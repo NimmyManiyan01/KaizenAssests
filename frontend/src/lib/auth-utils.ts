@@ -81,15 +81,7 @@ export function hasRole(roles: string[] | string): boolean {
 
 export function getRequiredRolesForPath(pathname: string): string[] | null {
   if (pathname.startsWith("/admin")) return ["ADMIN", "SUPERUSER"];
-  if (pathname === "/manager-dashboard") return ["MANAGER", "PROCUREMENT_MANAGER", "ADMIN", "SUPERUSER"];
-  if (pathname === "/procurement/reports") return ["PROCUREMENT", "FINANCE", "MANAGER", "ADMIN", "SUPERUSER"];
-  if (
-    pathname.startsWith("/procurement") ||
-    pathname === "/master-data" ||
-    pathname === "/new-supplier"
-  )
-    return ["PROCUREMENT", "MANAGER", "ADMIN", "SUPERUSER"];
-  if (pathname.startsWith("/finance")) return ["FINANCE", "ADMIN", "SUPERUSER"];
+  if (pathname === "/manager-dashboard") return ["MANAGER", "ADMIN", "SUPERUSER"];
   if (
     pathname.startsWith("/supplier") ||
     pathname === "/supplier-dashboard" ||
@@ -172,15 +164,19 @@ export function getSafeRedirectPath(redirectPath: unknown): string | null {
 
 export function getDefaultRouteForUser(user = getUserInfo()): string {
   const roles = user?.roles || [];
-  // Route by explicit permissions only. Username-based routing can send users
-  // such as `storemanager` to a dashboard they cannot access, causing a
-  // redirect loop between the route guard and this fallback.
-  if (roles.includes("MANAGER") || roles.includes("PROCUREMENT_MANAGER")) return "/manager-dashboard";
+  const username = (user?.username || "").toLowerCase();
+
+  if (
+    roles.includes("WAREHOUSE") ||
+    roles.includes("WAREHOUSE_MANAGER") ||
+    username.includes("warehouse")
+  ) {
+    return "/warehouse-dashboard";
+  }
+  if (roles.includes("MANAGER")) return "/manager-dashboard";
   if (roles.includes("ADMIN") || roles.includes("SUPERUSER")) return "/admin/users";
-  if (roles.includes("FINANCE")) return "/finance-dashboard";
-  if (roles.includes("PROCUREMENT")) return "/procurement-dashboard";
   if (roles.includes("GATE_SECURITY")) return "/gate-dashboard";
-  if (roles.includes("SUPPLIER")) return "/submit-quotation";
+  if (roles.includes("SUPPLIER")) return "/supplier-dashboard";
   if (roles.includes("ASSEMBLY_MANAGER") || roles.includes("ASSEMBLY") || roles.includes("ASSEMBLY_OPERATOR")) return "/assembly-dashboard";
   if (roles.includes("DISPATCH") || roles.includes("DISPATCH_MANAGER") || user?.username?.toLowerCase() === "dispatch") return "/dispatch";
   if (roles.includes("STORE_MANAGER") || roles.includes("STORE_KEEPER"))

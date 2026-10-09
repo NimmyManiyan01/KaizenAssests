@@ -4,10 +4,10 @@ import { AppShell } from "@/components/wms/app-shell";
 import { Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/warehouse/material-requests")({
-  component: WarehouseMaterialRequestsPage,
+  component: MaterialRequestsPage,
 });
 
-function WarehouseMaterialRequestsPage(_props?: any) {
+export function MaterialRequestsPage(_props?: any) {
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -25,3 +25,5 @@ function WarehouseMaterialRequestsPage(_props?: any) {
     </AppShell>
   );
 }
+
+export const WarehouseMaterialRequestsPage = MaterialRequestsPage;

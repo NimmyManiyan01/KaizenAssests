@@ -54,6 +54,7 @@ import { Route as PutawayTasksRouteImport } from './routes/putaway-tasks'
 import { Route as ReceivingRouteImport } from './routes/receiving'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as SupplierDashboardRouteImport } from './routes/supplier-dashboard'
 import { Route as UnscheduledArrivalsRouteImport } from './routes/unscheduled-arrivals'
 import { Route as VehicleExitRouteImport } from './routes/vehicle-exit'
 import { Route as VehicleQueueRouteImport } from './routes/vehicle-queue'
@@ -70,6 +71,7 @@ import { Route as WarehouseMaterialRequestsRouteImport } from './routes/warehous
 import { Route as WarehouseMaterialsRouteImport } from './routes/warehouse.materials'
 import { Route as WarehouseQuarantineRouteImport } from './routes/warehouse.quarantine'
 import { Route as WarehouseStoresRouteImport } from './routes/warehouse.stores'
+import { Route as SupplierAsnsNewRouteImport } from './routes/supplier.asns.new'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -302,6 +304,11 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SupplierDashboardRoute = SupplierDashboardRouteImport.update({
+  id: '/supplier-dashboard',
+  path: '/supplier-dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const UnscheduledArrivalsRoute = UnscheduledArrivalsRouteImport.update({
   id: '/unscheduled-arrivals',
   path: '/unscheduled-arrivals',
@@ -388,6 +395,11 @@ const WarehouseStoresRoute = WarehouseStoresRouteImport.update({
   path: '/warehouse/stores',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SupplierAsnsNewRoute = SupplierAsnsNewRouteImport.update({
+  id: '/supplier/asns/new',
+  path: '/supplier/asns/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -435,6 +447,7 @@ export interface FileRoutesByFullPath {
   '/receiving': typeof ReceivingRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
+  '/supplier-dashboard': typeof SupplierDashboardRoute
   '/unscheduled-arrivals': typeof UnscheduledArrivalsRoute
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
@@ -451,6 +464,7 @@ export interface FileRoutesByFullPath {
   '/warehouse/materials': typeof WarehouseMaterialsRoute
   '/warehouse/quarantine': typeof WarehouseQuarantineRoute
   '/warehouse/stores': typeof WarehouseStoresRoute
+  '/supplier/asns/new': typeof SupplierAsnsNewRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -498,6 +512,7 @@ export interface FileRoutesByTo {
   '/receiving': typeof ReceivingRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
+  '/supplier-dashboard': typeof SupplierDashboardRoute
   '/unscheduled-arrivals': typeof UnscheduledArrivalsRoute
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
@@ -514,6 +529,7 @@ export interface FileRoutesByTo {
   '/warehouse/materials': typeof WarehouseMaterialsRoute
   '/warehouse/quarantine': typeof WarehouseQuarantineRoute
   '/warehouse/stores': typeof WarehouseStoresRoute
+  '/supplier/asns/new': typeof SupplierAsnsNewRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -562,6 +578,7 @@ export interface FileRoutesById {
   '/receiving': typeof ReceivingRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
+  '/supplier-dashboard': typeof SupplierDashboardRoute
   '/unscheduled-arrivals': typeof UnscheduledArrivalsRoute
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
@@ -578,6 +595,7 @@ export interface FileRoutesById {
   '/warehouse/materials': typeof WarehouseMaterialsRoute
   '/warehouse/quarantine': typeof WarehouseQuarantineRoute
   '/warehouse/stores': typeof WarehouseStoresRoute
+  '/supplier/asns/new': typeof SupplierAsnsNewRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -627,6 +645,7 @@ export interface FileRouteTypes {
     | '/receiving'
     | '/reports'
     | '/settings'
+    | '/supplier-dashboard'
     | '/unscheduled-arrivals'
     | '/vehicle-exit'
     | '/vehicle-queue'
@@ -643,6 +662,7 @@ export interface FileRouteTypes {
     | '/warehouse/materials'
     | '/warehouse/quarantine'
     | '/warehouse/stores'
+    | '/supplier/asns/new'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -690,6 +710,7 @@ export interface FileRouteTypes {
     | '/receiving'
     | '/reports'
     | '/settings'
+    | '/supplier-dashboard'
     | '/unscheduled-arrivals'
     | '/vehicle-exit'
     | '/vehicle-queue'
@@ -706,6 +727,7 @@ export interface FileRouteTypes {
     | '/warehouse/materials'
     | '/warehouse/quarantine'
     | '/warehouse/stores'
+    | '/supplier/asns/new'
   id:
     | '__root__'
     | '/'
@@ -753,6 +775,7 @@ export interface FileRouteTypes {
     | '/receiving'
     | '/reports'
     | '/settings'
+    | '/supplier-dashboard'
     | '/unscheduled-arrivals'
     | '/vehicle-exit'
     | '/vehicle-queue'
@@ -769,6 +792,7 @@ export interface FileRouteTypes {
     | '/warehouse/materials'
     | '/warehouse/quarantine'
     | '/warehouse/stores'
+    | '/supplier/asns/new'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -817,6 +841,7 @@ export interface RootRouteChildren {
   ReceivingRoute: typeof ReceivingRoute
   ReportsRoute: typeof ReportsRoute
   SettingsRoute: typeof SettingsRoute
+  SupplierDashboardRoute: typeof SupplierDashboardRoute
   UnscheduledArrivalsRoute: typeof UnscheduledArrivalsRoute
   VehicleExitRoute: typeof VehicleExitRoute
   VehicleQueueRoute: typeof VehicleQueueRoute
@@ -833,6 +858,7 @@ export interface RootRouteChildren {
   WarehouseMaterialsRoute: typeof WarehouseMaterialsRoute
   WarehouseQuarantineRoute: typeof WarehouseQuarantineRoute
   WarehouseStoresRoute: typeof WarehouseStoresRoute
+  SupplierAsnsNewRoute: typeof SupplierAsnsNewRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -1152,6 +1178,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/supplier-dashboard': {
+      id: '/supplier-dashboard'
+      path: '/supplier-dashboard'
+      fullPath: '/supplier-dashboard'
+      preLoaderRoute: typeof SupplierDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/unscheduled-arrivals': {
       id: '/unscheduled-arrivals'
       path: '/unscheduled-arrivals'
@@ -1264,6 +1297,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WarehouseStoresRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/supplier/asns/new': {
+      id: '/supplier/asns/new'
+      path: '/supplier/asns/new'
+      fullPath: '/supplier/asns/new'
+      preLoaderRoute: typeof SupplierAsnsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -1313,6 +1353,7 @@ const rootRouteChildren: RootRouteChildren = {
   ReceivingRoute: ReceivingRoute,
   ReportsRoute: ReportsRoute,
   SettingsRoute: SettingsRoute,
+  SupplierDashboardRoute: SupplierDashboardRoute,
   UnscheduledArrivalsRoute: UnscheduledArrivalsRoute,
   VehicleExitRoute: VehicleExitRoute,
   VehicleQueueRoute: VehicleQueueRoute,
@@ -1329,6 +1370,7 @@ const rootRouteChildren: RootRouteChildren = {
   WarehouseMaterialsRoute: WarehouseMaterialsRoute,
   WarehouseQuarantineRoute: WarehouseQuarantineRoute,
   WarehouseStoresRoute: WarehouseStoresRoute,
+  SupplierAsnsNewRoute: SupplierAsnsNewRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
