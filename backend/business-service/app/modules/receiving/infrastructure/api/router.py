@@ -69,9 +69,12 @@ from app.modules.receiving.infrastructure.persistence.models import (
     GrnLineModel,
     GrnModel,
 )
+from app.modules.gate.infrastructure.persistence.models import SupplierDamageClaimModel
 from app.common.persistence.models import (
+    AsnModel,
     MaterialModel,
     MaterialVariantModel,
+    NotificationModel,
     PurchaseOrderModel,
     SupplierModel,
 )
@@ -848,6 +851,21 @@ async def notify_vendor_damage(
     if count_damaged == 0 or not items_for_render:
         raise HTTPException(status_code=400, detail="No damaged or rejected items found in this GRN.")
 
+    # Damage returns are published by GRN completion into the supplier claim
+    # workflow. Keep this legacy endpoint as a compatibility acknowledgement,
+    # but never send the former vendor email notification.
+    return GrnDamageVendorNotifyResponse(
+        status="PUBLISHED",
+        grn_number=grn_number,
+        vendor_email="",
+        supplier_email="",
+        supplier_status="PUBLISHED",
+        procurement_status="NOTIFIED_IN_APP" if body.notify_procurement else "SKIPPED",
+        email_delivered=False,
+        procurement_notified=bool(body.notify_procurement),
+        summary="Damage details are available in Supplier Damage Returns.",
+    )
+
     # ------------------------------------------------------------------------
     # DYNAMIC RECIPIENT RESOLUTION
     # ------------------------------------------------------------------------
@@ -1263,8 +1281,6 @@ async def complete_grn(
     try:
         target_uuid = uuid.UUID(grn_id)
     except ValueError:
-        from app.modules.receiving.infrastructure.persistence.models import GrnModel
-        from sqlalchemy import select
         res = await uow.session.execute(
             select(GrnModel).where(GrnModel.grn_number.ilike(grn_id.strip()))
         )
@@ -1282,6 +1298,72 @@ async def complete_grn(
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    # Publish GRN-native damage claims for the supplier portal.  The GRN page
+    # completes through this router (not the gate completion router), so claim
+    # creation must happen here as part of the same transaction.  The unique
+    # source_grn_line_id constraint plus the lookup below makes retries safe.
+    if grn.asn_id:
+        supplier_id = (
+            await uow.session.execute(
+                select(AsnModel.supplier_id).where(AsnModel.id == grn.asn_id)
+            )
+        ).scalar_one_or_none()
+        if supplier_id:
+            last_claim = (
+                await uow.session.execute(
+                    select(SupplierDamageClaimModel.claim_number)
+                    .order_by(SupplierDamageClaimModel.created_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            try:
+                claim_sequence = int(last_claim.rsplit("-", 1)[1]) + 1 if last_claim else 1
+            except (ValueError, IndexError):
+                claim_sequence = 1
+
+            for line in grn.lines or []:
+                damaged = line.damaged_quantity or Decimal("0")
+                rejected = line.rejected_quantity or Decimal("0")
+                if damaged <= 0 and rejected <= 0:
+                    continue
+
+                existing = (
+                    await uow.session.execute(
+                        select(SupplierDamageClaimModel.id).where(
+                            SupplierDamageClaimModel.source_grn_line_id == line.id
+                        )
+                    )
+                ).scalar_one_or_none()
+                if existing:
+                    continue
+
+                claim_number = f"DC-{claim_sequence:05d}"
+                claim_sequence += 1
+                created_at = grn.posted_at or datetime.utcnow()
+                uow.session.add(
+                    SupplierDamageClaimModel(
+                        claim_number=claim_number,
+                        source_grn_id=grn.id,
+                        source_grn_line_id=line.id,
+                        supplier_id=supplier_id,
+                        status="SUPPLIER_SENT",
+                        created_by=user.username or "System User",
+                        created_at=created_at,
+                        sent_at=created_at,
+                    )
+                )
+                uow.session.add(
+                    NotificationModel(
+                        user_role="SUPPLIER",
+                        title=f"Damage Return {claim_number}",
+                        message=(
+                            f"GRN {grn.grn_number}: damaged/rejected material "
+                            "requires your response."
+                        ),
+                        link="/damage-claims",
+                    )
+                )
 
     return CompleteGrnResponse(
         grn_id=str(grn.id),

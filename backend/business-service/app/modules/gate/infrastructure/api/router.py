@@ -24,9 +24,9 @@ from app.common.domain.exceptions import DomainRuleViolationException, NotFoundE
 from app.common.email_utils import render_premium_email, send_email
 from app.database.session import UnitOfWork, get_uow
 from app.modules.gate.adapters.mock_adapters import InMemoryGateEntryRepository
-from app.modules.gate.infrastructure.persistence.models import DamagePhotoModel, DamageReportModel, DockAssignmentModel, DockModel, GateEntryAuditLogModel, GateEntryModel, GateExitModel, ReceivingLineModel, VehicleExitApprovalModel
-from app.common.persistence.models import AsnLineModel, PurchaseOrderModel, AsnModel, MaterialStockModel, NotificationModel, SupplierContactModel, SupplierModel
-from app.modules.receiving.infrastructure.persistence.models import GrnLineModel, GrnModel, InventoryReceiptPostingModel
+from app.modules.gate.infrastructure.persistence.models import DamagePhotoModel, DamageReportModel, DockAssignmentModel, DockModel, GateEntryAuditLogModel, GateEntryModel, GateExitModel, ReceivingLineModel, SupplierDamageClaimModel, VehicleExitApprovalModel
+from app.common.persistence.models import AsnLineModel, PurchaseOrderModel, AsnModel, MaterialStockModel, NotificationModel, SupplierContactModel, SupplierModel, SupplierUserModel
+from app.modules.receiving.infrastructure.persistence.models import GrnDamageEvidenceModel, GrnLineModel, GrnModel, InventoryReceiptPostingModel
 from app.modules.receiving.domain.events import GrnPostedEvent, PostedInventoryLine
 from app.events.outbox_repository import to_outbox_row
 from app.modules.storage.infrastructure.persistence.models import HandlingUnitModel, PutawayTaskModel, StorageLocationModel
@@ -77,6 +77,9 @@ def _asn_response(asn: AsnModel) -> dict:
         "po_id": asn.po_id,
         "po_number": asn.po_number,
         "supplier_id": str(asn.supplier_id) if asn.supplier_id else None,
+        "shipment_type": asn.shipment_type,
+        "is_replacement": asn.shipment_type == "REPLACEMENT",
+        "claim_id": str(asn.claim_id) if asn.claim_id else None,
         "supplier_name": details.get("supplier_name") or (asn.supplier.supplier_name if asn.supplier else None),
         "destination_warehouse": details.get("destination_warehouse"),
         "destination_warehouse_id": details.get("destination_warehouse_id"),
@@ -270,8 +273,45 @@ async def get_expected_delivery(reference: str, uow: UnitOfWork = Depends(get_uo
     return response
 
 
+async def _authenticated_supplier_id(user: CurrentUser, uow: UnitOfWork) -> uuid.UUID:
+    """Resolve supplier ownership from the authenticated account, never request data."""
+    if "SUPPLIER" not in {role.upper() for role in user.roles}:
+        raise HTTPException(status_code=403, detail="Only an authenticated supplier can create an ASN")
+
+    mapped = (await uow.session.execute(
+        select(SupplierUserModel.supplier_id).where(SupplierUserModel.username == user.username)
+    )).scalar_one_or_none()
+    raw = user.raw_claims.get("supplier_id") if user.raw_claims else None
+    claimed: uuid.UUID | None = None
+    if raw:
+        try:
+            claimed = uuid.UUID(str(raw))
+        except (ValueError, AttributeError):
+            claimed = (await uow.session.execute(
+                select(SupplierModel.id).where(SupplierModel.supplier_code == str(raw))
+            )).scalar_one_or_none()
+
+    if mapped and claimed and mapped != claimed:
+        logger.error("Supplier identity mismatch for ASN user=%s mapped=%s claimed=%s", user.username, mapped, claimed)
+        raise HTTPException(status_code=403, detail="Authenticated supplier identity is inconsistent")
+    supplier_id = mapped or claimed
+    if supplier_id is None:
+        logger.error("No registered supplier mapping for authenticated ASN user=%s subject=%s", user.username, user.subject)
+        raise HTTPException(status_code=403, detail="Authenticated account is not linked to a registered supplier")
+    exists = (await uow.session.execute(select(SupplierModel.id).where(SupplierModel.id == supplier_id))).scalar_one_or_none()
+    if exists is None:
+        logger.error("Supplier mapping points to missing supplier user=%s supplier_id=%s", user.username, supplier_id)
+        raise HTTPException(status_code=403, detail="Registered supplier could not be found")
+    return supplier_id
+
+
 @preview_router.post("/asns", status_code=status.HTTP_201_CREATED)
-async def create_supplier_asn(payload: dict = Body(...), uow: UnitOfWork = Depends(get_uow)) -> dict:
+async def create_supplier_asn(
+    payload: dict = Body(...),
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> dict:
+    supplier_id = await _authenticated_supplier_id(user, uow)
     asn_number = str(payload.get("asn_number") or "").strip().upper()
     if not asn_number:
         raise HTTPException(status_code=422, detail="asn_number is required")
@@ -370,14 +410,6 @@ async def create_supplier_asn(payload: dict = Body(...), uow: UnitOfWork = Depen
                     detail=f"shipped_quantity for '{code}' exceeds the remaining purchase-order quantity ({max(remaining, Decimal('0'))})",
                 )
 
-    supplier_id = None
-    raw_supplier_id = payload.get("supplier_id")
-    if raw_supplier_id:
-        try:
-            supplier_id = uuid.UUID(str(raw_supplier_id))
-        except ValueError:
-            supplier_id = None
-
     shipment_date_raw = payload.get("shipment_date")
     try:
         shipment_date = datetime.date.fromisoformat(str(shipment_date_raw)) if shipment_date_raw else datetime.date.today()
@@ -439,8 +471,9 @@ async def create_supplier_asn(payload: dict = Body(...), uow: UnitOfWork = Depen
     material_summary = ", ".join(
         f"{line.item_code} {line.shipped_quantity:g} {line.uom}" for line in asn.lines
     ) or "—"
+    supplier_name = next((entry.get("supplier_name") for entry in (asn.logistics or []) if isinstance(entry, dict) and entry.get("type") == "asn_details"), None) or "supplier"
     notification_message = (
-        f"ASN {asn.asn_number} dispatched by {asn.supplier_name or 'supplier'}. "
+        f"ASN {asn.asn_number} dispatched by {supplier_name}. "
         f"Vehicle: {asn.vehicle_number or '—'} · Driver: {asn.driver_name or '—'} "
         f"({asn.driver_contact or '—'}) · ETA: "
         f"{asn.expected_arrival_at.isoformat() if asn.expected_arrival_at else '—'} · "
@@ -1480,11 +1513,15 @@ async def list_inbound_arrivals(
             "gate_entry_number": gate_entry.gate_entry_number,
             "asn_id": str(asn.id) if asn else None,
             "asn_number": asn.asn_number if asn else "DIRECT-ARRIVAL",
+            "shipment_type": asn.shipment_type if asn else "STANDARD",
+            "is_replacement": bool(asn and asn.shipment_type == "REPLACEMENT"),
+            "claim_id": str(asn.claim_id) if asn and asn.claim_id else None,
             "po_number": gate_entry.po_number,
             "supplier_name": (po.supplier_name if po else None) or gate_entry.ocr_supplier_name or "Unknown Supplier",
             "vehicle_number": (asn.vehicle_number if asn else None) or gate_entry.vehicle_number,
             "driver_name": (asn.driver_name if asn else None) or gate_entry.driver_name,
             "driver_contact": asn.driver_contact if asn else None,
+            "truck_photo_base64": base64.b64encode(gate_entry.vehicle_photo_data).decode("ascii") if gate_entry.vehicle_photo_data else None,
             "arrival_time": gate_entry.created_at.isoformat(),
             "expected_arrival_at": asn.expected_arrival_at.isoformat() if asn and asn.expected_arrival_at else None,
             "status": (
@@ -2325,6 +2362,45 @@ async def submit_damage_report(
         message=f"{report.damaged_quantity} {line.uom or ''} {report.material_name or report.material_code} damaged against {report.po_number}.",
         link="/procurement/quality-issues",
     ))
+    # Publish the submitted GRN damage report directly to the supplier portal.
+    # This is idempotent so retries cannot create duplicate supplier claims.
+    gate = await uow.session.get(GateEntryModel, report.gate_entry_id)
+    asn = await uow.session.get(AsnModel, gate.asn_id) if gate and gate.asn_id else None
+    if asn and asn.supplier_id:
+        existing_claim = (await uow.session.execute(
+            select(SupplierDamageClaimModel).where(
+                SupplierDamageClaimModel.damage_report_id == report.id
+            )
+        )).scalar_one_or_none()
+        if existing_claim is None:
+            last_claim = (await uow.session.execute(
+                select(func.max(SupplierDamageClaimModel.claim_number))
+            )).scalar_one_or_none()
+            try:
+                next_claim_number = int(last_claim.split("-", 1)[1]) + 1 if last_claim else 1
+            except (ValueError, IndexError):
+                next_claim_number = 1
+            claim_number = f"DC-{next_claim_number:05d}"
+            uow.session.add(SupplierDamageClaimModel(
+                claim_number=claim_number,
+                damage_report_id=report.id,
+                supplier_id=asn.supplier_id,
+                status="SUPPLIER_SENT",
+                created_by=user.username,
+                created_at=submitted_at,
+                sent_at=submitted_at,
+            ))
+            report.status = "SUPPLIER_CLAIM_SENT"
+            uow.session.add(NotificationModel(
+                user_role="SUPPLIER",
+                title=f"Damage Return {claim_number}",
+                message=(
+                    f"{report.damaged_quantity} {line.uom or 'PCS'} of "
+                    f"{report.material_name or report.material_code} from GRN "
+                    f"{report.grn_number or 'pending'} requires your review."
+                ),
+                link="/damage-claims",
+            ))
     await uow.session.flush()
     return {"id": str(report.id), "report_number": report.report_number, "status": report.status,
             "status_label": "Pending Procurement", "submitted_by": user.username,
@@ -2526,6 +2602,34 @@ async def complete_receiving(
     # assignment is an existing row and SQLAlchemy may otherwise schedule its
     # UPDATE ahead of the unrelated GRN INSERT, violating the foreign key.
     await uow.session.flush()
+    # Publish GRN-native damage claims. This is the authoritative source for
+    # QC damage/rejection and does not depend on the legacy gate damage report.
+    if asn.supplier_id:
+        last_claim = (await uow.session.execute(select(func.max(SupplierDamageClaimModel.claim_number)))).scalar_one_or_none()
+        try:
+            claim_sequence = int(last_claim.split("-", 1)[1]) + 1 if last_claim else 1
+        except (ValueError, IndexError):
+            claim_sequence = 1
+        for grn_line in grn.lines:
+            if (grn_line.damaged_quantity or 0) <= 0 and (grn_line.rejected_quantity or 0) <= 0:
+                continue
+            existing = (await uow.session.execute(select(SupplierDamageClaimModel.id).where(SupplierDamageClaimModel.source_grn_line_id == grn_line.id))).scalar_one_or_none()
+            if existing:
+                continue
+            evidence = (await uow.session.execute(select(GrnDamageEvidenceModel).where(GrnDamageEvidenceModel.grn_line_id == grn_line.id))).scalars().first()
+            claim_number = f"DC-{claim_sequence:05d}"
+            claim_sequence += 1
+            uow.session.add(SupplierDamageClaimModel(
+                claim_number=claim_number, damage_report_id=None, source_grn_id=grn.id,
+                source_grn_line_id=grn_line.id, supplier_id=asn.supplier_id,
+                status="SUPPLIER_SENT", created_by=user.username,
+                created_at=completed_at, sent_at=completed_at,
+            ))
+            uow.session.add(NotificationModel(
+                user_role="SUPPLIER", title=f"Damage Return {claim_number}",
+                message=f"GRN {grn_number}: damaged/rejected material requires your response.",
+                link="/damage-claims",
+            ))
     receiving_by_code = {line.item_code: line for line in lines}
     units_result = await uow.session.execute(select(HandlingUnitModel).where(HandlingUnitModel.receiving_line_id.in_([line.id for line in lines])))
     units_by_receiving_line = {unit.receiving_line_id: unit for unit in units_result.scalars().all()}
@@ -2642,6 +2746,39 @@ async def complete_receiving(
     )).scalars().all()
     for damage_report in damage_reports:
         damage_report.grn_number = grn_number
+        # Completing the GRN is the authoritative publication point for the
+        # supplier claim. Create it here so the supplier portal does not depend
+        # on a separate Procurement/email action. The unique damage_report_id
+        # check makes this safe on retries and page refreshes.
+        existing_claim = (await uow.session.execute(
+            select(SupplierDamageClaimModel).where(
+                SupplierDamageClaimModel.damage_report_id == damage_report.id
+            )
+        )).scalar_one_or_none()
+        if existing_claim is None and asn.supplier_id and damage_report.damaged_quantity > 0:
+            last_claim = (await uow.session.execute(
+                select(func.max(SupplierDamageClaimModel.claim_number))
+            )).scalar_one_or_none()
+            try:
+                next_claim_number = int(last_claim.split("-", 1)[1]) + 1 if last_claim else 1
+            except (ValueError, IndexError):
+                next_claim_number = 1
+            claim_number = f"DC-{next_claim_number:05d}"
+            uow.session.add(SupplierDamageClaimModel(
+                claim_number=claim_number,
+                damage_report_id=damage_report.id,
+                supplier_id=asn.supplier_id,
+                status="SUPPLIER_SENT",
+                created_by=user.username,
+                created_at=completed_at,
+                sent_at=completed_at,
+            ))
+            uow.session.add(NotificationModel(
+                user_role="SUPPLIER",
+                title=f"Damage Return {claim_number}",
+                message=f"GRN {grn_number}: damaged/rejected material requires your response.",
+                link="/damage-claims",
+            ))
     assignment.receiving_completed_by = user.username
     assignment.receiving_completed_at = completed_at
     await _save_gate_entry(uow.session, entry)

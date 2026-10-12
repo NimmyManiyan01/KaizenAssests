@@ -132,7 +132,9 @@ class SupplierDamageClaimModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     claim_number: Mapped[str] = mapped_column(String(32), nullable=False, unique=True, index=True)
-    damage_report_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("damage_report.id", ondelete="RESTRICT"), nullable=False, unique=True, index=True)
+    damage_report_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("damage_report.id", ondelete="RESTRICT"), nullable=True, unique=True, index=True)
+    source_grn_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("grn.id", ondelete="RESTRICT"), nullable=True, index=True)
+    source_grn_line_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("grn_line.id", ondelete="RESTRICT"), nullable=True, unique=True, index=True)
     supplier_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("supplier.id", ondelete="RESTRICT"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="SUPPLIER_SENT", index=True)
     created_by: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -152,6 +154,7 @@ class ReplacementShipmentModel(Base):
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     shipment_number: Mapped[str] = mapped_column(String(32), nullable=False, unique=True, index=True)
     claim_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("supplier_damage_claim.id", ondelete="RESTRICT"), nullable=False, unique=True, index=True)
+    asn_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("asn.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
     expected_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     vehicle_number: Mapped[str] = mapped_column(String(32), nullable=False)
     expected_arrival: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

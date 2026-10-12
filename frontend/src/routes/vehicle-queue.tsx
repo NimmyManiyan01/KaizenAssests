@@ -16,7 +16,6 @@ import {
   ShieldCheck,
   Truck,
   Trash2,
-  Warehouse,
   Camera,
 } from "lucide-react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
@@ -40,6 +39,8 @@ type Arrival = {
   vehicle_number: string;
   driver_name: string;
   driver_contact?: string | null;
+  truck_photo_base64?: string | null;
+  vehicle_photo_base64?: string | null;
   arrival_time: string;
   expected_arrival_at?: string | null;
   status: string;
@@ -92,7 +93,6 @@ function InboundArrivals() {
   );
 
   // FR-02 Section A: Supplier and Shipment Details
-  const [selectedWarehouse, setSelectedWarehouse] = useState("");
   const [selectedSupplier, setSelectedSupplier] = useState("");
   const [selectedAsn, setSelectedAsn] = useState("");
   const [asnRecords, setAsnRecords] = useState<any[]>([]);
@@ -163,7 +163,6 @@ function InboundArrivals() {
   const applyAsnDetails = (asn: any) => {
     if (!asn) return;
     setSelectedSupplier(asn.supplier_name || asn.supplier_company_name || "");
-    setSelectedWarehouse(asn.destination_warehouse || asn.warehouse_name || "");
     setAutoPoNumber(asn.po_number || "");
     setAutoExpectedDate(asn.expected_arrival_at?.split("T")[0] || asn.delivery_date || "");
     setVehicleNumberInput(asn.vehicle_number || "");
@@ -505,20 +504,6 @@ function InboundArrivals() {
             {/* SECTION A: SUPPLIER AND SHIPMENT DETAILS */}
             <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
               <div className="grid gap-3 sm:grid-cols-2">
-                {/* Warehouse Dropdown */}
-                <div>
-                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
-                    Warehouse *
-                  </label>
-                  <input
-                    type="text"
-                    value={selectedWarehouse}
-                    readOnly
-                    placeholder="Auto-filled from ASN"
-                    className="h-9 w-full rounded-xl border bg-muted/50 px-3 font-semibold text-xs text-primary"
-                  />
-                </div>
-
                 {/* Supplier Searchable Dropdown */}
                 <div>
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
@@ -1193,6 +1178,18 @@ function ArrivalDetails({
           <Detail label="Driver contact" value={arrival.driver_contact} />
           <Detail label="Arrival time" value={new Date(arrival.arrival_time).toLocaleString()} />
         </dl>
+        <div className="mt-5 border-t pt-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Vehicle photo</p>
+          {(arrival.truck_photo_base64 || arrival.vehicle_photo_base64) ? (
+            <img
+              src={`data:image/jpeg;base64,${arrival.truck_photo_base64 || arrival.vehicle_photo_base64}`}
+              alt={`Vehicle ${arrival.vehicle_number || "photo"}`}
+              className="max-h-72 w-full rounded-xl border object-contain bg-muted/20 p-2 sm:w-96"
+            />
+          ) : (
+            <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No vehicle photo uploaded.</p>
+          )}
+        </div>
       </div>
       <div className="grid gap-5 md:grid-cols-2">
         <div>

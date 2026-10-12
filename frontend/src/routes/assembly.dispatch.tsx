@@ -23,6 +23,8 @@ function AssemblyDispatchPage() {
   const [finishedGoods, setFinishedGoods] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const [allocation, setAllocation] = useState<any | null>(null);
+  const [allocationError, setAllocationError] = useState<string | null>(null);
   const remindedOrders = useRef(new Set<string>());
 
   const load = async () => {
@@ -54,9 +56,22 @@ function AssemblyDispatchPage() {
 
   const openOrder = (order: any) => {
     setSelectedOrder(order);
+    setAllocation(null);
+    setAllocationError(null);
     if (!remindedOrders.current.has(String(order.id))) {
       remindedOrders.current.add(String(order.id));
       toast.info("FIFO reminder", { description: "Use the oldest eligible Assembly finished-goods batch first." });
+    }
+  };
+
+  const allocate = async () => {
+    if (!selectedOrder) return;
+    try {
+      setAllocationError(null);
+      setAllocation(await api.allocateAssemblyFinishedGoodsFifo(selectedOrder.id));
+      toast.success("Finished goods allocated using FIFO");
+    } catch (error) {
+      setAllocationError(error instanceof Error ? error.message : "Insufficient eligible Assembly stock");
     }
   };
 
@@ -70,6 +85,8 @@ function AssemblyDispatchPage() {
         </Card>
 
         {selectedOrder && <Card className="rounded-2xl p-5">
+          <Button className="mb-3 rounded-xl" onClick={() => void allocate()}>Allocate FIFO</Button>
+          {allocationError && <div className="mb-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm font-medium text-red-900">Required: {required} · Available: {totalAvailable}. {allocationError}</div>}
           <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-bold">FIFO allocation · {selectedOrder.dispatch_number || selectedOrder.order_number}</h2><p className="mt-1 text-xs text-muted-foreground">Required {required} · Available in Assembly {totalAvailable} · Stock remains physically in Assembly</p></div><Link to="/dispatch-picking-packing"><Button className="rounded-xl">Open Packing <ArrowRight className="ml-2 size-4" /></Button></Link></div>
           {showFifoReminder && <div className="mt-4 flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900"><AlertTriangle className="mt-0.5 size-4" /><div><p className="font-bold">FIFO reminder</p><p>Older eligible finished-goods stock is available. Allocate the oldest batch first.</p></div></div>}
           <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b text-xs uppercase text-muted-foreground"><tr><th className="p-2">Batch / QR</th><th className="p-2">Completed</th><th className="p-2">Available</th><th className="p-2">Location</th><th className="p-2">FIFO</th></tr></thead><tbody>{batches.length === 0 ? <tr><td colSpan={5} className="p-6 text-center text-muted-foreground">No eligible Assembly finished goods available.</td></tr> : batches.map((batch: any, index: number) => <tr key={batch.id} className="border-b"><td className="p-2 font-mono text-xs">{batch.serial_number || batch.qr_code || batch.batch_number || batch.id}</td><td className="p-2">{batch.production_completed_at || batch.completed_at || batch.certified_date || "—"}</td><td className="p-2 font-bold">{availableQuantity(batch)} {batch.uom || "PCS"}</td><td className="p-2">{batch.location_code || "Assembly FG Area"}</td><td className="p-2">{index === 0 ? <Badge className="bg-emerald-100 text-emerald-700">Oldest first</Badge> : <span className="text-muted-foreground">Next</span>}</td></tr>)}</tbody></table></div>

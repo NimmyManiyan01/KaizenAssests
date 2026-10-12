@@ -41,6 +41,7 @@ from app.modules.gate.infrastructure.persistence.models import (
     DockAssignmentModel,
     DockModel,
     GateEntryModel,
+    SupplierDamageClaimModel,
 )
 from app.modules.store.infrastructure.persistence.models import StoreModel
 
@@ -1277,6 +1278,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
         existing_batches = await self._session.execute(
             select(GrnBatchModel)
             .where(GrnBatchModel.grn_line_id == grn_line_id)
+            .where(GrnBatchModel.superseded.is_(False))
             .order_by(GrnBatchModel.created_at.asc())
         )
         persisted_batches = list(existing_batches.scalars().all())
@@ -1296,9 +1298,14 @@ class SqlAlchemyGrnRepository(GrnRepository):
         # 1. Reuse the material-level QR if present. Batch QRs below are
         # intentionally one-per-batch and may share the same item_code.
         qr_res = await self._session.execute(
-            select(GrnBatchQrModel).where(GrnBatchQrModel.item_code == line.item_code)
+            select(GrnBatchQrModel)
+            .where(GrnBatchQrModel.item_code == line.item_code)
+            .order_by(GrnBatchQrModel.generated_at.asc())
         )
-        qr = qr_res.scalar_one_or_none()
+        # Older data may contain more than one material QR for the same item
+        # code. Reuse the first deterministic record instead of failing with
+        # MultipleResultsFound during an otherwise idempotent batch retry.
+        qr = qr_res.scalars().first()
         if not qr:
             qr_payload = "\n".join([
                 f"Material Code: {line.item_code}",
@@ -1373,8 +1380,15 @@ class SqlAlchemyGrnRepository(GrnRepository):
             select(GrnModel)
             .options(
                 selectinload(GrnModel.lines).selectinload(GrnLineModel.damage_evidence),
+                selectinload(GrnModel.lines).selectinload(GrnLineModel.batches),
                 selectinload(GrnModel.lines).selectinload(GrnLineModel.damage_lots).selectinload(GrnDamageLotModel.qr_code),
             )
+            # The same GRN may already be present in this UoW's identity map
+            # from the preceding save/post operation.  Refresh the existing
+            # instances so the selectinload options are applied; otherwise a
+            # relationship access below can fall back to async lazy loading,
+            # which raises MissingGreenlet in this request handler.
+            .execution_options(populate_existing=True)
             .where(GrnModel.id == grn_id)
         )
         grn = res.scalar_one_or_none()
@@ -1389,7 +1403,8 @@ class SqlAlchemyGrnRepository(GrnRepository):
             accepted_qty = line.quality_approved_quantity or line.good_quantity or Decimal("0")
             if accepted_qty < Decimal("0"):
                 raise ValueError(f"Accepted quantity is invalid for {line.item_code}")
-            if line.batches and sum((b.batch_quantity or Decimal("0")) for b in line.batches) != accepted_qty:
+            active_batches = [b for b in line.batches if not b.superseded]
+            if active_batches and sum((b.batch_quantity or Decimal("0")) for b in active_batches) != accepted_qty:
                 raise ValueError(f"Batch quantities do not match accepted quantity for {line.item_code}")
 
         now = datetime.now(timezone.utc)
@@ -1895,7 +1910,9 @@ class SqlAlchemyGrnRepository(GrnRepository):
             select(GrnModel)
             .options(
                 selectinload(GrnModel.lines).selectinload(GrnLineModel.damage_evidence),
-                selectinload(GrnModel.lines).selectinload(GrnLineModel.batches).selectinload(GrnBatchModel.qr_code),
+                # Batch QR is material-level and older data can contain
+                # multiple matching rows; do not eager-load it as one-to-one.
+                selectinload(GrnModel.lines).selectinload(GrnLineModel.batches),
                 selectinload(GrnModel.lines).selectinload(GrnLineModel.damage_lots).selectinload(GrnDamageLotModel.qr_code),
                 selectinload(GrnModel.documents),
             )
@@ -1985,6 +2002,20 @@ class SqlAlchemyGrnRepository(GrnRepository):
         )
         for assignment in assignments_result.scalars().all():
             assignment.prepared_grn_id = None
+        await self._session.flush()
+
+        # GRN-native supplier claims reference the GRN and its lines. They
+        # are created when a completed GRN publishes damage/rejection data,
+        # so remove those claims before deleting the owned lines. Legacy
+        # damage-report claims are intentionally left untouched because they
+        # belong to the gate-entry workflow rather than this GRN aggregate.
+        claim_result = await self._session.execute(
+            select(SupplierDamageClaimModel).where(
+                SupplierDamageClaimModel.source_grn_id == grn_id
+            )
+        )
+        for claim in claim_result.scalars().all():
+            await self._session.delete(claim)
         await self._session.flush()
 
         await self._session.delete(grn)

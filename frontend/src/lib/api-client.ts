@@ -3298,6 +3298,12 @@ export const api = {
       },
     );
   },
+  async allocateAssemblyFinishedGoodsFifo(dispatchId: string): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/dispatch/${encodeURIComponent(dispatchId)}/allocate-fifo`,
+      { method: "POST" },
+    );
+  },
 
   async getMaterialIssues(status?: string): Promise<any[]> {
     const qStr = status && status !== "ALL" ? `?status=${encodeURIComponent(status)}` : "";

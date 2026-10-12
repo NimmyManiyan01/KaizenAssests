@@ -185,6 +185,18 @@ class AssemblyFinishedGoodsModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
 
 
+class AssemblyFinishedGoodsAllocationModel(Base):
+    __tablename__ = "assembly_finished_goods_allocation"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    finished_goods_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("assembly_finished_goods.id", ondelete="RESTRICT"), nullable=False, index=True)
+    dispatch_order_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("dispatch_order.id", ondelete="RESTRICT"), nullable=False, index=True)
+    dispatch_item_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("dispatch_item.id", ondelete="RESTRICT"), nullable=False, index=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ALLOCATED", index=True)
+    allocated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+
+
 class BillOfMaterialsModel(Base):
     __tablename__ = "bill_of_materials"
 

@@ -56,6 +56,7 @@ import { Route as AssemblyQualityRouteImport } from './routes/assembly.quality'
 import { Route as AssemblyRequestsRouteImport } from './routes/assembly.requests'
 import { Route as PoCodeRouteImport } from './routes/po.$code'
 import { Route as QCodeRouteImport } from './routes/q.$code'
+import { Route as SupplierDispatchRouteImport } from './routes/supplier.dispatch'
 import { Route as WarehouseAssemblyRequisitionsRouteImport } from './routes/warehouse.assembly-requisitions'
 import { Route as WarehouseDispatchTrackingRouteImport } from './routes/warehouse.dispatch-tracking'
 import { Route as WarehouseFinishedGoodsRequestsRouteImport } from './routes/warehouse.finished-goods-requests'
@@ -303,6 +304,11 @@ const QCodeRoute = QCodeRouteImport.update({
   path: '/q/$code',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SupplierDispatchRoute = SupplierDispatchRouteImport.update({
+  id: '/supplier/dispatch',
+  path: '/supplier/dispatch',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WarehouseAssemblyRequisitionsRoute =
   WarehouseAssemblyRequisitionsRouteImport.update({
     id: '/warehouse/assembly-requisitions',
@@ -402,6 +408,7 @@ export interface FileRoutesByFullPath {
   '/assembly/requests': typeof AssemblyRequestsRoute
   '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
+  '/supplier/dispatch': typeof SupplierDispatchRoute
   '/warehouse/assembly-requisitions': typeof WarehouseAssemblyRequisitionsRoute
   '/warehouse/dispatch-tracking': typeof WarehouseDispatchTrackingRoute
   '/warehouse/finished-goods-requests': typeof WarehouseFinishedGoodsRequestsRoute
@@ -460,6 +467,7 @@ export interface FileRoutesByTo {
   '/assembly/requests': typeof AssemblyRequestsRoute
   '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
+  '/supplier/dispatch': typeof SupplierDispatchRoute
   '/warehouse/assembly-requisitions': typeof WarehouseAssemblyRequisitionsRoute
   '/warehouse/dispatch-tracking': typeof WarehouseDispatchTrackingRoute
   '/warehouse/finished-goods-requests': typeof WarehouseFinishedGoodsRequestsRoute
@@ -519,6 +527,7 @@ export interface FileRoutesById {
   '/assembly/requests': typeof AssemblyRequestsRoute
   '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
+  '/supplier/dispatch': typeof SupplierDispatchRoute
   '/warehouse/assembly-requisitions': typeof WarehouseAssemblyRequisitionsRoute
   '/warehouse/dispatch-tracking': typeof WarehouseDispatchTrackingRoute
   '/warehouse/finished-goods-requests': typeof WarehouseFinishedGoodsRequestsRoute
@@ -579,6 +588,7 @@ export interface FileRouteTypes {
     | '/assembly/requests'
     | '/po/$code'
     | '/q/$code'
+    | '/supplier/dispatch'
     | '/warehouse/assembly-requisitions'
     | '/warehouse/dispatch-tracking'
     | '/warehouse/finished-goods-requests'
@@ -637,6 +647,7 @@ export interface FileRouteTypes {
     | '/assembly/requests'
     | '/po/$code'
     | '/q/$code'
+    | '/supplier/dispatch'
     | '/warehouse/assembly-requisitions'
     | '/warehouse/dispatch-tracking'
     | '/warehouse/finished-goods-requests'
@@ -695,6 +706,7 @@ export interface FileRouteTypes {
     | '/assembly/requests'
     | '/po/$code'
     | '/q/$code'
+    | '/supplier/dispatch'
     | '/warehouse/assembly-requisitions'
     | '/warehouse/dispatch-tracking'
     | '/warehouse/finished-goods-requests'
@@ -754,6 +766,7 @@ export interface RootRouteChildren {
   AssemblyRequestsRoute: typeof AssemblyRequestsRoute
   PoCodeRoute: typeof PoCodeRoute
   QCodeRoute: typeof QCodeRoute
+  SupplierDispatchRoute: typeof SupplierDispatchRoute
   WarehouseAssemblyRequisitionsRoute: typeof WarehouseAssemblyRequisitionsRoute
   WarehouseDispatchTrackingRoute: typeof WarehouseDispatchTrackingRoute
   WarehouseFinishedGoodsRequestsRoute: typeof WarehouseFinishedGoodsRequestsRoute
@@ -1096,6 +1109,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof QCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/supplier/dispatch': {
+      id: '/supplier/dispatch'
+      path: '/supplier/dispatch'
+      fullPath: '/supplier/dispatch'
+      preLoaderRoute: typeof SupplierDispatchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/warehouse/assembly-requisitions': {
       id: '/warehouse/assembly-requisitions'
       path: '/warehouse/assembly-requisitions'
@@ -1210,6 +1230,7 @@ const rootRouteChildren: RootRouteChildren = {
   AssemblyRequestsRoute: AssemblyRequestsRoute,
   PoCodeRoute: PoCodeRoute,
   QCodeRoute: QCodeRoute,
+  SupplierDispatchRoute: SupplierDispatchRoute,
   WarehouseAssemblyRequisitionsRoute: WarehouseAssemblyRequisitionsRoute,
   WarehouseDispatchTrackingRoute: WarehouseDispatchTrackingRoute,
   WarehouseFinishedGoodsRequestsRoute: WarehouseFinishedGoodsRequestsRoute,

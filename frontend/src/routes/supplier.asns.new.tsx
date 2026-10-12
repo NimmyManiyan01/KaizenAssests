@@ -1,5 +1,5 @@
 import { createFileRoute, useSearch } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import {
   CheckCircle2,
@@ -56,6 +56,11 @@ function NewAsnPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isAssignmentOpen, setIsAssignmentOpen] = useState(false);
+  const [isMaterialPopupOpen, setIsMaterialPopupOpen] = useState(false);
+  const [customMaterialName, setCustomMaterialName] = useState("");
+  const [manualVehicle, setManualVehicle] = useState(false);
+  const [manualDriver, setManualDriver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Modal Form Inputs
@@ -76,7 +81,6 @@ function NewAsnPage() {
 
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [materialCatalog, setMaterialCatalog] = useState<any[]>([]);
-  const [materialSearch, setMaterialSearch] = useState("");
   const [warehouses, setWarehouses] = useState<any[]>([]);
   const [selectedPo, setSelectedPo] = useState<any>(null);
   const currentUser = getUserInfo();
@@ -142,26 +146,40 @@ function NewAsnPage() {
     setVehicleNumber("");
     setDriverName("");
     setDriverMobile("");
+    setManualVehicle(false);
+    setManualDriver(false);
     setLines([
       { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" },
     ]);
+    setIsAssignmentOpen(true);
+  };
+
+  const continueToAsnForm = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!vehicleNumber || !driverName || !driverMobile.trim()) {
+      toast.error("Vehicle number, driver name and driver contact are required");
+      return;
+    }
+    setIsAssignmentOpen(false);
     setIsModalOpen(true);
   };
 
   const handleAddNewCustomMaterial = async () => {
-    const compName = prompt("Enter New Material Component Name (to save in Database):");
-    if (!compName || !compName.trim()) return;
-
+    const compName = customMaterialName.trim();
+    if (!compName) return;
     try {
       const created = await api.createMaterialComponent(compName.trim(), "PCS");
       void created;
       toast.success(`Component '${created.name}' saved to Database ✓`, {
         description: `Code: ${created.code} · Now available in dropdown`,
       });
+      setMaterialCatalog((prev) => [...prev, { ...created, id: created.id || created.material_id, code: created.code, name: created.name, uom: created.uom || "PCS" }]);
       setLines((prev) => [
         ...prev,
         { item_code: created.code, material_name: created.name, shipped_quantity: "1", uom: created.uom || "PCS" },
       ]);
+      setCustomMaterialName("");
+      setIsMaterialPopupOpen(false);
     } catch {
       toast.error("Failed to save material to database");
     }
@@ -183,8 +201,8 @@ function NewAsnPage() {
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!destinationWarehouse || !lines.length || lines.some((line) => !line.item_code || !line.material_name)) {
-      toast.error("Select a warehouse and material before submitting the ASN");
+    if (!lines.length || lines.some((line) => !line.item_code || !line.material_name)) {
+      toast.error("Select a material before submitting the ASN");
       return;
     }
     if (!expectedArrivalDate) {
@@ -206,7 +224,6 @@ function NewAsnPage() {
         asn_number: asnNumber,
         po_number: undefined,
         supplier_name: supplierName,
-        supplier_id: currentUser?.supplierId,
         destination_warehouse: destinationWarehouse,
         destination_warehouse_id: destinationWarehouseId,
         expected_arrival_at: expectedArrivalDate,
@@ -315,7 +332,6 @@ function NewAsnPage() {
                   <tr>
                     <th className="px-4 py-3">ASN Number</th>
                     <th className="px-4 py-3">Supplier Name</th>
-                    <th className="px-4 py-3">Destination Warehouse</th>
                     <th className="px-4 py-3">Vehicle Number</th>
                     <th className="px-4 py-3">Driver Name & Mobile</th>
                     <th className="px-4 py-3">Expected Arrival Date</th>
@@ -328,7 +344,6 @@ function NewAsnPage() {
                     <tr key={asn.id} className="hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-3 font-mono font-bold text-primary">{asn.asn_number}</td>
                       <td className="px-4 py-3 font-bold text-foreground">{asn.supplier_name}</td>
-                      <td className="px-4 py-3">{asn.destination_warehouse}</td>
                       <td className="px-4 py-3 font-mono font-bold text-sky-600">{asn.vehicle_number}</td>
                       <td className="px-4 py-3">
                         <span className="font-bold">{asn.driver_name}</span>{" "}
@@ -362,6 +377,31 @@ function NewAsnPage() {
           </CardContent>
         </Card>
 
+        <Dialog open={isAssignmentOpen} onOpenChange={setIsAssignmentOpen}>
+          <DialogContent className="max-w-xl rounded-2xl p-6">
+            <DialogHeader><DialogTitle className="text-lg font-black text-primary">Assign vehicle and driver</DialogTitle></DialogHeader>
+            <form onSubmit={continueToAsnForm} className="space-y-5">
+              <p className="text-sm text-muted-foreground">Enter the transport details first. The complete ASN form will open after you click Next.</p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div><Label htmlFor="assignment-vehicle">Vehicle Number *</Label><Input id="assignment-vehicle" required placeholder="Enter vehicle number" value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} className={inputClass} /></div>
+                <div><Label htmlFor="assignment-driver">Driver Name *</Label><Input id="assignment-driver" required placeholder="Enter driver name" value={driverName} onChange={(e) => setDriverName(e.target.value)} className={inputClass} /></div>
+                <div><Label htmlFor="assignment-contact">Driver Contact *</Label><Input id="assignment-contact" required type="tel" value={driverMobile} onChange={(e) => setDriverMobile(e.target.value)} className={inputClass} /></div>
+              </div>
+              <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setIsAssignmentOpen(false)}>Cancel</Button><Button type="submit">Next</Button></div>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={isMaterialPopupOpen} onOpenChange={setIsMaterialPopupOpen}>
+          <DialogContent className="max-w-sm rounded-2xl p-6">
+            <DialogHeader><DialogTitle className="text-lg font-black text-primary">Add custom material</DialogTitle></DialogHeader>
+            <form onSubmit={(event) => { event.preventDefault(); void handleAddNewCustomMaterial(); }} className="space-y-4">
+              <div><Label htmlFor="custom-material-name">Material name *</Label><Input id="custom-material-name" autoFocus required placeholder="Enter material name" value={customMaterialName} onChange={(event) => setCustomMaterialName(event.target.value)} className={inputClass} /></div>
+              <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => { setCustomMaterialName(""); setIsMaterialPopupOpen(false); }}>Cancel</Button><Button type="submit">Add Material</Button></div>
+            </form>
+          </DialogContent>
+        </Dialog>
+
         {/* CREATE ASN POPUP MODAL DIALOG */}
         <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
           <DialogContent className="max-w-2xl rounded-2xl bg-card p-6 shadow-2xl">
@@ -371,7 +411,7 @@ function NewAsnPage() {
               </DialogTitle>
             </DialogHeader>
 
-            <form onSubmit={handleFormSubmit} className="space-y-4 text-xs">
+            <form noValidate onSubmit={handleFormSubmit} className="space-y-4 text-xs">
               {/* AUTOMATIC / MANDATORY DETAILS */}
               <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
                 <h3 className="text-xs font-black uppercase tracking-wider text-primary">
@@ -392,15 +432,6 @@ function NewAsnPage() {
                   </div>
 
                   <div>
-                    <Label htmlFor="destination-warehouse" className="text-[10px] font-bold uppercase text-muted-foreground">Destination Warehouse *</Label>
-                    <select id="destination-warehouse" required value={destinationWarehouseId} onChange={(e) => { const warehouse = warehouses.find((item) => String(item.id) === e.target.value); setDestinationWarehouseId(e.target.value); setDestinationWarehouse(warehouse?.store_name || warehouse?.name || warehouse?.store_code || ""); }} className={`${inputClass} w-full px-3`}>
-                      <option value="">Select warehouse</option>
-                      {warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.store_name || warehouse.name} ({warehouse.store_code})</option>)}
-                    </select>
-                    {!warehouses.length && <p className="mt-1 text-[10px] font-semibold text-amber-600">No active warehouses exist in the Warehouse Master.</p>}
-                  </div>
-
-                  <div>
                     <Label htmlFor="expected-arrival-date" className="text-[10px] font-bold uppercase text-muted-foreground">
                       Expected Arrival Date *
                     </Label>
@@ -418,7 +449,7 @@ function NewAsnPage() {
               </div>
 
               {/* VEHICLE & DRIVER DETAILS */}
-              <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
+              <div aria-hidden="true" className="hidden rounded-xl border bg-muted/30 p-4 space-y-3">
                 <h3 className="text-xs font-black uppercase tracking-wider text-primary">
                   2. VEHICLE & DRIVER DETAILS
                 </h3>
@@ -459,9 +490,9 @@ function NewAsnPage() {
               <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
                   <div className="flex justify-between items-center flex-wrap gap-2">
                   <h3 className="text-xs font-black uppercase tracking-wider text-primary">
-                    3. SHIPPED MATERIALS & QUANTITIES
+                    2. SHIPPED MATERIALS & QUANTITIES
                   </h3>
-                  <div className="flex gap-2"><Input placeholder="Search material name or code" value={materialSearch} onChange={(e) => setMaterialSearch(e.target.value)} className="h-8 w-56 text-[11px]" /><Button type="button" variant="outline" size="sm" className="h-8" onClick={() => setLines((rows) => [...rows, { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" }])}>+ Add Row</Button></div>
+                  <div className="flex justify-end"><Button type="button" variant="outline" size="sm" className="h-8" onClick={() => setLines((rows) => [...rows, { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" }])}>+ Add Row</Button></div>
                 </div>
 
                 <div className="overflow-x-auto rounded-xl border bg-background">
@@ -478,7 +509,7 @@ function NewAsnPage() {
                       {lines.map((line, idx) => (
                         <tr key={idx}>
                           <td className="p-2">
-                            <select required value={line.item_id || line.material_id || ""} onChange={(e) => { const material = materialCatalog.find((item) => String(item.id) === e.target.value); if (material && lines.some((item, i) => i !== idx && String(item.material_id) === String(material.id))) { toast.error("This material is already selected in the ASN."); return; } setLines((current) => current.map((item, i) => i === idx ? { ...item, material_id: material?.id || "", item_code: material?.code || "", material_name: material?.name || "", uom: material?.uom || "" } : item)); }} className="h-8 w-full rounded-lg border bg-background px-2 text-xs font-semibold"><option value="">Select material</option>{materialCatalog.filter((material) => `${material.name || ""} ${material.code || ""}`.toLowerCase().includes(materialSearch.toLowerCase())).map((material) => <option key={material.id} value={material.id}>{material.name} ({material.code})</option>)}</select>
+                            <select required value={line.item_id || line.material_id || ""} onChange={(e) => { if (e.target.value === "__add_custom_material__") { setIsMaterialPopupOpen(true); return; } const material = materialCatalog.find((item) => String(item.id) === e.target.value); if (material && lines.some((item, i) => i !== idx && String(item.material_id) === String(material.id))) { toast.error("This material is already selected in the ASN."); return; } setLines((current) => current.map((item, i) => i === idx ? { ...item, material_id: material?.id || "", item_code: material?.code || "", material_name: material?.name || "", uom: material?.uom || "" } : item)); }} className="h-8 w-full rounded-lg border bg-background px-2 text-xs font-semibold"><option value="">Select material</option>{materialCatalog.map((material) => <option key={material.id} value={material.id}>{material.name} ({material.code})</option>)}<option value="__add_custom_material__">＋ Add custom material</option></select>
                           </td>
                           <td className="p-2">
                             <Input
@@ -502,7 +533,7 @@ function NewAsnPage() {
                               type="button"
                               variant="ghost"
                               size="icon"
-                              disabled
+                              disabled={lines.length === 1}
                               onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}
                               className="h-7 size-7 text-red-500 hover:bg-red-50"
                             >

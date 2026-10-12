@@ -440,9 +440,9 @@ function DockManagement() {
         dock_name: String(data.get("dock_name") || createDockName),
         dock_type: String(data.get("dock_type") || createDockType),
         direction: String(data.get("direction") || createDockDirection),
-        location: String(data.get("location") || ""),
-        description: String(data.get("description") || ""),
-        status: String(data.get("status") || "AVAILABLE"),
+        location: "",
+        description: "",
+        status: "AVAILABLE",
       });
       toast.success("Dock created successfully", {
         description: `Dock ${createDockCode} is now available in Dock Management.`,
@@ -470,7 +470,6 @@ function DockManagement() {
         dock_name: editDockForm.name.trim() || editDockModalDock.dock_name,
         dock_type: editDockForm.type,
         direction: editDockForm.direction,
-        location: editDockForm.location.trim() || undefined,
         description: editDockForm.description.trim() || undefined,
       });
       toast.success(`Dock ${editDockModalDock.dock_code} updated successfully`);
@@ -1630,14 +1629,6 @@ function DockManagement() {
                 <option value="BOTH">BOTH</option>
               </select>
             </div>
-            <div>
-              <Label className="text-xs font-semibold">Location</Label>
-              <Input
-                value={editDockForm.location}
-                onChange={(e) => setEditDockForm({ ...editDockForm, location: e.target.value })}
-                className="mt-1"
-              />
-            </div>
           </div>
 
           <DialogFooter>
@@ -1788,50 +1779,6 @@ function DockManagement() {
                 required
                 className="mt-1.5 h-10 rounded-xl bg-background"
               />
-            </div>
-
-            <div>
-              <Label htmlFor="create_location" className="text-xs font-semibold">
-                Location
-              </Label>
-              <Input
-                id="create_location"
-                name="location"
-                value={createLocation}
-                onChange={(e) => setCreateLocation(e.target.value)}
-                placeholder="e.g. North Warehouse, Bay 3"
-                className="mt-1.5 h-10 rounded-xl bg-background"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="create_description" className="text-xs font-semibold">
-                Description
-              </Label>
-              <Input
-                id="create_description"
-                name="description"
-                value={createDescription}
-                onChange={(e) => setCreateDescription(e.target.value)}
-                placeholder="e.g. Heavy vehicle unloading ramp"
-                className="mt-1.5 h-10 rounded-xl bg-background"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="create_status" className="text-xs font-semibold">
-                Initial Status
-              </Label>
-              <select
-                id="create_status"
-                name="status"
-                value={createStatus}
-                onChange={(e) => setCreateStatus(e.target.value)}
-                className="mt-1.5 h-10 w-full rounded-xl border border-input bg-background px-3 text-xs font-medium focus:ring-2 focus:ring-primary/20"
-              >
-                <option value="AVAILABLE">AVAILABLE</option>
-                <option value="MAINTENANCE">MAINTENANCE</option>
-              </select>
             </div>
 
             <DialogFooter className="pt-3">

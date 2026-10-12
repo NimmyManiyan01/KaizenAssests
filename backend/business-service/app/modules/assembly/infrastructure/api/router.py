@@ -14,6 +14,7 @@ from sqlalchemy import func, or_, select
 from app.database.session import UnitOfWork, get_uow
 from app.modules.assembly.infrastructure.persistence.models import (
     AssemblyFinishedGoodsModel,
+    AssemblyFinishedGoodsAllocationModel,
     AssemblyLineModel,
     AssemblyOrderModel,
     AssemblyQualityInspectionModel,
@@ -31,6 +32,7 @@ from app.common.persistence.models import (
     PickTaskModel,
 )
 from app.security.dependencies import CurrentUser, get_current_user
+from app.modules.dispatch.infrastructure.persistence.models import DispatchModel, DispatchItemModel
 
 logger = logging.getLogger(__name__)
 
@@ -2481,6 +2483,51 @@ async def perform_quality_inspection(
 # ==============================================================================
 # STEP 5: FINISHED GOODS TRACKING & QR GENERATION INSIDE ASSEMBLY
 # ==============================================================================
+
+@router.post("/dispatch/{dispatch_id}/allocate-fifo")
+async def allocate_finished_goods_fifo(
+    dispatch_id: str,
+    uow: UnitOfWork = Depends(get_uow),
+    current_user: Optional[CurrentUser] = Depends(get_current_user),
+):
+    """Allocate persisted QC-approved Assembly FG batches oldest-first."""
+    try:
+        dispatch_uuid = uuid.UUID(dispatch_id)
+    except ValueError:
+        dispatch_uuid = (await uow.session.execute(select(DispatchModel.id).where(DispatchModel.dispatch_number == dispatch_id))).scalar_one_or_none()
+    if not dispatch_uuid:
+        raise HTTPException(404, "Dispatch order not found")
+    items = (await uow.session.execute(select(DispatchItemModel).where(DispatchItemModel.dispatch_order_id == dispatch_uuid))).scalars().all()
+    if not items:
+        raise HTTPException(409, "Dispatch has no finished-goods items")
+    allocations = (await uow.session.execute(select(AssemblyFinishedGoodsAllocationModel).where(AssemblyFinishedGoodsAllocationModel.status == "ALLOCATED"))).scalars().all()
+    allocated_by_fg = {}
+    for allocation in allocations:
+        allocated_by_fg[allocation.finished_goods_id] = allocated_by_fg.get(allocation.finished_goods_id, Decimal("0")) + allocation.quantity
+    result = []
+    shortages = []
+    for item in items:
+        required = item.quantity_ordered or Decimal("0")
+        existing = (await uow.session.execute(select(AssemblyFinishedGoodsAllocationModel).where(AssemblyFinishedGoodsAllocationModel.dispatch_item_id == item.id, AssemblyFinishedGoodsAllocationModel.status == "ALLOCATED"))).scalars().all()
+        already = sum((a.quantity for a in existing), Decimal("0"))
+        remaining_required = max(Decimal("0"), required - already)
+        candidates = (await uow.session.execute(select(AssemblyFinishedGoodsModel).join(AssemblyOrderModel, AssemblyOrderModel.id == AssemblyFinishedGoodsModel.assembly_order_id).where(AssemblyFinishedGoodsModel.status == "AVAILABLE", AssemblyFinishedGoodsModel.product_code == item.material_code, AssemblyFinishedGoodsModel.quantity > 0, AssemblyOrderModel.status == "COMPLETED").order_by(AssemblyFinishedGoodsModel.posted_at.asc()))).scalars().all()
+        for fg in candidates:
+            available = max(Decimal("0"), fg.quantity - allocated_by_fg.get(fg.id, Decimal("0")))
+            if available <= 0 or remaining_required <= 0:
+                continue
+            quantity = min(available, remaining_required)
+            uow.session.add(AssemblyFinishedGoodsAllocationModel(finished_goods_id=fg.id, dispatch_order_id=dispatch_uuid, dispatch_item_id=item.id, quantity=quantity, status="ALLOCATED"))
+            allocated_by_fg[fg.id] = allocated_by_fg.get(fg.id, Decimal("0")) + quantity
+            remaining_required -= quantity
+            result.append({"dispatch_item_id": str(item.id), "finished_goods_id": str(fg.id), "product_code": fg.product_code, "quantity": float(quantity), "qr_code": fg.qr_code, "posted_at": fg.posted_at.isoformat() if fg.posted_at else None, "location_code": fg.location_code})
+        if remaining_required > 0:
+            shortages.append(f"{item.material_code}: required {required:g}, available {required - remaining_required:g}")
+    if shortages:
+        await uow.session.rollback()
+        raise HTTPException(409, "Insufficient Assembly finished-goods stock: " + "; ".join(shortages))
+    await uow.session.commit()
+    return {"dispatch_id": str(dispatch_uuid), "allocated": result, "status": "ALLOCATED"}
 
 @router.get("/finished-goods")
 async def list_assembly_finished_goods(

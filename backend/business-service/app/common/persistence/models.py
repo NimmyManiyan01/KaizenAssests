@@ -317,6 +317,7 @@ class AsnModel(Base):
     package_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     shipping_method: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     shipment_type: Mapped[str] = mapped_column(String(32), nullable=False, default="STANDARD")
+    claim_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("supplier_damage_claim.id", ondelete="SET NULL"), nullable=True, index=True)
     replacement_request_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("replacement_request.id"), nullable=True)
     invoice_number: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     invoice_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)

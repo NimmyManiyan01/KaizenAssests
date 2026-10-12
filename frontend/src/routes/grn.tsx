@@ -1009,14 +1009,17 @@ function GrnPageWorkflow() {
       const resolvedGrnId =
         resolvedContext.grn_id ||
         resolvedContext.grnId ||
-        resolvedContext.id ||
         ctx.grn_id ||
         ctx.grnId ||
-        ctx.id ||
         null;
       if (resolvedGrnId) {
         setGrnId(String(resolvedGrnId));
         localStorage.setItem("active_grn_id", String(resolvedGrnId));
+      } else {
+        // ASN context is not a persisted GRN. Do not reuse an ASN UUID as the
+        // GRN id for QR/evidence requests.
+        setGrnId(null);
+        localStorage.removeItem("active_grn_id");
       }
       if (resolvedContext.dock_options && resolvedContext.dock_options.length > 0) {
         setDockOptions((prev) => {
@@ -3470,9 +3473,13 @@ function GrnPageWorkflow() {
           let soundUnits = 0;
           let quarantinedUnits = 0;
           let lotsCount = 0;
+          let inspectedLines = 0;
+          let totalLines = 0;
           for (const r of grnRecords) {
             const lines = r.lines || r.materials || [];
             for (const l of lines) {
+              totalLines += 1;
+              if (l.quality_result || l.qualityResult || l.condition_result || l.conditionResult) inspectedLines += 1;
               const g = Number(l.good_quantity ?? l.goodQuantity ?? 0);
               const d = Number(l.damaged_quantity ?? l.damagedQuantity ?? 0);
               soundUnits += g;
@@ -3488,8 +3495,10 @@ function GrnPageWorkflow() {
             }
           }
           const totalUnits = soundUnits + quarantinedUnits;
-          const healthPercent =
-            totalUnits > 0 ? Number(((soundUnits / totalUnits) * 100).toFixed(1)) : 100;
+          // Health is inspection completion, not the percentage accepted as
+          // sound. A completed inspection can legitimately contain damaged,
+          // rejected, or held quantities.
+          const healthPercent = totalLines > 0 ? Number(((inspectedLines / totalLines) * 100).toFixed(1)) : 100;
 
           return (
             <div className="space-y-6">
@@ -5943,7 +5952,7 @@ function GrnPageWorkflow() {
               </div>
 
               {/* ⚠️ DAMAGED & REJECTED GOODS QR LABELS (QUARANTINE) SECTION */}
-              <div className="pt-6 border-t space-y-4">
+              <div className="hidden pt-6 border-t space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3 bg-rose-50/70 dark:bg-rose-950/30 p-4 rounded-2xl border border-rose-200 dark:border-rose-900">
                   <div>
                     <h4 className="font-bold text-base text-rose-900 dark:text-rose-200 flex items-center gap-2">
@@ -5967,7 +5976,7 @@ function GrnPageWorkflow() {
                         }}
                         className="rounded-xl font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm"
                       >
-                        <Mail className="mr-2 size-4" /> Send Damage Report to Vendor & Procurement
+                        <Mail className="mr-2 size-4" /> Send Damage Return to Supplier App
                       </Button>
                       <Button
                         onClick={() => printAllDamageQrLabels()}
@@ -6178,68 +6187,6 @@ function GrnPageWorkflow() {
                         persistedStatus = postedGrn?.status || postedGrn?.grn?.status || computedStatus;
                       }
                       newRecord.status = persistedStatus;
-
-                      // Auto-dispatch damage notification to vendor and procurement if damaged materials exist
-                      const damagedLines = processedMaterials.filter(
-                        (m) => (m.damaged_quantity || 0) > 0,
-                      );
-                      if (damagedLines.length > 0 && (grnId || grnNumber)) {
-                        const targetId = grnId || grnNumber;
-                        const currentPhotoIds = damagedLines
-                          .map((m) => {
-                            const materialIndex = processedMaterials.indexOf(m);
-                            const rowKey =
-                              materialIndex >= 0 ? grnMaterialKey(m, materialIndex) : m.item_code;
-                            const photo = (damagePhotos[rowKey] ||
-                              damagePhotos[m.item_code]) as any;
-                            return (
-                              photo?.evidenceId ||
-                              (photo?.evidenceIds &&
-                                photo.evidenceIds[photo.evidenceIds.length - 1])
-                            );
-                          })
-                          .filter((id): id is string => Boolean(id && id.trim()));
-
-                        const damagePayloadItems = damagedLines.map((m) => {
-                          const materialIndex = processedMaterials.indexOf(m);
-                          const rowKey =
-                            materialIndex >= 0 ? grnMaterialKey(m, materialIndex) : m.item_code;
-                          const photo = (damagePhotos[rowKey] || damagePhotos[m.item_code]) as any;
-                          const activeId =
-                            photo?.evidenceId ||
-                            (photo?.evidenceIds && photo.evidenceIds[photo.evidenceIds.length - 1]);
-                          const pIds = activeId ? [activeId] : [];
-                          return {
-                            item_code: m.item_code,
-                            material_name: m.material_name,
-                            damaged_quantity: Number(m.damaged_quantity || 0),
-                            uom: m.uom || "PCS",
-                            reason: m.damage_reason || "Damaged during receiving inspection",
-                            photo_ids: pIds,
-                          };
-                        });
-
-                        try {
-                          const res = await api.notifyVendorDamage(targetId, {
-                            supplier_email: header.supplier_email || notifyVendorEmail || "",
-                            custom_remarks:
-                              "Automated damaged goods report dispatched on GRN completion.",
-                            notify_procurement: true,
-                            photo_ids: currentPhotoIds,
-                            damage_items: damagePayloadItems,
-                          });
-                          toast.success("Damage Report Email Dispatched!", {
-                            description: `Notice dispatched to ${res?.vendor_email || header.supplier_email || "Vendor"} and Procurement team.`,
-                          });
-                        } catch (emailErr: any) {
-                          console.warn("Auto damage notification warning:", emailErr);
-                          toast.warning("Damage Notification Notice", {
-                            description:
-                              emailErr?.message ||
-                              "Could not auto-dispatch damage email. Check SMTP settings.",
-                          });
-                        }
-                      }
 
                       // Update grnRecords state so it appears immediately on Dashboard & Records table
                       setGrnRecords((prev) => [
@@ -6574,7 +6521,7 @@ function GrnPageWorkflow() {
                 Procurement
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
-                Dispatches an official damage report email to the supplier ({header.supplier_name})
+                Publishes the damage return in the supplier application for {header.supplier_name} to review.
                 and alerts the internal Procurement team in KaizenX.
               </DialogDescription>
             </DialogHeader>
@@ -6888,8 +6835,8 @@ function GrnPageWorkflow() {
                 <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
                 <span>
                   {selectedReconciliation.received > 0 && selectedReconciliation.accounted === selectedReconciliation.received
-                    ? `✓ RECEIVED QUANTITY RECONCILED: ${selectedReconciliation.accounted} METER accounted across accepted, rejected, damaged, and held quantities.`
-                    : `⚠ RECONCILIATION PENDING: ${Math.max(0, selectedReconciliation.received - selectedReconciliation.accounted)} METER unaccounted.`}
+                    ? `✓ RECEIVED QUANTITY RECONCILED: ${selectedReconciliation.accounted} ${materials.find((m) => Number(m.received_quantity ?? m.receivedQuantity ?? 0) === selectedReconciliation.received)?.uom || materials[0]?.uom || "PCS"} accounted across accepted, rejected, damaged, and held quantities.`
+                    : `⚠ RECONCILIATION PENDING: ${Math.max(0, selectedReconciliation.received - selectedReconciliation.accounted)} ${materials.find((m) => Number(m.received_quantity ?? m.receivedQuantity ?? 0) === selectedReconciliation.received)?.uom || materials[0]?.uom || "PCS"} unaccounted.`}
                 </span>
               </div>
               <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-background border shadow-xs">

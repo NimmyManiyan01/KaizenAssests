@@ -33,6 +33,7 @@ async def test_asn_creation_sends_email_to_correct_supplier():
             category=["Tools"],
             industry="Tools",
             gstin=f"29AAACA{uuid.uuid4().hex[:4].upper()}1Z5",
+            supplier_code=f"SUP-TEST-{uuid.uuid4().hex[:8].upper()}",
             status="Active",
         )
         sup.contact = SupplierContactModel(

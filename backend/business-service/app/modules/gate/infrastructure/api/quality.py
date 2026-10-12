@@ -148,8 +148,8 @@ async def create_supplier_damage_claim(
     ))).scalar_one_or_none()
     if existing:
         return {"claim_number": existing.claim_number, "status": existing.status, "recipient": contact.primary_email if contact else None}
-    if supplier is None or contact is None or not contact.primary_email:
-        raise HTTPException(status_code=409, detail="Supplier contact email is not configured")
+    if supplier is None:
+        raise HTTPException(status_code=409, detail="Supplier could not be resolved for this ASN")
     last_claim = (await uow.session.execute(select(func.max(SupplierDamageClaimModel.claim_number)))).scalar_one_or_none()
     try:
         sequence = int(last_claim.split("-", 1)[1]) + 1 if last_claim else 1
@@ -157,22 +157,6 @@ async def create_supplier_damage_claim(
         sequence = 1
     claim_number = f"DC-{sequence:05d}"
     photos = (await uow.session.execute(select(DamagePhotoModel).where(DamagePhotoModel.damage_report_id == report.id))).scalars().all()
-    subject = f"Damage Claim {claim_number} - {report.po_number}"
-    body = (f"Dear {supplier.supplier_name},\n\nDamage Claim: {claim_number}\nPO: {report.po_number}\n"
-            f"Material: {report.material_name or report.material_code}\nDamaged Qty: {report.damaged_quantity} {line.uom or ''}\n"
-            f"Reason: {report.damage_reason}\n\nInspection photos are attached.\n\nRegards,\nKaizenX Procurement Team")
-    html = render_premium_email(
-        eyebrow="Supplier damage claim", title=f"Damage Claim {claim_number}", greeting=f"Hello {supplier.supplier_name},",
-        intro="Procurement has raised a claim for material damaged on receipt.",
-        details=[("PO", report.po_number), ("Material", report.material_name or report.material_code),
-                 ("Damaged quantity", f"{report.damaged_quantity} {line.uom or ''}"), ("Reason", report.damage_reason)],
-        primary_cta=("Review damage claim", "http://localhost:8080/supplier/quality-issues"),
-        note="Inspection photos are attached for review.",
-    )
-    delivered = await send_email(contact.primary_email, subject, body, html,
-                                 [(p.filename, p.image_data, p.content_type) for p in photos])
-    if delivered is not True:
-        raise HTTPException(status_code=503, detail="SMTP is not configured; supplier claim was not sent")
     now = datetime.datetime.now(datetime.timezone.utc)
     claim = SupplierDamageClaimModel(claim_number=claim_number, damage_report_id=report.id,
                                      supplier_id=supplier.id, status="SUPPLIER_SENT", created_by=user.username,
@@ -183,7 +167,7 @@ async def create_supplier_damage_claim(
                                       message=f"Claim for {report.damaged_quantity} {line.uom or ''} {report.material_name or report.material_code} against {report.po_number}.",
                                       link="/supplier/quality-issues"))
     await uow.session.flush()
-    return {"claim_number": claim_number, "status": claim.status, "recipient": contact.primary_email, "sent_at": now.isoformat()}
+    return {"claim_number": claim_number, "status": claim.status, "recipient": None, "sent_at": now.isoformat()}
 
 
 @router.post("/issues/{entry_id}/forward")
