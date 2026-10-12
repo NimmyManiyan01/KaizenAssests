@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 class StoreCreate(BaseModel):
     store_name: str = Field(..., min_length=2, max_length=128, description="Store display name")
     description: Optional[str] = Field(None, max_length=1000)
-    warehouse_id: str = Field(default="Main Warehouse", max_length=64)
+    warehouse_id: Optional[str] = Field(None, max_length=64)
     store_manager_id: Optional[str] = Field(None, max_length=128)
     store_manager_name: Optional[str] = Field(None, max_length=128)
     status: str = Field(default="ACTIVE", max_length=32)
@@ -72,6 +72,19 @@ class BinCreate(BaseModel):
     hazardous_material_permitted: bool = False
     temperature_requirement: Optional[str] = Field(None, max_length=128)
     status: str = Field(default="AVAILABLE", max_length=32)
+
+
+class BulkRackCreate(BaseModel):
+    zone_id: str = Field(..., description="Persisted zone receiving the new rack positions")
+    rack_code: str = Field(..., min_length=1, max_length=64)
+    bin_code_prefix: str = Field(..., min_length=1, max_length=48)
+    bin_code_start: int = Field(default=1, ge=0)
+    count: int = Field(..., ge=1, le=500)
+    position_prefix: str = Field(..., min_length=1, max_length=32)
+    position_start: int = Field(default=1, ge=0)
+    code_width: int = Field(default=3, ge=1, le=8)
+    capacity: Decimal = Field(..., gt=0)
+    storage_type: str = Field(default="GENERAL", max_length=64)
 
 
 class BinUpdate(BaseModel):

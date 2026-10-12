@@ -1,4 +1,5 @@
 import datetime
+import hashlib
 import json
 import logging
 import uuid
@@ -22,6 +23,7 @@ from app.modules.dock.infrastructure.persistence.models import (
 )
 from app.modules.gate.infrastructure.persistence.models import DockAssignmentModel
 from app.common.persistence.models import (
+    MaterialModel,
     MaterialStockModel,
     NotificationModel,
 )
@@ -134,6 +136,115 @@ async def _resolve_task(session: AsyncSession, task_id: Any) -> PutawayTaskModel
     return res.scalars().first()
 
 
+async def _material_qr_matches_task(session: AsyncSession, task: PutawayTaskModel, scan: str) -> bool:
+    """Resolve existing material/batch QR identities without minting labels."""
+    raw = (scan or "").strip()
+    if raw.upper() == task.item_code.upper():
+        return True
+    hu = await session.scalar(select(HandlingUnitModel).where(
+        or_(
+            func.upper(HandlingUnitModel.hu_number) == raw.upper(),
+            func.upper(HandlingUnitModel.barcode_value) == raw.upper(),
+        )
+    ))
+    if hu:
+        return (
+            hu.item_code.strip().upper() == task.item_code.upper()
+            and (not task.handling_unit_id or hu.id == task.handling_unit_id)
+            and (not task.batch_number or not hu.batch_number or hu.batch_number.upper() == task.batch_number.upper())
+        )
+    item_code = grn_number = batch_number = None
+    try:
+        payload = json.loads(raw)
+        if isinstance(payload, dict):
+            item_code = payload.get("item_code") or payload.get("material_code") or payload.get("code")
+            grn_number = payload.get("grn_number") or payload.get("grn_no") or payload.get("grn")
+            batch_number = payload.get("batch_number") or payload.get("batch_no") or payload.get("batch")
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+
+    if not item_code:
+        for line in raw.splitlines():
+            label, separator, value = line.partition(":")
+            if not separator:
+                continue
+            label_key = label.strip().lower().replace(" ", "_")
+            value = value.strip()
+            if label_key in {"material_code", "item_code", "code"}:
+                item_code = value
+            elif label_key in {"grn", "grn_number", "grn_no"}:
+                grn_number = value
+            elif label_key in {"batch", "batch_number", "batch_no"}:
+                batch_number = value
+
+    if not item_code and raw.upper().startswith("QR-MAT-"):
+        item_code = raw[7:].strip()
+
+    if not item_code:
+        qr_record = await session.scalar(
+            select(GrnBatchQrModel).where(GrnBatchQrModel.qr_code == raw)
+        )
+        if qr_record:
+            item_code = qr_record.item_code
+            try:
+                payload = json.loads(qr_record.qr_payload or "{}")
+                if isinstance(payload, dict):
+                    grn_number = grn_number or payload.get("grn_number") or payload.get("grn_no")
+                    batch_number = batch_number or payload.get("batch_number") or payload.get("batch")
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+
+    if not item_code:
+        batch = await session.scalar(
+            select(GrnBatchModel).where(func.upper(GrnBatchModel.batch_number) == raw.upper())
+        )
+        if batch:
+            line = await session.get(GrnLineModel, batch.grn_line_id)
+            grn = await session.get(GrnModel, line.grn_id) if line else None
+            item_code = line.item_code if line else None
+            grn_number = grn.grn_number if grn else grn_number
+            batch_number = batch.batch_number
+
+    if str(item_code or "").strip().upper() != task.item_code.upper():
+        return False
+    if grn_number and task.grn_number and str(grn_number).strip().upper() != task.grn_number.upper():
+        return False
+    if batch_number and task.batch_number and str(batch_number).strip().upper() != task.batch_number.upper():
+        return False
+    return True
+
+
+async def _lock_warehouse_stock(
+    session: AsyncSession,
+    material_code: str,
+    warehouse_id: str,
+) -> tuple[MaterialStockModel | None, MaterialModel]:
+    stock_query = select(MaterialStockModel).where(
+        MaterialStockModel.material_code == material_code,
+        MaterialStockModel.warehouse_id == warehouse_id,
+    ).with_for_update()
+    rows = (await session.execute(stock_query)).scalars().all()
+    if len(rows) > 1:
+        raise HTTPException(status_code=409, detail="Material has multiple warehouse stock records; select a material variant before putaway")
+    if rows:
+        material = await session.scalar(select(MaterialModel).where(MaterialModel.material_code == material_code))
+        if material is None:
+            raise HTTPException(status_code=409, detail=f"Material master '{material_code}' was not found")
+        return rows[0], material
+
+    # The material master is the lock target when its stock row does not yet
+    # exist, serializing first receipts of that material in this warehouse.
+    material = await session.scalar(
+        select(MaterialModel).where(MaterialModel.material_code == material_code).with_for_update()
+    )
+    if material is None:
+        raise HTTPException(status_code=409, detail=f"Material master '{material_code}' was not found")
+    rows = (await session.execute(stock_query)).scalars().all()
+    if len(rows) > 1:
+        raise HTTPException(status_code=409, detail="Material has multiple warehouse stock records; select a material variant before putaway")
+    return (rows[0] if rows else None), material
+
+
 async def _resolve_store_entity(session: AsyncSession, store_id: Any) -> StoreModel | None:
     if not store_id:
         return None
@@ -214,10 +325,12 @@ class PutawayConfirmationRequest(BaseModel):
     material_scan: str
     location_scan: str
     quantity: Decimal
+    confirmation_id: str | None = Field(default=None, max_length=64)
 
 
 class ResolveGrnQrRequest(BaseModel):
     qr_code: str
+    batch_number: str | None = Field(default=None, max_length=128)
 
 
 class ResolveBinQrRequest(BaseModel):
@@ -232,6 +345,13 @@ class ExecutePutawayRequest(BaseModel):
     grn_qr_code: str
     bin_qr_code: str
     quantity: Decimal
+    batch_number: str | None = Field(default=None, max_length=128)
+    confirmation_id: str | None = Field(default=None, max_length=64)
+
+
+def _confirmation_digest(*parts: Any) -> str:
+    normalized = [str(part or "").strip().upper() for part in parts]
+    return hashlib.sha256(json.dumps(normalized, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 class StorageLocationCreateRequest(BaseModel):
@@ -358,6 +478,7 @@ def task_response(task: PutawayTaskModel) -> dict:
         "grn_number": task.grn_number,
         "handling_unit_id": str(task.handling_unit_id) if task.handling_unit_id else None,
         "item_code": task.item_code,
+        "batch_number": task.batch_number,
         "material_name": task.material_name,
         "material_qr": (task.placement_metadata or {}).get("unit_qr") if task.finished_goods_id else None,
         "barcode_value": None,
@@ -576,6 +697,7 @@ async def enrich_putaway_tasks(tasks: list[PutawayTaskModel], session) -> list[d
                 "grn_number": None if t.finished_goods_id else t.grn_number,
                 "handling_unit_id": str(t.handling_unit_id) if t.handling_unit_id else None,
                 "item_code": t.item_code,
+                "batch_number": t.batch_number,
                 "material_name": t.material_name,
                 "material_qr": mat_qr,
                 "barcode_value": hu.barcode_value if hu else None,
@@ -1074,7 +1196,7 @@ async def assign_storage_location(
         bin_obj = None
         if request.bin_id:
             bin_obj = await _resolve_bin_entity(uow.session, request.bin_id)
-            if bin_obj is None or (bin_obj.status and bin_obj.status.upper() not in ("ACTIVE", "AVAILABLE")):
+            if bin_obj is None or (bin_obj.status and bin_obj.status.upper() not in ("ACTIVE", "AVAILABLE", "OCCUPIED", "PARTIALLY_OCCUPIED")):
                 raise HTTPException(status_code=422, detail="Selected destination bin is inactive or not found")
             if zone and bin_obj.zone_id != zone.id:
                 raise HTTPException(status_code=422, detail=f"Bin '{bin_obj.bin_code}' does not belong to Zone '{zone.zone_code}'")
@@ -1248,6 +1370,35 @@ async def complete_putaway(
     task = await _resolve_task(uow.session, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Putaway task not found")
+    # Serialize partial confirmations for this task and reload its remaining
+    # quantity after the preceding operator commits.
+    locked_task = await uow.session.scalar(
+        select(PutawayTaskModel)
+        .where(PutawayTaskModel.id == task.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if locked_task is None:
+        raise HTTPException(status_code=404, detail="Putaway task not found")
+    task = locked_task
+    confirmation_id = (request.confirmation_id or "").strip() or None
+    confirmation_hash = _confirmation_digest(
+        task.id,
+        request.material_scan,
+        request.location_scan,
+        request.quantity,
+    )
+    if confirmation_id:
+        prior_confirmation = await uow.session.scalar(
+            select(PutawayMovementModel).where(PutawayMovementModel.confirmation_id == confirmation_id)
+        )
+        if prior_confirmation:
+            if prior_confirmation.confirmation_hash != confirmation_hash:
+                raise HTTPException(status_code=409, detail="Confirmation ID was already used for a different putaway scan")
+            response = task_response(task)
+            response["duplicate_confirmation"] = True
+            response["confirmed_quantity"] = float(prior_confirmation.confirmed_quantity)
+            return response
     if task.status in ("PUTAWAY_COMPLETED", "STORED"):
         raise HTTPException(status_code=409, detail="Putaway task is already completed")
 
@@ -1331,13 +1482,8 @@ async def complete_putaway(
         except Exception:
             pass
 
-    if (
-        handling_unit is None
-        and not afg_match
-        and scanned_hu.upper() != task.item_code.upper()
-        and raw_scan.upper() != task.item_code.upper()
-        and task.item_code.upper() not in raw_scan.upper()
-    ):
+    qr_matches_task = await _material_qr_matches_task(uow.session, task, raw_scan)
+    if handling_unit is None and not afg_match and not qr_matches_task:
         raise HTTPException(status_code=422, detail="Scanned Material QR does not match the putaway task")
 
     if handling_unit and handling_unit.status in ("QUARANTINED", "REJECTED", "DAMAGED"):
@@ -1485,8 +1631,20 @@ async def complete_putaway(
         uow.session.add(target_bin)
         await uow.session.flush()
 
+    # The physical rack scan must match the warehouse manager's assignment.
+    if task.destination_bin_id and target_bin.id != task.destination_bin_id:
+        raise HTTPException(status_code=422, detail="Scanned Rack/Bin does not match the rack assigned to this putaway task")
+    target_bin = await uow.session.scalar(
+        select(StoreBinModel)
+        .where(StoreBinModel.id == target_bin.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if target_bin is None:
+        raise HTTPException(status_code=404, detail="Scanned Rack/Bin no longer exists")
+
     # STRICT BIN VALIDATION
-    if target_bin.status.upper() not in ("ACTIVE", "AVAILABLE"):
+    if target_bin.status.upper() not in ("ACTIVE", "AVAILABLE", "OCCUPIED", "PARTIALLY_OCCUPIED"):
         raise HTTPException(status_code=409, detail=f"Target Bin '{target_bin.bin_code}' is inactive")
     if target_bin.zone_id != target_zone.id:
         raise HTTPException(status_code=422, detail=f"Target Bin '{target_bin.bin_code}' does not belong to Zone '{target_zone.zone_code}'")
@@ -1551,22 +1709,17 @@ async def complete_putaway(
         raise HTTPException(status_code=409, detail=f"Target Bin '{target_bin.bin_code}' has insufficient capacity")
 
     # 5. Material Stock Update (Available increments upon Putaway completion)
-    stock_result = await uow.session.execute(
-        select(MaterialStockModel).where(MaterialStockModel.material_code == task.item_code).with_for_update()
-    )
-    stock = stock_result.scalar_one_or_none()
+    stock, material = await _lock_warehouse_stock(uow.session, task.item_code, task.warehouse_id)
     if stock is None:
         stock = MaterialStockModel(
             id=uuid.uuid4(),
+            material_id=material.id,
             material_code=task.item_code,
-            material_name=task.item_code,
-            category="General",
             on_hand=Decimal("0.0"),
             allocated=Decimal("0.0"),
             available=Decimal("0.0"),
             uom=task.uom or "PCS",
-            warehouse_id=task.warehouse_id or "MAIN",
-            reorder_point=Decimal("10.0"),
+            warehouse_id=task.warehouse_id,
             updated_at=datetime.datetime.now(),
         )
         uow.session.add(stock)
@@ -1589,12 +1742,14 @@ async def complete_putaway(
         select(InventoryLocationBalanceModel).where(
             InventoryLocationBalanceModel.material_code == task.item_code,
             InventoryLocationBalanceModel.storage_location_id == location.id,
+            InventoryLocationBalanceModel.batch_number == (task.batch_number or "UNTRACKED"),
         ).with_for_update()
     )
     balance = balance_result.scalar_one_or_none()
     if balance is None:
         balance = InventoryLocationBalanceModel(
             material_code=task.item_code,
+            batch_number=task.batch_number or "UNTRACKED",
             material_name=task.material_name,
             warehouse_id=task.warehouse_id,
             storage_location_id=location.id,
@@ -1648,6 +1803,8 @@ async def complete_putaway(
     src_loc_str = getattr(task, "source_location", None) or "RECEIVING_DOCK"
     uow.session.add(
         PutawayMovementModel(
+            confirmation_id=confirmation_id,
+            confirmation_hash=confirmation_hash if confirmation_id else None,
             putaway_task_id=task.id,
             material_scan=material_scan_record,
             location_scan=location_scan_record,
@@ -1655,6 +1812,7 @@ async def complete_putaway(
             material_name=getattr(task, "material_name", None) or task.item_code,
             source_location=src_loc_str,
             destination_location=dest_loc_str,
+            batch_lot=task.batch_number or "UNTRACKED",
             confirmed_quantity=request.quantity,
             uom=task.uom,
             inventory_available_before=available_before,
@@ -1670,7 +1828,7 @@ async def complete_putaway(
             material_name=getattr(task, "material_name", None) or task.item_code,
             material_qr=material_scan_record,
             grn_number=task.grn_number,
-            batch_lot=None,
+            batch_lot=task.batch_number or "UNTRACKED",
             from_location=src_loc_str,
             to_location=dest_loc_str,
             from_bin_id=None,
@@ -1681,7 +1839,7 @@ async def complete_putaway(
             stock_after=stock.available,
             performed_by=user.username,
             user_role=",".join(user.roles or []),
-            warehouse_id=task.warehouse_id or "MAIN",
+            warehouse_id=task.warehouse_id,
             store_id=target_zone.store_id if target_zone else None,
             store_code=target_store.store_code if target_store else None,
             reference_document=task.task_number,
@@ -1826,10 +1984,10 @@ async def resolve_grn_qr(
             "available_quantity": float(available_qty),
             "uom": fg.uom or fg_task.uom or "PCS",
             "supplier_name": "Assembly",
-            "warehouse_id": fg.warehouse_id or fg_task.warehouse_id or "MAIN",
+            "warehouse_id": fg.warehouse_id or fg_task.warehouse_id,
             "store_id": str(fg_task.destination_store_id) if fg_task.destination_store_id else None,
-            "store_name": fg_store.store_name if fg_store else "Finished Goods Store",
-            "store_code": fg_store.store_code if fg_store else "STR-FG",
+            "store_name": fg_store.store_name if fg_store else None,
+            "store_code": fg_store.store_code if fg_store else None,
             "destination_zone": fg_task.destination_zone,
             "destination_bin": fg_task.destination_bin,
             "destination_bin_code": fg_task.destination_bin_code,
@@ -1842,7 +2000,7 @@ async def resolve_grn_qr(
 
     item_code: str | None = None
     grn_number: str | None = None
-    batch_number: str | None = None
+    batch_number: str | None = request.batch_number.strip() if request.batch_number else None
     hu_number: str | None = None
 
     # Step 1: Parse JSON QR payload if applicable
@@ -1965,8 +2123,10 @@ async def resolve_grn_qr(
         user_store_ids, user_store_codes = await get_user_store_context(user, uow)
         pt_query = select(PutawayTaskModel).where(
             func.upper(PutawayTaskModel.item_code) == item_code.upper(),
-            PutawayTaskModel.status.in_(["PENDING", "IN_PROGRESS", "ASSIGNED", "DRAFT"])
+            PutawayTaskModel.status.in_(["PENDING", "IN_PROGRESS", "ASSIGNED", "DRAFT", "OPEN", "ASSIGNED_TO_STORE", "PUTAWAY_IN_PROGRESS"])
         )
+        if batch_number:
+            pt_query = pt_query.where(func.upper(PutawayTaskModel.batch_number) == batch_number.upper())
         if user_store_ids:
             pt_query = pt_query.where(PutawayTaskModel.destination_store_id.in_(user_store_ids))
         pt_query = pt_query.order_by(PutawayTaskModel.created_at.desc())
@@ -1998,6 +2158,18 @@ async def resolve_grn_qr(
         if grn_line:
             grn = await uow.session.get(GrnModel, grn_line.grn_id)
 
+    # A shared material QR can identify an item that has several batches. Do
+    # not silently assign a random batch; ask the operator to scan a
+    # batch-specific label or provide the batch number explicitly.
+    if grn_line and not batch_number:
+        batch_rows = (await uow.session.execute(
+            select(GrnBatchModel).where(GrnBatchModel.grn_line_id == grn_line.id)
+        )).scalars().all()
+        if len(batch_rows) > 1:
+            raise HTTPException(status_code=422, detail="This material QR is shared across multiple batches; scan a batch label or enter the batch number")
+        if len(batch_rows) == 1:
+            batch_number = batch_rows[0].batch_number
+
     if grn is None:
         raise HTTPException(
             status_code=404,
@@ -2014,12 +2186,13 @@ async def resolve_grn_qr(
 
     # Locate existing Putaway Task if any
     if task_obj is None:
-        res_t = await uow.session.execute(
-            select(PutawayTaskModel).where(
+        task_query = select(PutawayTaskModel).where(
                 PutawayTaskModel.grn_id == grn.id,
                 func.upper(PutawayTaskModel.item_code) == item_code.upper(),
             )
-        )
+        if batch_number:
+            task_query = task_query.where(func.upper(PutawayTaskModel.batch_number) == batch_number.upper())
+        res_t = await uow.session.execute(task_query.order_by(PutawayTaskModel.created_at.asc()))
         task_obj = res_t.scalars().first()
 
     # Calculate quantities. A batch QR represents only that batch, not the
@@ -2055,6 +2228,8 @@ async def resolve_grn_qr(
             or_(PutawayTaskModel.grn_id == grn.id, PutawayTaskModel.grn_number == grn.grn_number),
         )
     )
+    if batch_number:
+        mov_stmt = mov_stmt.where(func.upper(PutawayTaskModel.batch_number) == batch_number.upper())
     mov_res = await uow.session.execute(mov_stmt)
     already_put_away = Decimal(str(mov_res.scalar() or 0))
 
@@ -2089,8 +2264,8 @@ async def resolve_grn_qr(
     truck_no = grn.vehicle_number
     asn_no = grn.asn_number or (hu_obj.asn_number if hu_obj else None)
     po_no = grn.po_number or (hu_obj.po_number if hu_obj else None)
-    supplier_name = grn.supplier_name or grn.supplier_company_name or "Standard Supplier"
-    warehouse_id = grn.warehouse_id or "MAIN"
+    supplier_name = grn.supplier_name or grn.supplier_company_name
+    warehouse_id = grn.warehouse_id or (task_obj.warehouse_id if task_obj else None)
     dock_code = grn.dock_number or (task_obj.source_location if task_obj else "RECEIVING_DOCK")
     assigned_sm = task_obj.assigned_to if task_obj else None
     dest_store_id = str(task_obj.destination_store_id) if task_obj and task_obj.destination_store_id else None
@@ -2125,14 +2300,6 @@ async def resolve_grn_qr(
             if not assigned_sm:
                 assigned_sm = store_obj.store_manager_name
 
-    # Batch number
-    if not batch_number:
-        if grn_line:
-            res_b = await uow.session.execute(select(GrnBatchModel).where(GrnBatchModel.grn_line_id == grn_line.id))
-            b_first = res_b.scalars().first()
-            if b_first:
-                batch_number = b_first.batch_number
-
     return {
         "valid": True,
         "material_code": item_code,
@@ -2144,22 +2311,22 @@ async def resolve_grn_qr(
         "grn_id": str(grn.id),
         "po_number": po_no or "N/A",
         "asn_number": asn_no or "N/A",
-        "batch_lot_number": batch_number or "BATCH-01",
+        "batch_lot_number": batch_number,
         "batch_quantity": float(scanned_batch.batch_quantity) if scanned_batch else None,
         "received_quantity": float(received_qty),
         "already_put_away_quantity": float(already_put_away),
         "available_quantity": float(available_qty),
         "uom": uom,
         "supplier_name": supplier_name,
-        "warehouse_id": warehouse_id,
+        "warehouse_id": warehouse_id or (task_obj.warehouse_id if task_obj else None),
         "store_id": dest_store_id,
-        "store_name": store_name or "Assigned Store",
-        "store_code": store_code or "STORE",
+        "store_name": store_name,
+        "store_code": store_code,
         "gate_entry_number": gate_entry_no or "N/A",
         "truck_number": truck_no or "N/A",
         "dock_code": dock_code,
         "assigned_dock": dock_code,
-        "assigned_store_manager": assigned_sm or "Store Manager",
+        "assigned_store_manager": assigned_sm,
         "putaway_task_id": str(task_obj.id) if task_obj else None,
         "putaway_status": task_obj.status if task_obj else ("COMPLETED" if available_qty == 0 else ("IN_PROGRESS" if already_put_away > 0 else "READY_FOR_PUTAWAY")),
         "handling_unit_id": str(hu_obj.id) if hu_obj else None,
@@ -2255,7 +2422,7 @@ async def resolve_bin_qr(
         )
 
     # Validate active
-    if (bin_obj.status or "").upper() not in ("ACTIVE", "AVAILABLE"):
+    if (bin_obj.status or "").upper() not in ("ACTIVE", "AVAILABLE", "OCCUPIED", "PARTIALLY_OCCUPIED"):
         raise HTTPException(
             status_code=409,
             detail=f"Destination Bin '{bin_obj.bin_code}' is {bin_obj.status} and cannot receive materials.",
@@ -2335,15 +2502,47 @@ async def execute_putaway(
     if request.quantity <= 0:
         raise HTTPException(status_code=422, detail="Putaway quantity must be greater than zero")
 
+    confirmation_id = (request.confirmation_id or "").strip() or None
+    confirmation_hash = _confirmation_digest(
+        request.task_id,
+        request.grn_qr_code,
+        request.bin_qr_code,
+        request.quantity,
+    )
+    if confirmation_id:
+        prior_confirmation = await uow.session.scalar(
+            select(PutawayMovementModel).where(PutawayMovementModel.confirmation_id == confirmation_id)
+        )
+        if prior_confirmation:
+            if prior_confirmation.confirmation_hash != confirmation_hash:
+                raise HTTPException(status_code=409, detail="Confirmation ID was already used for a different putaway scan")
+            return {
+                "status": "SUCCESS",
+                "duplicate_confirmation": True,
+                "message": "This putaway confirmation was already posted",
+                "task_id": str(prior_confirmation.putaway_task_id),
+                "material_code": prior_confirmation.material_code,
+                "putaway_quantity": float(prior_confirmation.confirmed_quantity),
+                "bin_code": prior_confirmation.location_scan,
+                "inventory_available_before": float(prior_confirmation.inventory_available_before),
+                "inventory_available_after": float(prior_confirmation.inventory_available_after),
+            }
+
     # Step 1: Resolve GRN QR strictly on backend
-    grn_info = await resolve_grn_qr(ResolveGrnQrRequest(qr_code=request.grn_qr_code), user=user, uow=uow)
+    grn_info = await resolve_grn_qr(
+        ResolveGrnQrRequest(qr_code=request.grn_qr_code, batch_number=request.batch_number),
+        user=user,
+        uow=uow,
+    )
     item_code = grn_info["material_code"]
     grn_number = grn_info["grn_number"]
     grn_id = uuid.UUID(grn_info["grn_id"]) if grn_info.get("grn_id") else None
     available_qty = Decimal(str(grn_info["available_quantity"]))
     uom = grn_info["uom"] or "PCS"
     mat_name = grn_info["material_name"]
-    warehouse_id = grn_info["warehouse_id"] or "MAIN"
+    warehouse_id = grn_info["warehouse_id"]
+    if not warehouse_id:
+        raise HTTPException(status_code=409, detail="The GRN material is not associated with a warehouse")
 
     if request.quantity > available_qty:
         raise HTTPException(
@@ -2359,7 +2558,7 @@ async def execute_putaway(
     )
     bin_id = uuid.UUID(bin_info["bin_id"])
     target_bin = await uow.session.get(StoreBinModel, bin_id)
-    if not target_bin or (target_bin.status or "").upper() not in ("ACTIVE", "AVAILABLE"):
+    if not target_bin or (target_bin.status or "").upper() not in ("ACTIVE", "AVAILABLE", "OCCUPIED", "PARTIALLY_OCCUPIED"):
         raise HTTPException(status_code=409, detail="Destination Bin is inactive or not found")
 
     target_zone = await uow.session.get(StoreZoneModel, target_bin.zone_id) if target_bin.zone_id else None
@@ -2370,11 +2569,68 @@ async def execute_putaway(
     # stock to a different location.
     resolved_task: PutawayTaskModel | None = None
     if request.task_id:
-        resolved_task = await uow.session.get(PutawayTaskModel, request.task_id)
+        resolved_task = await uow.session.scalar(
+            select(PutawayTaskModel)
+            .where(PutawayTaskModel.id == request.task_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         if resolved_task is None:
             raise HTTPException(status_code=404, detail="Putaway task was not found")
     elif grn_info.get("putaway_task_id"):
-        resolved_task = await uow.session.get(PutawayTaskModel, uuid.UUID(grn_info["putaway_task_id"]))
+        resolved_task = await uow.session.scalar(
+            select(PutawayTaskModel)
+            .where(PutawayTaskModel.id == uuid.UUID(grn_info["putaway_task_id"]))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+
+    if resolved_task and (
+        resolved_task.item_code.strip().upper() != item_code.strip().upper()
+        or (resolved_task.grn_id and grn_id and resolved_task.grn_id != grn_id)
+        or (
+            resolved_task.batch_number
+            and grn_info.get("batch_lot_number")
+            and resolved_task.batch_number.strip().upper() != grn_info["batch_lot_number"].strip().upper()
+        )
+    ):
+        raise HTTPException(status_code=422, detail="Scanned GRN material batch does not match the selected putaway task")
+
+    # The task lock above serializes partial receipts. Recheck the key after
+    # acquiring it so a retry sent concurrently with the first commit returns
+    # the already-posted outcome.
+    if confirmation_id:
+        prior_confirmation = await uow.session.scalar(
+            select(PutawayMovementModel).where(PutawayMovementModel.confirmation_id == confirmation_id)
+        )
+        if prior_confirmation:
+            if prior_confirmation.confirmation_hash != confirmation_hash:
+                raise HTTPException(status_code=409, detail="Confirmation ID was already used for a different putaway scan")
+            return {
+                "status": "SUCCESS",
+                "duplicate_confirmation": True,
+                "message": "This putaway confirmation was already posted",
+                "task_id": str(prior_confirmation.putaway_task_id),
+                "material_code": prior_confirmation.material_code,
+                "putaway_quantity": float(prior_confirmation.confirmed_quantity),
+                "bin_code": prior_confirmation.location_scan,
+                "inventory_available_before": float(prior_confirmation.inventory_available_before),
+                "inventory_available_after": float(prior_confirmation.inventory_available_after),
+            }
+
+    # Refresh and lock the physical bin after the task lock, matching the
+    # direct putaway endpoint's lock order and protecting capacity from two
+    # concurrent material confirmations.
+    target_bin = await uow.session.scalar(
+        select(StoreBinModel)
+        .where(StoreBinModel.id == bin_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if not target_bin:
+        raise HTTPException(status_code=404, detail="Destination Bin no longer exists")
+    target_zone = await uow.session.get(StoreZoneModel, target_bin.zone_id) if target_bin.zone_id else None
+    target_store = await uow.session.get(StoreModel, target_bin.store_id) if target_bin.store_id else None
 
     if resolved_task:
         if resolved_task.status in {"CANCELLED", "PUTAWAY_COMPLETED", "COMPLETED"}:
@@ -2386,6 +2642,11 @@ async def execute_putaway(
             raise HTTPException(
                 status_code=422,
                 detail=f"WRONG LOCATION. Expected {expected}; scanned {target_bin.bin_code}. Move material to the assigned location.",
+            )
+        if request.quantity > resolved_task.quantity:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Putaway quantity ({request.quantity}) exceeds remaining task quantity ({resolved_task.quantity} {resolved_task.uom}).",
             )
 
     allowed_category = (getattr(target_bin, "allowed_material_category", None) or "").strip()
@@ -2453,22 +2714,17 @@ async def execute_putaway(
         await uow.session.flush()
 
     # Step 4: Update MaterialStockModel
-    stock_res = await uow.session.execute(
-        select(MaterialStockModel).where(MaterialStockModel.material_code == item_code).with_for_update()
-    )
-    stock = stock_res.scalar_one_or_none()
+    stock, material = await _lock_warehouse_stock(uow.session, item_code, warehouse_id)
     if stock is None:
         stock = MaterialStockModel(
             id=uuid.uuid4(),
+            material_id=material.id,
             material_code=item_code,
-            material_name=mat_name,
-            category=grn_info.get("material_category") or "General",
             on_hand=Decimal("0.0"),
             allocated=Decimal("0.0"),
             available=Decimal("0.0"),
             uom=uom,
             warehouse_id=warehouse_id,
-            reorder_point=Decimal("10.0"),
             updated_at=datetime.datetime.now(),
         )
         uow.session.add(stock)
@@ -2484,17 +2740,20 @@ async def execute_putaway(
     target_bin.status = "OCCUPIED" if target_bin.occupied_quantity >= target_bin.capacity else "PARTIALLY_OCCUPIED"
     location.occupied_quantity = location.occupied_quantity + request.quantity
 
-    # Step 5: Update InventoryLocationBalanceModel
+    # Step 5: Update the exact material, batch, and location balance.
+    batch_number = (resolved_task.batch_number if resolved_task else grn_info.get("batch_lot_number")) or "UNTRACKED"
     bal_res = await uow.session.execute(
         select(InventoryLocationBalanceModel).where(
             InventoryLocationBalanceModel.material_code == item_code,
             InventoryLocationBalanceModel.storage_location_id == location.id,
+            InventoryLocationBalanceModel.batch_number == batch_number,
         ).with_for_update()
     )
     balance = bal_res.scalar_one_or_none()
     if balance is None:
         balance = InventoryLocationBalanceModel(
             material_code=item_code,
+            batch_number=batch_number,
             material_name=mat_name,
             warehouse_id=warehouse_id,
             storage_location_id=location.id,
@@ -2515,15 +2774,19 @@ async def execute_putaway(
     task_id = request.task_id or (uuid.UUID(grn_info["putaway_task_id"]) if grn_info.get("putaway_task_id") else None)
     task: PutawayTaskModel | None = resolved_task
     if task is None and task_id:
-        task = await uow.session.get(PutawayTaskModel, task_id)
+        task = resolved_task or await uow.session.get(PutawayTaskModel, task_id)
     elif grn_id:
-        t_res = await uow.session.execute(
-            select(PutawayTaskModel).where(
+        task_query = select(PutawayTaskModel).where(
                 PutawayTaskModel.grn_id == grn_id,
                 func.upper(PutawayTaskModel.item_code) == item_code.upper(),
             )
-        )
+        if batch_number != "UNTRACKED":
+            task_query = task_query.where(func.upper(PutawayTaskModel.batch_number) == batch_number.upper())
+        t_res = await uow.session.execute(task_query.with_for_update())
         task = t_res.scalars().first()
+
+    if task is None:
+        raise HTTPException(status_code=409, detail="No active putaway task is linked to this material batch")
 
     remaining_available = max(Decimal("0"), available_qty - request.quantity)
     is_completed = remaining_available <= 0
@@ -2570,13 +2833,16 @@ async def execute_putaway(
 
     uow.session.add(
         PutawayMovementModel(
-            putaway_task_id=task.id if task else uuid.uuid4(),
+            confirmation_id=confirmation_id,
+            confirmation_hash=confirmation_hash if confirmation_id else None,
+            putaway_task_id=task.id,
             material_scan=material_scan_record,
             location_scan=location_scan_record,
             material_code=item_code,
             material_name=mat_name,
             source_location=src_loc_str,
             destination_location=dest_loc_str,
+            batch_lot=batch_number,
             confirmed_quantity=request.quantity,
             uom=uom,
             inventory_available_before=available_before,
@@ -2607,7 +2873,7 @@ async def execute_putaway(
             warehouse_id=warehouse_id,
             store_id=target_bin.store_id,
             store_code=target_store.store_code if target_store else None,
-            reference_document=task.task_number if task else (grn_number or "DIRECT_PUTAWAY"),
+            reference_document=task.task_number,
             remarks=f"Putaway confirmed via GRN QR into Bin {target_bin.bin_code}",
             performed_at=completed_at,
         )

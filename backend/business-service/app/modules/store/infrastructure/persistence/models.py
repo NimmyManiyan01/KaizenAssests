@@ -22,7 +22,7 @@ class StoreModel(Base):
     store_code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     store_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False, default="Main Warehouse", index=True)
+    warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     store_manager_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     store_manager_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE", index=True)

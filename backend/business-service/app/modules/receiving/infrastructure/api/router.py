@@ -350,7 +350,7 @@ async def create_grn_header(
         warehouse_name=request.warehouse_name,
         vehicle_number=request.vehicle_number,
         driver_name=request.driver_name,
-        received_by=user.username or "System User",
+        received_by=user.username,
         verification_notes=request.verification_notes,
     )
 

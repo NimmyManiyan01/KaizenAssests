@@ -2546,6 +2546,7 @@ export const api = {
       material_scan: string;
       location_scan: string;
       quantity: number;
+      confirmation_id?: string;
     },
   ): Promise<any> {
     return request<any>(
@@ -2651,6 +2652,7 @@ export const api = {
   },
   async performBinTransfer(data: {
     material_code: string;
+    batch_number?: string;
     source_bin_code: string;
     destination_bin_code: string;
     quantity: number;
@@ -2749,7 +2751,7 @@ export const api = {
   },
   async completePickupTask(
     id: string,
-    data: { material_scan: string; zone_scan: string; quantity: number; notes?: string },
+    data: { material_scan: string; zone_scan: string; quantity: number; notes?: string; batch_number?: string; confirmation_id?: string },
   ): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/storage/pickup-tasks/${encodeURIComponent(id)}/complete`,
@@ -2795,6 +2797,23 @@ export const api = {
   },
   async createBin(storeId: string, zoneId: string, data: { bin_code: string; bin_name?: string; rack?: string; position?: string; qr_identifier?: string }): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/bins`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  },
+  async createBulkRack(storeId: string, data: {
+    zone_id: string;
+    rack_code: string;
+    bin_code_prefix: string;
+    bin_code_start: number;
+    count: number;
+    position_prefix: string;
+    position_start: number;
+    code_width: number;
+    capacity: number;
+  }): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/stores/${encodeURIComponent(storeId)}/bins/bulk`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -3153,6 +3172,7 @@ export const api = {
   },
   async performBinTransfer(payload: {
     material_code: string;
+    batch_number?: string;
     source_bin_code: string;
     destination_bin_code: string;
     quantity: number;

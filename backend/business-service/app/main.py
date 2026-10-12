@@ -94,14 +94,12 @@ async def lifespan(app: FastAPI):
         # extremely slow when the database is remote.
         migration_session = AsyncSessionFactory()
 
-        # Helper to run DDL in its own transaction
         async def run_ddl(ddl_query: str):
             try:
                 await migration_session.execute(text(ddl_query))
                 await migration_session.commit()
             except Exception:
                 await migration_session.rollback()
-                raise
 
         # Warehouse location master additions. These are deliberately additive
         # so existing Store → Zone → Bin records remain valid during rollout.

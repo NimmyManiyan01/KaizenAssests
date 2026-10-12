@@ -14,26 +14,27 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
-import pytesseract
+try:
+    import pytesseract
+    # Auto-configure Tesseract executable path on Windows if present
+    TESSERACT_WIN_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    if os.path.exists(TESSERACT_WIN_PATH):
+        pytesseract.pytesseract.tesseract_cmd = TESSERACT_WIN_PATH
+    elif shutil.which("tesseract"):
+        pytesseract.pytesseract.tesseract_cmd = shutil.which("tesseract")
+except Exception:
+    pytesseract = None
 
 if os.getenv("ENABLE_PADDLE_OCR", "false").lower() == "true":
     try:
         from paddleocr import PaddleOCR
-    except ImportError:
+    except Exception:
         PaddleOCR = None  # type: ignore[assignment,misc]
 else:
-    # Operators can explicitly disable Paddle and retain Tesseract-only OCR.
     PaddleOCR = None  # type: ignore[assignment,misc]
 
 from app.common.domain.exceptions import DomainRuleViolationException
 from app.modules.gate.domain.value_objects import FieldMismatch, GateEntryStatus, OcrResult, PurchaseOrderRecord
-
-# Auto-configure Tesseract executable path on Windows if present
-TESSERACT_WIN_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-if os.path.exists(TESSERACT_WIN_PATH):
-    pytesseract.pytesseract.tesseract_cmd = TESSERACT_WIN_PATH
-elif shutil.which("tesseract"):
-    pytesseract.pytesseract.tesseract_cmd = shutil.which("tesseract")
 
 MIN_IMAGE_BYTES = 50
 MAX_IMAGE_BYTES = 15 * 1024 * 1024

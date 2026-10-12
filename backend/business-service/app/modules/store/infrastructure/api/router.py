@@ -23,6 +23,7 @@ from app.database.session import UnitOfWork, get_uow
 from app.logging.logger import get_logger
 from app.modules.store.infrastructure.api.schemas import (
     BinCreate,
+    BulkRackCreate,
     BinQRResponse,
     BinResponse,
     BinScanLookupRequest,
@@ -1214,6 +1215,25 @@ async def create_store(
             detail="Access denied: Only Warehouse or Admin users can create stores.",
         )
 
+    warehouse_id = (payload.warehouse_id or "").strip()
+    if not warehouse_id:
+        configured_warehouses = {
+            value.strip()
+            for value in (await uow.session.execute(
+                select(StoreModel.warehouse_id).where(
+                    StoreModel.status == "ACTIVE",
+                    StoreModel.warehouse_id.is_not(None),
+                ).distinct()
+            )).scalars().all()
+            if value and value.strip()
+        }
+        if len(configured_warehouses) != 1:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Select a configured warehouse when creating a store",
+            )
+        warehouse_id = next(iter(configured_warehouses))
+
     for attempt in range(5):
         clean_code = await generate_next_store_code(uow.session)
         now = datetime.now(timezone.utc)
@@ -1222,7 +1242,7 @@ async def create_store(
             store_code=clean_code,
             store_name=payload.store_name.strip(),
             description=payload.description.strip() if payload.description else None,
-            warehouse_id=payload.warehouse_id.strip() if payload.warehouse_id else "Main Warehouse",
+            warehouse_id=warehouse_id,
             store_manager_id=payload.store_manager_id.strip() if payload.store_manager_id else None,
             store_manager_name=payload.store_manager_name.strip() if payload.store_manager_name else None,
             status=payload.status.strip().upper() if payload.status else "ACTIVE",
@@ -1576,6 +1596,83 @@ async def create_store_bin(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Bin with code '{clean_code}' already exists in Store '{store.store_code}'.",
         )
+
+
+@router.post("/{id_or_code}/bins/bulk", response_model=List[BinResponse], status_code=status.HTTP_201_CREATED)
+async def create_store_rack_positions_bulk(
+    id_or_code: str,
+    payload: BulkRackCreate,
+    uow: UnitOfWork = Depends(get_uow),
+    user: CurrentUser = Depends(get_current_user),
+) -> List[BinResponse]:
+    """Create a rack's bin positions atomically, with a unique persisted QR per bin."""
+    store = await _resolve_store(uow.session, id_or_code)
+    if not store:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Store '{id_or_code}' not found")
+    if not _is_warehouse_or_admin(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only Warehouse or Admin users can create racks")
+
+    zone = await _resolve_zone(uow.session, payload.zone_id)
+    if not zone:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Zone '{payload.zone_id}' not found")
+    if zone.store_id != store.id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Zone must belong to the selected store")
+    if (zone.status or "").upper() != "ACTIVE":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Zone '{zone.zone_code}' is not active")
+
+    rack_code = payload.rack_code.strip().upper()
+    bin_prefix = payload.bin_code_prefix.strip().upper()
+    position_prefix = payload.position_prefix.strip().upper()
+    planned: list[tuple[str, str]] = []
+    for offset in range(payload.count):
+        sequence = offset
+        bin_code = f"{bin_prefix}{payload.bin_code_start + sequence:0{payload.code_width}d}"
+        position = f"{position_prefix}{payload.position_start + sequence:0{payload.code_width}d}"
+        qr = f"LOC-{store.store_code}-{zone.zone_code}-{bin_code}"
+        if len(bin_code) > 64 or len(position) > 64 or len(qr) > 128:
+            raise HTTPException(status_code=422, detail="Generated bin code, position, or QR exceeds its supported length")
+        planned.append((bin_code, position))
+    if len({code for code, _ in planned}) != len(planned):
+        raise HTTPException(status_code=422, detail="Bulk rack request generates duplicate bin codes")
+
+    existing_codes = (await uow.session.execute(
+        select(StoreBinModel.bin_code).where(
+            StoreBinModel.store_id == store.id,
+            func.upper(StoreBinModel.bin_code).in_([code for code, _ in planned]),
+        )
+    )).scalars().all()
+    if existing_codes:
+        raise HTTPException(status_code=409, detail=f"Bin code already exists in this store: {existing_codes[0]}")
+
+    now = datetime.now(timezone.utc)
+    bins = [
+        StoreBinModel(
+            id=uuid.uuid4(),
+            store_id=store.id,
+            zone_id=zone.id,
+            bin_code=code,
+            bin_name=f"{rack_code} {position}",
+            rack=rack_code,
+            shelf=position,
+            position=position,
+            storage_type=payload.storage_type.strip().upper(),
+            capacity=payload.capacity,
+            occupied_quantity=Decimal("0"),
+            qr_identifier=f"LOC-{store.store_code}-{zone.zone_code}-{code}",
+            status="AVAILABLE",
+            created_at=now,
+            updated_at=now,
+        )
+        for code, position in planned
+    ]
+    uow.session.add_all(bins)
+    try:
+        await uow.session.flush()
+        await uow.commit()
+    except IntegrityError as error:
+        await uow.rollback()
+        raise HTTPException(status_code=409, detail="A bin code or QR identity in this rack already exists") from error
+    return [_to_bin_response(bin_obj) for bin_obj in bins]
 
 
 # ==========================================

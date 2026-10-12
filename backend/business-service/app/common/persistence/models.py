@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Table, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, synonym
 
 from app.database.base import Base, GUID
 
@@ -562,13 +562,44 @@ class MaterialStockModel(Base):
     material_code: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     variant_code: Mapped[Optional[str]] = mapped_column(String(128), index=True, nullable=True)
     location_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False, default="Main Warehouse")
+    warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False)
     on_hand_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
     allocated_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
     available_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
     uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
+    # Existing warehouse flows refer to the same balances through these
+    # shorter names. Synonyms keep both vocabularies mapped to the same DB
+    # columns, so locked stock changes are persisted rather than transient.
+    on_hand = synonym("on_hand_quantity")
+    allocated = synonym("allocated_quantity")
+    available = synonym("available_quantity")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    @property
+    def material_name(self) -> str:
+        material = self.__dict__.get("material")
+        return self.__dict__.get("_material_name_cache") or (material.material_name if material else self.material_code)
+
+    @material_name.setter
+    def material_name(self, value: str | None) -> None:
+        self.__dict__["_material_name_cache"] = value
+
+    @property
+    def category(self) -> str | None:
+        return self.__dict__.get("_category_cache")
+
+    @category.setter
+    def category(self, value: str | None) -> None:
+        self.__dict__["_category_cache"] = value
+
+    @property
+    def reorder_point(self) -> Decimal:
+        return self.__dict__.get("_reorder_point_cache", Decimal("0"))
+
+    @reorder_point.setter
+    def reorder_point(self, value: Decimal | int | float) -> None:
+        self.__dict__["_reorder_point_cache"] = Decimal(str(value))
 
     material: Mapped[Optional["MaterialModel"]] = relationship("MaterialModel")
     variant: Mapped[Optional["MaterialVariantModel"]] = relationship("MaterialVariantModel")

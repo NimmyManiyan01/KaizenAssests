@@ -6,6 +6,7 @@ Store Zone validation, concurrency locking, and auditable inventory issue transa
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import uuid
 from decimal import Decimal
@@ -47,8 +48,15 @@ pickup_router = APIRouter(prefix="/api/storage/pickup-tasks", tags=["pickup-task
 
 class CompletePickupTaskRequest(BaseModel):
     material_scan: str = Field(..., description="Scanned Material QR payload or item code")
+    batch_number: Optional[str] = Field(None, description="Batch on the scanned material label when material QR is shared")
     zone_scan: str = Field(..., description="Scanned Zone QR payload, ID, or zone code")
     quantity: Decimal = Field(..., description="Confirmed picked quantity")
+    confirmation_id: Optional[str] = Field(None, max_length=64)
+
+
+def _confirmation_digest(*parts: Any) -> str:
+    normalized = [str(part or "").strip().upper() for part in parts]
+    return hashlib.sha256(json.dumps(normalized, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 async def _resolve_user_store_context(uow: UnitOfWork, user: CurrentUser) -> tuple[Optional[uuid.UUID], Optional[str]]:
@@ -237,6 +245,9 @@ async def get_pickup_task(
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pickup task not found")
 
+    req_id_val = getattr(task, "requisition_id", None) or getattr(task, "request_id", None)
+    req_no_val = getattr(task, "requisition_number", None) or getattr(task, "request_number", "")
+
     roles = [r.upper() for r in (user.roles or [])]
     is_warehouse_or_admin = any(r in ["WAREHOUSE", "WAREHOUSE_MANAGER", "ADMIN", "SUPERUSER"] for r in roles)
     is_store_user = any(r in ["STORE_MANAGER", "STORE_KEEPER"] for r in roles)
@@ -360,6 +371,15 @@ async def complete_pickup_task(
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pickup task not found")
 
+    confirmation_id = (payload.confirmation_id or "").strip() or None
+    confirmation_hash = _confirmation_digest(
+        task.id,
+        payload.material_scan,
+        payload.batch_number,
+        payload.zone_scan,
+        payload.quantity,
+    )
+
     # 1. Store IDOR Verification
     if not is_admin:
         user_store_id, user_store_code = await _resolve_user_store_context(uow, user)
@@ -373,6 +393,25 @@ async def complete_pickup_task(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access denied. Cannot complete pickup task for '{task.store_name}'.",
             )
+
+    # The task row is already locked. Recheck after obtaining that lock so a
+    # second operator retrying the same client confirmation observes the
+    # first committed issue instead of receiving a stale over-pick error.
+    if confirmation_id:
+        prior_confirmation = await uow.session.scalar(
+            select(InventoryIssueTransactionModel).where(
+                InventoryIssueTransactionModel.confirmation_id == confirmation_id
+            )
+        )
+        if prior_confirmation:
+            if prior_confirmation.confirmation_hash != confirmation_hash:
+                raise HTTPException(status_code=409, detail="Confirmation ID was already used for a different pick scan")
+            response = _format_pickup_task(task)
+            response["duplicate_confirmation"] = True
+            response["issue_number"] = prior_confirmation.issue_number
+            response["inventory_available_before"] = float(prior_confirmation.stock_before)
+            response["inventory_available_after"] = float(prior_confirmation.stock_after)
+            return response
 
     # 2. Status Validation
     if task.status.upper() == "COMPLETED":
@@ -396,6 +435,7 @@ async def complete_pickup_task(
     # 3. Material QR Validation
     scanned_mat = payload.material_scan.strip()
     target_mat_code = task.material_code.strip()
+    scanned_batch = payload.batch_number.strip() if payload.batch_number else None
     mat_matches = False
 
     if scanned_mat.upper() == target_mat_code.upper():
@@ -407,6 +447,7 @@ async def complete_pickup_task(
                 p_code = parsed.get("item_code") or parsed.get("material_code") or parsed.get("material_tag") or parsed.get("code") or ""
                 if str(p_code).strip().upper() == target_mat_code.upper():
                     mat_matches = True
+                    scanned_batch = scanned_batch or parsed.get("batch_number") or parsed.get("batch")
         except (json.JSONDecodeError, ValueError):
             pass
 
@@ -422,16 +463,19 @@ async def complete_pickup_task(
     # Handling Unit database lookup
     if not mat_matches:
         hu_res = await uow.session.execute(
-            select(HandlingUnitModel.item_code).where(
+            select(HandlingUnitModel).where(
                 or_(
                     HandlingUnitModel.hu_number == scanned_mat,
                     HandlingUnitModel.barcode_value == scanned_mat,
                 )
             )
         )
-        hu_item_code = hu_res.scalar_one_or_none()
-        if hu_item_code and hu_item_code.upper() == target_mat_code.upper():
+        scanned_hu = hu_res.scalar_one_or_none()
+        if scanned_hu and scanned_hu.item_code.upper() == target_mat_code.upper():
             mat_matches = True
+            if scanned_batch and scanned_batch.upper() != (scanned_hu.batch_number or "").upper():
+                raise HTTPException(status_code=422, detail="Scanned batch does not match the handling-unit QR")
+            scanned_batch = scanned_batch or scanned_hu.batch_number
 
     if not mat_matches:
         raise HTTPException(
@@ -530,6 +574,9 @@ async def complete_pickup_task(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Bin '{scanned_bin.bin_code}' does not belong to assigned Store '{task.store_name}'.",
         )
+    store_obj = await uow.session.get(StoreModel, task.store_id)
+    if not store_obj or not store_obj.warehouse_id:
+        raise HTTPException(status_code=409, detail="Assigned Store has no configured warehouse")
 
     # Lock the exact material/bin balance first. A valid bin label without the
     # requested material balance is not a valid pick source.
@@ -539,12 +586,18 @@ async def complete_pickup_task(
         .where(
             InventoryLocationBalanceModel.material_code == task.material_code,
             StorageLocationModel.store_id == task.store_id,
+            StorageLocationModel.warehouse_id == store_obj.warehouse_id,
             StorageLocationModel.zone_id == zone.id,
             StorageLocationModel.bin_id == scanned_bin.id,
         )
         .with_for_update()
     )
-    loc_balance = (await uow.session.execute(loc_balance_stmt)).scalars().first()
+    if scanned_batch:
+        loc_balance_stmt = loc_balance_stmt.where(func.upper(InventoryLocationBalanceModel.batch_number) == scanned_batch.upper())
+    loc_balances = (await uow.session.execute(loc_balance_stmt)).scalars().all()
+    if not scanned_batch and len(loc_balances) > 1:
+        raise HTTPException(status_code=422, detail="Scan a batch-specific material label or enter the batch number for this bin")
+    loc_balance = loc_balances[0] if loc_balances else None
     if loc_balance is None or loc_balance.available_quantity < payload.quantity:
         available_here = loc_balance.available_quantity if loc_balance else Decimal("0")
         raise HTTPException(status_code=409, detail=f"Insufficient {task.material_code} stock in scanned bin {scanned_bin.bin_code}: {available_here} {task.uom} available")
@@ -552,7 +605,10 @@ async def complete_pickup_task(
     # 5. Inventory Stock Validation & Concurrency Lock
     stock_stmt = (
         select(MaterialStockModel)
-        .where(MaterialStockModel.material_code == task.material_code)
+        .where(
+            MaterialStockModel.material_code == task.material_code,
+            MaterialStockModel.warehouse_id == store_obj.warehouse_id,
+        )
         .with_for_update()
     )
     stock_res = await uow.session.execute(stock_stmt)
@@ -570,12 +626,62 @@ async def complete_pickup_task(
     allocated_stock = stock.allocated if stock else Decimal("0.0")
     on_hand_stock = stock.on_hand if stock else Decimal("0.0")
     # For a pickup task, the usable stock includes both free available and allocated (reserved for AR) stock
-    reserved_pick = min(allocated_stock, payload.quantity)
+    reserved_for_task = Decimal("0")
+    if req_id_val:
+        req_item = await uow.session.scalar(
+            select(AssemblyRequisitionItemModel)
+            .where(
+                AssemblyRequisitionItemModel.requisition_id == req_id_val,
+                AssemblyRequisitionItemModel.material_code == task.material_code,
+            )
+            .with_for_update()
+        )
+        if not req_item:
+            raise HTTPException(status_code=409, detail="Pickup task has no linked Assembly requisition item")
+        reserved_for_task = max(
+            Decimal("0"),
+            Decimal(str(req_item.reserved_quantity or 0)) - Decimal(str(req_item.issued_quantity or 0)),
+        )
+        if payload.quantity > reserved_for_task:
+            raise HTTPException(status_code=409, detail=f"Pick quantity exceeds this requisition's remaining reservation ({reserved_for_task} {task.uom})")
+        reservation = await uow.session.scalar(
+            select(AssemblyStockReservationModel)
+            .where(
+                AssemblyStockReservationModel.requisition_id == req_id_val,
+                AssemblyStockReservationModel.requisition_item_id == req_item.id,
+            )
+            .with_for_update()
+        )
+        location_code = await uow.session.scalar(
+            select(StorageLocationModel.location_code).where(StorageLocationModel.id == loc_balance.storage_location_id)
+        )
+        reserved_in_location = Decimal("0")
+        if reservation and isinstance(reservation.allocations, list):
+            for allocation in reservation.allocations:
+                if (
+                    str(allocation.get("location_code") or "").upper() == str(location_code or "").upper()
+                    and str(allocation.get("batch_number") or allocation.get("batch") or "UNTRACKED").upper() == loc_balance.batch_number.upper()
+                ):
+                    reserved_in_location += Decimal(str(allocation.get("quantity") or 0))
+        issued_from_location = await uow.session.scalar(
+            select(func.coalesce(func.sum(InventoryIssueTransactionModel.quantity), Decimal("0"))).where(
+                InventoryIssueTransactionModel.requisition_id == req_id_val,
+                InventoryIssueTransactionModel.material_code == task.material_code,
+                InventoryIssueTransactionModel.batch_number == loc_balance.batch_number,
+                InventoryIssueTransactionModel.source_location_id == loc_balance.storage_location_id,
+            )
+        ) or Decimal("0")
+        remaining_reserved_here = max(Decimal("0"), reserved_in_location - Decimal(str(issued_from_location)))
+        if payload.quantity > remaining_reserved_here:
+            raise HTTPException(status_code=409, detail=f"This batch/location has only {remaining_reserved_here} {task.uom} reserved for the requisition")
+        if not reservation or reserved_in_location <= 0:
+            raise HTTPException(status_code=409, detail="No active stock reservation covers this batch and pick location")
+    reserved_pick = min(reserved_for_task, payload.quantity) if req_id_val else min(allocated_stock, payload.quantity)
     free_pick = payload.quantity - reserved_pick
     usable_stock = allocated_stock + available_stock
     effective_available = max(Decimal("0.0"), usable_stock - quarantined_qty)
 
-    if not stock or effective_available < payload.quantity or stock.available < free_pick or stock.on_hand < payload.quantity:
+    if not stock or effective_available < payload.quantity or stock.available < free_pick or stock.allocated < reserved_pick or stock.on_hand < payload.quantity:
         avail = float(effective_available)
         quar_info = f" ({float(quarantined_qty)} {task.uom} quarantined/blocked)" if quarantined_qty > 0 else ""
         raise HTTPException(
@@ -599,33 +705,34 @@ async def complete_pickup_task(
 
     # 7. Record Immutable Inventory Issue Transaction
     issue_no = f"ISS-{now_utc.year}-{uuid.uuid4().hex[:6].upper()}"
-    req_id_val = getattr(task, "requisition_id", None) or getattr(task, "request_id", None)
-    req_no_val = getattr(task, "requisition_number", None) or getattr(task, "request_number", "")
     issue_tx = InventoryIssueTransactionModel(
         id=uuid.uuid4(),
         issue_number=issue_no,
+        confirmation_id=confirmation_id,
+        confirmation_hash=confirmation_hash if confirmation_id else None,
         requisition_id=req_id_val,
         requisition_number=req_no_val,
         pickup_task_id=task.id,
+        source_location_id=loc_balance.storage_location_id,
         store_id=task.store_id,
         store_code=task.store_code,
         zone_id=zone.id,
         zone_code=zone.zone_code,
         material_code=task.material_code,
+        batch_number=loc_balance.batch_number,
         material_name=task.material_name,
         quantity=payload.quantity,
         uom=task.uom,
         recipient_department=task.department,
         stock_before=stock_before,
         stock_after=stock_after,
-        issued_by=user.username or "store_keeper",
+        issued_by=user.username,
         issued_at=now_utc,
     )
     uow.session.add(issue_tx)
 
     # Keep the common pickup workflow auditable for finished goods as a
     # dispatch movement, while retaining TAKEAWAY for raw-material stores.
-    store_obj = await uow.session.get(StoreModel, task.store_id)
     is_finished_goods = bool(
         store_obj and (
             (store_obj.store_type or "").upper() == "FINISHED_GOODS"
@@ -638,15 +745,16 @@ async def complete_pickup_task(
         material_code=task.material_code,
         material_name=task.material_name,
         material_qr=scanned_mat[:128],
+        batch_lot=loc_balance.batch_number,
         from_location=f"{task.store_name} / {zone.zone_code}",
         to_location=task.department or ("CUSTOMER_DISPATCH" if is_finished_goods else "ASSEMBLY"),
         quantity=payload.quantity,
         uom=task.uom,
         stock_before=stock_before,
         stock_after=stock_after,
-        performed_by=user.username or "store_keeper",
+        performed_by=user.username,
         user_role="STORE_MANAGER" if "STORE_MANAGER" in roles else "STORE_KEEPER",
-        warehouse_id="MAIN",
+        warehouse_id=store_obj.warehouse_id,
         store_id=task.store_id,
         store_code=task.store_code,
         reference_document=req_no_val,
