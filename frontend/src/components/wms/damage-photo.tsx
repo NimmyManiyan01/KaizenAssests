@@ -35,9 +35,13 @@ function PhotoEditor({ lineId, damagedQuantity, reason, onSuccess, initialPrevie
     const [uploading, setUploading] = useState(false);
     const [capturing, setCapturing] = useState(false);
     const [saved, setSaved] = useState(!!initialPreviewUrl || !!initialFile);
+    const [evidenceConfirmed, setEvidenceConfirmed] = useState(!!initialPreviewUrl || !!initialFile);
     const [error, setError] = useState("");
 
-    const validLine = Boolean(lineId?.trim());
+    const normalizedLineId = String(lineId || "").trim();
+    const validLine =
+        Boolean(normalizedLineId) &&
+        !["undefined", "null"].includes(normalizedLineId.toLowerCase());
     const validQuantity =
         Number.isFinite(damagedQuantity) && damagedQuantity > 0;
 
@@ -166,6 +170,7 @@ function PhotoEditor({ lineId, damagedQuantity, reason, onSuccess, initialPrevie
 
         setFile(selected);
         setSaved(false);
+        setEvidenceConfirmed(false);
         setError("");
 
         return true;
@@ -264,6 +269,11 @@ function PhotoEditor({ lineId, damagedQuantity, reason, onSuccess, initialPrevie
             return;
         }
 
+        if (!evidenceConfirmed) {
+            report("Confirm that the photo clearly shows the damaged material before saving.");
+            return;
+        }
+
         uploadLock.current = true;
         setUploading(true);
         setError("");
@@ -281,7 +291,7 @@ function PhotoEditor({ lineId, damagedQuantity, reason, onSuccess, initialPrevie
             }
 
             const result = await api.uploadDamageEvidence(
-                lineId.trim(),
+                normalizedLineId,
                 data
             );
 
@@ -404,24 +414,39 @@ function PhotoEditor({ lineId, damagedQuantity, reason, onSuccess, initialPrevie
             )}
 
             {file && (
-                <Button
-                    type="button"
-                    disabled={
-                        uploading ||
-                        saved ||
-                        cameraOpen ||
-                        capturing ||
-                        !validLine ||
-                        !validQuantity
-                    }
-                    onClick={() => void upload()}
-                >
-                    {uploading
-                        ? "Uploading..."
-                        : saved
-                            ? "Photo Saved"
-                            : "Save Photo"}
-                </Button>
+                <>
+                    {!saved && (
+                        <label className="flex items-start gap-2 text-xs text-muted-foreground">
+                            <input
+                                type="checkbox"
+                                checked={evidenceConfirmed}
+                                disabled={uploading || cameraOpen || capturing}
+                                onChange={(event) => setEvidenceConfirmed(event.target.checked)}
+                                className="mt-0.5"
+                            />
+                            <span>I confirm this photo clearly shows the damaged material and its condition.</span>
+                        </label>
+                    )}
+                    <Button
+                        type="button"
+                        disabled={
+                            uploading ||
+                            saved ||
+                            cameraOpen ||
+                            capturing ||
+                            !validLine ||
+                            !validQuantity ||
+                            !evidenceConfirmed
+                        }
+                        onClick={() => void upload()}
+                    >
+                        {uploading
+                            ? "Uploading..."
+                            : saved
+                                ? "Photo Saved"
+                                : "Save Photo"}
+                    </Button>
+                </>
             )}
 
             {!validLine && (

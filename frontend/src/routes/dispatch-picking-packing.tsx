@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
-import { Package, Box, RefreshCw, Loader2, CheckCircle2, ScanLine, ArrowRight, UserCheck, Truck, Navigation } from "lucide-react";
+import { Package, Box, RefreshCw, Loader2, CheckCircle2, ScanLine, ArrowRight, Navigation } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
+import QRCode from "qrcode";
 
 export const Route = createFileRoute("/dispatch-picking-packing")({
   component: DispatchPickingPackingPage,
@@ -19,6 +20,12 @@ function DispatchPickingPackingPage() {
   const [selectedDispatchId, setSelectedDispatchId] = useState<string>("");
   const [selectedDispatch, setSelectedDispatch] = useState<any | null>(null);
   const [workflowCompleted, setWorkflowCompleted] = useState(false);
+  const [pickedQuantities, setPickedQuantities] = useState<Record<string, string>>({});
+  const [packedQuantity, setPackedQuantity] = useState("");
+  const [packageType, setPackageType] = useState("");
+  const [packageCount, setPackageCount] = useState("");
+  const [packageWeight, setPackageWeight] = useState("");
+  const [packageNumber, setPackageNumber] = useState("");
 
   // Packing Form State matching wireframe
   const [submitting, setSubmitting] = useState(false);
@@ -33,6 +40,7 @@ function DispatchPickingPackingPage() {
       if (items.length > 0 && !selectedDispatchId) {
         setSelectedDispatchId(items[0].id);
         setSelectedDispatch(items[0]);
+        setPackageNumber((items[0].items || []).find((item: any) => item.package_number)?.package_number || "");
         setWorkflowCompleted(["PACKED", "DISPATCH_READY", "DRIVER_ALLOCATED", "VEHICLE_ALLOCATED", "LOADING", "LOADED", "READY_FOR_GATE_EXIT", "DISPATCHED", "IN_TRANSIT", "DELIVERED", "CLOSED"].includes(String(items[0].status || "").toUpperCase()));
       }
     } catch (e) {
@@ -49,8 +57,54 @@ function DispatchPickingPackingPage() {
     const found = dispatches.find(d => d.id === id);
     setSelectedDispatch(found || null);
     setWorkflowCompleted(["PACKED", "DISPATCH_READY", "DRIVER_ALLOCATED", "VEHICLE_ALLOCATED", "LOADING", "LOADED", "READY_FOR_GATE_EXIT", "DISPATCHED", "IN_TRANSIT", "DELIVERED", "CLOSED"].includes(String(found?.status || "").toUpperCase()));
+    setPickedQuantities(Object.fromEntries((found?.items || []).map((item: any) => [item.id, String(item.quantity_picked || 0)])));
+    setPackedQuantity(String((found?.items || []).reduce((sum: number, item: any) => sum + Number(item.quantity_packed || 0), 0) || ""));
+    setPackageCount(String((found?.items || []).find((item: any) => item.package_count != null)?.package_count || ""));
+    setPackageNumber((found?.items || []).find((item: any) => item.package_number)?.package_number || "");
   };
 
+  const handleDownloadPackageQr = async () => {
+    if (!packageNumber) return;
+    const dataUrl = await QRCode.toDataURL(packageNumber, { width: 600, margin: 2, errorCorrectionLevel: "H" });
+    const link = document.createElement("a");
+    link.href = dataUrl;
+    link.download = `${packageNumber}.png`;
+    link.click();
+  };
+
+  const productRows = selectedDispatch?.items || [];
+  const requiredQuantity = productRows.reduce((sum: number, item: any) => sum + Number(item.quantity_ordered || 0), 0);
+  const pickedTotal = productRows.reduce((sum: number, item: any) => sum + Number(pickedQuantities[item.id] || item.quantity_picked || 0), 0);
+  const packedTotal = Number(packedQuantity || productRows.reduce((sum: number, item: any) => sum + Number(item.quantity_packed || 0), 0));
+  const isPickingConfirmed = String(selectedDispatch?.status || "").toUpperCase() === "PICKED" || (productRows.length > 0 && productRows.every((item: any) => Number(item.quantity_picked || 0) >= Number(item.quantity_reserved || item.quantity_ordered || 0)));
+
+  const handleConfirmPicking = async () => {
+    if (!selectedDispatch || pickedTotal !== requiredQuantity) return;
+    setSubmitting(true);
+    try {
+      if (["PENDING", "STOCK_RESERVED"].includes(String(selectedDispatch.status).toUpperCase())) await api.startDispatchPicking(selectedDispatch.id);
+      const updated = await api.pickDispatchItems(selectedDispatch.id, productRows.map((item: any) => ({ id: item.id, material_code: item.material_code, quantity_picked: Number(pickedQuantities[item.id] || 0) })));
+      setSelectedDispatch(updated); setDispatches((items) => items.map((item) => item.id === updated.id ? updated : item));
+      toast.success("Picking confirmed from Assembly Storage");
+    } catch (err) { toast.error("Unable to confirm picking", { description: err instanceof Error ? err.message : undefined }); }
+    finally { setSubmitting(false); }
+  };
+
+  const handleConfirmPacking = async () => {
+    if (!selectedDispatch || packedTotal !== requiredQuantity || !packageType || Number(packageCount) < 1) return;
+    setSubmitting(true);
+    try {
+      const persistedPackageNumber = packageNumber || `PKG-${new Date().getFullYear()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+      setPackageNumber(persistedPackageNumber);
+      if (selectedDispatch.status !== "PACKING_IN_PROGRESS") await api.startDispatchPacking(selectedDispatch.id);
+      const updated = await api.packDispatchItems(selectedDispatch.id, productRows.map((item: any) => ({ id: item.id, material_code: item.material_code, quantity_packed: Number(packedQuantity) || Number(item.quantity_picked || 0), package_number: persistedPackageNumber, package_type: packageType, package_count: Number(packageCount), package_weight: Number(packageWeight) || undefined })));
+      setSelectedDispatch(updated); setDispatches((items) => items.map((item) => item.id === updated.id ? updated : item)); setWorkflowCompleted(true);
+      toast.success("Packing confirmed", { description: `Package ${persistedPackageNumber} recorded` });
+    } catch (err) { toast.error("Unable to confirm packing", { description: err instanceof Error ? err.message : undefined }); }
+    finally { setSubmitting(false); }
+  };
+
+  /* Completion is intentionally split into explicit picking and packing confirmations. */
   const handleCompleteWorkflow = async () => {
     if (!selectedDispatch) {
       toast.error("Please select a dispatch order");
@@ -87,8 +141,6 @@ function DispatchPickingPackingPage() {
       setSubmitting(false);
     }
   };
-
-  const productRows = selectedDispatch?.items || [];
 
   const totalItems = productRows.reduce((acc: number, i: any) => acc + Number(i.quantity_ordered ?? i.quantity ?? 0), 0);
 
@@ -149,19 +201,9 @@ function DispatchPickingPackingPage() {
                   <CheckCircle2 className="size-5" /> Picking & Packing Completed Successfully!
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  The order is now Packed and Ready for Transport Allocation and Loading. Proceed to the next workflow steps below:
+                  The order is now Packed and Ready for Loading. Supplier vehicle details will be verified at loading and gate exit:
                 </p>
                 <div className="flex flex-wrap gap-2 pt-1">
-                  <Link to="/dispatch-transport-allocation">
-                    <Button size="sm" className="rounded-xl text-xs font-bold">
-                      <UserCheck className="size-3.5 mr-1.5" /> Go to Driver Allocation <ArrowRight className="size-3.5 ml-1.5" />
-                    </Button>
-                  </Link>
-                  <Link to="/dispatch-transport-allocation">
-                    <Button size="sm" variant="outline" className="rounded-xl text-xs font-bold">
-                      <Truck className="size-3.5 mr-1.5" /> Go to Vehicle Allocation <ArrowRight className="size-3.5 ml-1.5" />
-                    </Button>
-                  </Link>
                   <Link to="/dispatch-loading">
                     <Button size="sm" variant="outline" className="rounded-xl text-xs font-bold">
                       <Navigation className="size-3.5 mr-1.5" /> Go to Loading Stage <ArrowRight className="size-3.5 ml-1.5" />
@@ -189,7 +231,7 @@ function DispatchPickingPackingPage() {
                       <tr key={idx} className="border-t font-medium">
                         <td className="px-4 py-3 font-semibold text-foreground">{item.material_name || item.material_code || "—"}</td>
                         <td className="px-4 py-3 text-right font-mono">{item.quantity_ordered ?? 0}</td>
-                        <td className="px-4 py-3 text-right font-mono text-amber-600 font-bold">{item.quantity_picked ?? 0}</td>
+                        <td className="px-4 py-3 text-right font-mono text-amber-600 font-bold">{pickedQuantities[item.id] ?? item.quantity_picked ?? 0}</td>
                         <td className="px-4 py-3 text-right font-mono text-emerald-600 font-bold">{item.quantity_packed ?? 0}</td>
                       </tr>
                     ))}
@@ -204,9 +246,11 @@ function DispatchPickingPackingPage() {
                 <ScanLine className="size-4" /> Picking Execution
               </h3>
               <div className="flex flex-wrap items-center gap-3">
-                <span className="text-xs text-muted-foreground">Picking is confirmed through the backend workflow.</span>
+                <span className="text-xs text-muted-foreground">Source: Assembly Storage · {Array.from(new Set(productRows.map((item: any) => item.bin).filter(Boolean))).join(", ") || "Not specified"}</span>
+                {productRows.map((item: any) => <Input key={item.id} type="number" min="0" max={item.quantity_ordered} value={pickedQuantities[item.id] ?? item.quantity_picked ?? ""} onChange={(e) => setPickedQuantities((current) => ({ ...current, [item.id]: e.target.value }))} placeholder={`Pick ${item.quantity_ordered}`} className="w-32 rounded-xl text-xs" disabled={isWorkflowCompleted} />)}
+                <Button type="button" size="sm" className="rounded-xl text-xs" disabled={submitting || isWorkflowCompleted || isPickingConfirmed || pickedTotal !== requiredQuantity} onClick={() => void handleConfirmPicking()}><CheckCircle2 className="size-3.5 mr-1.5" /> Confirm Picking</Button>
                 <span className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600">
-                  {selectedDispatch?.status || "No dispatch selected"}
+                  {isPickingConfirmed ? "PICKING_COMPLETED" : selectedDispatch?.status || "No dispatch selected"}
                 </span>
               </div>
             </div>
@@ -216,23 +260,30 @@ function DispatchPickingPackingPage() {
               <h3 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
                 <Box className="size-4" /> Packing & Cartonization
               </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div>
                   <Label className="text-[10px] font-bold uppercase text-muted-foreground">Package No</Label>
-                  <Input value={selectedDispatch?.dispatch_number || ""} readOnly className="mt-1 rounded-xl text-xs font-mono font-bold" />
+                  <Input value={packageNumber} readOnly className="mt-1 rounded-xl text-xs font-mono font-bold" />
+                  <Button type="button" variant="outline" size="sm" className="mt-1 rounded-lg text-[10px]" disabled={!packageNumber} onClick={() => void handleDownloadPackageQr()}>
+                    Download QR
+                  </Button>
                 </div>
                 <div>
                   <Label className="text-[10px] font-bold uppercase text-muted-foreground">Package Type</Label>
-                  <Input value="" readOnly placeholder="Not returned by backend" className="mt-1 rounded-xl text-xs font-semibold" />
+                  <Input value={packageType} onChange={(e) => setPackageType(e.target.value)} placeholder="Carton / Crate / Pallet" className="mt-1 rounded-xl text-xs font-semibold" disabled={isWorkflowCompleted} />
                 </div>
                 <div>
-                  <Label className="text-[10px] font-bold uppercase text-muted-foreground">Weight</Label>
-                  <Input value="" readOnly placeholder="Provided by packing backend" className="mt-1 rounded-xl text-xs font-bold" />
+                  <Label className="text-[10px] font-bold uppercase text-muted-foreground">Package Count</Label>
+                  <Input type="number" min="1" value={packageCount} onChange={(e) => setPackageCount(e.target.value)} placeholder="Number of packages" className="mt-1 rounded-xl text-xs font-bold" disabled={isWorkflowCompleted} />
+                </div>
+                <div>
+                  <Label className="text-[10px] font-bold uppercase text-muted-foreground">Weight (KG)</Label>
+                  <Input type="number" min="0" step="0.01" value={packageWeight} onChange={(e) => setPackageWeight(e.target.value)} placeholder="Total package weight" className="mt-1 rounded-xl text-xs font-bold" disabled={isWorkflowCompleted} />
                 </div>
               </div>
 
               <div className="flex items-center justify-between pt-2">
-                <span className="text-xs text-muted-foreground">Package details are read from the dispatch backend.</span>
+                <div className="flex items-center gap-2"><Input type="number" min="0" max={requiredQuantity} value={packedQuantity} onChange={(e) => setPackedQuantity(e.target.value)} placeholder={`Packed quantity (${requiredQuantity})`} className="w-48 rounded-xl text-xs" disabled={isWorkflowCompleted || pickedTotal !== requiredQuantity} /><Button type="button" size="sm" className="rounded-xl text-xs" disabled={submitting || isWorkflowCompleted || pickedTotal !== requiredQuantity || packedTotal !== requiredQuantity || !packageType || Number(packageCount) < 1} onClick={() => void handleConfirmPacking()}><CheckCircle2 className="size-3.5 mr-1.5" /> Confirm Packing</Button></div>
                 <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600">
                   {selectedDispatch?.status || "No dispatch selected"}
                 </span>
@@ -243,10 +294,10 @@ function DispatchPickingPackingPage() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-4 border-t">
               <div className="flex items-center gap-6 text-xs font-mono font-bold">
                 <div>Total Items: <span className="text-primary text-base">{totalItems}</span></div>
-                <div>Total Packages: <span className="text-purple-600 text-base">—</span></div>
+                <div>Total Packages: <span className="text-purple-600 text-base">{packageCount ? `${packageCount} Packages` : "—"}</span></div>
               </div>
               <div className="flex items-center gap-3">
-                <Button type="button" disabled={submitting || !selectedDispatch || isWorkflowCompleted} className="rounded-xl text-xs font-bold px-6 shadow-glow" onClick={() => void handleCompleteWorkflow()}>
+                <Button type="button" disabled={submitting || isWorkflowCompleted || pickedTotal !== requiredQuantity || packedTotal !== requiredQuantity || !packageType || Number(packageCount) < 1} onClick={() => void handleConfirmPacking()} className="rounded-xl text-xs font-bold px-6 shadow-glow">
                   {submitting ? <Loader2 className="size-4 animate-spin mr-2" /> : <CheckCircle2 className="size-4 mr-2" />}
                   Complete Workflow
                 </Button>

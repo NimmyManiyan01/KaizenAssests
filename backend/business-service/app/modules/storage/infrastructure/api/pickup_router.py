@@ -134,6 +134,9 @@ def _format_pickup_task(t: PickupTaskModel) -> dict[str, Any]:
         "started_at": t.started_at.isoformat() if t.started_at else None,
         "completed_by": t.completed_by,
         "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+        "picked_material_qr": t.picked_material_qr,
+        "picked_rack_qr": t.picked_rack_qr,
+        "picked_batch_number": t.picked_batch_number,
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "updated_at": t.updated_at.isoformat() if t.updated_at else None,
     }
@@ -419,19 +422,25 @@ async def complete_pickup_task(
                     mat_matches = True
                     break
 
-    # Handling Unit database lookup
+    # Resolve the persisted handling unit/batch behind the scan.  A material
+    # code alone is accepted only for legacy labels; new batch labels must
+    # resolve to a saved handling unit so the exact batch is auditable.
+    scanned_hu: HandlingUnitModel | None = None
     if not mat_matches:
         hu_res = await uow.session.execute(
-            select(HandlingUnitModel.item_code).where(
+            select(HandlingUnitModel).where(
                 or_(
                     HandlingUnitModel.hu_number == scanned_mat,
                     HandlingUnitModel.barcode_value == scanned_mat,
                 )
             )
         )
-        hu_item_code = hu_res.scalar_one_or_none()
-        if hu_item_code and hu_item_code.upper() == target_mat_code.upper():
+        scanned_hu = hu_res.scalars().first()
+        if scanned_hu and scanned_hu.item_code.upper() == target_mat_code.upper():
             mat_matches = True
+
+    if scanned_hu is not None and scanned_hu.item_code.upper() != target_mat_code.upper():
+        raise HTTPException(status_code=422, detail="Scanned Material QR belongs to a different material")
 
     if not mat_matches:
         raise HTTPException(
@@ -444,6 +453,11 @@ async def complete_pickup_task(
     ))
     if not material_exists:
         raise HTTPException(status_code=422, detail=f"Material '{target_mat_code}' is not an active persisted material")
+
+    # Batch-traceable scans are required to identify the actual saved batch.
+    # Do not invent a batch when the database cannot resolve one.
+    if scanned_hu is None and scanned_mat.upper().startswith(("QR-BATCH-", "LOT-", "HU-")):
+        raise HTTPException(status_code=422, detail="Scanned Material QR does not resolve to a saved material batch")
 
     # 4. Store Zone/Bin Validation. Pickup labels may contain either a zone
     # QR or a bin QR; a bin resolves to its owning zone for the stock issue.
@@ -664,6 +678,9 @@ async def complete_pickup_task(
         task.status = "PARTIALLY_PICKED"
     task.completed_by = user.username or "store_keeper"
     task.completed_at = now_utc
+    task.picked_material_qr = scanned_mat[:128]
+    task.picked_rack_qr = scanned_zone_str[:128]
+    task.picked_batch_number = scanned_hu.batch_number if scanned_hu else None
     task.updated_at = now_utc
 
     # 9. Update Assembly Requisition Lifecycle

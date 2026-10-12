@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 import uuid
+import re
 
 class VehicleStatus(str, Enum):
     AVAILABLE = "AVAILABLE"
@@ -65,9 +66,16 @@ class Vehicle:
     ) -> Vehicle:
         if not vehicle_number:
             raise ValueError("Vehicle number is required")
+        normalized_vehicle = vehicle_number.upper().replace(" ", "").replace("-", "")
+        if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}", normalized_vehicle):
+            raise ValueError("Invalid Indian vehicle registration number format")
+        if not rc_number or not re.fullmatch(r"[A-Z0-9-]{6,20}", rc_number.upper()):
+            raise ValueError("A valid RC number is required")
+        if not chassis_number or not re.fullmatch(r"[A-Z0-9]{8,30}", chassis_number.upper().replace("-", "")):
+            raise ValueError("A valid chassis number is required")
         return cls(
             id=vehicle_id or str(uuid.uuid4()),
-            vehicle_number=vehicle_number,
+            vehicle_number=normalized_vehicle,
             vehicle_type=vehicle_type,
             ownership_type=ownership_type,
             capacity_tons=capacity_tons,

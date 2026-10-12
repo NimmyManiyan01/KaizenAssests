@@ -36,7 +36,10 @@ const STATUS_OPTIONS = [
   "Delayed"
 ];
 
-const SAMPLE_SALES_ORDERS = [
+// Sales orders are loaded from backend records only. No demo orders are used.
+const SAMPLE_SALES_ORDERS: any[] = [];
+/*
+const LEGACY_SAMPLE_SALES_ORDERS = [
   {
     order_number: "SO-2026-00521",
     customer_name: "ABC Industries",
@@ -79,6 +82,7 @@ const SAMPLE_SALES_ORDERS = [
     ]
   }
 ];
+*/
 
 function dateOnly(value: string | null | undefined): string {
   return value ? String(value).split("T")[0] : "";
@@ -87,7 +91,7 @@ function dateOnly(value: string | null | undefined): string {
 function DispatchOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<any[]>([]);
-  const [salesOrders, setSalesOrders] = useState<any[]>(SAMPLE_SALES_ORDERS);
+  const [salesOrders, setSalesOrders] = useState<any[]>([]);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   // Filter States
@@ -103,11 +107,12 @@ function DispatchOrdersPage() {
   const [selectedSo, setSelectedSo] = useState("");
   const [orderNumber, setOrderNumber] = useState("");
   const [customerName, setCustomerName] = useState("");
-  const [warehouseId, setWarehouseId] = useState("Bangalore FG Warehouse");
-  const [dispatchType, setDispatchType] = useState("Standard");
-  const [dispatchDate, setDispatchDate] = useState("2026-09-22");
-  const [expectedDeliveryDate, setExpectedDeliveryDate] = useState("2026-09-23");
-  const [priority, setPriority] = useState("High");
+  const [dispatchDate, setDispatchDate] = useState("");
+  const [expectedDeliveryDate, setExpectedDeliveryDate] = useState("");
+  // Retained for backwards-compatible draft payloads; transport is assigned during Loading.
+  const [transportMode] = useState("Road");
+  const [transportType] = useState("Full Truckload");
+  const [transporter] = useState("");
 
   // Section 2: Delivery Info
   const [customerAddress, setCustomerAddress] = useState("");
@@ -117,9 +122,6 @@ function DispatchOrdersPage() {
   const [deliveryInstructions, setDeliveryInstructions] = useState("");
 
   // Section 3: Transport Info
-  const [transportMode, setTransportMode] = useState("Vehicle");
-  const [transportType, setTransportType] = useState("Full Truckload");
-  const [transporter, setTransporter] = useState("VRL Logistics");
 
   // Section 4 & 5: Finished Goods & Stock Reservation
   const [productSearch, setProductSearch] = useState("");
@@ -138,7 +140,7 @@ function DispatchOrdersPage() {
       setAutosaveStatus(`Draft Autosaved (${timeStr})`);
     }, 1000);
     return () => clearTimeout(timer);
-  }, [customerName, destination, warehouseId, dispatchType, priority, remarks, formItems, isCreateOpen]);
+  }, [customerName, destination, expectedDeliveryDate, remarks, formItems, isCreateOpen]);
 
   const getNextDispatchNumber = (existingOrders: any[]): string => {
     const currentYear = new Date().getFullYear();
@@ -164,28 +166,15 @@ function DispatchOrdersPage() {
     const newDoNum = getNextDispatchNumber(orders);
     setDispatchNumber(newDoNum);
     setAutosaveStatus("Draft Autosaved");
-    const defaultSo = salesOrders[0];
-    if (defaultSo) {
-      setSelectedSo(defaultSo.order_number);
-      setOrderNumber(defaultSo.order_number);
-      setCustomerName(defaultSo.customer_name);
-      setCustomerAddress(defaultSo.customer_address);
-      setDestination(defaultSo.destination);
-      setWarehouseId(defaultSo.warehouse_id);
-      setDispatchType("Standard");
-      setDispatchDate(dateOnly(defaultSo.dispatch_date));
-      setExpectedDeliveryDate(dateOnly(defaultSo.expected_delivery_date));
-      setPriority(defaultSo.priority);
-      setContactPerson(defaultSo.contact_person);
-      setContactPhone(defaultSo.contact_phone);
-      setDeliveryInstructions(defaultSo.delivery_instructions);
-      setTransportMode(defaultSo.transport_mode);
-      setTransportType(defaultSo.transport_type);
-      setTransporter(defaultSo.transporter);
-      setRemarks(defaultSo.notes);
-      setFormItems(defaultSo.items ? defaultSo.items.map((i: any) => ({ ...i })) : []);
-    }
+    setDispatchDate(dateOnly(new Date().toISOString()));
     setIsStockReserved(false);
+    setSelectedSo("");
+    setOrderNumber("");
+    setCustomerName("");
+    setCustomerAddress("");
+    setDestination("");
+    setExpectedDeliveryDate("");
+    setFormItems([]);
     setIsCreateOpen(true);
   };
 
@@ -197,16 +186,11 @@ function DispatchOrdersPage() {
       setCustomerName(found.customer_name);
       setCustomerAddress(found.customer_address);
       setDestination(found.destination);
-      setWarehouseId(found.warehouse_id);
       setDispatchDate(dateOnly(found.dispatch_date));
       setExpectedDeliveryDate(dateOnly(found.expected_delivery_date));
-      setPriority(found.priority);
       setContactPerson(found.contact_person);
       setContactPhone(found.contact_phone);
       setDeliveryInstructions(found.delivery_instructions);
-      setTransportMode(found.transport_mode);
-      setTransportType(found.transport_type);
-      setTransporter(found.transporter);
       setRemarks(found.notes);
       setFormItems(found.items.map(i => ({ ...i })));
       setIsStockReserved(false);
@@ -219,12 +203,13 @@ function DispatchOrdersPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [res, finishedGoodsRequests, balances, stores, putawayTasks] = await Promise.all([
+      const [res, customerOrders, balances, stores, putawayTasks, assemblyFinishedGoods] = await Promise.all([
         api.getDispatches().catch(() => ({ items: [], total: 0 })),
-        api.getFinishedGoodsRequests().catch(() => []),
+        api.getEligibleCustomerOrders().catch(() => []),
         api.getInventoryLocationBalances().catch(() => []),
         api.getStores().catch(() => []),
         api.getPutawayTasks().catch(() => []),
+        api.getAssemblyFinishedGoods().catch(() => []),
       ]);
 
       setOrders(res.items || []);
@@ -242,86 +227,46 @@ function DispatchOrdersPage() {
             : String(b.location_code || b.zone_code || "").toUpperCase().includes("FG"),
       );
 
-      setFgInventory(fgBalances);
+      const assemblyStock = (assemblyFinishedGoods || [])
+        .filter((fg: any) => ["AVAILABLE", "QC_CERTIFIED", "READY"].includes(String(fg.status || "").toUpperCase()))
+        .map((fg: any) => ({
+          material_code: fg.product_code,
+          material_name: fg.product_name,
+          uom: fg.uom || "PCS",
+          batch: fg.batch_number || fg.batch_id || fg.serial_number || fg.qr_code,
+          bin: fg.location_code,
+          quantity_available: Number(fg.quantity || 0),
+        }));
+      setFgInventory(assemblyStock);
 
-      const requestOrders = (Array.isArray(finishedGoodsRequests) ? finishedGoodsRequests : [])
-        .filter((request) => !["REJECTED", "CANCELLED"].includes(String(request.status || "").toUpperCase()))
+      const requestOrders = (Array.isArray(customerOrders) ? customerOrders : [])
+        .filter((request) => String(request.status || "").toUpperCase() === "CONFIRMED")
         .map((request) => {
-          const reqCode = String(
-            request.finished_goods_code || request.product_code || request.request_number || "",
-          ).toUpperCase();
-          const reqName = String(
-            request.finished_goods_name || request.product_name || "",
-          ).toUpperCase();
-
-          const matchingStock = fgBalances.filter(
-            (b: any) =>
-              (b.material_code && String(b.material_code).toUpperCase() === reqCode) ||
-              (b.material_name && String(b.material_name).toUpperCase() === reqName),
-          );
-
-          const stockAvail = matchingStock.reduce(
-            (sum: number, b: any) => sum + Number(b.available_quantity ?? b.quantity ?? 0),
-            0,
-          );
-
-          const fgPutaways = (putawayTasks || []).filter(
-            (pt: any) =>
-              pt.finished_goods_id ||
-              String(pt.item_code || "").toUpperCase() === reqCode ||
-              String(pt.material_name || "").toUpperCase() === reqName,
-          );
-
-          const putawayQty = fgPutaways.reduce(
-            (sum: number, pt: any) => sum + Number(pt.quantity || 0),
-            0,
-          );
-
-          const totalReqQty = Number(request.quantity || request.requested_quantity || 0);
-
-          const availQty =
-            stockAvail > 0
-              ? stockAvail
-              : Number(request.available_quantity || request.fg_store_available || 0) > 0
-                ? Number(request.available_quantity || request.fg_store_available)
-                : putawayQty > 0
-                  ? putawayQty
-                  : totalReqQty;
-
-          const firstStock = matchingStock[0] || fgBalances[0] || {};
-
+          const orderItems = Array.isArray(request.items) ? request.items : [];
           return {
-            order_number: request.request_number,
-            customer_name: "Assembly",
-            customer_address: request.warehouse_id || "MAIN – Central Finished Goods Warehouse",
-            destination: "Assembly",
-            warehouse_id: request.warehouse_id || "Bangalore FG Warehouse",
-            dispatch_date: request.required_date || new Date().toISOString(),
-            expected_delivery_date: request.required_date || "",
-            priority: "Normal",
-            contact_person: request.requested_by || "Production Planning",
-            contact_phone: "+91 9812345678",
+            order_number: request.order_number,
+            customer_name: request.customer_name,
+            customer_address: request.customer_address || request.delivery_address || "",
+            destination: request.destination || request.delivery_address || "",
+            dispatch_date: request.order_date || new Date().toISOString(),
+            expected_delivery_date: request.expected_delivery_date || "",
+            contact_person: request.contact_person || "",
+            contact_phone: request.phone || request.contact_phone || "",
             delivery_instructions: "Finished goods requested for assembly",
-            transport_mode: "Vehicle",
-            transport_type: "Full Truckload",
-            transporter: "VRL Logistics",
-            notes: request.remarks || `Finished Goods Request ${request.request_number}`,
-            items: [
-              {
-                material_code: request.finished_goods_code || request.product_code || request.request_number,
-                material_name: request.finished_goods_name || request.product_name || "Finished Good",
-                uom: request.uom || "PCS",
-                batch: firstStock.batch_number || firstStock.batch || "BATCH-FG-01",
-                bin: firstStock.bin_code || firstStock.location_code || "BIN-FG-01",
-                quantity_ordered: totalReqQty,
-                quantity_available: availQty,
-                dispatch_qty: totalReqQty,
-              },
-            ],
+            notes: request.remarks || `Customer Order ${request.order_number}`,
+            items: orderItems.map((orderItem: any) => {
+              const code = String(orderItem.product_code || "").toUpperCase();
+              const name = String(orderItem.product_name || "").toUpperCase();
+              const stocks = assemblyStock.filter((b: any) => String(b.material_code || "").toUpperCase() === code || String(b.material_name || "").toUpperCase() === name);
+              const available = stocks.reduce((sum: number, b: any) => sum + Number(b.quantity_available || 0), 0);
+              const first = stocks[0] || {};
+              const remaining = Number(orderItem.remaining_quantity || 0);
+              return { material_code: orderItem.product_code, material_name: orderItem.product_name, uom: orderItem.uom || "PCS", batch: first.batch || null, bin: first.bin || null, quantity_ordered: remaining, quantity_available: available, dispatch_qty: Math.min(remaining, available) };
+            }),
           };
         });
 
-      setSalesOrders(requestOrders.length ? requestOrders : SAMPLE_SALES_ORDERS);
+      setSalesOrders(requestOrders);
     } catch (e) {
       toast.error("Failed to load dispatch orders", { description: e instanceof Error ? e.message : undefined });
     } finally {
@@ -334,8 +279,19 @@ function DispatchOrdersPage() {
   const hasInsufficientStock = formItems.some(
     (item) => Number(item.dispatch_qty || item.quantity_ordered || 0) > Number(item.quantity_available || 0)
   );
+  const hasQuantityOverOrder = formItems.some(
+    (item) => Number(item.dispatch_qty || 0) > Number(item.quantity_ordered || 0),
+  );
 
   const handleReserveAllStock = () => {
+    if (!selectedSo || !formItems.length) {
+      toast.error("Select a customer order and Assembly finished goods before creating the dispatch");
+      return;
+    }
+    if (formItems.some((item) => !item.bin)) {
+      toast.error("Assembly storage location is missing for one or more finished-goods items");
+      return;
+    }
     if (hasInsufficientStock) {
       toast.error("Insufficient Stock", { description: "Cannot reserve stock. Dispatch quantity exceeds available stock." });
       return;
@@ -353,9 +309,11 @@ function DispatchOrdersPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (hasInsufficientStock) {
+    if (hasInsufficientStock || hasQuantityOverOrder) {
       toast.error("Insufficient Stock Error", {
-        description: "One or more items exceed available stock. Please adjust dispatch quantity before creating."
+        description: hasQuantityOverOrder
+          ? "Dispatch quantity exceeds the sales order's outstanding quantity."
+          : "Dispatch quantity exceeds available Assembly FG stock."
       });
       return;
     }
@@ -365,26 +323,21 @@ function DispatchOrdersPage() {
         dispatch_number: dispatchNumber,
         order_number: orderNumber || selectedSo || "SO-2026-00521",
         customer_name: customerName,
+        warehouse_id: formItems[0].bin,
         delivery_address: customerAddress,
         destination: destination,
-        warehouse_id: warehouseId,
-        dispatch_type: dispatchType,
         scheduled_date: new Date(dispatchDate).toISOString(),
         expected_delivery_date: expectedDeliveryDate ? new Date(expectedDeliveryDate).toISOString() : null,
-        priority: priority,
         contact_person: contactPerson,
         contact_phone: contactPhone,
         delivery_instructions: deliveryInstructions,
-        transport_mode: transportMode,
-        transport_type: transportType,
-        transporter: transporter,
         notes: remarks,
         items: formItems.map(item => ({
           material_code: item.material_code,
           material_name: item.material_name,
-          quantity_ordered: Number(item.quantity_ordered),
+          quantity_ordered: Number(item.dispatch_qty || item.quantity_ordered || 0),
           quantity_available: Number(item.quantity_available || 0),
-          quantity_reserved: Number(item.dispatch_qty || item.quantity_ordered || 0),
+          quantity_reserved: 0,
           quantity_picked: 0,
           quantity_packed: 0,
           quantity_loaded: 0,
@@ -445,10 +398,22 @@ function DispatchOrdersPage() {
 
   // Section 6 Calculations
   const totalItemsCount = formItems.reduce((acc, item) => acc + Number(item.dispatch_qty || item.quantity_ordered || 0), 0);
-  const totalPackagesCount = Math.ceil(totalItemsCount / 50) || 1;
-  const netWeightKg = totalItemsCount * 2.5;
-  const grossWeightKg = netWeightKg * 1.15;
-  const volumeCbm = Number((totalPackagesCount * 0.45).toFixed(2));
+  const packageValues = formItems.map((item) => item.package_count ?? item.packages_count ?? item.packages);
+  const totalPackagesCount = packageValues.every((value) => Number.isFinite(Number(value)))
+    ? packageValues.reduce((sum, value) => sum + Number(value), 0)
+    : null;
+  const netWeightValues = formItems.map((item) => item.net_weight_kg ?? item.net_weight);
+  const netWeightKg = netWeightValues.every((value) => Number.isFinite(Number(value)))
+    ? Number(netWeightValues.reduce((sum, value) => sum + Number(value), 0).toFixed(2))
+    : null;
+  const grossWeightValues = formItems.map((item) => item.gross_weight_kg ?? item.gross_weight);
+  const grossWeightKg = grossWeightValues.every((value) => Number.isFinite(Number(value)))
+    ? Number(grossWeightValues.reduce((sum, value) => sum + Number(value), 0).toFixed(2))
+    : null;
+  const volumeValues = formItems.map((item) => item.volume_cbm ?? item.volume);
+  const volumeCbm = volumeValues.every((value) => Number.isFinite(Number(value)))
+    ? Number(volumeValues.reduce((sum, value) => sum + Number(value), 0).toFixed(2))
+    : null;
 
   const filteredOrders = orders.filter((order) => {
     const matchesSearch =
@@ -502,12 +467,12 @@ function DispatchOrdersPage() {
                 </div>
               </DialogHeader>
 
-              <form onSubmit={handleCreate} className="space-y-6 mt-4 text-sm">
+              <form onSubmit={handleCreate} className="space-y-3 mt-3 text-sm">
                 {/* 1. DISPATCH INFORMATION */}
                 <div className="p-4 rounded-2xl border bg-muted/20 space-y-4">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
                     <span className="grid size-5 place-items-center rounded-full bg-primary text-primary-foreground text-[10px]">1</span>
-                    Dispatch Information
+                    Order Details
                   </h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                     <div>
@@ -517,7 +482,9 @@ function DispatchOrdersPage() {
                         onChange={(e) => handleSalesOrderSelect(e.target.value)}
                         className="mt-1.5 w-full rounded-xl border border-input bg-background px-3 py-2 text-xs shadow-sm font-semibold text-primary"
                       >
-                        <option value="">-- Select Sales Order --</option>
+                        <option value="">
+                          {salesOrders.length ? "-- Select Sales Order --" : "No eligible sales orders available"}
+                        </option>
                         {salesOrders.map((so) => (
                           <option key={so.order_number} value={so.order_number}>
                             {so.order_number} - {so.customer_name}
@@ -530,35 +497,10 @@ function DispatchOrdersPage() {
                       <Input
                         value={customerName}
                         onChange={(e) => setCustomerName(e.target.value)}
-                        placeholder="ABC Industries"
-                        required
+                        placeholder="Selected from sales order"
+                        readOnly
                         className="mt-1.5 rounded-xl text-xs font-semibold"
                       />
-                    </div>
-                    <div>
-                      <Label className="text-xs font-semibold uppercase text-muted-foreground">Warehouse</Label>
-                      <select
-                        value={warehouseId}
-                        onChange={(e) => setWarehouseId(e.target.value)}
-                        className="mt-1.5 w-full rounded-xl border border-input bg-background px-3 py-2 text-xs shadow-sm font-semibold"
-                      >
-                        <option value="Bangalore FG Warehouse">Bangalore FG Warehouse</option>
-                        <option value="Main FG Depot - WH-01">Main FG Depot - WH-01</option>
-                        <option value="East Distribution Center">East Distribution Center</option>
-                      </select>
-                    </div>
-                    <div>
-                      <Label className="text-xs font-semibold uppercase text-muted-foreground">Dispatch Type</Label>
-                      <select
-                        value={dispatchType}
-                        onChange={(e) => setDispatchType(e.target.value)}
-                        className="mt-1.5 w-full rounded-xl border border-input bg-background px-3 py-2 text-xs shadow-sm font-semibold"
-                      >
-                        <option value="Standard">Standard Outbound</option>
-                        <option value="Express">Express Delivery</option>
-                        <option value="Export">Export Shipment</option>
-                        <option value="Inter-Warehouse">Inter-Warehouse Transfer</option>
-                      </select>
                     </div>
                   </div>
 
@@ -581,21 +523,21 @@ function DispatchOrdersPage() {
                         className="mt-1.5 rounded-xl font-mono text-xs"
                       />
                     </div>
-                    <div>
-                      <Label className="text-xs font-semibold uppercase text-muted-foreground">Priority</Label>
-                      <select
-                        value={priority}
-                        onChange={(e) => setPriority(e.target.value)}
-                        className="mt-1.5 w-full rounded-xl border border-input bg-background px-3 py-2 text-xs shadow-sm font-bold text-amber-600"
-                      >
-                        <option value="Normal">Normal</option>
-                        <option value="High">High</option>
-                        <option value="Urgent">Urgent</option>
-                      </select>
-                    </div>
                   </div>
                 </div>
 
+                {/* 3. DELIVERY DETAILS */}
+                <div className="p-3 rounded-2xl border bg-muted/20 space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-primary">Delivery Details</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <Input value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} placeholder="Customer address" className="rounded-xl text-xs" />
+                    <Input value={destination} onChange={(e) => setDestination(e.target.value)} placeholder="Destination" className="rounded-xl text-xs" />
+                    <Input value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} placeholder="Contact person" className="rounded-xl text-xs" />
+                    <Input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder="Contact phone" className="rounded-xl text-xs font-mono" />
+                  </div>
+                </div>
+
+                {false && <>
                 {/* 2. DELIVERY INFORMATION */}
                 <div className="p-4 rounded-2xl border bg-muted/20 space-y-4">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
@@ -655,6 +597,9 @@ function DispatchOrdersPage() {
                   </div>
                 </div>
 
+                </>}
+
+                {false && <>
                 {/* 3. TRANSPORT INFORMATION */}
                 <div className="p-4 rounded-2xl border bg-muted/20 space-y-4">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
@@ -716,12 +661,14 @@ function DispatchOrdersPage() {
                   </div>
                 </div>
 
+                </>}
+
                 {/* 4. FINISHED GOODS SELECTION & STOCK CHECK */}
                 <div className="p-4 rounded-2xl border bg-muted/20 space-y-4">
                   <div className="flex items-center justify-between">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
-                      <span className="grid size-5 place-items-center rounded-full bg-primary text-primary-foreground text-[10px]">4</span>
-                      Finished Goods Selection & Stock Check
+                      <span className="grid size-5 place-items-center rounded-full bg-primary text-primary-foreground text-[10px]">2</span>
+                      Assembly Finished Goods & Stock Check
                     </h3>
                     <div className="flex items-center gap-2">
                       <div className="relative">
@@ -750,8 +697,8 @@ function DispatchOrdersPage() {
                                 material_code: unadded.material_code || unadded.item_code || `FG-00${formItems.length + 1}`,
                                 material_name: unadded.material_name || "Finished Good",
                                 uom: unadded.uom || "PCS",
-                                batch: unadded.batch_number || unadded.batch || "BATCH-FG-01",
-                                bin: unadded.bin_code || unadded.location_code || "BIN-FG-01",
+                                batch: unadded.batch_number || unadded.batch || null,
+                                bin: unadded.bin_code || unadded.location_code || null,
                                 quantity_ordered: Math.min(50, avail || 50),
                                 quantity_available: avail || 100,
                                 dispatch_qty: Math.min(50, avail || 50),
@@ -759,19 +706,7 @@ function DispatchOrdersPage() {
                             ]);
                             toast.success("Finished good added from FG Store", { description: `${unadded.material_name || unadded.material_code}` });
                           } else {
-                            setFormItems([
-                              ...formItems,
-                              {
-                                material_code: `FG-00${formItems.length + 1}`,
-                                material_name: "Pump Assembly Unit",
-                                uom: "PCS",
-                                batch: "BATCH-FG-01",
-                                bin: "BIN-FG-01",
-                                quantity_ordered: 50,
-                                quantity_available: 100,
-                                dispatch_qty: 50,
-                              },
-                            ]);
+                            toast.info("No QC-approved Assembly finished goods available");
                           }
                         }}
                       >
@@ -827,6 +762,7 @@ function DispatchOrdersPage() {
                                   <Input
                                     type="number"
                                     value={item.dispatch_qty ?? item.quantity_ordered}
+                                    max={Math.min(Number(item.quantity_available || 0), Number(item.quantity_ordered || 0))}
                                     onChange={(e) => {
                                       const val = parseFloat(e.target.value) || 0;
                                       const updated = [...formItems];
@@ -868,6 +804,7 @@ function DispatchOrdersPage() {
                   </div>
                 </div>
 
+                {false && <>
                 {/* 5. STOCK RESERVATION */}
                 <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
                   <div className="flex items-center justify-between">
@@ -892,7 +829,7 @@ function DispatchOrdersPage() {
                       </span>
                     </div>
                     <div className="p-3 rounded-xl border bg-card">
-                      <span className="text-muted-foreground block text-[10px] uppercase font-bold">Available</span>
+                            <span className="text-muted-foreground block text-[10px] uppercase font-bold">Available in Assembly FG Area</span>
                       <span className="font-mono font-bold text-base text-emerald-600">
                         {formItems.reduce((acc, i) => acc + Number(i.quantity_available || 0), 0)} PCS
                       </span>
@@ -912,6 +849,8 @@ function DispatchOrdersPage() {
                   </div>
                 </div>
 
+                </>}
+
                 {/* 6. DISPATCH SUMMARY */}
                 <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
@@ -925,19 +864,19 @@ function DispatchOrdersPage() {
                     </div>
                     <div className="p-3 rounded-xl border bg-card">
                       <span className="text-muted-foreground block text-[10px] uppercase font-bold">Total Packages</span>
-                      <span className="font-mono font-bold text-base text-blue-600">{totalPackagesCount} Pkgs</span>
+                      <span className="font-mono font-bold text-base text-blue-600">{totalPackagesCount == null ? "Not specified" : `${totalPackagesCount} Pkgs`}</span>
                     </div>
                     <div className="p-3 rounded-xl border bg-card">
                       <span className="text-muted-foreground block text-[10px] uppercase font-bold">Net Weight</span>
-                      <span className="font-mono font-bold text-base">{netWeightKg} KG</span>
+                      <span className="font-mono font-bold text-base">{netWeightKg == null ? "Not specified" : `${netWeightKg.toFixed(2)} KG`}</span>
                     </div>
                     <div className="p-3 rounded-xl border bg-card">
                       <span className="text-muted-foreground block text-[10px] uppercase font-bold">Gross Weight</span>
-                      <span className="font-mono font-bold text-base text-amber-600">{grossWeightKg} KG</span>
+                      <span className="font-mono font-bold text-base text-amber-600">{grossWeightKg == null ? "Not specified" : `${grossWeightKg.toFixed(2)} KG`}</span>
                     </div>
                     <div className="p-3 rounded-xl border bg-card col-span-2 sm:col-span-1">
                       <span className="text-muted-foreground block text-[10px] uppercase font-bold">Volume</span>
-                      <span className="font-mono font-bold text-base text-purple-600">{volumeCbm} CBM</span>
+                      <span className="font-mono font-bold text-base text-purple-600">{volumeCbm == null ? "Not specified" : `${volumeCbm.toFixed(2)} CBM`}</span>
                     </div>
                   </div>
                 </div>
@@ -964,12 +903,9 @@ function DispatchOrdersPage() {
                   <Button type="button" variant="secondary" className="rounded-xl text-xs font-semibold" onClick={handleAutosaveDraft}>
                     Auto Save Draft
                   </Button>
-                  <Button type="button" variant="outline" className="rounded-xl text-xs font-bold text-purple-600 border-purple-200" onClick={handleReserveAllStock}>
-                    Reserve Stock
-                  </Button>
                   <Button
                     type="submit"
-                    disabled={hasInsufficientStock}
+                    disabled={hasInsufficientStock || hasQuantityOverOrder || !selectedSo || !formItems.length}
                     className="rounded-xl px-6 text-xs font-bold shadow-glow disabled:opacity-50"
                   >
                     Create Dispatch

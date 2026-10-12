@@ -5,6 +5,7 @@ interface GateBarrierProps {
   rotation?: [number, number, number];
   barrierOpenProgress?: number; // 0 (closed) to 1 (fully open)
   securitySide?: "left" | "right";
+  gateType?: "entry" | "exit";
 }
 
 export function GateBarrier({
@@ -12,13 +13,14 @@ export function GateBarrier({
   rotation = [0, 0, 0],
   barrierOpenProgress = 0,
   securitySide = "right",
+  gateType = "entry",
 }: GateBarrierProps) {
   const opening = Math.max(0, Math.min(1, barrierOpenProgress));
 
   return (
     <group position={position} rotation={rotation}>
       <group>
-        <SecurityRoom clearance={opening} side={securitySide} />
+        <SecurityRoom clearance={opening} side={securitySide} gateType={gateType} />
       </group>
 
       {/* ─── BLACK & YELLOW STRIPED SPEED BUMP ─── */}

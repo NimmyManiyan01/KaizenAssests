@@ -36,7 +36,6 @@ import {
   Inbox,
   GitFork,
   Navigation,
-  MapPin,
   CheckCircle2,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -135,15 +134,11 @@ const grnNav: NavItem[] = [
 
 const dispatchNav = [
   { label: "Dashboard", to: "/dispatch", icon: LayoutDashboard },
+  { label: "Customer Orders", to: "/customer-orders", icon: ClipboardList },
   { label: "Dispatch Orders", to: "/dispatch-orders", icon: ClipboardList },
-  { label: "Picking & Packing", to: "/dispatch-picking-packing", icon: PackageCheck },
-  { label: "Transport Allocation", to: "/dispatch-transport-allocation", icon: Truck },
-  { label: "Driver Master", to: "/dispatch-drivers", icon: Users },
-  { label: "Vehicle Master", to: "/dispatch-vehicles", icon: Warehouse },
+  { label: "Packing", to: "/dispatch-picking-packing", icon: PackageCheck },
   { label: "Loading", to: "/dispatch-loading", icon: Navigation },
   { label: "Gate Out", to: "/dispatch-gate-out", icon: DoorOpen },
-  { label: "In Transit", to: "/dispatch-transit", icon: MapPin },
-  { label: "Exceptions", to: "/dispatch-exceptions", icon: AlertTriangle },
   { label: "Reports", to: "/dispatch-reports", icon: BarChart3 },
 ];
 
@@ -161,7 +156,8 @@ const assemblyNav = [
   { label: "Material Requests", to: "/assembly/material-requests", icon: Boxes },
   { label: "Production", to: "/assembly/production", icon: Factory },
   { label: "Quality Check", to: "/assembly/quality", icon: ShieldCheck },
-  { label: "Finished Goods", to: "/assembly/finished-goods", icon: PackageCheck },
+  { label: "Dispatch", to: "/assembly/dispatch", icon: Truck },
+  { label: "Finished Goods Records", to: "/assembly/finished-goods", icon: PackageCheck },
 ];
 
 const warehouseNav = [
@@ -176,6 +172,9 @@ const warehouseNav = [
 
 const supplierNav = [
   { label: "Dashboard", to: "/supplier-dashboard", icon: LayoutDashboard },
+  { label: "Dispatch", to: "/supplier-dashboard?view=dispatch", icon: Truck },
+  { label: "Vehicle Registration", to: "/dispatch-vehicles", icon: Truck },
+  { label: "Driver Registration", to: "/dispatch-drivers", icon: Users },
   { label: "Create ASN", to: "/supplier/asns/new", icon: Truck },
 ];
 

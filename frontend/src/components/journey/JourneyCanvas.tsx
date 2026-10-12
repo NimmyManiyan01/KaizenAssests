@@ -1,4 +1,4 @@
-import { memo, Suspense } from "react";
+import { memo, Suspense, useEffect, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
 import type { JourneyStage } from "./data/journeyStages";
@@ -15,6 +15,8 @@ import { PalletAndCargo as PalletAndCargoModel } from "./models/PalletAndCargo";
 import { ConveyorSystem as ConveyorSystemModel } from "./models/ConveyorSystem";
 import { PumpAssemblyCell as PumpAssemblyCellModel } from "./models/PumpAssemblyCell";
 import { NatureEnvironment as NatureEnvironmentModel } from "./models/NatureEnvironment";
+import { SupplierAsnEnvelope as SupplierAsnEnvelopeModel } from "./models/SupplierAsnEnvelope";
+import { supplierJourney } from "./supplierJourney";
 
 // Compare transform tuples by value so unchanged models skip reconciliation.
 function sameModelProps(previous: object, next: object) {
@@ -46,6 +48,7 @@ const PalletAndCargo = memo(PalletAndCargoModel, sameModelProps);
 const ConveyorSystem = memo(ConveyorSystemModel, sameModelProps);
 const PumpAssemblyCell = memo(PumpAssemblyCellModel, sameModelProps);
 const NatureEnvironment = memo(NatureEnvironmentModel, sameModelProps);
+const SupplierAsnEnvelope = memo(SupplierAsnEnvelopeModel, sameModelProps);
 
 interface JourneyCanvasProps {
   stages: JourneyStage[];
@@ -54,6 +57,7 @@ interface JourneyCanvasProps {
   overviewProgress?: number;
   mouseOffset: { x: number; y: number };
   onSelectStage: (index: number) => void;
+  selectedAsn?: any;
 }
 
 function lerp(a: number, b: number, t: number) {
@@ -72,11 +76,40 @@ function smoothstep(min: number, max: number, value: number) {
 export function JourneyCanvas({
   stages,
   activeIndex,
-  scrollProgress,
+  scrollProgress: journeyProgress,
   overviewProgress = 1,
   mouseOffset,
   onSelectStage,
+  selectedAsn,
 }: JourneyCanvasProps) {
+  const supplierProgress = clamp(journeyProgress / 0.12, 0, 1);
+  const scrollProgress = clamp((journeyProgress - 0.12) / 0.88, 0, 1);
+  const [manualTruckOffset, setManualTruckOffset] = useState({ x: 0, z: 0 });
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.matches("input, textarea, select, button, [contenteditable='true']")) return;
+      event.preventDefault();
+      const step = event.shiftKey ? 1.2 : 0.55;
+      setManualTruckOffset((current) => ({
+        x: clamp(
+          current.x + (event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0),
+          -8,
+          8,
+        ),
+        z: clamp(
+          current.z + (event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0),
+          -10,
+          10,
+        ),
+      }));
+    };
+    window.addEventListener("keydown", handleKeyDown, { passive: false });
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   // ─── STAGE PROGRESS CALCULATIONS ───
 
   // Inbound truck: forward approach, apron turn, rear docking, then receiving.
@@ -87,37 +120,41 @@ export function JourneyCanvas({
   let truck1Doors = 0;
   let wheelRot = 0;
   let isReversing = false;
+  // Animation progress is intentionally independent of backend snapshot data.
+  // The landing page is a scroll-controlled visual journey; API availability
+  // must not freeze or reset the existing truck/camera animation.
+  const inboundProgress = scrollProgress;
 
-  if (scrollProgress < 0.09) {
+  if (inboundProgress < 0.09) {
     // Approach the stop line, wait for security clearance, then pass the raised boom.
-    const approach = smoothstep(0, 0.012, scrollProgress);
-    const departure = smoothstep(0.034, 0.09, scrollProgress);
-    barrier1Open = smoothstep(0.014, 0.032, scrollProgress);
+    const approach = smoothstep(0, 0.012, inboundProgress);
+    const departure = smoothstep(0.034, 0.09, inboundProgress);
+    barrier1Open = smoothstep(0.014, 0.032, inboundProgress);
     truck1Pos = [
       lerp(0.8, 0, departure),
       0,
-      scrollProgress < 0.034 ? lerp(23, 21.5, approach) : lerp(21.5, -4, departure),
+      inboundProgress < 0.034 ? lerp(23, 21.5, approach) : lerp(21.5, -4, departure),
     ];
     truck1Rot = [0, Math.PI, 0];
     wheelRot = (23 - truck1Pos[2]) / 0.49;
-  } else if (scrollProgress < 0.11) {
+  } else if (inboundProgress < 0.11) {
     // Continue forward through the warehouse entrance into the turning apron.
-    const t = smoothstep(0.09, 0.11, scrollProgress);
+    const t = smoothstep(0.09, 0.11, inboundProgress);
     barrier1Open = 1;
     truck1Pos = [0, 0, lerp(-4, -10, t)];
     truck1Rot = [0, Math.PI, 0];
     wheelRot = (23 - truck1Pos[2]) / 0.49;
-  } else if (scrollProgress < 0.145) {
+  } else if (inboundProgress < 0.145) {
     // Follow a forward semicircle; the cab always points along the path tangent.
-    const angle = smoothstep(0.11, 0.145, scrollProgress) * Math.PI;
+    const angle = smoothstep(0.11, 0.145, inboundProgress) * Math.PI;
     barrier1Open = 1;
     truck1Pos = [-4.25 + 4.25 * Math.cos(angle), 0, -10 - 4.25 * Math.sin(angle)];
     truck1Rot = [0, Math.PI + angle, 0];
     wheelRot = (33 + 4.25 * angle) / 0.49;
-    dockDoorOpen = smoothstep(0.12, 0.145, scrollProgress);
-  } else if (scrollProgress < 0.1667) {
+    dockDoorOpen = smoothstep(0.12, 0.145, inboundProgress);
+  } else if (inboundProgress < 0.1667) {
     // Once aligned, reverse straight back to the dock bumpers.
-    const t = smoothstep(0.145, 0.1667, scrollProgress);
+    const t = smoothstep(0.145, 0.1667, inboundProgress);
     isReversing = true;
     barrier1Open = 1;
     truck1Pos = [-8.5, 0, lerp(-10, -17.5, t)];
@@ -130,10 +167,22 @@ export function JourneyCanvas({
     truck1Rot = [0, Math.PI * 2, 0];
     wheelRot = (33 + 4.25 * Math.PI - 7.5) / 0.49;
     dockDoorOpen = 1;
-    truck1Doors = smoothstep(0.1667, 0.185, scrollProgress);
+    truck1Doors = smoothstep(0.1667, 0.185, inboundProgress);
   }
 
   // ─── SCENE 2: DOCK INSPECTOR (THE MAN CHECKING GOODS LIST BEFORE FORKLIFT PICK) ───
+  truck1Pos = [
+    truck1Pos[0] + manualTruckOffset.x,
+    truck1Pos[1],
+    truck1Pos[2] + manualTruckOffset.z,
+  ];
+  if (journeyProgress < 0.12) {
+    const supplier = supplierJourney(supplierProgress);
+    truck1Pos = [supplier.truck.x, 0, supplier.truck.z];
+    truck1Rot = [0, supplier.heading, 0];
+    wheelRot = supplier.wheels;
+  }
+
   let inspectorPos: [number, number, number] = [-6.6, 1.25, -23.8];
   let inspectorRot: [number, number, number] = [0, -Math.PI / 2, 0]; // facing pallet at X: -8.5
   let inspectProgress = 0;
@@ -274,26 +323,40 @@ export function JourneyCanvas({
   // 3. Scene 5: Robotic assembly kinematics (progress 0.64 to 0.76)
   const robotProgress = clamp((scrollProgress - 0.64) / 0.11, 0, 1);
 
-  // 4. Scene 7: Outbound departure truck driving through exit gate (progress 0.86 to 1.0)
-  let truckExitPos: [number, number, number] = [0.8, 0, -244];
-  let barrier2Open = 0;
-
-  if (scrollProgress < 0.86) {
-    truckExitPos = [0.8, 0, -244];
-    barrier2Open = 0;
-  } else if (scrollProgress < 0.9) {
-    const t = (scrollProgress - 0.86) / 0.04;
-    barrier2Open = t;
-    truckExitPos = [0.8, 0, -244 - t * 2];
+  // One outbound truck: close doors, pull clear, turn into the exit lane,
+  // wait for the boom, then depart. All transforms reverse with scrolling.
+  const departureDoors = 1 - smoothstep(0.825, 0.84, scrollProgress);
+  let truckExitPos: [number, number, number] = [-8.5, 0, -204.5];
+  let departureHeading = 0;
+  let departureDistance = 0;
+  const turnRadius = 4.65;
+  const barrier2Open = smoothstep(0.92, 0.94, scrollProgress);
+  if (scrollProgress < 0.855) {
+    const distance = 7.5 * smoothstep(0.84, 0.855, scrollProgress);
+    truckExitPos = [-8.5, 0, -204.5 + distance];
+    departureDistance = distance;
+  } else if (scrollProgress < 0.885) {
+    const angle = Math.PI * smoothstep(0.855, 0.885, scrollProgress);
+    truckExitPos = [
+      -8.5 + turnRadius * (1 - Math.cos(angle)),
+      0,
+      -197 + turnRadius * Math.sin(angle),
+    ];
+    departureHeading = angle;
+    departureDistance = 7.5 + turnRadius * angle;
   } else {
-    const t = clamp((scrollProgress - 0.9) / 0.1, 0, 1);
-    barrier2Open = 1;
-    truckExitPos = [0.8, 0, -246 - t * 20]; // drives out through exit barrier
+    departureHeading = Math.PI;
+    const approach = 47 * smoothstep(0.885, 0.92, scrollProgress);
+    const exit = 26 * smoothstep(0.94, 1, scrollProgress);
+    truckExitPos = [0.8, 0, -197 - approach - exit];
+    departureDistance = 7.5 + Math.PI * turnRadius + approach + exit;
   }
 
   return (
-    <div className="absolute inset-0 -z-10 bg-sky-400 overflow-hidden">
+    <div className="absolute inset-0 -z-10 bg-[#e7e9e5] overflow-hidden">
       <Canvas
+        frameloop="always"
+        performance={{ min: 0.65, max: 1, debounce: 250 }}
         camera={{ position: [-6.5, 17.5, 43.5], fov: 48, near: 0.1, far: 4000 }}
         gl={{
           antialias: true,
@@ -305,8 +368,9 @@ export function JourneyCanvas({
         dpr={[1, 1.5]}
         shadows
       >
-        <color attach="background" args={["#38bdf8"]} />
-        <fog attach="fog" args={["#7dd3fc", 90, 300]} />
+        <color attach="background" args={["#e7e9e5"]} />
+        <fog attach="fog" args={["#e7e9e5", 90, 300]} />
+        <hemisphereLight args={["#fffaf0", "#7e8580", 0.6]} />
 
         {/* ─── LIGHTING RIG (DAYLIGHT) ─── */}
         <ambientLight intensity={1.2} color="#ffffff" />
@@ -344,11 +408,21 @@ export function JourneyCanvas({
           {/* Nature Environment (Hills & Trees) */}
           <NatureEnvironment />
 
+          {/* Supplier ASN story: sent, carried to security, then opened. */}
+          <SupplierAsnEnvelope
+            // The inbound scene ends at the receiving-dock keyframe. Keep the
+            // envelope timeline local to that scene instead of the whole page.
+            progress={supplierProgress}
+            visible={journeyProgress < 0.12}
+            asn={selectedAsn}
+          />
+
           {/* Continuous Camera Trajectory Controller */}
           <JourneyCamera
             stages={stages}
             scrollProgress={scrollProgress}
             overviewProgress={overviewProgress}
+            supplierProgress={supplierProgress}
             mouseOffset={mouseOffset}
           />
 
@@ -532,19 +606,18 @@ export function JourneyCanvas({
           {/* ─── SCENE 6: OUTBOUND DISPATCH DOCK ─── */}
           <LoadingDock position={[-8.5, 0, -212]} doorOpenProgress={1} doorNumber="BAY 06" />
           {/* Outbound Trailer docked and being loaded */}
-          <LogisticsTruck position={[-8.5, 0, -204.5]} rotation={[0, 0, 0]} doorsOpenProgress={1} />
+          <LogisticsTruck
+            position={truckExitPos}
+            rotation={[0, departureHeading, 0]}
+            doorsOpenProgress={departureDoors}
+            wheelRotation={departureDistance / 0.49}
+          />
           {/* Outbound Wrapped Pallets ready for trailer */}
           <PalletAndCargo position={[-8.5, 1.25, -210]} isWrapped={true} boxCount={8} />
           <PalletAndCargo position={[-6.0, 1.25, -210]} isWrapped={true} boxCount={8} />
 
           {/* ─── SCENE 7: DEPARTURE GATE EXIT ─── */}
-          <GateBarrier position={[0, 0, -252]} barrierOpenProgress={barrier2Open} />
-          <LogisticsTruck
-            position={truckExitPos}
-            rotation={[0, Math.PI, 0]}
-            doorsOpenProgress={0}
-            wheelRotation={scrollProgress * 40}
-          />
+          <GateBarrier position={[0, 0, -252]} barrierOpenProgress={barrier2Open} gateType="exit" />
         </Suspense>
       </Canvas>
     </div>

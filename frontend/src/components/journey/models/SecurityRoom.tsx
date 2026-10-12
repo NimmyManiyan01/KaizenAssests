@@ -5,9 +5,11 @@ import { Html } from "@react-three/drei";
 export function SecurityRoom({
   clearance = 0,
   side = "right",
+  gateType = "entry",
 }: {
   clearance?: number;
   side?: "left" | "right";
+  gateType?: "entry" | "exit";
 }) {
   const direction = side === "left" ? -1 : 1;
 
@@ -131,7 +133,7 @@ export function SecurityRoom({
       <group position={[direction * 4.35, 3.8, 1.2]}>
         <Html center distanceFactor={16}>
           <div className="pointer-events-none whitespace-nowrap rounded-lg bg-blue-700 px-5 py-2 border-2 border-blue-400 shadow-[0_4px_25px_rgba(30,58,138,0.7)] flex items-center gap-2">
-            <span className="text-white text-xs font-black tracking-[0.2em] uppercase">GATE ENTRY</span>
+            <span className="text-white text-xs font-black tracking-[0.2em] uppercase">{gateType === "exit" ? "GATE EXIT" : "GATE ENTRY"}</span>
           </div>
         </Html>
       </group>

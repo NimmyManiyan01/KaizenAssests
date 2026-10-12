@@ -201,7 +201,11 @@ export const api = {
       const devUser = {
         token: response.token || `token-${Date.now()}`,
         username: response.username || username,
-        roles: response.roles || (username.toLowerCase().includes("warehouse") ? ["WAREHOUSE", "WAREHOUSE_MANAGER"] : ["ADMIN"]),
+        roles:
+          response.roles ||
+          (username.toLowerCase().includes("warehouse")
+            ? ["WAREHOUSE", "WAREHOUSE_MANAGER"]
+            : ["ADMIN"]),
         employee_id: response.employee_id || "EMP-001",
         full_name: response.full_name || username,
         store_id: response.store_id,
@@ -213,7 +217,8 @@ export const api = {
     } catch {
       const uLower = username.toLowerCase();
       const isWarehouse = uLower.includes("warehouse");
-      const isGate = uLower.includes("gate") || uLower.includes("security") || uLower.includes("emp-8042");
+      const isGate =
+        uLower.includes("gate") || uLower.includes("security") || uLower.includes("emp-8042");
       const isGrn = uLower.includes("grn") || uLower.includes("receiving");
       const isAssembly = uLower.includes("assembly");
       const isStore = uLower.includes("store") || uLower.includes("keeper");
@@ -223,18 +228,18 @@ export const api = {
       const roles = isWarehouse
         ? ["WAREHOUSE", "WAREHOUSE_MANAGER"]
         : isManager
-        ? ["MANAGER"]
-        : isGate
-        ? ["GATE_SECURITY"]
-        : isGrn
-        ? ["GRN", "WAREHOUSE"]
-        : isAssembly
-        ? ["ASSEMBLY_MANAGER"]
-        : isStore
-        ? ["STORE_MANAGER", "STORE_KEEPER"]
-        : isSupplier
-        ? ["SUPPLIER"]
-        : ["ADMIN", "SUPERUSER"];
+          ? ["MANAGER"]
+          : isGate
+            ? ["GATE_SECURITY"]
+            : isGrn
+              ? ["GRN", "WAREHOUSE"]
+              : isAssembly
+                ? ["ASSEMBLY_MANAGER"]
+                : isStore
+                  ? ["STORE_MANAGER", "STORE_KEEPER"]
+                  : isSupplier
+                    ? ["SUPPLIER"]
+                    : ["ADMIN", "SUPERUSER"];
 
       const mockUser = {
         token: `mock-jwt-${username}-token`,
@@ -258,14 +263,11 @@ export const api = {
   },
 
   async magicLogin(token: string): Promise<any> {
-    const response = await request<any>(
-      `${BUSINESS_API_URL}/api/v1/procurement/auth/magic-login`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
-      },
-    );
+    const response = await request<any>(`${BUSINESS_API_URL}/api/v1/procurement/auth/magic-login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
     const supplierUser = {
       token: response.token,
       username: response.username,
@@ -321,7 +323,7 @@ export const api = {
   },
 
   async getDocks(
-    statusOrParams?: string | { dock_type?: string; status?: string },
+    statusOrParams?: string | { dock_type?: string; status?: string; direction?: string },
     type?: string,
   ): Promise<any[]> {
     const query = new URLSearchParams();
@@ -330,6 +332,8 @@ export const api = {
         query.set("dock_type", statusOrParams.dock_type);
       if (statusOrParams.status && statusOrParams.status !== "ALL")
         query.set("status", statusOrParams.status);
+      if (statusOrParams.direction && statusOrParams.direction !== "ALL")
+        query.set("direction", statusOrParams.direction);
     } else {
       if (statusOrParams && statusOrParams !== "ALL") query.set("status", statusOrParams);
       if (type && type !== "ALL") query.set("dock_type", type);
@@ -384,10 +388,10 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-          allocation_request_id: allocationRequestId,
-          dock_id: dockId,
-          assigned_store_id: (storeManagerIdOrOpts as any)?.assignedStoreId || null,
-          store_manager_id: smId,
+        allocation_request_id: allocationRequestId,
+        dock_id: dockId,
+        assigned_store_id: (storeManagerIdOrOpts as any)?.assignedStoreId || null,
+        store_manager_id: smId,
         store_manager_username: smUsername,
         store_manager_name: smName,
       }),
@@ -445,6 +449,7 @@ export const api = {
     dock_number?: string;
     dock_name?: string;
     dock_type: string;
+    direction?: "INBOUND" | "OUTBOUND" | "BOTH";
     location?: string;
     description?: string;
     status?: string;
@@ -463,6 +468,7 @@ export const api = {
         dock_code: code,
         dock_name: name,
         dock_type: payload.dock_type,
+        direction: payload.direction || "INBOUND",
         location: payload.location || null,
         description: payload.description || null,
         status: payload.status || "AVAILABLE",
@@ -478,6 +484,7 @@ export const api = {
           dock_number?: string;
           dock_name?: string;
           dock_type?: string;
+          direction?: "INBOUND" | "OUTBOUND" | "BOTH";
           location?: string;
           description?: string;
           status?: string;
@@ -767,18 +774,24 @@ export const api = {
     if (status?.toUpperCase() === "ALL") {
       const params = new URLSearchParams({ limit: "200" });
       if (search?.trim()) params.set("search", search.trim());
-      const result = await request<{ items?: any[] }>(`${BUSINESS_API_URL}/api/dispatches?${params.toString()}`, {
-        cache: "no-store",
-      });
+      const result = await request<{ items?: any[] }>(
+        `${BUSINESS_API_URL}/api/dispatches?${params.toString()}`,
+        {
+          cache: "no-store",
+        },
+      );
       return result?.items || [];
     }
     const params = new URLSearchParams();
     if (status) params.set("status", status);
     if (search?.trim()) params.set("search", search.trim());
     const query = params.toString();
-    return request<any[]>(`${BUSINESS_API_URL}/api/dispatches/ready-for-gate-exit${query ? `?${query}` : ""}`, {
-      cache: "no-store",
-    });
+    return request<any[]>(
+      `${BUSINESS_API_URL}/api/dispatches/ready-for-gate-exit${query ? `?${query}` : ""}`,
+      {
+        cache: "no-store",
+      },
+    );
   },
 
   async getOutboundDispatch(dispatchId: string): Promise<any> {
@@ -787,13 +800,22 @@ export const api = {
 
   async confirmOutboundGateExit(
     dispatchId: string,
-    payload: { vehicle_verified: boolean; driver_verified: boolean; remarks?: string; vehicle_photo_base64?: string },
+    payload: {
+      vehicle_verified: boolean;
+      driver_verified: boolean;
+      loaded_goods_verified: boolean;
+      remarks?: string;
+      vehicle_photo_base64?: string;
+    },
   ): Promise<any> {
-    void payload;
-    return request<any>(`${BUSINESS_API_URL}/api/dispatches/${encodeURIComponent(dispatchId)}/dispatch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/dispatches/${encodeURIComponent(dispatchId)}/dispatch`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
   },
 
   async reportOutboundGateExitMismatch(
@@ -805,11 +827,14 @@ export const api = {
       actual_driver?: string;
     },
   ): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/dispatch/${encodeURIComponent(dispatchId)}/report-mismatch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/dispatch/${encodeURIComponent(dispatchId)}/report-mismatch`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
   },
 
   async resolveOutboundGateExitMismatch(
@@ -822,11 +847,14 @@ export const api = {
       new_driver_phone?: string;
     },
   ): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/dispatch/${encodeURIComponent(dispatchId)}/resolve-mismatch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/dispatch/${encodeURIComponent(dispatchId)}/resolve-mismatch`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
   },
 
   async seedSampleDispatches(force = false): Promise<any> {
@@ -1408,7 +1436,12 @@ export const api = {
     return [];
   },
   async getSupplierReplacementRequest(id: string): Promise<any> {
-    return { id, status: "SUPPLIER_ACCEPTED", original_asn_id: "", reason: "Damaged Material Replacement" };
+    return {
+      id,
+      status: "SUPPLIER_ACCEPTED",
+      original_asn_id: "",
+      reason: "Damaged Material Replacement",
+    };
   },
 
   async acceptSupplierReplacementRequest(_id: string): Promise<any> {
@@ -1427,11 +1460,13 @@ export const api = {
     // Do not turn a failed lookup into a fabricated empty ASN context. The
     // GRN wizard needs the persisted ASN, gate entry, vehicle and dock data
     // before it can save Step 1.
-    return request<any>(`${BUSINESS_API_URL}/api/gate/asn/${encodeURIComponent(id)}`, { cache: "no-store" });
+    return request<any>(`${BUSINESS_API_URL}/api/gate/asn/${encodeURIComponent(id)}`, {
+      cache: "no-store",
+    });
   },
 
   async getArrivalNotifications(): Promise<any[]> {
-    return [];
+    return this.getNotifications("GATE_SECURITY");
   },
 
   async createAsn(data: any): Promise<any> {
@@ -1690,17 +1725,23 @@ export const api = {
     return Array.isArray(response) ? response : [];
   },
   async rejectAssemblyRequisition(id: string, reason: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions/${encodeURIComponent(id)}/reject`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason }),
-    });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly-requisitions/${encodeURIComponent(id)}/reject`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      },
+    );
   },
   async confirmAssemblyReceipt(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions/${encodeURIComponent(id)}/confirm-receipt`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly-requisitions/${encodeURIComponent(id)}/confirm-receipt`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   },
 
   subscribeNotifications(role: string, onChange: () => void): () => void {
@@ -1753,8 +1794,6 @@ export const api = {
       `${BUSINESS_API_URL}/api/v1/procurement/global-search?q=${encodeURIComponent(q)}`,
     );
   },
-
-
 
   // ============================
   // WAREHOUSE MATERIAL MASTER
@@ -1900,7 +1939,9 @@ export const api = {
   },
 
   async getFinishedGoodsRequest(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/finished-goods-requests/${encodeURIComponent(id)}`);
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/procurement/finished-goods-requests/${encodeURIComponent(id)}`,
+    );
   },
 
   async createFinishedGoodsRequest(data: {
@@ -2500,16 +2541,20 @@ export const api = {
     if (params?.material_code) query.append("material_code", params.material_code);
     if (params?.store_id && params.store_id !== "ALL") query.append("store_id", params.store_id);
     if (params?.zone_id && params.zone_id !== "ALL") query.append("zone_id", params.zone_id);
-    if (params?.warehouse_id && params.warehouse_id !== "ALL") query.append("warehouse_id", params.warehouse_id);
+    if (params?.warehouse_id && params.warehouse_id !== "ALL")
+      query.append("warehouse_id", params.warehouse_id);
     if (params?.category && params.category !== "ALL") query.append("category", params.category);
     if (params?.batch && params.batch !== "ALL") query.append("batch", params.batch);
     if (params?.supplier && params.supplier !== "ALL") query.append("supplier", params.supplier);
     if (params?.grn && params.grn !== "ALL") query.append("grn", params.grn);
     if (params?.location && params.location !== "ALL") query.append("location", params.location);
-    if (params?.stock_status && params.stock_status !== "ALL") query.append("stock_status", params.stock_status);
-    if (params?.qc_status && params.qc_status !== "ALL") query.append("qc_status", params.qc_status);
+    if (params?.stock_status && params.stock_status !== "ALL")
+      query.append("stock_status", params.stock_status);
+    if (params?.qc_status && params.qc_status !== "ALL")
+      query.append("qc_status", params.qc_status);
     if (params?.expiry && params.expiry !== "ALL") query.append("expiry", params.expiry);
-    if (params?.availability && params.availability !== "ALL") query.append("availability", params.availability);
+    if (params?.availability && params.availability !== "ALL")
+      query.append("availability", params.availability);
     if (params?.status_filter && params.status_filter !== "ALL")
       query.append("status_filter", params.status_filter);
     if (params?.search) query.append("search", params.search);
@@ -2541,7 +2586,9 @@ export const api = {
     });
   },
   async getMaterialInventoryDetail(materialCode: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/materials/${encodeURIComponent(materialCode)}/detail`);
+    return request<any>(
+      `${BUSINESS_API_URL}/api/storage/inventory/materials/${encodeURIComponent(materialCode)}/detail`,
+    );
   },
   async getStockLedger(params?: {
     material_code?: string;
@@ -2740,7 +2787,9 @@ export const api = {
   },
   async getGrnDetail(grnId: string): Promise<any> {
     try {
-      return await request<any>(`${BUSINESS_API_URL}/api/receiving/grn/${encodeURIComponent(grnId)}`);
+      return await request<any>(
+        `${BUSINESS_API_URL}/api/receiving/grn/${encodeURIComponent(grnId)}`,
+      );
     } catch (error) {
       // A deleted/stale local session is handled by the GRN screen. Do not
       // surface it as an unhandled console error or resume invalid data.
@@ -2838,8 +2887,40 @@ export const api = {
     return resolveMediaUrl(path);
   },
   async getDispatches(status?: string): Promise<{ items: any[]; total: number }> {
-    const url = status ? `${BUSINESS_API_URL}/api/dispatches?status=${encodeURIComponent(status)}` : `${BUSINESS_API_URL}/api/dispatches`;
+    const url = status
+      ? `${BUSINESS_API_URL}/api/dispatches?status=${encodeURIComponent(status)}`
+      : `${BUSINESS_API_URL}/api/dispatches`;
     return request<{ items: any[]; total: number }>(url, { cache: "no-store" });
+  },
+  async getEligibleCustomerOrders(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/customer-orders/eligible`, {
+      cache: "no-store",
+    });
+  },
+  async getCustomerOrders(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/customer-orders`, { cache: "no-store" });
+  },
+  async getCustomerOrderProducts(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/customer-orders/products`, {
+      cache: "no-store",
+    });
+  },
+  async getCustomerOrderFinishedGoods(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/customer-orders/finished-goods`, {
+      cache: "no-store",
+    });
+  },
+  async createCustomerOrder(payload: any): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/customer-orders`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  async confirmCustomerOrder(id: string): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/customer-orders/${encodeURIComponent(id)}/confirm`,
+      { method: "POST" },
+    );
   },
   async getDispatch(id: string): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}`, { cache: "no-store" });
@@ -2851,7 +2932,9 @@ export const api = {
     });
   },
   async reserveDispatchStock(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/reserve-stock`, { method: "POST" });
+    return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/reserve-stock`, {
+      method: "POST",
+    });
   },
   async startDispatchPicking(id: string): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/picking`, { method: "POST" });
@@ -2890,10 +2973,21 @@ export const api = {
     });
   },
   async startDispatchLoading(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/loading/start`, { method: "POST" });
+    return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/loading/start`, {
+      method: "POST",
+    });
   },
   async verifyDispatchLoading(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/loading/verify`, { method: "POST" });
+    return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/loading/verify`, {
+      method: "POST",
+    });
+  },
+  async scanDispatchPackage(id: string, qrCode: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/loading/scan-package`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ qr_code: qrCode }),
+    });
   },
   async verifyDispatchFinal(id: string): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/verify`, { method: "POST" });
@@ -2918,7 +3012,9 @@ export const api = {
   },
   async getDispatchesReadyForGateExit(): Promise<any[]> {
     try {
-      const res = await request<any[]>(`${BUSINESS_API_URL}/api/dispatches/ready-for-gate-exit`, { cache: "no-store" });
+      const res = await request<any[]>(`${BUSINESS_API_URL}/api/dispatches/ready-for-gate-exit`, {
+        cache: "no-store",
+      });
       return Array.isArray(res) ? res : [];
     } catch {
       return [];
@@ -2998,7 +3094,11 @@ export const api = {
       cache: "no-store",
     });
   },
-  async getAssemblyOrders(params?: { search?: string; status?: string; priority?: string }): Promise<AssemblyOrder[]> {
+  async getAssemblyOrders(params?: {
+    search?: string;
+    status?: string;
+    priority?: string;
+  }): Promise<AssemblyOrder[]> {
     const q = new URLSearchParams();
     if (params?.search) q.append("search", params.search);
     if (params?.status && params.status !== "ALL") q.append("status", params.status);
@@ -3015,99 +3115,155 @@ export const api = {
     });
   },
   async getAssemblyOrderDetail(orderId: string): Promise<AssemblyOrder> {
-    return request<AssemblyOrder>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}`, {
-      cache: "no-store",
-    });
+    return request<AssemblyOrder>(
+      `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}`,
+      {
+        cache: "no-store",
+      },
+    );
   },
   async getAssemblyOrderMaterials(orderId: string): Promise<AssemblyOrderMaterialsResponse> {
     return request<AssemblyOrderMaterialsResponse>(
       `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}/materials`,
-      { cache: "no-store" }
+      { cache: "no-store" },
     );
   },
   async getProductBOM(productCode: string, quantity = 1): Promise<AssemblyProductBOMResponse> {
     return request<AssemblyProductBOMResponse>(
       `${BUSINESS_API_URL}/api/v1/assembly/products/${encodeURIComponent(productCode)}/bom?quantity=${quantity}`,
-      { cache: "no-store" }
+      { cache: "no-store" },
     );
   },
-  async getAssemblyMaterialRequests(params?: { search?: string; status?: string }): Promise<AssemblyMaterialRequest[]> {
+  async getAssemblyMaterialRequests(params?: {
+    search?: string;
+    status?: string;
+  }): Promise<AssemblyMaterialRequest[]> {
     const q = new URLSearchParams();
     if (params?.search) q.append("search", params.search);
     if (params?.status && params.status !== "ALL") q.append("status", params.status);
     const queryStr = q.toString() ? `?${q.toString()}` : "";
-    return request<AssemblyMaterialRequest[]>(`${BUSINESS_API_URL}/api/v1/assembly/material-requests${queryStr}`, {
-      cache: "no-store",
-    });
+    return request<AssemblyMaterialRequest[]>(
+      `${BUSINESS_API_URL}/api/v1/assembly/material-requests${queryStr}`,
+      {
+        cache: "no-store",
+      },
+    );
   },
-  async createAssemblyMaterialRequest(data: CreateAssemblyMaterialRequestPayload): Promise<AssemblyMaterialRequest> {
-    return request<AssemblyMaterialRequest>(`${BUSINESS_API_URL}/api/v1/assembly/material-requests`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
+  async createAssemblyMaterialRequest(
+    data: CreateAssemblyMaterialRequestPayload,
+  ): Promise<AssemblyMaterialRequest> {
+    return request<AssemblyMaterialRequest>(
+      `${BUSINESS_API_URL}/api/v1/assembly/material-requests`,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    );
   },
   async getAssemblyMaterialRequestDetail(requestId: string): Promise<AssemblyMaterialRequest> {
     return request<AssemblyMaterialRequest>(
       `${BUSINESS_API_URL}/api/v1/assembly/material-requests/${encodeURIComponent(requestId)}`,
-      { cache: "no-store" }
+      { cache: "no-store" },
     );
   },
-  async warehouseIssueMaterials(
-    requestId: string,
-    payload?: { remarks?: string }
+  async getAssemblyPickingTasks(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/material-requests/picking-tasks`, {
+      cache: "no-store",
+    });
+  },
+  async completeAssemblyPickingTask(
+    id: string,
+    data: { material_scan: string; zone_scan: string; quantity: number },
   ): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/material-requests/picking-tasks/${encodeURIComponent(id)}/complete`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+  },
+  async approveAssemblyMaterialRequest(requestId: string): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/material-requests/${encodeURIComponent(requestId)}/approve`,
+      { method: "POST", body: "{}" },
+    );
+  },
+  async warehouseIssueMaterials(requestId: string, payload?: { remarks?: string }): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/v1/assembly/material-requests/${encodeURIComponent(requestId)}/warehouse-issue`,
       {
         method: "POST",
         body: JSON.stringify(payload || {}),
-      }
+      },
     );
   },
   async confirmAssemblyMaterialReceipt(
     requestId: string,
-    payload?: { received_items?: Array<{ material_code: string; received_quantity: number }>; remarks?: string }
+    payload?: {
+      received_items?: Array<{ material_code: string; received_quantity: number }>;
+      remarks?: string;
+    },
   ): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/v1/assembly/material-requests/${encodeURIComponent(requestId)}/confirm-receipt`,
       {
         method: "POST",
         body: JSON.stringify(payload || {}),
-      }
+      },
     );
   },
-  async getAssemblyProductionOrders(params?: { search?: string; status?: string }): Promise<AssemblyProductionOrder[]> {
+  async getAssemblyProductionOrders(params?: {
+    search?: string;
+    status?: string;
+  }): Promise<AssemblyProductionOrder[]> {
     const q = new URLSearchParams();
     if (params?.search) q.append("search", params.search);
     if (params?.status && params.status !== "ALL") q.append("status", params.status);
     const queryStr = q.toString() ? `?${q.toString()}` : "";
-    return request<AssemblyProductionOrder[]>(`${BUSINESS_API_URL}/api/v1/assembly/production/orders${queryStr}`, {
-      cache: "no-store",
-    });
+    return request<AssemblyProductionOrder[]>(
+      `${BUSINESS_API_URL}/api/v1/assembly/production/orders${queryStr}`,
+      {
+        cache: "no-store",
+      },
+    );
   },
   async startAssemblyProduction(orderId: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}/start-production`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}/start-production`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    );
   },
   async completeAssemblyProduction(
     orderId: string,
-    payload: { produced_quantity: number; notes?: string }
+    payload: { produced_quantity: number; notes?: string },
   ): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}/complete-production`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}/complete-production`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
   },
-  async getAssemblyQualityInspections(params?: { search?: string; status?: string }): Promise<AssemblyQualityInspectionItem[]> {
+  async getAssemblyQualityInspections(params?: {
+    search?: string;
+    status?: string;
+  }): Promise<AssemblyQualityInspectionItem[]> {
     const q = new URLSearchParams();
     if (params?.search) q.append("search", params.search);
     if (params?.status && params.status !== "ALL") q.append("status", params.status);
     const queryStr = q.toString() ? `?${q.toString()}` : "";
-    return request<AssemblyQualityInspectionItem[]>(`${BUSINESS_API_URL}/api/v1/assembly/quality/inspections${queryStr}`, {
-      cache: "no-store",
-    });
+    return request<AssemblyQualityInspectionItem[]>(
+      `${BUSINESS_API_URL}/api/v1/assembly/quality/inspections${queryStr}`,
+      {
+        cache: "no-store",
+      },
+    );
   },
   async performAssemblyQualityInspection(payload: {
     order_id: string;
@@ -3121,18 +3277,26 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  async getAssemblyFinishedGoods(params?: { search?: string }): Promise<AssemblyFinishedGoodItem[]> {
+  async getAssemblyFinishedGoods(params?: {
+    search?: string;
+  }): Promise<AssemblyFinishedGoodItem[]> {
     const q = new URLSearchParams();
     if (params?.search) q.append("search", params.search);
     const queryStr = q.toString() ? `?${q.toString()}` : "";
-    return request<AssemblyFinishedGoodItem[]>(`${BUSINESS_API_URL}/api/v1/assembly/finished-goods${queryStr}`, {
-      cache: "no-store",
-    });
+    return request<AssemblyFinishedGoodItem[]>(
+      `${BUSINESS_API_URL}/api/v1/assembly/finished-goods${queryStr}`,
+      {
+        cache: "no-store",
+      },
+    );
   },
   async getAssemblyFinishedGoodsDetail(fgId: string): Promise<AssemblyFinishedGoodDetail> {
-    return request<AssemblyFinishedGoodDetail>(`${BUSINESS_API_URL}/api/v1/assembly/finished-goods/${encodeURIComponent(fgId)}`, {
-      cache: "no-store",
-    });
+    return request<AssemblyFinishedGoodDetail>(
+      `${BUSINESS_API_URL}/api/v1/assembly/finished-goods/${encodeURIComponent(fgId)}`,
+      {
+        cache: "no-store",
+      },
+    );
   },
 
   async getMaterialIssues(status?: string): Promise<any[]> {
@@ -3274,7 +3438,10 @@ export const api = {
   async getMobileTasksSummary(): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/mobile-tasks-summary`);
   },
-  async getInventoryTraceability(params?: { material_code?: string; batch_number?: string }): Promise<any> {
+  async getInventoryTraceability(params?: {
+    material_code?: string;
+    batch_number?: string;
+  }): Promise<any> {
     const q = new URLSearchParams();
     if (params?.material_code) q.append("material_code", params.material_code);
     if (params?.batch_number) q.append("batch_number", params.batch_number);

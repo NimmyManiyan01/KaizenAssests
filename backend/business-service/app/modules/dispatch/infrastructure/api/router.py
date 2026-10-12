@@ -1,9 +1,12 @@
 import uuid
 import datetime
+import base64
+import binascii
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import String, select
+from sqlalchemy import String, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.common.persistence.models import NotificationModel
@@ -23,11 +26,14 @@ from app.modules.dispatch.infrastructure.persistence.repository_impl import (
     SQLAlchemyDriverRepository,
     SQLAlchemyVehicleRepository,
 )
-from app.modules.dispatch.infrastructure.persistence.models import DriverModel, VehicleModel
+from app.modules.dispatch.infrastructure.persistence.models import DispatchModel, DriverModel, VehicleModel
+from app.modules.gate.infrastructure.persistence.models import GateEntryModel
 from app.modules.dispatch.infrastructure.api.schemas import (
     DispatchOrderResponse,
     DispatchItemResponse,
     DispatchListResponse,
+    ScanPackageRequest,
+    ConfirmGateExitRequest,
     DriverResponse,
     VehicleResponse,
 )
@@ -36,10 +42,23 @@ from app.security.dependencies import get_current_user, CurrentUser
 router = APIRouter(tags=["Finished Goods Dispatch"])
 
 
+def _uuid_value(value: object) -> uuid.UUID:
+    """Normalize UUID values, including legacy UUID('...') strings."""
+    if isinstance(value, uuid.UUID):
+        return value
+    text = str(value).strip()
+    if text.startswith("UUID('") and text.endswith("')"):
+        text = text[6:-2]
+    elif text.startswith('UUID("') and text.endswith('")'):
+        text = text[6:-2]
+    return uuid.UUID(text)
+
+
 def _to_dispatch_dto(o, *, driver_name: str | None = None, vehicle_number: str | None = None) -> DispatchOrderResponse:
+    completed_exit = (o.status.value if hasattr(o.status, "value") else str(o.status)) in {"GATE_OUT", "EXIT_COMPLETED", "DISPATCHED"}
     items = [
         DispatchItemResponse(
-            id=i.id,
+            id=_uuid_value(i.id),
             material_code=i.material_code,
             material_name=i.material_name,
             quantity_ordered=i.quantity_ordered,
@@ -53,17 +72,43 @@ def _to_dispatch_dto(o, *, driver_name: str | None = None, vehicle_number: str |
             batch=i.batch,
             bin=i.bin,
             status=i.status,
+            package_number=i.package_number,
+            package_type=i.package_type,
+            package_count=int(i.package_count) if i.package_count is not None else None,
         )
         for i in o.items
     ]
+    loaded_goods = [
+        {
+            "product": i.material_name or i.material_code,
+            "material_code": i.material_code,
+            "quantity": float(i.quantity_loaded or 0),
+            "uom": i.uom,
+            # package_count is a quantity entered during packing, not a count
+            # of physical package records. Each persisted package identifier
+            # represents one package in the current dispatch model.
+            "package_count": 1 if i.package_number else 0,
+            "package_number": i.package_number,
+        }
+        for i in o.items
+        if float(i.quantity_loaded or 0) > 0
+    ]
     return DispatchOrderResponse(
-        id=o.id,
+        id=_uuid_value(o.id),
         dispatch_number=o.dispatch_number,
         order_number=o.order_number,
         customer_name=o.customer_name,
         warehouse_id=o.warehouse_id,
         status=o.status.value if hasattr(o.status, "value") else str(o.status),
         items=items,
+        loaded_goods=loaded_goods,
+        loading_record_reference=str(o.id) if loaded_goods else None,
+        gate_exit_vehicle_verified=o.gate_exit_vehicle_verified or completed_exit,
+        gate_exit_driver_verified=o.gate_exit_driver_verified or completed_exit,
+        gate_exit_loaded_goods_verified=o.gate_exit_loaded_goods_verified or completed_exit,
+        gate_exit_security_officer=o.gate_exit_security_officer,
+        gate_exit_remarks=o.gate_exit_remarks,
+        gate_exit_completed_at=o.gate_exit_completed_at,
         driver_id=o.driver_id,
         driver_name=driver_name,
         vehicle_id=o.vehicle_id,
@@ -95,6 +140,8 @@ def _to_driver_dto(d) -> DriverResponse:
         phone=d.phone,
         email=d.email,
         license_type=d.license_type,
+        license_expiry_date=d.license_expiry_date,
+        license_verified=d.license_verified,
         is_active=d.is_active,
         photo_path=d.photo_path,
         address=d.address,
@@ -425,6 +472,37 @@ async def start_dispatch_loading(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
+@router.post("/api/dispatches/{dispatch_id}/loading/scan-package", response_model=DispatchOrderResponse)
+async def scan_dispatch_package(
+    dispatch_id: str,
+    req: ScanPackageRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Validate one persisted package QR and record its loading exactly once."""
+    result = await db.execute(
+        select(DispatchModel).where(DispatchModel.id == uuid.UUID(dispatch_id)).options(selectinload(DispatchModel.items))
+    )
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Dispatch order not found")
+    qr = req.qr_code.strip()
+    item = next((candidate for candidate in order.items if candidate.package_number == qr), None)
+    if not item:
+        raise HTTPException(status_code=400, detail="Package QR is not registered for this dispatch")
+    if order.status not in {"PACKED", "ROUTE_ASSIGNED", "VEHICLE_ALLOCATED", "DRIVER_ALLOCATED", "LOADING_STARTED"}:
+        raise HTTPException(status_code=400, detail=f"Dispatch is not ready for loading: {order.status}")
+    if float(item.quantity_loaded or 0) > 0 or item.status == "LOADED":
+        raise HTTPException(status_code=409, detail="This package has already been loaded")
+    item.quantity_loaded = item.quantity_packed
+    item.status = "LOADED"
+    if order.status != "LOADING_STARTED":
+        order.status = "LOADING_STARTED"
+    await db.commit()
+    await db.refresh(order)
+    return _to_dispatch_dto(order)
+
+
 @router.post("/api/dispatches/{dispatch_id}/loading/verify", response_model=DispatchOrderResponse)
 async def verify_dispatch_loading(
     dispatch_id: str,
@@ -468,12 +546,72 @@ async def verify_dispatch_final(
 @router.post("/api/dispatches/{dispatch_id}/dispatch", response_model=DispatchOrderResponse)
 async def dispatch_order(
     dispatch_id: str,
+    payload: ConfirmGateExitRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     _user: CurrentUser = Depends(get_current_user),
 ):
+    if not payload.vehicle_verified or not payload.driver_verified:
+        raise HTTPException(status_code=400, detail="Vehicle and driver verification are required before gate exit")
+    if not payload.loaded_goods_verified:
+        raise HTTPException(status_code=400, detail="Loaded goods verification is required before gate exit")
+    if not payload.vehicle_photo_base64.strip():
+        raise HTTPException(status_code=400, detail="Vehicle photo proof is required before gate exit")
+    try:
+        encoded_photo = payload.vehicle_photo_base64.split(",", 1)[-1]
+        photo_bytes = base64.b64decode(encoded_photo, validate=True)
+    except (ValueError, binascii.Error):
+        raise HTTPException(status_code=400, detail="Vehicle photo proof must be a valid image")
+    if not photo_bytes or not (
+        photo_bytes.startswith(b"\xff\xd8\xff")
+        or photo_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+        or photo_bytes.startswith(b"RIFF")
+    ):
+        raise HTTPException(status_code=400, detail="Vehicle photo proof must be a valid JPG, PNG, or WebP image")
+    # A vehicle cannot leave on an outbound dispatch while its previous
+    # inbound gate visit is still open (for example, AT_DOCK).
+    dispatch_model = await db.scalar(
+        select(DispatchModel).where(DispatchModel.id == uuid.UUID(dispatch_id))
+    )
+    if not dispatch_model:
+        raise HTTPException(status_code=404, detail="Dispatch order not found")
+    vehicle = None
+    if dispatch_model.vehicle_id:
+        vehicle = await db.scalar(
+            select(VehicleModel).where(VehicleModel.id == dispatch_model.vehicle_id)
+        )
+        if vehicle:
+            open_inbound = await db.scalar(
+                select(GateEntryModel)
+                .where(
+                    func.upper(GateEntryModel.vehicle_number) == str(vehicle.vehicle_number).strip().upper(),
+                    GateEntryModel.exited_at.is_(None),
+                    GateEntryModel.status != "VEHICLE_EXITED",
+                )
+                .order_by(GateEntryModel.created_at.desc())
+            )
+            if open_inbound:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Vehicle {vehicle.vehicle_number} has an open inbound gate visit "
+                        f"({open_inbound.gate_entry_number}, status {open_inbound.status}). "
+                        "Complete and close the inbound visit before outbound gate exit."
+                    ),
+                )
     uc = _get_use_cases(db)
     try:
+        # Capture the authoritative completion time in the backend transaction.
+        # This is the time the security approval is recorded, not a frontend
+        # generated value, and it is persisted with the dispatch audit fields.
+        gate_exit_completed_at = datetime.datetime.now(datetime.timezone.utc)
         order = await uc.dispatch_order(dispatch_id)
+        order.gate_exit_vehicle_verified = payload.vehicle_verified
+        order.gate_exit_driver_verified = payload.driver_verified
+        order.gate_exit_loaded_goods_verified = payload.loaded_goods_verified
+        order.gate_exit_security_officer = _user.username
+        order.gate_exit_remarks = payload.remarks
+        order.gate_exit_completed_at = gate_exit_completed_at
+        order = await uc.dispatch_repo.save(order)
         db.add(NotificationModel(
             id=uuid.uuid4(),
             user_role="DISPATCH",
@@ -483,7 +621,7 @@ async def dispatch_order(
             created_at=datetime.datetime.now(),
         ))
         await db.commit()
-        return _to_dispatch_dto(order)
+        return _to_dispatch_dto(order, vehicle_number=vehicle.vehicle_number if vehicle else None)
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

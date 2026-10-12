@@ -6,15 +6,10 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
-  ArrowUpRight,
-  BarChart3,
   Boxes,
   CheckCircle2,
-  ChevronRight,
   ClipboardList,
-  Clock,
   Clock3,
-  Database,
   DoorOpen,
   Download,
   Eye,
@@ -66,7 +61,9 @@ import {
 } from "@/components/wms/qr-scan-result-modal";
 
 export const Route = createFileRoute("/grn")({
-  validateSearch: (search: Record<string, unknown>): {
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): {
     tab: string;
     page: number;
     grn_id?: string;
@@ -90,6 +87,9 @@ export const Route = createFileRoute("/grn")({
 type GrnLineItem = {
   grn_line_id?: string;
   material_name: string;
+  material_code?: string;
+  materialName?: string;
+  material_description?: string;
   item_code: string;
   po_quantity: number;
   received_quantity: number;
@@ -121,6 +121,7 @@ type BatchEntry = {
 
 type UploadedDocument = {
   document_id?: string;
+  grn_id?: string;
   category: string;
   file_name: string;
   file_path: string;
@@ -172,7 +173,7 @@ const PAGES = [
   {
     id: 5,
     title: "Documents",
-    subtitle: "Invoice, Challan, Packing List & Compulsory PO Copy",
+    subtitle: "ASN Copy, Invoice, Challan & Packing List",
     icon: FileText,
   },
   {
@@ -249,8 +250,7 @@ function normalizeGrnRecord(r: any) {
     dock_number: r.dock_number || r.dockNumber || "",
     vehicle_number: r.vehicle_number || r.vehicleNumber || "",
     driver_name: r.driver_name || r.driverName || "",
-    receipt_date:
-      r.receipt_date || r.receiptDate || r.created_at || r.createdAt || "",
+    receipt_date: r.receipt_date || r.receiptDate || r.created_at || r.createdAt || "",
     received_by: r.received_by || r.receivedBy || "",
     receipt_type: r.receipt_type || r.receiptType || "PO_RECEIPT",
     status: r.status || "COMPLETED",
@@ -376,11 +376,11 @@ function GrnPageWorkflow() {
   const [uploadedDocuments, setUploadedDocuments] = useState<UploadedDocument[]>([]);
   const [customDocTypes, setCustomDocTypes] = useState<string[]>([
     "Invoice Copy",
-    "Purchase Order Copy",
+    "ASN Copy",
     "Weighment Slip",
     "Tax Invoice / e-Way Bill",
   ]);
-  const [selectedDocCategory, setSelectedDocCategory] = useState<string>("Invoice Copy");
+  const [selectedDocCategory, setSelectedDocCategory] = useState<string>("ASN Copy");
   const [showAddCustomTypeInput, setShowAddCustomTypeInput] = useState(false);
   const [newCustomCategoryInput, setNewCustomCategoryInput] = useState("");
   const [pendingDocFile, setPendingDocFile] = useState<File | null>(null);
@@ -420,7 +420,11 @@ function GrnPageWorkflow() {
       if (!rawDraft) return;
       const draft = JSON.parse(rawDraft);
       if (draft?.header) {
-        setHeader((prev) => ({ ...prev, ...draft.header, received_by: draft.header.received_by || prev.received_by }));
+        setHeader((prev) => ({
+          ...prev,
+          ...draft.header,
+          received_by: draft.header.received_by || prev.received_by,
+        }));
       }
       if (Array.isArray(draft?.materials)) setMaterials(draft.materials);
       if (draft?.qualityApproved) setQualityApproved(draft.qualityApproved);
@@ -429,7 +433,8 @@ function GrnPageWorkflow() {
       if (Number(draft?.currentPage) > 0) setCurrentPage(Number(draft.currentPage));
       if (Number(draft?.maxCompletedStep) > 0) setMaxCompletedStep(Number(draft.maxCompletedStep));
       const draftGrnId = typeof draft?.grnId === "string" ? draft.grnId.trim() : "";
-      const hasValidDraftId = draftGrnId && !["undefined", "null"].includes(draftGrnId.toLowerCase());
+      const hasValidDraftId =
+        draftGrnId && !["undefined", "null"].includes(draftGrnId.toLowerCase());
       if (hasValidDraftId) {
         setGrnId(draftGrnId);
         localStorage.setItem("active_grn_id", draftGrnId);
@@ -699,6 +704,32 @@ function GrnPageWorkflow() {
     };
   }
 
+  // GRN lines created by older records may contain only the material name.
+  // Resolve the code from the linked Material Master record for display and
+  // downstream actions instead of showing a blank placeholder.
+  function resolveGrnMaterialCode(material: Partial<GrnLineItem>) {
+    const directCode = material.item_code || material.material_code;
+    if (directCode?.trim()) return directCode.trim();
+
+    const normalize = (value: unknown) =>
+      String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ");
+    const name = normalize(
+      material.material_name || material.materialName || material.material_description,
+    );
+    if (!name) return "";
+
+    const linked = materialMasterList.find((record: any) => {
+      const recordName = normalize(
+        record.material_name || record.materialName || record.name || record.description,
+      );
+      return recordName === name;
+    });
+    return String(linked?.material_code || linked?.code || "").trim();
+  }
+
   // Dashboard & Detail Drawer State
   const [selectedGrnDetail, setSelectedGrnDetail] = useState<any | null>(null);
   const [dashboardStatusFilter, setDashboardStatusFilter] = useState<string>("ALL");
@@ -823,7 +854,12 @@ function GrnPageWorkflow() {
 
   useEffect(() => {
     const urlGrnId = String((search as any).grn_id || "").toLowerCase();
-    if (activeTab !== "wizard" || !grnId || (urlGrnId && urlGrnId !== "undefined" && urlGrnId !== "null")) return;
+    if (
+      activeTab !== "wizard" ||
+      !grnId ||
+      (urlGrnId && urlGrnId !== "undefined" && urlGrnId !== "null")
+    )
+      return;
     navigate({
       to: "/grn",
       search: { tab: "wizard", page: currentPage, grn_id: grnId },
@@ -856,9 +892,23 @@ function GrnPageWorkflow() {
       const resolvedContext = ctx;
       if (requestId !== contextRequest.current) return;
       const resolvedPoNumber =
-        resolvedContext.po_number || resolvedContext.poNumber || resolvedContext.purchase_order_number || resolvedContext.purchaseOrderNumber || ctx.po_number || ctx.poNumber || "";
-      const supplierName = resolvedContext.supplier_name || resolvedContext.supplierName || ctx.supplier_name || ctx.supplierName || "";
-      const supplierComp = resolvedContext.supplier_company_name || resolvedContext.supplierCompanyName || supplierName;
+        resolvedContext.po_number ||
+        resolvedContext.poNumber ||
+        resolvedContext.purchase_order_number ||
+        resolvedContext.purchaseOrderNumber ||
+        ctx.po_number ||
+        ctx.poNumber ||
+        "";
+      const supplierName =
+        resolvedContext.supplier_name ||
+        resolvedContext.supplierName ||
+        ctx.supplier_name ||
+        ctx.supplierName ||
+        "";
+      const supplierComp =
+        resolvedContext.supplier_company_name ||
+        resolvedContext.supplierCompanyName ||
+        supplierName;
       const supplierEmail =
         resolvedContext.supplier_email ||
         resolvedContext.supplierEmail ||
@@ -866,7 +916,13 @@ function GrnPageWorkflow() {
         resolvedContext.supplier?.contact?.primary_email ||
         "";
       const asnNum =
-        resolvedContext.asn_number || resolvedContext.asnNumber || ctx.asn_number || ctx.asnNumber || ctx.asn?.asn_number || ctx.asn?.asnNumber || numToFetch;
+        resolvedContext.asn_number ||
+        resolvedContext.asnNumber ||
+        ctx.asn_number ||
+        ctx.asnNumber ||
+        ctx.asn?.asn_number ||
+        ctx.asn?.asnNumber ||
+        numToFetch;
       const gateNum =
         resolvedContext.gate_entry_number ||
         resolvedContext.gateEntryNumber ||
@@ -929,7 +985,8 @@ function GrnPageWorkflow() {
           prefilledDock = matchedDock.dock_number;
         }
       }
-      const generatedGrnNum = resolvedContext.grn_number || resolvedContext.grnNumber || generateGrnNumber();
+      const generatedGrnNum =
+        resolvedContext.grn_number || resolvedContext.grnNumber || generateGrnNumber();
 
       setHeader({
         receipt_type: resolvedContext.receipt_type || resolvedContext.receiptType || "",
@@ -949,7 +1006,14 @@ function GrnPageWorkflow() {
       });
 
       setDamagePhotos({});
-      const resolvedGrnId = resolvedContext.grn_id || resolvedContext.grnId || resolvedContext.id || ctx.grn_id || ctx.grnId || ctx.id || null;
+      const resolvedGrnId =
+        resolvedContext.grn_id ||
+        resolvedContext.grnId ||
+        resolvedContext.id ||
+        ctx.grn_id ||
+        ctx.grnId ||
+        ctx.id ||
+        null;
       if (resolvedGrnId) {
         setGrnId(String(resolvedGrnId));
         localStorage.setItem("active_grn_id", String(resolvedGrnId));
@@ -957,7 +1021,9 @@ function GrnPageWorkflow() {
       if (resolvedContext.dock_options && resolvedContext.dock_options.length > 0) {
         setDockOptions((prev) => {
           const existingNums = new Set(prev.map((d: any) => d.dock_number));
-          const newDocks = resolvedContext.dock_options.filter((d: any) => !existingNums.has(d.dock_number));
+          const newDocks = resolvedContext.dock_options.filter(
+            (d: any) => !existingNums.has(d.dock_number),
+          );
           return [...prev, ...newDocks];
         });
       }
@@ -974,8 +1040,19 @@ function GrnPageWorkflow() {
 
         return {
           grn_line_id: l.grn_line_id || l.grnLineId,
-          material_name: l.material_name || l.materialName || sourceMaterial.material_name || sourceMaterial.name || l.item_code || l.itemCode,
-          item_code: l.item_code || l.itemCode || l.material_code || sourceMaterial.material_code || sourceMaterial.code,
+          material_name:
+            l.material_name ||
+            l.materialName ||
+            sourceMaterial.material_name ||
+            sourceMaterial.name ||
+            l.item_code ||
+            l.itemCode,
+          item_code:
+            l.item_code ||
+            l.itemCode ||
+            l.material_code ||
+            sourceMaterial.material_code ||
+            sourceMaterial.code,
           po_quantity: poQty,
           received_quantity: recQty,
           good_quantity: goodQty,
@@ -998,7 +1075,9 @@ function GrnPageWorkflow() {
         const initBatches: Record<string, BatchEntry[]> = {};
         mapped.forEach((m, idx) => {
           const rowKey = grnMaterialKey(m, idx);
-          qApp[rowKey] = m.good_quantity;
+          // Item Receiving's good/received quantity is not QC approval.
+          // QC starts pending until the inspector enters and submits a result.
+          qApp[rowKey] = 0;
           initBatches[rowKey] = [
             {
               batch_number: `BATCH-${m.item_code}-001`,
@@ -1201,7 +1280,12 @@ function GrnPageWorkflow() {
         supplier_name: detail.supplier_name || "",
         supplier_company_name: detail.supplier_company_name || detail.supplier_name || "",
         supplier_email: detail.supplier_email || detail.supplierEmail || "",
-        asn_number: detail.asn_number || "",
+        asn_number:
+          detail.asn_number ||
+          detail.asnNumber ||
+          detail.asn?.asn_number ||
+          detail.asn?.asnNumber ||
+          "",
         gate_entry_number: detail.gate_entry_number || "",
         warehouse_name: detail.warehouse_name || "",
         grn_number: detail.grn_number || "",
@@ -1238,8 +1322,21 @@ function GrnPageWorkflow() {
           );
           return {
             grn_line_id: l.grn_line_id || String(l.id),
-            item_code: l.item_code || l.material_code || l.code || sourceMaterial.material_code || sourceMaterial.code,
-            material_name: l.material_name || l.materialName || l.material_description || sourceMaterial.material_name || sourceMaterial.name || l.item_code || l.material_code || l.code,
+            item_code:
+              l.item_code ||
+              l.material_code ||
+              l.code ||
+              sourceMaterial.material_code ||
+              sourceMaterial.code,
+            material_name:
+              l.material_name ||
+              l.materialName ||
+              l.material_description ||
+              sourceMaterial.material_name ||
+              sourceMaterial.name ||
+              l.item_code ||
+              l.material_code ||
+              l.code,
             material_category: l.material_category || "Raw Materials",
             po_quantity: poQty,
             received_quantity: recQty,
@@ -1268,7 +1365,14 @@ function GrnPageWorkflow() {
         persistedLines.forEach((l: any, idx: number) => {
           const itemTarget = rehydratedLines[idx] || (l as GrnLineItem);
           const rowKey = grnMaterialKey(itemTarget, idx);
-          qApp[rowKey] = Number(l.quality_approved_quantity ?? l.good_quantity ?? 0);
+          qApp[rowKey] = Number(
+            l.quality_approved_quantity ??
+              (!["", "PENDING", "UNINSPECTED"].includes(
+                String(l.quality_result || "PENDING").toUpperCase(),
+              )
+                ? l.good_quantity || 0
+                : 0),
+          );
           if (Array.isArray(l.batches) && l.batches.length > 0) {
             bMap[rowKey] = l.batches.map((b: any) => ({
               batch_id: b.id || b.batch_id,
@@ -1351,7 +1455,7 @@ function GrnPageWorkflow() {
       setCurrentPage(targetStep);
       setSaveStatus("saved");
       navigate({ to: "/grn", search: { tab: "wizard", page: targetStep, grn_id: resolvedId } });
-      } catch (err: any) {
+    } catch (err: any) {
       console.warn("Unable to restore GRN session:", err);
       setSaveStatus("error");
       // Do not keep retrying a deleted/stale GRN UUID from the URL or local
@@ -1377,7 +1481,12 @@ function GrnPageWorkflow() {
       return;
     }
     const label = record?.grn_number || grnId;
-    if (!window.confirm(`Delete GRN ${label}? This will remove its receiving data, lines, batches, and documents.`)) return;
+    if (
+      !window.confirm(
+        `Delete GRN ${label}? This will remove its receiving data, lines, batches, and documents.`,
+      )
+    )
+      return;
     try {
       await api.deleteGrn(grnId);
       toast.success(`GRN ${label} deleted.`);
@@ -1445,7 +1554,8 @@ function GrnPageWorkflow() {
   }
 
   async function saveGrnHeader(): Promise<string> {
-    if (!header.receiving_dock.trim()) {
+    const receivingDock = header.receiving_dock.trim() || allocatedDockInfo?.dock_number || "";
+    if (!receivingDock) {
       throw new Error(
         "No Receiving Dock assigned by warehouse dock allocation. Please ensure a dock is allocated before proceeding.",
       );
@@ -1463,7 +1573,7 @@ function GrnPageWorkflow() {
       grn_id: grnId || undefined,
       receipt_type: "ASN_RECEIPT",
       asn_number: header.asn_number.trim(),
-      dock_number: header.receiving_dock.trim(),
+      dock_number: receivingDock,
       invoice_number: header.invoice_number,
       supplier_name:
         header.receipt_type === "PO_RECEIPT"
@@ -1548,14 +1658,25 @@ function GrnPageWorkflow() {
     .filter(({ material }) => (material.damaged_quantity || 0) > 0);
   const qcHasRequiredEvidence = materials.every((m, idx) => {
     const received = Number(m.received_quantity || 0);
-    const total = Number(m.good_quantity || 0) + Number(m.rejected_quantity || 0) + Number(m.damaged_quantity || 0) + Number(m.held_quantity || 0);
+    const accepted = Number(qualityApproved[grnMaterialKey(m, idx)] ?? 0);
+    const total =
+      accepted +
+      Number(m.rejected_quantity || 0) +
+      Number(m.damaged_quantity || 0) +
+      Number(m.held_quantity || 0);
     if (total !== received) return false;
     if ((m.rejected_quantity || 0) > 0 && !m.rejected_reason?.trim()) return false;
     if ((m.damaged_quantity || 0) > 0 && !m.damage_reason?.trim()) return false;
     if ((m.held_quantity || 0) > 0 && !m.held_reason?.trim()) return false;
     if ((m.damaged_quantity || 0) > 0) {
       const evidence = damagePhotos[grnMaterialKey(m, idx)] || damagePhotos[m.item_code];
-      return Boolean(evidence?.file || evidence?.previewUrl || evidence?.evidenceId || evidence?.evidenceIds?.length || evidence?.photos?.length);
+      return Boolean(
+        evidence?.file ||
+        evidence?.previewUrl ||
+        evidence?.evidenceId ||
+        evidence?.evidenceIds?.length ||
+        evidence?.photos?.length,
+      );
     }
     return true;
   });
@@ -1707,7 +1828,11 @@ function GrnPageWorkflow() {
 
     autosaveTimerRef.current = setTimeout(async () => {
       if (saveLock.current || loadingContext || busyAction) return;
-      if (!header.receipt_type || !header.receiving_dock.trim()) return;
+      if (
+        !header.receipt_type ||
+        (!header.receiving_dock.trim() && !allocatedDockInfo?.dock_number)
+      )
+        return;
       if (header.receipt_type === "PO_RECEIPT" && !header.po_number.trim()) return;
       if (
         header.receipt_type === "UNEXPECTED_DELIVERY" &&
@@ -1751,7 +1876,8 @@ function GrnPageWorkflow() {
         console.warn("GRN autosave failed:", err);
         setSaveStatus("error");
         toast.error("Unable to save GRN changes", {
-          description: err instanceof Error ? err.message : "The backend rejected the saved values.",
+          description:
+            err instanceof Error ? err.message : "The backend rejected the saved values.",
         });
       } finally {
         saveLock.current = false;
@@ -1787,13 +1913,17 @@ function GrnPageWorkflow() {
       const rejected = Number(m.rejected_quantity || 0);
       const damaged = Number(m.damaged_quantity || 0);
       const held = Number(m.held_quantity || 0);
-      return accepted + rejected + damaged + held !== received ||
+      return (
+        accepted + rejected + damaged + held !== received ||
         (rejected > 0 && !m.rejected_reason?.trim()) ||
         (damaged > 0 && !m.damage_reason?.trim()) ||
-        (held > 0 && !m.held_reason?.trim());
+        (held > 0 && !m.held_reason?.trim())
+      );
     });
     if (invalidQcLine) {
-      toast.error(`QC quantities and reasons are incomplete for ${invalidQcLine.material_name}. Accepted + Rejected + Damaged + Held must equal Received.`);
+      toast.error(
+        `QC quantities and reasons are incomplete for ${invalidQcLine.material_name}. Accepted + Rejected + Damaged + Held must equal Received.`,
+      );
       return;
     }
 
@@ -1835,6 +1965,11 @@ function GrnPageWorkflow() {
           received_quantity: rec,
           good_quantity: qualityApproved[rowKey] ?? m.good_quantity,
           damaged_quantity: m.damaged_quantity,
+          rejected_quantity: m.rejected_quantity || 0,
+          held_quantity: m.held_quantity || 0,
+          rejected_reason: m.rejected_reason || null,
+          damage_reason: m.damage_reason || null,
+          held_reason: m.held_reason || null,
         };
       });
 
@@ -1895,10 +2030,23 @@ function GrnPageWorkflow() {
         .submitQualityInspection(
           savedGrnId,
           currentMaterials.map((m, idx) => ({
+            grn_line_id: m.grn_line_id,
             item_code: m.item_code,
-            good_quantity: qualityApproved[grnMaterialKey(m, idx)] ?? m.good_quantity,
-            damaged_quantity: m.damaged_quantity,
-            quality_result: m.damaged_quantity > 0 ? "PARTIALLY_ACCEPTED" : "ACCEPTED",
+            accepted_quantity: qualityApproved[grnMaterialKey(m, idx)] ?? m.good_quantity ?? 0,
+            quality_approved_quantity: qualityApproved[grnMaterialKey(m, idx)] ?? m.good_quantity ?? 0,
+            good_quantity: qualityApproved[grnMaterialKey(m, idx)] ?? m.good_quantity ?? 0,
+            rejected_quantity: m.rejected_quantity || 0,
+            damaged_quantity: m.damaged_quantity || 0,
+            held_quantity: m.held_quantity || 0,
+            rejected_reason: m.rejected_reason || null,
+            damage_reason: m.damage_reason || null,
+            held_reason: m.held_reason || null,
+            quality_result:
+              (m.rejected_quantity || 0) > 0 ||
+              (m.damaged_quantity || 0) > 0 ||
+              (m.held_quantity || 0) > 0
+                ? "PARTIALLY_ACCEPTED"
+                : "ACCEPTED",
           })),
         )
         .catch((e) => console.warn("Quality submit:", e));
@@ -1932,14 +2080,25 @@ function GrnPageWorkflow() {
         const rowKey = grnMaterialKey(m, idx);
         const batchesForLine = materialBatches[rowKey] || materialBatches[m.item_code];
         if (m.grn_line_id && batchesForLine) {
-          await api
-            .createGrnBatches(
-              m.grn_line_id,
-              batchesForLine.map((b) => ({
-                batch_quantity: Number(b.batch_quantity || 0),
-              })),
-            )
-            .catch((e) => console.warn("Batch save:", e));
+          const savedBatches = await api.createGrnBatches(
+            m.grn_line_id,
+            batchesForLine.map((b) => ({
+              batch_quantity: Number(b.batch_quantity || 0),
+            })),
+          );
+          if (!Array.isArray(savedBatches) || savedBatches.length !== batchesForLine.length) {
+            throw new Error("Backend did not return all saved batch records.");
+          }
+          const persistedBatches = savedBatches.map((entry: any, batchIndex: number) => {
+            const draftBatch = batchesForLine[batchIndex] || { batch_number: "", batch_quantity: 0 };
+            return {
+              batch_number:
+              entry?.batch?.batch_number || entry?.batch_number || draftBatch.batch_number,
+              batch_quantity:
+              Number(entry?.batch?.batch_quantity ?? entry?.batch_quantity ?? draftBatch.batch_quantity),
+            };
+          });
+          setMaterialBatches((prev) => ({ ...prev, [rowKey]: persistedBatches }));
         }
       }
       const nextStep = 5;
@@ -1967,15 +2126,14 @@ function GrnPageWorkflow() {
   }
 
   async function handleProceedFromPage5() {
-    if (header.receipt_type === "PO_RECEIPT") {
-      const poDoc = uploadedDocuments.find(
+    {
+      const asnDoc = uploadedDocuments.find(
         (d) =>
-          d.category.toLowerCase().includes("po") ||
-          d.category.toLowerCase().includes("purchase order"),
+          isPersistedDocument(d) && d.category.toLowerCase().includes("asn"),
       );
-      if (!poDoc) {
+      if (!asnDoc) {
         toast.error(
-          "Purchase Order (PO) Copy is compulsory for PO Receipts. Please attach a PO document to proceed.",
+          "ASN document must be uploaded and saved before proceeding.",
         );
         return;
       }
@@ -1998,14 +2156,45 @@ function GrnPageWorkflow() {
     });
   }
 
+  function isPersistedDocument(document: UploadedDocument) {
+    const path = String(document.file_path || "");
+    const activeGrnId = grnId || localStorage.getItem("active_grn_id") || "";
+    const documentId = String(document.document_id || "").trim();
+    const belongsToCurrentGrn =
+      !document.grn_id || !activeGrnId || document.grn_id === activeGrnId;
+    return (
+      belongsToCurrentGrn &&
+      ((!["", "undefined", "null"].includes(documentId.toLowerCase()) && !path.startsWith("blob:")) ||
+        Boolean(path && !path.startsWith("blob:")))
+    );
+  }
+
+  useEffect(() => {
+    if (currentPage !== 5 || !grnId) return;
+    let cancelled = false;
+    void api.getGrnDetail(grnId).then((detail: any) => {
+      if (cancelled || !Array.isArray(detail?.documents)) return;
+      setUploadedDocuments(
+        detail.documents.map((document: any) => ({
+          document_id: document.id || document.document_id,
+          grn_id: document.grn_id || grnId,
+          category: document.document_type || document.category || "Document",
+          file_name: document.file_name || "document.pdf",
+          file_path: document.file_path || document.filePath || "",
+        })),
+      );
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [currentPage, grnId]);
+
   // Page 4 Validation Check
   function getBatchValidation(item: GrnLineItem, index: number) {
     const rowKey = grnMaterialKey(item, index);
     const mat = item;
     const appQty =
-      qualityApproved[rowKey] !== undefined
-        ? qualityApproved[rowKey]
-        : (mat?.good_quantity ?? 0);
+      qualityApproved[rowKey] !== undefined ? qualityApproved[rowKey] : (mat?.good_quantity ?? 0);
     const batches = materialBatches[rowKey] || materialBatches[item.item_code] || [];
     const totalBatchQty = batches.reduce((acc, b) => acc + Number(b.batch_quantity || 0), 0);
     const isValid =
@@ -2026,6 +2215,8 @@ function GrnPageWorkflow() {
     qa_status: string;
     quarantine_location: string;
     status: string;
+    exception_type?: "DAMAGED" | "REJECTED" | "QC_HOLD" | string;
+    quantity_label?: string;
     qr_id: string;
     qr_code: string;
     qr_payload: string;
@@ -2034,16 +2225,18 @@ function GrnPageWorkflow() {
 
   const [damageQrLabels, setDamageQrLabels] = useState<DamageQrEntry[]>([]);
 
-  function buildDamageQrPayload(m: GrnLineItem, reasonText: string) {
+  function buildDamageQrPayload(
+    m: GrnLineItem,
+    reasonText: string,
+    exceptionType: "DAMAGED" | "REJECTED" | "QC_HOLD" = "DAMAGED",
+  ) {
     const lotNum = `DMG-LOT-${header.grn_number || grnId || "GRN"}-${m.item_code}`;
-    const damagedQty =
-      (m.damaged_quantity || 0) > 0 ? m.damaged_quantity : m.rejected_quantity || 0;
+    const damagedQty = m.damaged_quantity || 0;
     const variantInfo = getMaterialVariantInfo(m.item_code, m.variant_code);
     const uom = m.uom || "BUNDLE";
     const category = m.material_category || variantInfo.category || "Raw Materials";
 
     return [
-      `PO Number: ${header.po_number || ""}`,
       `GRN Number: ${header.grn_number || ""}`,
       `Supplier: ${header.supplier_name || header.supplier_company_name || ""}`,
       `Warehouse: ${header.warehouse_name || "Main Warehouse"}`,
@@ -2053,14 +2246,15 @@ function GrnPageWorkflow() {
       `Material Category: ${category}`,
       `Material Variant Code: ${variantInfo.variant_code}`,
       `Damage Lot: ${lotNum}`,
+      `QA Status: ${exceptionType}`,
+      `Quantity Label: ${exceptionType === "REJECTED" ? "Rejected Qty" : exceptionType === "QC_HOLD" ? "Held Qty" : "Damaged Qty"}`,
       `Size: ${variantInfo.size}`,
       `Color: ${variantInfo.color}`,
       `Grade: ${variantInfo.grade}`,
       `UOM: ${uom}`,
-      `QA Status: DAMAGED`,
-      `Inspection Status: DAMAGED`,
-      `Damaged Quantity: ${damagedQty} ${uom}`,
-      `Damage Reason: ${reasonText}`,
+      `Inspection Status: ${exceptionType}`,
+      `${exceptionType === "REJECTED" ? "Rejected" : exceptionType === "QC_HOLD" ? "Held" : "Damaged"} Quantity: ${damagedQty} ${uom}`,
+      `${exceptionType === "REJECTED" ? "Rejection" : exceptionType === "QC_HOLD" ? "Hold" : "Damage"} Reason: ${reasonText}`,
     ].join("\n");
   }
 
@@ -2344,7 +2538,9 @@ function GrnPageWorkflow() {
       for (const b of batches) {
         const batchNum = b.batch_number || `BATCH-${itemCode}-001`;
         const batchQty =
-          b.batch_quantity !== undefined ? b.batch_quantity : (m.good_quantity ?? m.received_quantity ?? 0);
+          b.batch_quantity !== undefined
+            ? b.batch_quantity
+            : (m.good_quantity ?? m.received_quantity ?? 0);
         const qrId = `QR-${grnNum}-${itemCode}-${batchNum}`;
         const payload = [
           `Material Code: ${itemCode}`,
@@ -2444,7 +2640,6 @@ function GrnPageWorkflow() {
     const inspectionStatus = dmgQty > 0 || rejQty > 0 ? "PARTIAL" : "COMPLETED";
 
     return [
-      `PO Number: ${header.po_number || ""}`,
       `GRN Number: ${header.grn_number || ""}`,
       `Supplier: ${header.supplier_name || header.supplier_company_name || ""}`,
       `Warehouse: ${header.warehouse_name || "Main Warehouse"}`,
@@ -2467,7 +2662,11 @@ function GrnPageWorkflow() {
   }
 
   // Page 6 QR Code Generation (Material-Wise) -> Encodes complete self-contained stock details
-  async function generateQrForMaterial(itemCode: string, batch?: BatchEntry, material?: GrnLineItem) {
+  async function generateQrForMaterial(
+    itemCode: string,
+    batch?: BatchEntry,
+    material?: GrnLineItem,
+  ) {
     const qrPayload = buildMaterialQrPayload(itemCode, batch, material);
     try {
       const url = await QRCode.toDataURL(qrPayload, {
@@ -2533,10 +2732,11 @@ function GrnPageWorkflow() {
       return;
     }
 
-    const filteredMaterials = (targetItemCode
-      ? materials.filter((m) => m.item_code === targetItemCode)
-      : materials
-    ).filter((m, index, list) => list.findIndex((item) => item.item_code === m.item_code) === index);
+    const filteredMaterials = (
+      targetItemCode ? materials.filter((m) => m.item_code === targetItemCode) : materials
+    ).filter(
+      (m, index, list) => list.findIndex((item) => item.item_code === m.item_code) === index,
+    );
 
     let labelsHtml = "";
     for (const m of filteredMaterials) {
@@ -2991,7 +3191,9 @@ function GrnPageWorkflow() {
           batch_quantity: matchedWizardMaterial.good_quantity,
         };
         setScanResultData({
-          qr_id: qrLabels[matchedWizardEntry.rowKey]?.qr_id || `QR-MAT-${matchedWizardMaterial.item_code}`,
+          qr_id:
+            qrLabels[matchedWizardEntry.rowKey]?.qr_id ||
+            `QR-MAT-${matchedWizardMaterial.item_code}`,
           grn_number: header.grn_number || "",
           po_number: header.po_number || "",
           material_code: matchedWizardMaterial.item_code,
@@ -3043,6 +3245,31 @@ function GrnPageWorkflow() {
   useEffect(() => {
     let active = true;
 
+    if (currentPage === 6 && grnId) {
+      void api.getGrnDetail(grnId).then((detail: any) => {
+        if (!active || !Array.isArray(detail?.lines)) return;
+        setMaterialBatches((previous) => {
+          const next = { ...previous };
+          detail.lines.forEach((line: any, index: number) => {
+            const material = materials.find(
+              (item) =>
+                item.grn_line_id === (line.grn_line_id || line.id) ||
+                item.item_code === (line.item_code || line.material_code),
+            );
+            const key = material ? grnMaterialKey(material, materials.indexOf(material)) : `${line.item_code || line.material_code}:${index}`;
+            const savedBatches = Array.isArray(line.batches) ? line.batches : [];
+            if (savedBatches.length > 0) {
+              next[key] = savedBatches.map((batch: any) => ({
+                batch_number: batch.batch_number,
+                batch_quantity: Number(batch.batch_quantity || 0),
+              }));
+            }
+          });
+          return next;
+        });
+      }).catch(() => undefined);
+    }
+
     // Ensure EVERY material line item has batches compulsory
     const effectiveBatches: Record<string, BatchEntry[]> = { ...materialBatches };
     let updated = false;
@@ -3050,9 +3277,7 @@ function GrnPageWorkflow() {
     materials.forEach((m, idx) => {
       const rowKey = grnMaterialKey(m, idx);
       const appQty = Number(
-        qualityApproved[rowKey] !== undefined
-          ? qualityApproved[rowKey]
-          : (m.good_quantity ?? 0),
+        qualityApproved[rowKey] !== undefined ? qualityApproved[rowKey] : (m.good_quantity ?? 0),
       );
       const existing = effectiveBatches[rowKey] || effectiveBatches[m.item_code];
       if (!existing || existing.length === 0) {
@@ -3080,14 +3305,14 @@ function GrnPageWorkflow() {
           if (generated[rowKey]) continue;
 
           const bList = effectiveBatches[rowKey] || effectiveBatches[code] || [];
-          const b = bList[0] || {
-            batch_number: `BATCH-${code}-001`,
-            batch_quantity: m.good_quantity,
-          };
-          const qrId = `QR-MAT-${code}-${idx + 1}`;
-          const url = await generateQrForMaterial(code, b, m);
-          const payload = buildMaterialQrPayload(code, b, m);
-          generated[rowKey] = { qr_id: qrId, data_url: url, payload };
+          for (const b of bList) {
+            if (!b.batch_number || Number(b.batch_quantity || 0) <= 0) continue;
+            const batchKey = `${rowKey}:${b.batch_number}`;
+            const qrId = `QR-MAT-${code}-${b.batch_number}`;
+            const url = await generateQrForMaterial(code, b, m);
+            const payload = buildMaterialQrPayload(code, b, m);
+            generated[batchKey] = { qr_id: qrId, data_url: url, payload };
+          }
         }
 
         const damageGenerated: DamageQrEntry[] = [];
@@ -3096,41 +3321,63 @@ function GrnPageWorkflow() {
         );
 
         for (const m of damagedLines) {
-          const photo = damagePhotos[m.item_code];
-          const reasonText =
-            photo && photo.reason
-              ? photo.reason
-              : m.damage_reason || "Damaged/Rejected during receiving inspection";
-          const qrCodeStr = `DMG-${header.grn_number || grnId || "GRN"}-${m.item_code}-01`;
-          const payload = buildDamageQrPayload(m, reasonText);
-          let dataUrl = "";
-          try {
-            dataUrl = await QRCode.toDataURL(payload, {
-              margin: 2,
-              width: 500,
-              errorCorrectionLevel: "M",
-              color: { dark: "#000000", light: "#ffffff" },
+          const exceptionTypes = [
+            { key: "DAMAGED", quantity: Number(m.damaged_quantity || 0), reason: m.damage_reason },
+            { key: "REJECTED", quantity: Number(m.rejected_quantity || 0), reason: m.rejected_reason },
+            { key: "QC_HOLD", quantity: Number(m.held_quantity || 0), reason: m.held_reason },
+          ].filter((entry) => entry.quantity > 0);
+          if (!grnId || ["undefined", "null"].includes(String(grnId).toLowerCase())) continue;
+          for (const entry of exceptionTypes) {
+            const exceptionMaterial = { ...m, damaged_quantity: entry.quantity };
+            const reasonText = entry.reason || "No reason recorded";
+            const lotKey = `${header.grn_number || grnId}-${m.item_code}-${entry.key}`;
+            const payload = buildDamageQrPayload(exceptionMaterial, reasonText, entry.key as "DAMAGED" | "REJECTED" | "QC_HOLD");
+            const dataUrl = await QRCode.toDataURL(payload, { margin: 2, width: 500, errorCorrectionLevel: "M" });
+            damageGenerated.push({
+              damage_lot_id: `dmg_lot_${lotKey}`,
+              damage_lot_number: `DMG-LOT-${lotKey}`,
+              item_code: m.item_code,
+              material_name: m.material_name,
+              damaged_quantity: entry.quantity,
+              uom: m.uom || "PCS",
+              reason: reasonText,
+              qa_status: entry.key,
+              quarantine_location: "QUARANTINE-ZONE-A",
+              status: entry.key,
+              exception_type: entry.key,
+              quantity_label: entry.key === "REJECTED" ? "Rejected Qty" : entry.key === "QC_HOLD" ? "Held Qty" : "Damaged Qty",
+              qr_id: `dmg_qr_${lotKey}`,
+              qr_code: `DMG-${lotKey}`,
+              qr_payload: payload,
+              qr_data_url: dataUrl,
             });
-          } catch (e) {
-            console.error("Damage QR generation error:", e);
           }
-          const qty = (m.damaged_quantity || 0) > 0 ? m.damaged_quantity : m.rejected_quantity || 0;
-          damageGenerated.push({
-            damage_lot_id: `dmg_lot_${m.item_code}`,
-            damage_lot_number: `DMG-LOT-${header.grn_number || grnId || "GRN"}-${m.item_code}`,
-            item_code: m.item_code,
-            material_name: m.material_name,
-            damaged_quantity: qty,
-            uom: m.uom || "PCS",
-            reason: reasonText,
-            qa_status: "REJECTED / DAMAGED",
-            quarantine_location: "QUARANTINE-ZONE-A",
-            status: "DAMAGED",
-            qr_id: `dmg_qr_${m.item_code}`,
-            qr_code: qrCodeStr,
-            qr_payload: payload,
-            qr_data_url: dataUrl,
-          });
+        }
+
+        if (grnId && !["undefined", "null"].includes(String(grnId).toLowerCase())) {
+          try {
+            const savedDamageLots = await api.generateDamageQrs(grnId);
+            if (false && Array.isArray(savedDamageLots) && savedDamageLots.length > 0) {
+              damageGenerated.splice(0, damageGenerated.length, ...savedDamageLots.map((lot: any) => ({
+                damage_lot_id: lot.damage_lot_id,
+                damage_lot_number: lot.damage_lot_number,
+                item_code: lot.qr?.item_code || lot.item_code,
+                material_name: materials.find((item) => item.grn_line_id === lot.grn_line_id)?.material_name || "Material",
+                damaged_quantity: Number(lot.damaged_quantity || 0),
+                uom: lot.uom || "PCS",
+                reason: lot.reason || "",
+                qa_status: lot.qa_status || "REJECTED / DAMAGED",
+                quarantine_location: lot.quarantine_location || "",
+                status: lot.status || "DAMAGED",
+                qr_id: lot.qr?.qr_id || lot.damage_lot_id,
+                qr_code: lot.qr?.qr_code || lot.damage_lot_number,
+                qr_payload: lot.qr?.qr_payload || "",
+                qr_data_url: "",
+              })));
+            }
+          } catch (error) {
+            console.warn("Could not refresh saved damage lots:", error);
+          }
         }
 
         if (active) {
@@ -3153,6 +3400,26 @@ function GrnPageWorkflow() {
     damagePhotos,
     qualityApproved,
   ]);
+
+  const selectedReconciliation = useMemo(() => {
+    const lines = selectedGrnDetail?.lines?.length
+      ? selectedGrnDetail.lines
+      : selectedGrnDetail?.materials || [];
+    return lines.reduce(
+      (totals: { received: number; accounted: number }, line: any, index: number) => {
+        const current = materials[index];
+        const received = Number(line.received_quantity ?? line.receivedQuantity ?? current?.received_quantity ?? 0);
+        const accepted = Number(line.good_quantity ?? line.goodQuantity ?? current?.good_quantity ?? 0);
+        const damaged = Number(line.damaged_quantity ?? line.damagedQuantity ?? current?.damaged_quantity ?? 0);
+        const rejected = Number(line.rejected_quantity ?? line.rejectedQuantity ?? current?.rejected_quantity ?? 0);
+        const held = Number(line.held_quantity ?? line.heldQuantity ?? current?.held_quantity ?? 0);
+        totals.received += received;
+        totals.accounted += accepted + damaged + rejected + held;
+        return totals;
+      },
+      { received: 0, accounted: 0 },
+    );
+  }, [selectedGrnDetail, materials]);
 
   return (
     <AppShell
@@ -3695,20 +3962,20 @@ function GrnPageWorkflow() {
                             </div>
 
                             {status.toUpperCase().includes("PARTIAL") && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="rounded-xl text-xs font-semibold border-rose-300 text-rose-700 hover:bg-rose-50"
-                              onClick={() => {
-                                setSelectedGrnDetail(r);
-                                setNotifyVendorEmail(r.supplier_email || r.supplierEmail || "");
-                                setGrnId(r.grn_id || r.id || r.grn_number || "");
-                                setShowNotifyVendorModal(true);
-                              }}
-                            >
-                              <Send className="mr-1.5 size-3.5 text-rose-600" /> Vendor Damage
-                              Notice
-                            </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="rounded-xl text-xs font-semibold border-rose-300 text-rose-700 hover:bg-rose-50"
+                                onClick={() => {
+                                  setSelectedGrnDetail(r);
+                                  setNotifyVendorEmail(r.supplier_email || r.supplierEmail || "");
+                                  setGrnId(r.grn_id || r.id || r.grn_number || "");
+                                  setShowNotifyVendorModal(true);
+                                }}
+                              >
+                                <Send className="mr-1.5 size-3.5 text-rose-600" /> Vendor Damage
+                                Notice
+                              </Button>
                             )}
                           </div>
                         </Card>
@@ -3790,7 +4057,8 @@ function GrnPageWorkflow() {
                     Advance Shipping Notice (ASN)
                   </h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Enter an ASN number to automatically populate supplier, gate, vehicle, and material details.
+                    Enter an ASN number to automatically populate supplier, gate, vehicle, and
+                    material details.
                   </p>
                 </div>
 
@@ -3801,7 +4069,7 @@ function GrnPageWorkflow() {
                       <span>ASN Number *</span>
                       {loadingContext && (
                         <span className="text-[10px] font-bold text-primary flex items-center gap-1 animate-pulse">
-                        <Loader2 className="size-3 animate-spin" /> Fetching ASN Details...
+                          <Loader2 className="size-3 animate-spin" /> Fetching ASN Details...
                         </span>
                       )}
                     </label>
@@ -3837,37 +4105,39 @@ function GrnPageWorkflow() {
                   </Button>
                 </div>
 
-                {false && <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                  {/* PO Number */}
-                  <div className="rounded-xl border bg-muted/10 p-3">
-                    <span className="text-[11px] font-semibold uppercase text-muted-foreground">
-                      PO Number
-                    </span>
-                    <p className="font-mono text-base font-bold text-primary">
-                      {header.po_number || "—"}
-                    </p>
-                  </div>
+                {false && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                    {/* PO Number */}
+                    <div className="rounded-xl border bg-muted/10 p-3">
+                      <span className="text-[11px] font-semibold uppercase text-muted-foreground">
+                        PO Number
+                      </span>
+                      <p className="font-mono text-base font-bold text-primary">
+                        {header.po_number || "—"}
+                      </p>
+                    </div>
 
-                  {/* Supplier Name */}
-                  <div className="rounded-xl border bg-muted/10 p-3">
-                    <span className="text-[11px] font-semibold uppercase text-muted-foreground">
-                      Supplier Name
-                    </span>
-                    <p className="text-sm font-bold text-foreground mt-1">
-                      {header.supplier_name || "—"}
-                    </p>
-                  </div>
+                    {/* Supplier Name */}
+                    <div className="rounded-xl border bg-muted/10 p-3">
+                      <span className="text-[11px] font-semibold uppercase text-muted-foreground">
+                        Supplier Name
+                      </span>
+                      <p className="text-sm font-bold text-foreground mt-1">
+                        {header.supplier_name || "—"}
+                      </p>
+                    </div>
 
-                  {/* Supplier Company Name */}
-                  <div className="rounded-xl border bg-muted/10 p-3 md:col-span-2">
-                    <span className="text-[11px] font-semibold uppercase text-muted-foreground">
-                      Supplier Company Name
-                    </span>
-                    <p className="text-sm font-bold text-foreground mt-1">
-                      {header.supplier_company_name || header.supplier_name || "—"}
-                    </p>
+                    {/* Supplier Company Name */}
+                    <div className="rounded-xl border bg-muted/10 p-3 md:col-span-2">
+                      <span className="text-[11px] font-semibold uppercase text-muted-foreground">
+                        Supplier Company Name
+                      </span>
+                      <p className="text-sm font-bold text-foreground mt-1">
+                        {header.supplier_company_name || header.supplier_name || "—"}
+                      </p>
+                    </div>
                   </div>
-                </div>}
+                )}
               </Card>
 
               {/* B. INBOUND DETAILS */}
@@ -3903,14 +4173,16 @@ function GrnPageWorkflow() {
                   </div>
 
                   {/* Receipt Type */}
-                  {false && <div className="rounded-xl border bg-muted/10 p-3">
-                    <label className="text-[11px] font-semibold uppercase text-muted-foreground block mb-1">
-                      Receipt Type
-                    </label>
-                    <div className="rounded-lg border bg-background px-2.5 py-1.5 text-xs font-bold text-foreground">
-                      {header.receipt_type}
+                  {false && (
+                    <div className="rounded-xl border bg-muted/10 p-3">
+                      <label className="text-[11px] font-semibold uppercase text-muted-foreground block mb-1">
+                        Receipt Type
+                      </label>
+                      <div className="rounded-lg border bg-background px-2.5 py-1.5 text-xs font-bold text-foreground">
+                        {header.receipt_type}
+                      </div>
                     </div>
-                  </div>}
+                  )}
 
                   {/* Vehicle Number */}
                   <div className="rounded-xl border bg-muted/10 p-3">
@@ -3955,9 +4227,7 @@ function GrnPageWorkflow() {
                     <span className="text-[11px] font-semibold uppercase text-muted-foreground">
                       Warehouse Name
                     </span>
-                    <p className="text-sm font-bold text-foreground">
-                      {header.warehouse_name}
-                    </p>
+                    <p className="text-sm font-bold text-foreground">{header.warehouse_name}</p>
                   </div>
 
                   {/* Receiving Dock */}
@@ -4276,11 +4546,20 @@ function GrnPageWorkflow() {
                         const recQty =
                           m.received_quantity !== undefined ? m.received_quantity : m.good_quantity;
                         const isCompleted = recQty === m.po_quantity;
+                        const rejectedVal = Number(m.rejected_quantity || 0);
+                        const damagedVal = Number(m.damaged_quantity || 0);
+                        const heldVal = Number(m.held_quantity || 0);
 
                         return (
                           <tr key={grnMaterialKey(m, idx)} className="hover:bg-muted/20">
                             <td className="px-4 py-3 font-bold text-foreground">
-                              <div>{m.item_code || m.material_code} — {m.material_name || m.materialName || m.material_description || "Material"}</div>
+                              <div>
+                                {m.item_code || m.material_code} —{" "}
+                                {m.material_name ||
+                                  m.materialName ||
+                                  m.material_description ||
+                                  "Material"}
+                              </div>
                               <span className="text-[10px] text-emerald-600 font-medium block mt-0.5">
                                 Category: {m.material_category || "General"}
                               </span>
@@ -4365,9 +4644,54 @@ function GrnPageWorkflow() {
                               </span>
                               {(rejectedVal > 0 || damagedVal > 0 || heldVal > 0) && (
                                 <div className="mt-2 space-y-1 text-left">
-                                  {rejectedVal > 0 && <Input placeholder="Rejected reason *" value={m.rejected_reason || ""} onChange={(e) => setMaterials((prev) => prev.map((item, i) => i === idx ? { ...item, rejected_reason: e.target.value } : item))} className="h-7 text-[11px]" />}
-                                  {damagedVal > 0 && <Input placeholder="Damage reason *" value={m.damage_reason || ""} onChange={(e) => setMaterials((prev) => prev.map((item, i) => i === idx ? { ...item, damage_reason: e.target.value } : item))} className="h-7 text-[11px]" />}
-                                  {heldVal > 0 && <Input placeholder="Held reason *" value={m.held_reason || ""} onChange={(e) => setMaterials((prev) => prev.map((item, i) => i === idx ? { ...item, held_reason: e.target.value } : item))} className="h-7 text-[11px]" />}
+                                  {rejectedVal > 0 && (
+                                    <Input
+                                      placeholder="Rejected reason *"
+                                      value={m.rejected_reason || ""}
+                                      onChange={(e) =>
+                                        setMaterials((prev) =>
+                                          prev.map((item, i) =>
+                                            i === idx
+                                              ? { ...item, rejected_reason: e.target.value }
+                                              : item,
+                                          ),
+                                        )
+                                      }
+                                      className="h-7 text-[11px]"
+                                    />
+                                  )}
+                                  {damagedVal > 0 && (
+                                    <Input
+                                      placeholder="Damage reason *"
+                                      value={m.damage_reason || ""}
+                                      onChange={(e) =>
+                                        setMaterials((prev) =>
+                                          prev.map((item, i) =>
+                                            i === idx
+                                              ? { ...item, damage_reason: e.target.value }
+                                              : item,
+                                          ),
+                                        )
+                                      }
+                                      className="h-7 text-[11px]"
+                                    />
+                                  )}
+                                  {heldVal > 0 && (
+                                    <Input
+                                      placeholder="Held reason *"
+                                      value={m.held_reason || ""}
+                                      onChange={(e) =>
+                                        setMaterials((prev) =>
+                                          prev.map((item, i) =>
+                                            i === idx
+                                              ? { ...item, held_reason: e.target.value }
+                                              : item,
+                                          ),
+                                        )
+                                      }
+                                      className="h-7 text-[11px]"
+                                    />
+                                  )}
                                 </div>
                               )}
                             </td>
@@ -4474,8 +4798,8 @@ function GrnPageWorkflow() {
                         <th className="px-4 py-3">Material</th>
                         <th className="px-4 py-3 text-right">Received Qty (Step 2)</th>
                         <th className="px-4 py-3 text-right">Accepted Qty</th>
-                        <th className="px-4 py-3 text-right">Rejected Qty</th>
                         <th className="px-4 py-3 text-right">Damaged Qty</th>
+                        <th className="px-4 py-3 text-right">Rejected Qty</th>
                         <th className="px-4 py-3 text-right">Held Qty</th>
                         <th className="px-4 py-3 text-center">Quality Status</th>
                       </tr>
@@ -4498,14 +4822,15 @@ function GrnPageWorkflow() {
                           String(m.quality_result || "PENDING").toUpperCase(),
                         );
                         const isSound = hasInspection && acceptedVal > 0 && damagedVal === 0;
-                        const isPartial = hasInspection && (acceptedVal > 0 || damagedVal > 0) && !isSound;
+                        const isPartial =
+                          hasInspection && (acceptedVal > 0 || damagedVal > 0) && !isSound;
 
                         return (
                           <tr key={grnMaterialKey(m, idx)} className="hover:bg-muted/20">
                             <td className="px-4 py-3 font-bold text-foreground">
                               <div>{m.material_name}</div>
                               <span className="font-mono text-xs text-primary font-normal">
-                                {m.item_code}
+                                {resolveGrnMaterialCode(m) || "—"}
                               </span>
                             </td>
                             <td className="px-4 py-3 text-right font-bold">
@@ -4559,7 +4884,8 @@ function GrnPageWorkflow() {
                                   const val =
                                     raw === "" ? 0 : Math.max(0, Math.min(Number(raw), recQty));
                                   setQualityApproved((prev) => ({
-                                    ...prev, [rowKey]: Number(m.good_quantity || 0),
+                                    ...prev,
+                                    [rowKey]: Number(m.good_quantity || 0),
                                   }));
                                   setMaterials((prev) =>
                                     prev.map((item, i) =>
@@ -4579,14 +4905,53 @@ function GrnPageWorkflow() {
                               />
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <Input type="number" min={0} max={recQty} value={rejectedVal || ""} placeholder="0"
-                                onChange={(e) => setMaterials((prev) => prev.map((item, i) => i === idx ? { ...item, rejected_quantity: Math.max(0, Number(e.target.value) || 0), quality_result: "INSPECTED" } : item))}
-                                className="w-28 text-right font-bold text-orange-600 rounded-xl ml-auto" />
+                              <Input
+                                type="number"
+                                min={0}
+                                max={recQty}
+                                value={rejectedVal || ""}
+                                placeholder="0"
+                                onChange={(e) =>
+                                  setMaterials((prev) =>
+                                    prev.map((item, i) =>
+                                      i === idx
+                                        ? {
+                                            ...item,
+                                            rejected_quantity: Math.max(
+                                              0,
+                                              Number(e.target.value) || 0,
+                                            ),
+                                            quality_result: "INSPECTED",
+                                          }
+                                        : item,
+                                    ),
+                                  )
+                                }
+                                className="w-28 text-right font-bold text-orange-600 rounded-xl ml-auto"
+                              />
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <Input type="number" min={0} max={recQty} value={heldVal || ""} placeholder="0"
-                                onChange={(e) => setMaterials((prev) => prev.map((item, i) => i === idx ? { ...item, held_quantity: Math.max(0, Number(e.target.value) || 0), quality_result: "INSPECTED" } : item))}
-                                className="w-28 text-right font-bold text-indigo-600 rounded-xl ml-auto" />
+                              <Input
+                                type="number"
+                                min={0}
+                                max={recQty}
+                                value={heldVal || ""}
+                                placeholder="0"
+                                onChange={(e) =>
+                                  setMaterials((prev) =>
+                                    prev.map((item, i) =>
+                                      i === idx
+                                        ? {
+                                            ...item,
+                                            held_quantity: Math.max(0, Number(e.target.value) || 0),
+                                            quality_result: "INSPECTED",
+                                          }
+                                        : item,
+                                    ),
+                                  )
+                                }
+                                className="w-28 text-right font-bold text-indigo-600 rounded-xl ml-auto"
+                              />
                             </td>
                             <td className="px-4 py-3 text-center">
                               <span
@@ -4601,10 +4966,10 @@ function GrnPageWorkflow() {
                                 {!hasInspection
                                   ? "PENDING QC"
                                   : isSound
-                                  ? "COMPLETED"
-                                  : isPartial
-                                    ? "INSPECTED — WITH EXCEPTIONS"
-                                    : "REJECTED ✗"}
+                                    ? "COMPLETED"
+                                    : isPartial
+                                      ? "INSPECTED — WITH EXCEPTIONS"
+                                      : "REJECTED ✗"}
                               </span>
                             </td>
                           </tr>
@@ -4624,7 +4989,13 @@ function GrnPageWorkflow() {
                 {damagedMaterialRows.length === 0 ? (
                   <div className="rounded-xl border bg-emerald-50 p-4 text-center text-sm font-medium text-emerald-800 flex items-center justify-center gap-2">
                     <CheckCircle2 className="size-5 text-emerald-600" />
-                    No damaged materials recorded. 100% of received items are accepted for batching.
+                    {materials.every(
+                      (m, idx) =>
+                        Number(qualityApproved[grnMaterialKey(m, idx)] ?? 0) ===
+                        Number(m.received_quantity || 0),
+                    )
+                      ? `${totalReceivedQty.toLocaleString()} ${materials[0]?.uom || "units"} recorded as accepted; QC confirmation pending.`
+                      : `${totalReceivedQty.toLocaleString()} ${materials[0]?.uom || "units"} received; enter QC quantities before confirmation.`}
                   </div>
                 ) : (
                   <div className="overflow-x-auto rounded-xl border">
@@ -4643,11 +5014,15 @@ function GrnPageWorkflow() {
                         {damagedMaterialRows.map(({ material: m, materialIndex, rowKey }) => (
                           <tr key={rowKey}>
                             <td className="px-4 py-3 font-mono font-bold text-primary">
-                              {m.item_code || m.material_code}
+                              {resolveGrnMaterialCode(m) || "—"}
                             </td>
 
                             <td className="px-4 py-3 font-bold text-foreground">
-                              {m.item_code || m.material_code} — {m.material_name || m.materialName || m.material_description || "Material"}
+                              {resolveGrnMaterialCode(m) || "—"} —{" "}
+                              {m.material_name ||
+                                m.materialName ||
+                                m.material_description ||
+                                "Material"}
                             </td>
 
                             <td className="px-4 py-3 text-right font-bold text-rose-600">
@@ -4663,9 +5038,7 @@ function GrnPageWorkflow() {
                                   const val = e.target.value;
                                   setMaterials((prev) =>
                                     prev.map((item, i) =>
-                                      i === materialIndex
-                                        ? { ...item, damage_reason: val }
-                                        : item,
+                                      i === materialIndex ? { ...item, damage_reason: val } : item,
                                     ),
                                   );
                                 }}
@@ -4676,18 +5049,30 @@ function GrnPageWorkflow() {
                             <td className="px-4 py-3">
                               <DamagePhoto
                                 key={`${grnId || "draft"}:${m.grn_line_id || m.item_code}`}
-                                lineId={m.grn_line_id}
+                                lineId={
+                                  m.grn_line_id &&
+                                  !["undefined", "null"].includes(String(m.grn_line_id).toLowerCase())
+                                    ? String(m.grn_line_id)
+                                    : undefined
+                                }
                                 damagedQuantity={m.damaged_quantity}
                                 reason={m.damage_reason}
-                                initialPreviewUrl={damagePhotos[rowKey]?.previewUrl || damagePhotos[m.item_code]?.previewUrl}
-                                initialFile={damagePhotos[rowKey]?.file || damagePhotos[m.item_code]?.file}
+                                initialPreviewUrl={
+                                  damagePhotos[rowKey]?.previewUrl ||
+                                  damagePhotos[m.item_code]?.previewUrl
+                                }
+                                initialFile={
+                                  damagePhotos[rowKey]?.file || damagePhotos[m.item_code]?.file
+                                }
                                 onSuccess={(ev) => {
                                   setDamagePhotos((prev) => ({
                                     ...prev,
                                     [rowKey]: {
                                       evidenceId: ev.evidenceId,
                                       evidenceIds: [ev.evidenceId],
-                                      photos: ev.filePath ? [{ id: ev.evidenceId, file_path: ev.filePath }] : [],
+                                      photos: ev.filePath
+                                        ? [{ id: ev.evidenceId, file_path: ev.filePath }]
+                                        : [],
                                       reason: m.damage_reason,
                                       previewUrl: ev.filePath,
                                       file: ev.file,
@@ -4702,6 +5087,37 @@ function GrnPageWorkflow() {
                     </table>
                   </div>
                 )}
+              </div>
+
+              <div className="pt-2 space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <AlertTriangle className="size-4 text-amber-500" /> Exception Reasons
+                </h4>
+                <div className="overflow-x-auto rounded-xl border">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+                      <tr><th className="px-4 py-3">Material</th><th className="px-4 py-3">Exception</th><th className="px-4 py-3 text-right">Quantity</th><th className="px-4 py-3">Reason *</th></tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {materials.flatMap((m, idx) => {
+                        const rows = [
+                          { kind: "Damaged", qty: Number(m.damaged_quantity || 0), field: "damage_reason" as const },
+                          { kind: "Rejected", qty: Number(m.rejected_quantity || 0), field: "rejected_reason" as const },
+                          { kind: "Held", qty: Number(m.held_quantity || 0), field: "held_reason" as const },
+                        ].filter((row) => row.qty > 0);
+                        return rows.map((row) => (
+                          <tr key={`${grnMaterialKey(m, idx)}-${row.kind}`}>
+                            <td className="px-4 py-3 font-semibold">{resolveGrnMaterialCode(m) || "—"} — {m.material_name}</td>
+                            <td className="px-4 py-3 font-semibold">{row.kind}</td>
+                            <td className="px-4 py-3 text-right font-bold">{row.qty} {m.uom || "PCS"}</td>
+                            <td className="px-4 py-3"><Input placeholder={`${row.kind} reason *`} value={m[row.field] || ""} onChange={(e) => setMaterials((prev) => prev.map((item, i) => i === idx ? { ...item, [row.field]: e.target.value } : item))} className="rounded-xl text-xs" /></td>
+                          </tr>
+                        ));
+                      })}
+                      {materials.every((m) => !(Number(m.damaged_quantity || 0) || Number(m.rejected_quantity || 0) || Number(m.held_quantity || 0))) && <tr><td colSpan={4} className="px-4 py-4 text-center text-xs text-muted-foreground">No exception quantities recorded.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               <div className="flex justify-between pt-4 border-t">
@@ -4760,7 +5176,9 @@ function GrnPageWorkflow() {
                             </span>
                           </div>
                           <div className="flex items-center gap-2 bg-background/50 px-3 py-1.5 rounded-lg border">
-                            <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">No. of Batches:</span>
+                            <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">
+                              No. of Batches:
+                            </span>
                             <Input
                               type="number"
                               min="1"
@@ -4770,7 +5188,7 @@ function GrnPageWorkflow() {
                               onChange={(e) => {
                                 const valStr = e.target.value;
                                 if (valStr === "") {
-                                  setMaterialBatches(prev => ({ ...prev, [rowKey]: [] }));
+                                  setMaterialBatches((prev) => ({ ...prev, [rowKey]: [] }));
                                   return;
                                 }
                                 const num = parseInt(valStr, 10);
@@ -4778,30 +5196,31 @@ function GrnPageWorkflow() {
                                   const isFloat = appQty % 1 !== 0;
                                   let newBatches = [];
                                   if (isFloat) {
-                                      const baseQty = Number((appQty / num).toFixed(2));
-                                      let sum = 0;
-                                      for (let i = 0; i < num - 1; i++) {
-                                        newBatches.push({
-                                          batch_number: `BATCH-${m.item_code}-${(i + 1).toString().padStart(3, "0")}`,
-                                          batch_quantity: baseQty,
-                                        });
-                                        sum += baseQty;
-                                      }
+                                    const baseQty = Number((appQty / num).toFixed(2));
+                                    let sum = 0;
+                                    for (let i = 0; i < num - 1; i++) {
                                       newBatches.push({
-                                          batch_number: `BATCH-${m.item_code}-${(num).toString().padStart(3, "0")}`,
-                                          batch_quantity: Number((appQty - sum).toFixed(2)),
+                                        batch_number: `BATCH-${m.item_code}-${(i + 1).toString().padStart(3, "0")}`,
+                                        batch_quantity: baseQty,
                                       });
+                                      sum += baseQty;
+                                    }
+                                    newBatches.push({
+                                      batch_number: `BATCH-${m.item_code}-${num.toString().padStart(3, "0")}`,
+                                      batch_quantity: Number((appQty - sum).toFixed(2)),
+                                    });
                                   } else {
-                                      const baseQty = Math.floor(appQty / num);
-                                      const remainder = appQty % num;
-                                      for (let i = 0; i < num; i++) {
-                                        newBatches.push({
-                                          batch_number: `BATCH-${m.item_code}-${(i + 1).toString().padStart(3, "0")}`,
-                                          batch_quantity: i === num - 1 ? baseQty + remainder : baseQty,
-                                        });
-                                      }
+                                    const baseQty = Math.floor(appQty / num);
+                                    const remainder = appQty % num;
+                                    for (let i = 0; i < num; i++) {
+                                      newBatches.push({
+                                        batch_number: `BATCH-${m.item_code}-${(i + 1).toString().padStart(3, "0")}`,
+                                        batch_quantity:
+                                          i === num - 1 ? baseQty + remainder : baseQty,
+                                      });
+                                    }
                                   }
-                                  setMaterialBatches(prev => ({ ...prev, [rowKey]: newBatches }));
+                                  setMaterialBatches((prev) => ({ ...prev, [rowKey]: newBatches }));
                                 }
                               }}
                             />
@@ -4849,7 +5268,8 @@ function GrnPageWorkflow() {
                                   return { ...prev, [rowKey]: list };
                                 });
                               }}
-                              className="w-40 font-mono text-xs rounded-xl"
+                              className="w-64 font-mono text-xs rounded-xl"
+                              title={b.batch_number}
                             />
                             <Input
                               type="number"
@@ -4902,17 +5322,11 @@ function GrnPageWorkflow() {
                     <span>Inbound Goods Document Repository</span>
                   </h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {header.receipt_type === "PO_RECEIPT" ? (
-                      <>
-                        <b>Purchase Order (PO) Copy</b> is Compulsory. Add optional documents using
-                        the <b>+ Add Document</b> form below.
-                      </>
-                    ) : (
-                      <>
-                        Attach invoices, weighment slips, tax documents, or other physical
-                        documents received with this shipment.
-                      </>
-                    )}
+                    <>
+                      <b>ASN Copy (Required)</b> must be uploaded and saved. Add optional invoices,
+                      weighment slips, tax documents, or other physical documents using the{" "}
+                      <b>+ Add Document</b> form below.
+                    </>
                   </p>
                 </div>
                 <Button
@@ -4989,8 +5403,8 @@ function GrnPageWorkflow() {
                       {customDocTypes.map((cat) => (
                         <option key={cat} value={cat}>
                           {cat}{" "}
-                          {cat.includes("PO") || cat.includes("Purchase Order")
-                            ? "(Compulsory *)"
+                          {cat.toLowerCase().includes("asn")
+                            ? "(Required)"
                             : "(Optional)"}
                         </option>
                       ))}
@@ -5009,9 +5423,15 @@ function GrnPageWorkflow() {
                   </div>
 
                   <Button
-                    onClick={() => {
+                    disabled={busyAction}
+                    onClick={async () => {
                       if (!pendingDocFile) {
                         toast.error("Please choose a file to attach");
+                        return;
+                      }
+                      const activeGrnId = grnId || localStorage.getItem("active_grn_id");
+                      if (!activeGrnId || ["undefined", "null"].includes(activeGrnId.toLowerCase())) {
+                        toast.error("Save the GRN header before uploading documents.");
                         return;
                       }
                       const fileType =
@@ -5023,15 +5443,42 @@ function GrnPageWorkflow() {
                                 .match(/\.(jpg|jpeg|png|webp|svg|gif)$/)
                             ? "image/jpeg"
                             : "application/octet-stream");
+                      try {
+                        setBusyAction(true);
+                        const formData = new FormData();
+                        formData.append("document_type", selectedDocCategory);
+                        formData.append("file", pendingDocFile);
+                        const saved = await api.uploadGrnDocument(activeGrnId, formData);
                       const newDoc: UploadedDocument = {
-                        category: selectedDocCategory,
-                        file_name: pendingDocFile.name,
-                        file_path: URL.createObjectURL(pendingDocFile),
-                        file_type: fileType,
-                      };
-                      setUploadedDocuments((prev) => [...prev, newDoc]);
-                      setPendingDocFile(null);
-                      toast.success(`Attached ${pendingDocFile.name} under ${selectedDocCategory}`);
+                          document_id: saved.document_id || saved.documentId,
+                          grn_id: saved.grn_id || saved.grnId || activeGrnId,
+                          category: saved.document_type || selectedDocCategory,
+                          file_name: saved.file_name || pendingDocFile.name,
+                          file_path: saved.file_path || saved.filePath || URL.createObjectURL(pendingDocFile),
+                          file_type: fileType,
+                        };
+                        setUploadedDocuments((prev) => {
+                          const duplicate = prev.some(
+                            (doc) =>
+                              doc.category.toLowerCase() === newDoc.category.toLowerCase() &&
+                              doc.file_name.toLowerCase() === newDoc.file_name.toLowerCase(),
+                          );
+                          return duplicate
+                            ? prev.map((doc) =>
+                                doc.category.toLowerCase() === newDoc.category.toLowerCase() &&
+                                doc.file_name.toLowerCase() === newDoc.file_name.toLowerCase()
+                                  ? newDoc
+                                  : doc,
+                              )
+                            : [...prev, newDoc];
+                        });
+                        setPendingDocFile(null);
+                        toast.success(`Saved ${newDoc.file_name} under ${newDoc.category}`);
+                      } catch (error) {
+                        toast.error(error instanceof Error ? error.message : "Unable to save document.");
+                      } finally {
+                        setBusyAction(false);
+                      }
                     }}
                     className="rounded-xl font-bold"
                   >
@@ -5052,30 +5499,26 @@ function GrnPageWorkflow() {
                     </tr>
                   </thead>
                   <tbody className="divide-y font-medium">
-                    {/* ALWAYS RENDER PO COMPULSORY ROW FIRST */}
+                    {/* ALWAYS RENDER ASN COMPULSORY ROW FIRST */}
                     {(() => {
-                      const poDoc = uploadedDocuments.find(
+                      const asnDoc = uploadedDocuments.find(
                         (d) =>
-                          d.category.toLowerCase().includes("po") ||
-                          d.category.toLowerCase().includes("purchase order"),
+                          d.category.toLowerCase().includes("asn"),
                       );
                       return (
-                        <tr className={!poDoc ? "bg-rose-50/30" : "hover:bg-muted/10"}>
+                        <tr className={!asnDoc ? "bg-rose-50/30" : "hover:bg-muted/10"}>
                           <td className="px-4 py-3.5">
                             <div className="flex items-center gap-2.5">
                               <FileText className="size-4 text-rose-600 shrink-0" />
                               <div>
                                 <span className="font-bold text-foreground text-xs block">
-                                  Purchase Order (PO) Document Copy
-                                </span>
-                                <span className="text-[10px] text-muted-foreground block">
-                                  Compulsory PO authorization copy for PO {header.po_number || "—"}
+                                  ASN Copy (Required)
                                 </span>
                               </div>
                             </div>
                           </td>
                           <td className="px-4 py-3.5">
-                            {poDoc ? (
+                            {asnDoc ? (
                               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 w-fit">
                                 ATTACHED ✓
                               </span>
@@ -5086,9 +5529,9 @@ function GrnPageWorkflow() {
                             )}
                           </td>
                           <td className="px-4 py-3.5 font-mono text-xs">
-                            {poDoc ? (
+                            {asnDoc ? (
                               <span className="font-bold text-foreground line-clamp-1">
-                                {poDoc.file_name}
+                                {asnDoc.file_name}
                               </span>
                             ) : (
                               <span className="text-muted-foreground text-[11px] font-normal italic">
@@ -5097,13 +5540,13 @@ function GrnPageWorkflow() {
                             )}
                           </td>
                           <td className="px-4 py-3.5 text-right">
-                            {poDoc ? (
+                            {asnDoc ? (
                               <div className="flex items-center justify-end gap-2">
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   className="rounded-xl text-xs font-bold border-primary/40 text-primary hover:bg-primary/10 h-7"
-                                  onClick={() => setViewingDocumentModal(poDoc)}
+                                  onClick={() => setViewingDocumentModal(asnDoc)}
                                 >
                                   <Eye className="mr-1 size-3" /> View Document
                                 </Button>
@@ -5113,9 +5556,9 @@ function GrnPageWorkflow() {
                                   className="rounded-xl text-xs text-rose-600 hover:bg-rose-50 h-7"
                                   onClick={() => {
                                     setUploadedDocuments((prev) =>
-                                      prev.filter((d) => d.file_name !== poDoc.file_name),
+                                      prev.filter((d) => d.file_name !== asnDoc.file_name),
                                     );
-                                    toast.info(`Removed ${poDoc.file_name}`);
+                                    toast.info(`Removed ${asnDoc.file_name}`);
                                   }}
                                 >
                                   Remove
@@ -5124,31 +5567,49 @@ function GrnPageWorkflow() {
                             ) : (
                               <label className="cursor-pointer inline-block">
                                 <span className="inline-flex items-center justify-center rounded-xl bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-xs font-bold shadow-sm">
-                                  <Upload className="mr-1 size-3" /> Attach PO File *
+                                  <Upload className="mr-1 size-3" /> Attach ASN File *
                                 </span>
                                 <input
                                   type="file"
                                   className="hidden"
-                                  onChange={(e) => {
+                                  onChange={async (e) => {
                                     const file = e.target.files?.[0];
                                     if (file) {
-                                      const fileType =
-                                        file.type ||
-                                        (file.name.toLowerCase().endsWith(".pdf")
-                                          ? "application/pdf"
-                                          : file.name
-                                                .toLowerCase()
-                                                .match(/\.(jpg|jpeg|png|webp|svg|gif)$/)
-                                            ? "image/jpeg"
-                                            : "application/octet-stream");
-                                      const newDoc: UploadedDocument = {
-                                        category: "Purchase Order Copy",
-                                        file_name: file.name,
-                                        file_path: URL.createObjectURL(file),
-                                        file_type: fileType,
-                                      };
-                                      setUploadedDocuments((prev) => [...prev, newDoc]);
-                                      toast.success(`Attached PO Copy: ${file.name}`);
+                                      const activeGrnId = grnId || localStorage.getItem("active_grn_id");
+                                      if (!activeGrnId) {
+                                        toast.error("Save the GRN header before uploading the ASN document.");
+                                        return;
+                                      }
+                                      try {
+                                        setBusyAction(true);
+                                        const formData = new FormData();
+                                        formData.append("document_type", "ASN Copy");
+                                        formData.append("file", file);
+                                        const saved = await api.uploadGrnDocument(activeGrnId, formData);
+                                        const newDoc: UploadedDocument = {
+                                          document_id: saved.document_id || saved.documentId,
+                                          grn_id: saved.grn_id || saved.grnId || activeGrnId,
+                                          category: saved.document_type || "ASN Copy",
+                                          file_name: saved.file_name || file.name,
+                                          file_path: saved.file_path || saved.filePath || "",
+                                          file_type: file.type,
+                                        };
+                                        setUploadedDocuments((prev) => [
+                                          ...prev.filter(
+                                            (doc) =>
+                                              !(
+                                                doc.category.toLowerCase().includes("asn") &&
+                                                doc.file_name.toLowerCase() === file.name.toLowerCase()
+                                              ),
+                                          ),
+                                          newDoc,
+                                        ]);
+                                        toast.success(`Saved ASN Copy: ${file.name}`);
+                                      } catch (error) {
+                                        toast.error(error instanceof Error ? error.message : "Unable to save ASN document.");
+                                      } finally {
+                                        setBusyAction(false);
+                                      }
                                     }
                                   }}
                                 />
@@ -5164,7 +5625,8 @@ function GrnPageWorkflow() {
                       .filter(
                         (d) =>
                           !d.category.toLowerCase().includes("po") &&
-                          !d.category.toLowerCase().includes("purchase order"),
+                          !d.category.toLowerCase().includes("purchase order") &&
+                          !d.category.toLowerCase().includes("asn"),
                       )
                       .map((optDoc, idx) => (
                         <tr
@@ -5230,7 +5692,12 @@ function GrnPageWorkflow() {
                   <ArrowLeft className="mr-2 size-4" /> Back to Step 4
                 </Button>
                 <Button
-                  disabled={busyAction}
+                  disabled={
+                    busyAction ||
+                    !uploadedDocuments.some(
+                      (d) => isPersistedDocument(d) && d.category.toLowerCase().includes("asn"),
+                    )
+                  }
                   onClick={() => void handleProceedFromPage5()}
                   className="rounded-xl font-bold px-6"
                 >
@@ -5284,9 +5751,10 @@ function GrnPageWorkflow() {
                 {(() => {
                   const goodMaterials =
                     selectedQrMaterialCode === "ALL"
-                      ? materials.filter((m, index, list) =>
-                          (m.good_quantity || 0) > 0 &&
-                          list.findIndex((item) => item.item_code === m.item_code) === index,
+                      ? materials.filter(
+                          (m, index, list) =>
+                            (m.good_quantity || 0) > 0 &&
+                            list.findIndex((item) => item.item_code === m.item_code) === index,
                         )
                       : materials.filter(
                           (m, index, list) =>
@@ -5304,23 +5772,16 @@ function GrnPageWorkflow() {
                   return goodMaterials.map((mat, matIdx) => {
                     const materialIndex = materials.indexOf(mat);
                     const rowKey =
-                      materialIndex >= 0 ? grnMaterialKey(mat, materialIndex) : grnMaterialKey(mat, matIdx);
+                      materialIndex >= 0
+                        ? grnMaterialKey(mat, materialIndex)
+                        : grnMaterialKey(mat, matIdx);
                     const matBatches = materialBatches[rowKey] || materialBatches[mat.item_code];
-                    const batchList =
+                    const bList =
                       matBatches && matBatches.length > 0
                         ? matBatches.filter((b) => (b.batch_quantity || 0) > 0)
-                        : [
-                            {
-                              batch_number: `BATCH-${mat.item_code}-001`,
-                              batch_quantity: mat.good_quantity,
-                            },
-                          ];
-                    const bList = batchList.slice(0, 1);
+                        : [];
                     return (
-                      <div
-                        key={rowKey}
-                        className="space-y-4 rounded-2xl border p-4 bg-muted/10"
-                      >
+                      <div key={rowKey} className="space-y-4 rounded-2xl border p-4 bg-muted/10">
                         <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
                           <div>
                             <div className="flex items-center gap-2">
@@ -5361,8 +5822,8 @@ function GrnPageWorkflow() {
                         ) : (
                           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                             {bList.map((b, idx) => {
-                              const qrInfo = qrLabels[rowKey] || {
-                                qr_id: `QR-MAT-${mat.item_code}-${materialIndex + 1 || matIdx + 1}`,
+                              const qrInfo = qrLabels[`${rowKey}:${b.batch_number}`] || {
+                                qr_id: `QR-MAT-${mat.item_code}-${b.batch_number}`,
                                 data_url: "",
                                 payload: buildMaterialQrPayload(mat.item_code, b, mat),
                               };
@@ -5420,7 +5881,6 @@ function GrnPageWorkflow() {
 
                                   <div className="text-xs text-left space-y-1 font-mono text-gray-800 border-t pt-2">
                                     <p>
-                                      <b>PO Number:</b> {header.po_number}
                                     </p>
                                     <p>
                                       <b>GRN Number:</b> {header.grn_number}
@@ -5488,7 +5948,7 @@ function GrnPageWorkflow() {
                   <div>
                     <h4 className="font-bold text-base text-rose-900 dark:text-rose-200 flex items-center gap-2">
                       <AlertTriangle className="size-5 text-rose-600 animate-pulse" />
-                      Damaged & Rejected Goods QR Labels (Quarantine Area)
+                      Quarantine QR Labels — Damaged, Rejected & QC Hold
                     </h4>
                     <p className="text-xs text-rose-700 dark:text-rose-300 mt-0.5">
                       <b>
@@ -5535,7 +5995,11 @@ function GrnPageWorkflow() {
                       >
                         <div className="border-b border-rose-200 dark:border-rose-900 pb-2 text-left">
                           <span className="text-[10px] font-extrabold uppercase tracking-widest text-rose-700 dark:text-rose-400">
-                            Damage Lot QR
+                            {dEntry.exception_type === "REJECTED"
+                              ? "Rejected Lot QR"
+                              : dEntry.exception_type === "QC_HOLD"
+                                ? "QC Hold Lot QR"
+                                : "Damage Lot QR"}
                           </span>
                           <h4 className="font-mono text-sm font-bold text-rose-950 dark:text-rose-100">
                             {dEntry.damage_lot_number}
@@ -5586,7 +6050,7 @@ function GrnPageWorkflow() {
                             <b>Material:</b> {dEntry.item_code} ({dEntry.material_name})
                           </p>
                           <p>
-                            <b>Damaged Qty:</b>{" "}
+                            <b>{dEntry.quantity_label || "Damaged Qty"}:</b>{" "}
                             <b className="text-rose-600 dark:text-rose-400">
                               {dEntry.damaged_quantity} {dEntry.uom}
                             </b>
@@ -5597,7 +6061,7 @@ function GrnPageWorkflow() {
                           <p>
                             <b>QA Status:</b>{" "}
                             <span className="bg-rose-100 dark:bg-rose-900 text-rose-800 dark:text-rose-200 px-1.5 py-0.5 rounded text-[10px] font-bold">
-                              DAMAGED
+                              {dEntry.exception_type || dEntry.qa_status || "DAMAGED"}
                             </span>
                           </p>
                           <p>
@@ -5651,24 +6115,28 @@ function GrnPageWorkflow() {
                   onClick={async () => {
                     setBusyAction(true);
                     try {
-                      // Rule: (Good Qty + Damaged Qty) >= PO Qty for ALL materials => COMPLETED
-                      //       (Good Qty + Damaged Qty) < PO Qty for ANY material => PARTIALLY COMPLETED
+                      // A GRN is complete only when every received quantity is
+                      // accounted for exactly once across all QC outcomes.
                       const currentMaterials = materials;
 
                       const processedMaterials = currentMaterials.map((m, idx) => {
                         const rowKey = grnMaterialKey(m, idx);
                         const good = Number(qualityApproved[rowKey] ?? m.good_quantity) || 0;
                         const damaged = Number(m.damaged_quantity) || 0;
-                        const poQty = Number(m.po_quantity) || 0;
-                        const combined = good + damaged;
-                        const balance = Math.max(0, poQty - combined);
+                        const rejected = Number(m.rejected_quantity) || 0;
+                        const held = Number(m.held_quantity) || 0;
+                        const received = Number(m.received_quantity) || 0;
+                        const accounted = good + rejected + damaged + held;
+                        const balance = Math.max(0, received - accounted);
                         return {
                           ...m,
                           good_quantity: good,
                           damaged_quantity: damaged,
-                          combined_received: combined,
+                          rejected_quantity: rejected,
+                          held_quantity: held,
+                          combined_received: accounted,
                           balance_quantity: balance,
-                          is_line_complete: combined >= poQty,
+                          is_line_complete: received > 0 && accounted === received,
                         };
                       });
 
@@ -5701,12 +6169,15 @@ function GrnPageWorkflow() {
                         materials: processedMaterials,
                       };
 
+                      let persistedStatus = computedStatus;
                       if (grnId || grnNumber) {
-                        await api.postGrn(
+                        const postedGrn = await api.postGrn(
                           grnId || grnNumber,
                           `Status: ${computedStatus} - Posted from GRN Console`,
                         );
+                        persistedStatus = postedGrn?.status || postedGrn?.grn?.status || computedStatus;
                       }
+                      newRecord.status = persistedStatus;
 
                       // Auto-dispatch damage notification to vendor and procurement if damaged materials exist
                       const damagedLines = processedMaterials.filter(
@@ -5718,10 +6189,9 @@ function GrnPageWorkflow() {
                           .map((m) => {
                             const materialIndex = processedMaterials.indexOf(m);
                             const rowKey =
-                              materialIndex >= 0
-                                ? grnMaterialKey(m, materialIndex)
-                                : m.item_code;
-                            const photo = (damagePhotos[rowKey] || damagePhotos[m.item_code]) as any;
+                              materialIndex >= 0 ? grnMaterialKey(m, materialIndex) : m.item_code;
+                            const photo = (damagePhotos[rowKey] ||
+                              damagePhotos[m.item_code]) as any;
                             return (
                               photo?.evidenceId ||
                               (photo?.evidenceIds &&
@@ -5780,7 +6250,7 @@ function GrnPageWorkflow() {
                       ]);
 
                       toast.success(`GOODS RECEIVING PROCESS COMPLETED!`, {
-                        description: `GRN ${grnNumber} saved with status: ${computedStatus} (${computedStatus === "COMPLETED" ? "100% PO Quantity Reconciled (Good + Damaged Qty matches PO)" : "Partial Delivery (Good + Damaged Qty < PO Qty)"}).`,
+                        description: `GRN ${grnNumber} saved with status: ${persistedStatus}. QC quantities are reconciled across accepted, rejected, damaged, and held categories.`,
                       });
 
                       localStorage.removeItem("active_grn_id");
@@ -5792,7 +6262,10 @@ function GrnPageWorkflow() {
                       setSearchTerm("");
                     } catch (e: any) {
                       console.error("GRN Posting error:", e);
-                      toast.error("Failed to post GRN", { description: e?.message || "An unexpected error occurred during GRN posting." });
+                      toast.error("Failed to post GRN", {
+                        description:
+                          e?.message || "An unexpected error occurred during GRN posting.",
+                      });
                     } finally {
                       setSaveStatus("idle");
                       setBusyAction(false);
@@ -5821,77 +6294,77 @@ function GrnPageWorkflow() {
         <Dialog open={!!enlargedQr} onOpenChange={() => setEnlargedQr(null)}>
           <DialogContent className="w-[min(96vw,1120px)] max-w-none rounded-2xl p-0 overflow-hidden">
             <div className="max-h-[92vh] overflow-y-auto">
-            <DialogHeader className="border-b bg-gradient-to-r from-primary/10 via-white to-sky-50 px-4 py-3 text-left sm:px-6">
-              <DialogTitle className="flex items-center gap-2 pr-8 text-base font-bold sm:text-lg">
-                <QrCode className="size-5 text-primary" /> Batch QR Code – {enlargedQr.title}
-              </DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground">
-                Point any smartphone camera or QR scanner at the high-definition QR code below to
-                read batch details.
-              </DialogDescription>
-            </DialogHeader>
+              <DialogHeader className="border-b bg-gradient-to-r from-primary/10 via-white to-sky-50 px-4 py-3 text-left sm:px-6">
+                <DialogTitle className="flex items-center gap-2 pr-8 text-base font-bold sm:text-lg">
+                  <QrCode className="size-5 text-primary" /> Batch QR Code – {enlargedQr.title}
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  Point any smartphone camera or QR scanner at the high-definition QR code below to
+                  read batch details.
+                </DialogDescription>
+              </DialogHeader>
 
-            <div className="grid gap-4 p-4 sm:p-6 lg:grid-cols-[minmax(300px,420px)_1fr] lg:items-stretch">
-            <div className="flex items-center justify-center rounded-2xl border border-primary/20 bg-white p-3 shadow-md">
-              <img
-                src={enlargedQr.data_url}
-                alt="Enlarged QR Code"
-                className="aspect-square w-full max-w-[min(72vw,380px)] object-contain"
-              />
-            </div>
+              <div className="grid gap-4 p-4 sm:p-6 lg:grid-cols-[minmax(300px,420px)_1fr] lg:items-stretch">
+                <div className="flex items-center justify-center rounded-2xl border border-primary/20 bg-white p-3 shadow-md">
+                  <img
+                    src={enlargedQr.data_url}
+                    alt="Enlarged QR Code"
+                    className="aspect-square w-full max-w-[min(72vw,380px)] object-contain"
+                  />
+                </div>
 
-            <div className="flex min-w-0 flex-col gap-3">
-            <div className="rounded-2xl border bg-muted/20 p-3 text-left sm:p-4">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                📱 Scanned Mobile Reader Live Output
-              </span>
-              <div className="mt-2 min-h-[260px] max-h-[44vh] overflow-auto rounded-xl border bg-black p-3 font-mono text-xs leading-relaxed text-emerald-400 shadow-inner whitespace-pre-wrap break-words">
-                {enlargedQr.payload}
+                <div className="flex min-w-0 flex-col gap-3">
+                  <div className="rounded-2xl border bg-muted/20 p-3 text-left sm:p-4">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                      📱 Scanned Mobile Reader Live Output
+                    </span>
+                    <div className="mt-2 min-h-[260px] max-h-[44vh] overflow-auto rounded-xl border bg-black p-3 font-mono text-xs leading-relaxed text-emerald-400 shadow-inner whitespace-pre-wrap break-words">
+                      {enlargedQr.payload}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <Button
+                      variant="outline"
+                      className="rounded-xl"
+                      onClick={() => setEnlargedQr(null)}
+                    >
+                      Close Preview
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="rounded-xl font-bold"
+                      onClick={() =>
+                        enlargedQr.qr_id.startsWith("DMG-") || enlargedQr.title.startsWith("DMG-")
+                          ? printSingleDamageQrLabel({
+                              damage_lot_id: `dmg_lot_${enlargedQr.itemCode}`,
+                              damage_lot_number: enlargedQr.title,
+                              item_code: enlargedQr.itemCode,
+                              material_name: enlargedQr.itemCode,
+                              damaged_quantity: enlargedQr.batch?.batch_quantity || 0,
+                              uom: "PCS",
+                              reason: "Damaged during receiving",
+                              qa_status: "REJECTED",
+                              quarantine_location: "QUARANTINE-ZONE-A",
+                              status: "DAMAGED",
+                              qr_id: enlargedQr.qr_id,
+                              qr_code: enlargedQr.qr_id,
+                              qr_payload: enlargedQr.payload,
+                              qr_data_url: enlargedQr.data_url,
+                            })
+                          : printSingleQrLabel(
+                              enlargedQr.title,
+                              enlargedQr.itemCode,
+                              enlargedQr.qr_id,
+                              enlargedQr.data_url,
+                            )
+                      }
+                    >
+                      <Printer className="mr-1.5 size-4" /> Print Label
+                    </Button>
+                  </div>
+                </div>
               </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <Button
-                variant="outline"
-                className="rounded-xl"
-                onClick={() => setEnlargedQr(null)}
-              >
-                Close Preview
-              </Button>
-              <Button
-                variant="outline"
-                className="rounded-xl font-bold"
-                onClick={() =>
-                  enlargedQr.qr_id.startsWith("DMG-") || enlargedQr.title.startsWith("DMG-")
-                    ? printSingleDamageQrLabel({
-                        damage_lot_id: `dmg_lot_${enlargedQr.itemCode}`,
-                        damage_lot_number: enlargedQr.title,
-                        item_code: enlargedQr.itemCode,
-                        material_name: enlargedQr.itemCode,
-                        damaged_quantity: enlargedQr.batch?.batch_quantity || 0,
-                        uom: "PCS",
-                        reason: "Damaged during receiving",
-                        qa_status: "REJECTED",
-                        quarantine_location: "QUARANTINE-ZONE-A",
-                        status: "DAMAGED",
-                        qr_id: enlargedQr.qr_id,
-                        qr_code: enlargedQr.qr_id,
-                        qr_payload: enlargedQr.payload,
-                        qr_data_url: enlargedQr.data_url,
-                      })
-                    : printSingleQrLabel(
-                        enlargedQr.title,
-                        enlargedQr.itemCode,
-                        enlargedQr.qr_id,
-                        enlargedQr.data_url,
-                      )
-                }
-              >
-                <Printer className="mr-1.5 size-4" /> Print Label
-              </Button>
-            </div>
-            </div>
-            </div>
             </div>
           </DialogContent>
         </Dialog>
@@ -6275,7 +6748,9 @@ function GrnPageWorkflow() {
                           (photo?.evidenceIds && photo.evidenceIds[photo.evidenceIds.length - 1])
                         );
                       })
-                      .filter((id: any): id is string => Boolean(id && typeof id === "string" && id.trim()));
+                      .filter((id: any): id is string =>
+                        Boolean(id && typeof id === "string" && id.trim()),
+                      );
 
                     const damagePayloadItems = activeDamageList.map((m: any, idx: number) => {
                       const code = m.item_code || m.itemCode || `ITEM-${idx + 1}`;
@@ -6391,7 +6866,7 @@ function GrnPageWorkflow() {
                 Goods Receipt Note Breakdown & Reconciliation
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
-                PO Reference: <b>{selectedGrnDetail.po_number || "—"}</b> • Supplier:{" "}
+                Supplier:{" "}
                 <b>
                   {selectedGrnDetail.supplier_name ||
                     selectedGrnDetail.supplier_company_name ||
@@ -6403,7 +6878,8 @@ function GrnPageWorkflow() {
             {/* STATUS RECONCILIATION RULE BANNER */}
             <div
               className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-between ${
-                selectedGrnDetail.status === "COMPLETED"
+                selectedReconciliation.received > 0 &&
+                selectedReconciliation.accounted === selectedReconciliation.received
                   ? "bg-emerald-50 text-emerald-900 border-emerald-300 dark:bg-emerald-950/30 dark:text-emerald-200 dark:border-emerald-800"
                   : "bg-amber-50 text-amber-900 border-amber-300 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-800"
               }`}
@@ -6411,9 +6887,9 @@ function GrnPageWorkflow() {
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
                 <span>
-                  {selectedGrnDetail.status === "COMPLETED"
-                    ? "✓ COMPLETED: Combined count (Good Qty + Damaged Qty) matches 100% of PO Quantity for all materials."
-                    : "⏳ PARTIALLY COMPLETED: Combined count (Good Qty + Damaged Qty) is less than PO Quantity (Pending Balance Remaining)."}
+                  {selectedReconciliation.received > 0 && selectedReconciliation.accounted === selectedReconciliation.received
+                    ? `✓ RECEIVED QUANTITY RECONCILED: ${selectedReconciliation.accounted} METER accounted across accepted, rejected, damaged, and held quantities.`
+                    : `⚠ RECONCILIATION PENDING: ${Math.max(0, selectedReconciliation.received - selectedReconciliation.accounted)} METER unaccounted.`}
                 </span>
               </div>
               <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-background border shadow-xs">
@@ -6464,11 +6940,12 @@ function GrnPageWorkflow() {
                   <thead className="bg-muted/60 font-bold text-muted-foreground text-[11px] uppercase border-b">
                     <tr>
                       <th className="p-2.5">Material Details</th>
-                      <th className="p-2.5 text-right">PO Qty</th>
+                      <th className="p-2.5 text-right">Received Qty</th>
                       <th className="p-2.5 text-right text-emerald-600">Good Qty</th>
                       <th className="p-2.5 text-right text-rose-600">Damaged Qty</th>
-                      <th className="p-2.5 text-right font-black">Good + Damaged</th>
-                      <th className="p-2.5 text-right text-amber-600">Pending Bal</th>
+                      <th className="p-2.5 text-right text-rose-600">Rejected Qty</th>
+                      <th className="p-2.5 text-right text-amber-600">Held Qty</th>
+                      <th className="p-2.5 text-right font-black">Accounted Qty</th>
                       <th className="p-2.5 text-center">Item Status</th>
                     </tr>
                   </thead>
@@ -6500,13 +6977,7 @@ function GrnPageWorkflow() {
                         const itemCode = m.item_code || m.itemCode || `MAT-00${i + 1}`;
                         const materialName = m.material_name || m.materialName || itemCode;
                         const uom = m.uom || "PCS";
-                        const poQty = Number(
-                          m.ordered_quantity ??
-                            m.po_quantity ??
-                            m.orderedQuantity ??
-                            m.poQuantity ??
-                            0,
-                        );
+                        const receivedQty = Number(m.received_quantity ?? m.receivedQuantity ?? 0);
                         const currentMaterial = materials[i];
                         const currentRowKey = currentMaterial
                           ? grnMaterialKey(currentMaterial, i)
@@ -6521,12 +6992,14 @@ function GrnPageWorkflow() {
                         const currentDamQty = Number(currentMaterial?.damaged_quantity ?? 0);
                         const goodQty = rawGoodQty > 0 ? rawGoodQty : currentGoodQty;
                         const damQty = rawDamQty > 0 ? rawDamQty : currentDamQty;
-                        const combined = goodQty + damQty;
-                        const bal =
-                          m.balance_quantity !== undefined && m.balance_quantity !== null
-                            ? Number(m.balance_quantity)
-                            : Math.max(0, poQty - combined);
-                        const isComplete = combined >= poQty;
+                        const rejectedQty = Number(
+                          m.rejected_quantity ?? m.rejectedQuantity ?? currentMaterial?.rejected_quantity ?? 0,
+                        );
+                        const heldQty = Number(
+                          m.held_quantity ?? m.heldQuantity ?? currentMaterial?.held_quantity ?? 0,
+                        );
+                        const accounted = goodQty + damQty + rejectedQty + heldQty;
+                        const isComplete = receivedQty > 0 && accounted === receivedQty;
 
                         return (
                           <tr key={itemCode || `mat_detail_${i}`} className="hover:bg-muted/20">
@@ -6535,7 +7008,7 @@ function GrnPageWorkflow() {
                               <span className="text-foreground text-xs">{materialName}</span>
                             </td>
                             <td className="p-2.5 text-right font-bold text-foreground">
-                              {poQty} {uom}
+                              {receivedQty} {uom}
                             </td>
                             <td className="p-2.5 text-right font-bold text-emerald-700">
                               {goodQty} {uom}
@@ -6544,10 +7017,13 @@ function GrnPageWorkflow() {
                               {damQty} {uom}
                             </td>
                             <td className="p-2.5 text-right font-black text-indigo-600">
-                              {combined} {uom}
+                              {rejectedQty} {uom}
                             </td>
                             <td className="p-2.5 text-right font-bold text-amber-600">
-                              {bal} {uom}
+                              {heldQty} {uom}
+                            </td>
+                            <td className="p-2.5 text-right font-black text-indigo-600">
+                              {accounted} {uom}
                             </td>
                             <td className="p-2.5 text-center">
                               <span

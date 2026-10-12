@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, date
 
 class DispatchItemDTO(BaseModel):
     material_code: str
@@ -48,6 +48,9 @@ class PackItemEntry(BaseModel):
     id: str | None = None
     material_code: str | None = None
     quantity_packed: float
+    package_number: str | None = None
+    package_type: str | None = None
+    package_count: int | None = None
 
 class PackItemsCommand(BaseModel):
     items: list[PackItemEntry]
@@ -67,6 +70,8 @@ class CreateDriverCommand(BaseModel):
     phone: str
     email: str | None = None
     license_type: str = "Heavy"
+    license_expiry_date: date
+    license_verified: bool = False
     is_active: bool = True
     photo_path: str | None = None
     address: str | None = None

@@ -1,8 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from enum import Enum
 import uuid
+import re
 
 class DriverStatus(str, Enum):
     AVAILABLE = "AVAILABLE"
@@ -19,6 +20,8 @@ class Driver:
     phone: str = ""
     email: str | None = None
     license_type: str = "Heavy"
+    license_expiry_date: date | None = None
+    license_verified: bool = False
     is_active: bool = True
     photo_path: str | None = None
     address: str | None = None
@@ -37,6 +40,8 @@ class Driver:
         phone: str,
         email: str | None = None,
         license_type: str = "Heavy",
+        license_expiry_date: date | None = None,
+        license_verified: bool = False,
         is_active: bool = True,
         photo_path: str | None = None,
         address: str | None = None,
@@ -47,13 +52,20 @@ class Driver:
     ) -> Driver:
         if not driver_name or not license_number:
             raise ValueError("Driver name and license number are required")
+        normalized_license = license_number.upper().replace(" ", "").replace("-", "")
+        if not re.fullmatch(r"[A-Z]{2}\d{2}(?:19|20)\d{2}\d{7}", normalized_license):
+            raise ValueError("Invalid Indian driving license number format")
+        if not license_expiry_date or license_expiry_date < date.today():
+            raise ValueError("A valid, non-expired license expiry date is required")
         return cls(
             id=driver_id or str(uuid.uuid4()),
             driver_name=driver_name,
-            license_number=license_number,
+            license_number=normalized_license,
             phone=phone,
             email=email,
             license_type=license_type,
+            license_expiry_date=license_expiry_date,
+            license_verified=license_verified,
             is_active=is_active,
             photo_path=photo_path,
             address=address,

@@ -9,6 +9,7 @@ class DockType(str, Enum):
     HAZARDOUS_ITEMS = "HAZARDOUS_ITEMS"
     ELECTRONICS = "ELECTRONICS"
     MAIN_RECEIVING = "MAIN_RECEIVING"
+    FINISHED_GOODS = "FINISHED_GOODS"
 
 
 class DockStatus(str, Enum):

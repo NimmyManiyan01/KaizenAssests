@@ -16,6 +16,11 @@ export const Route = createFileRoute("/dispatch-drivers")({
 });
 
 function DispatchDriversPage() {
+  const maskAadhaar = (value: string | null | undefined) => {
+    if (!value) return "N/A";
+    const digits = value.replace(/\D/g, "");
+    return digits.length >= 4 ? `XXXX-XXXX-${digits.slice(-4)}` : "XXXX-XXXX-XXXX";
+  };
   const [loading, setLoading] = useState(true);
   const [drivers, setDrivers] = useState<any[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -28,6 +33,8 @@ function DispatchDriversPage() {
     email: "",
     license_number: "",
     license_type: "Heavy",
+    license_expiry_date: "",
+    license_verified: false,
     aadhaar_number: "",
     address: "",
     photo_path: "",
@@ -66,6 +73,8 @@ function DispatchDriversPage() {
         email: "",
         license_number: "",
         license_type: "Heavy",
+        license_expiry_date: "",
+        license_verified: false,
         aadhaar_number: "",
         address: "",
         photo_path: "",
@@ -85,6 +94,8 @@ function DispatchDriversPage() {
       email: driver.email || "",
       license_number: driver.license_number || "",
       license_type: driver.license_type || "Heavy",
+      license_expiry_date: driver.license_expiry_date ? String(driver.license_expiry_date).slice(0, 10) : "",
+      license_verified: driver.license_verified === true,
       aadhaar_number: driver.aadhaar_number || "",
       address: driver.address || "",
       photo_path: driver.photo_path || "",
@@ -116,7 +127,7 @@ function DispatchDriversPage() {
           </Button>
           <Dialog open={isOpen} onOpenChange={(open) => { setIsOpen(open); if (!open) { setEditingId(null); } }}>
             <DialogTrigger asChild>
-              <Button className="rounded-xl shadow-glow" onClick={() => { setEditingId(null); setNewDriver({ driver_name: "", phone: "", email: "", license_number: "", license_type: "Heavy", aadhaar_number: "", address: "", photo_path: "", is_active: true }); setIsOpen(true); }}>
+              <Button className="rounded-xl shadow-glow" onClick={() => { setEditingId(null); setNewDriver({ driver_name: "", phone: "", email: "", license_number: "", license_type: "Heavy", license_expiry_date: "", license_verified: false, aadhaar_number: "", address: "", photo_path: "", is_active: true }); setIsOpen(true); }}>
                 <Plus className="size-4 mr-2" /> Register Driver
               </Button>
             </DialogTrigger>
@@ -187,12 +198,24 @@ function DispatchDriversPage() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <Label className="text-xs font-semibold uppercase text-muted-foreground">Aadhaar Number *</Label>
+                    <Label className="text-xs font-semibold uppercase text-muted-foreground">License Expiry Date *</Label>
+                    <Input type="date" value={newDriver.license_expiry_date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setNewDriver({ ...newDriver, license_expiry_date: e.target.value })} required className="mt-1.5 rounded-xl text-xs" />
+                  </div>
+                  <div className="flex items-end pb-2">
+                    <label className="flex items-center gap-2 text-xs font-semibold">
+                      <input type="checkbox" checked={newDriver.license_verified} onChange={(e) => setNewDriver({ ...newDriver, license_verified: e.target.checked })} className="rounded size-4 text-primary" />
+                      License verified
+                    </label>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs font-semibold uppercase text-muted-foreground">Aadhaar (Optional / Masked)</Label>
                     <Input
                       value={newDriver.aadhaar_number}
                       onChange={(e) => setNewDriver({ ...newDriver, aadhaar_number: e.target.value })}
                       placeholder="XXXX-XXXX-XXXX"
-                      required
                       className="mt-1.5 rounded-xl font-mono text-xs font-bold"
                     />
                   </div>
@@ -285,7 +308,7 @@ function DispatchDriversPage() {
                           <div className="font-mono font-bold text-xs">{driver.license_number}</div>
                           <div className="text-[11px] font-semibold text-amber-600">{licType}</div>
                         </td>
-                        <td className="px-4 py-3 font-mono text-xs">{driver.aadhaar_number || "N/A"}</td>
+                        <td className="px-4 py-3 font-mono text-xs">{maskAadhaar(driver.aadhaar_number)}</td>
                         <td className="px-4 py-3 text-xs max-w-xs truncate">{driver.address || "N/A"}</td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center rounded-lg px-2.5 py-1 text-xs font-semibold ${status === "ASSIGNED" ? "bg-blue-500/10 text-blue-600" : "bg-emerald-500/10 text-emerald-600"}`}>

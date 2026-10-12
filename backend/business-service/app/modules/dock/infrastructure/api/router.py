@@ -124,6 +124,7 @@ async def get_dock_availability(uow: UnitOfWork = Depends(get_uow)):
 async def list_docks(
     dock_type: Optional[str] = None,
     status: Optional[str] = None,
+    direction: Optional[str] = None,
     status_filter: Optional[str] = None,
     user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
@@ -135,6 +136,9 @@ async def list_docks(
         dock_type = None
 
     docks = await DockAllocationService.list_docks(uow.session, dock_type=dock_type, status=actual_status)
+    if direction:
+        direction_value = direction.strip().upper()
+        docks = [dock for dock in docks if dock.direction in (direction_value, "BOTH")]
     dock_ids = [d.id for d in docks]
     alloc_map = await DockAllocationService.get_active_allocations_for_docks(uow.session, dock_ids)
 
@@ -254,6 +258,7 @@ async def list_docks(
                 dock_code=d.dock_code,
                 dock_name=d.dock_name,
                 dock_type=d.dock_type,
+                direction=d.direction,
                 location=d.location,
                 description=d.description,
                 status=effective_status,
@@ -320,6 +325,7 @@ async def create_dock(
         dock_code=dock_code,
         dock_name=req.dock_name.strip(),
         dock_type=req.dock_type.strip().upper(),
+        direction=req.direction.strip().upper(),
         location=req.location,
         description=req.description,
         status=req.status.upper(),
@@ -426,6 +432,7 @@ async def get_dock_by_id(
         dock_code=dock.dock_code,
         dock_name=dock.dock_name,
         dock_type=dock.dock_type,
+        direction=dock.direction,
         location=dock.location,
         description=dock.description,
         status=dock.status,
@@ -457,6 +464,8 @@ async def update_dock(
         dock.dock_name = req.dock_name.strip()
     if req.dock_type is not None:
         dock.dock_type = req.dock_type.strip().upper()
+    if req.direction is not None:
+        dock.direction = req.direction.strip().upper()
     if req.location is not None:
         dock.location = req.location
     if req.description is not None:

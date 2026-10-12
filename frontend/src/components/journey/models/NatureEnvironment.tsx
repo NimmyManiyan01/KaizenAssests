@@ -2,36 +2,17 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { createFoliageGeometry, createTreeTexture } from "./treeGeometry";
+import { CityBuildings } from "./CityBuildings";
 
 type Vector = [number, number, number];
 type Instance = { position: Vector; scale: Vector; rotation: Vector; color: string };
 type Kind = "trunk" | "leaves" | "pine" | "rock";
 
-function smooth(value: number) {
-  const t = Math.max(0, Math.min(1, value));
-  return t * t * (3 - 2 * t);
-}
-
 // Continuous terrain remains below the entire facility and both vehicle approaches.
 function landscapeHeight(x: number, z: number) {
-  const sideClearance = smooth((Math.abs(x) - 38) / 34);
-  const rearClearance = smooth((-z - 300) / 45);
-  const approachClearance = smooth((Math.abs(x) - 9) / 20);
-  const clearance = Math.max(sideClearance, rearClearance) * approachClearance;
-  const hills = [
-    [-125, -65, 30, 68, 100],
-    [-145, -230, 43, 85, 110],
-    [125, -100, 36, 70, 120],
-    [160, -270, 48, 90, 95],
-    [-70, -405, 50, 100, 70],
-    [85, -430, 64, 105, 85],
-  ];
-  let height = 0;
-  for (const [cx, cz, peak, width, depth] of hills) {
-    height += peak * Math.exp(-(((x - cx) / width) ** 2 + ((z - cz) / depth) ** 2));
-  }
-  const detail = Math.sin(x * 0.055 + z * 0.026) * 2.1 + Math.cos(z * 0.071 - x * 0.023) * 1.2;
-  return -0.12 + clearance * Math.max(0, height + detail);
+  void x;
+  void z;
+  return -0.12;
 }
 
 function VegetationBatch({ items, kind }: { items: Instance[]; kind: Kind }) {
@@ -89,6 +70,7 @@ function WindGrass() {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const materialRef = useRef<THREE.ShaderMaterial>(null);
   const { geometry, matrices, colors } = useMemo(() => {
+    const grassCount = 2200;
     let seed = 9182;
     const random = () => {
       seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
@@ -96,30 +78,17 @@ function WindGrass() {
     };
     const transform = new THREE.Object3D();
     const color = new THREE.Color();
-    const matrices = new Float32Array(3200 * 16);
-    const colors = new Float32Array(3200 * 3);
+    const matrices = new Float32Array(grassCount * 16);
+    const colors = new Float32Array(grassCount * 3);
     const grassColors = ["#355b31", "#4f7738", "#698847", "#78964e"];
 
-    for (let i = 0; i < 3200; i++) {
-      let x: number;
-      let z: number;
-      if (i < 2200) {
-        const side = i % 2 ? 1 : -1;
-        // Keep the meadow visible around the apron, while leaving the vehicle
-        // lanes clear. A second, wider band gives the horizon a natural falloff.
-        const band = i % 5 === 0 ? 35 + random() * 32 : 18 + random() * 24;
-        x = side * band;
-        z = 24 - random() * 310;
-      } else {
-        // Scatter a second population over the actual hills. The terrain
-        // height lookup below places every tuft on the slope rather than at
-        // world Y=0, which makes the grass follow the contours naturally.
-        x = (random() - 0.5) * 360;
-        z = 35 - random() * 430;
-        if (Math.abs(x) < 24 && z > -285) {
-          x += x < 0 ? -28 : 28;
-        }
-      }
+    for (let i = 0; i < grassCount; i++) {
+      const side = i % 2 ? 1 : -1;
+      // Keep the meadow outside the warehouse footprint. The building floor
+      // spans roughly x=-30..30, so grass must begin beyond that boundary.
+      const band = i % 5 === 0 ? 42 + random() * 32 : 34 + random() * 24;
+      const x = side * band;
+      const z = 24 - random() * 310;
       const y = landscapeHeight(x, z) + 0.03;
       const height = 0.42 + random() * 1.35;
       transform.position.set(x, y, z);
@@ -167,7 +136,7 @@ function WindGrass() {
   useEffect(() => () => geometry.dispose(), [geometry]);
 
   return (
-    <instancedMesh ref={meshRef} args={[geometry, undefined, 3200]} castShadow receiveShadow>
+    <instancedMesh ref={meshRef} args={[geometry, undefined, 2200]} castShadow receiveShadow>
       <shaderMaterial
         ref={materialRef}
         vertexColors
@@ -200,6 +169,7 @@ function WindGrass() {
   );
 }
 
+
 export function NatureEnvironment() {
   const terrain = useMemo(() => {
     const geometry = new THREE.PlaneGeometry(600, 700, 160, 180);
@@ -207,20 +177,14 @@ export function NatureEnvironment() {
     geometry.translate(0, 0, -170);
     const vertices = geometry.attributes.position;
     const colors = new Float32Array(vertices.count * 3);
-    const grass = new THREE.Color("#718451");
-    const meadow = new THREE.Color("#9a9b66");
-    const stone = new THREE.Color("#848879");
+    const asphalt = new THREE.Color("#46515b");
     const color = new THREE.Color();
     for (let i = 0; i < vertices.count; i++) {
       const x = vertices.getX(i),
         z = vertices.getZ(i);
       const y = landscapeHeight(x, z);
       vertices.setY(i, y);
-      const patch = (Math.sin(x * 0.043 + z * 0.017) * Math.cos(z * 0.037) + 1) / 2;
-      color
-        .copy(grass)
-        .lerp(meadow, patch * 0.6)
-        .lerp(stone, smooth((y - 40) / 35) * 0.65);
+      color.copy(asphalt);
       color.toArray(colors, i * 3);
     }
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
@@ -325,11 +289,7 @@ export function NatureEnvironment() {
       <mesh geometry={terrain} receiveShadow>
         <meshStandardMaterial vertexColors roughness={0.98} metalness={0} />
       </mesh>
-      <WindGrass />
-      <VegetationBatch items={forest.trunks} kind="trunk" />
-      <VegetationBatch items={forest.leaves} kind="leaves" />
-      <VegetationBatch items={forest.pines} kind="pine" />
-      <VegetationBatch items={forest.rocks} kind="rock" />
+      <CityBuildings />
     </group>
   );
 }

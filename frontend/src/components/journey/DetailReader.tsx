@@ -6,9 +6,14 @@ import type { JourneyStage } from "./data/journeyStages";
 interface DetailReaderProps {
   stages: JourneyStage[];
   activeIndex: number;
+  asnJourney?: {
+    records: any[];
+    selectedId: string;
+    onSelect: (id: string) => void;
+  };
 }
 
-export function DetailReader({ stages, activeIndex }: DetailReaderProps) {
+export function DetailReader({ stages, activeIndex, asnJourney }: DetailReaderProps) {
   return (
     <div className="absolute inset-0 pointer-events-none z-30 flex items-center justify-between px-6 sm:px-12 lg:px-24">
       {stages.map((stage, idx) => {
@@ -55,6 +60,50 @@ export function DetailReader({ stages, activeIndex }: DetailReaderProps) {
             <p className="mt-4 text-sm sm:text-base text-slate-200 leading-relaxed font-normal max-w-md drop-shadow">
               {stage.description}
             </p>
+
+            {stage.id === "gate-entry" && asnJourney && (
+              <div className="mt-5 max-w-md rounded-xl border border-cyan-500/30 bg-slate-950/75 p-3 backdrop-blur-md">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-cyan-300">Live supplier ASN journey</span>
+                  <select
+                    aria-label="Select supplier ASN journey"
+                    value={asnJourney.selectedId}
+                    onChange={(event) => asnJourney.onSelect(event.target.value)}
+                    className="max-w-[11rem] rounded-md border border-cyan-500/30 bg-slate-900 px-2 py-1 text-[10px] font-mono text-white"
+                  >
+                    {!asnJourney.records.length && <option value="">No ASN available</option>}
+                    {asnJourney.records.map((asn) => (
+                      <option key={String(asn.id || asn.asn_number)} value={String(asn.id || asn.asn_number)}>
+                        {asn.asn_number || "—"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {(() => {
+                  const selected = asnJourney.records.find((asn) => String(asn.id || asn.asn_number) === asnJourney.selectedId);
+                  const gate = selected?.linked_gate_entry;
+                  const status = gate?.status || (selected ? "Awaiting Gate Entry" : "—");
+                  return (
+                    <>
+                    <div className="mb-3 flex flex-wrap gap-1.5 text-[9px] font-mono uppercase tracking-wide">
+                      {["ASN Created", "Vehicle Expected", "Vehicle Arrives", "Gate Verified", "Entry Approved"].map((label, index) => {
+                        const completed = selected && (index < 2 || (gate && index < 4) || status === "APPROVED" || status === "GATE_ENTRY_APPROVED");
+                        return <span key={label} className={`rounded border px-1.5 py-0.5 ${completed ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300" : "border-white/10 text-slate-500"}`}>{label}</span>;
+                      })}
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] font-mono">
+                      <span className="text-slate-400">ASN</span><strong className="text-white">{selected?.asn_number || "—"}</strong>
+                      <span className="text-slate-400">Supplier</span><strong className="truncate text-white">{selected?.supplier_name || "—"}</strong>
+                      <span className="text-slate-400">PO</span><strong className="text-white">{selected?.po_number || "—"}</strong>
+                      <span className="text-slate-400">Expected</span><strong className="text-white">{selected?.expected_arrival_at ? new Date(selected.expected_arrival_at).toLocaleDateString() : "—"}</strong>
+                      <span className="text-slate-400">Vehicle</span><strong className="text-white">{selected?.vehicle_number || "—"}</strong>
+                      <span className="text-slate-400">Workflow</span><strong className="text-cyan-300">{status}</strong>
+                    </div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
 
             {/* 5. In-Scene Floating Augmented Telemetry */}
             <div className="mt-6 flex flex-wrap items-center gap-3">
