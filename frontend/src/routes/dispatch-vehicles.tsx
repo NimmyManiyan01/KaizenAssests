@@ -29,11 +29,14 @@ function DispatchVehiclesPage() {
     capacity_tons: 10,
     rc_number: "",
     chassis_number: "",
-    insurance_valid: true,
+    insurance_valid: false,
+    insurance_expiry: "",
     insurance_doc: "",
-    fitness_valid: true,
+    fitness_valid: false,
+    fitness_expiry: "",
     fitness_doc: "",
-    permit_valid: true,
+    permit_valid: false,
+    permit_expiry: "",
     permit_doc: "",
     gps_available: true,
     is_active: true
@@ -72,11 +75,14 @@ function DispatchVehiclesPage() {
         capacity_tons: 10,
         rc_number: "",
         chassis_number: "",
-        insurance_valid: true,
+        insurance_valid: false,
+        insurance_expiry: "",
         insurance_doc: "",
-        fitness_valid: true,
+        fitness_valid: false,
+        fitness_expiry: "",
         fitness_doc: "",
-        permit_valid: true,
+        permit_valid: false,
+        permit_expiry: "",
         permit_doc: "",
         gps_available: true,
         is_active: true
@@ -97,10 +103,13 @@ function DispatchVehiclesPage() {
       rc_number: v.rc_number || "",
       chassis_number: v.chassis_number || "",
       insurance_valid: v.insurance_valid !== false,
+      insurance_expiry: v.insurance_expiry || "",
       insurance_doc: v.insurance_doc || "",
       fitness_valid: v.fitness_valid !== false,
+      fitness_expiry: v.fitness_expiry || "",
       fitness_doc: v.fitness_doc || "",
       permit_valid: v.permit_valid !== false,
+      permit_expiry: v.permit_expiry || "",
       permit_doc: v.permit_doc || "",
       gps_available: v.gps_available !== false,
       is_active: v.is_active !== false
@@ -131,7 +140,7 @@ function DispatchVehiclesPage() {
           </Button>
           <Dialog open={isOpen} onOpenChange={(open) => { setIsOpen(open); if (!open) setEditingId(null); }}>
             <DialogTrigger asChild>
-              <Button className="rounded-xl shadow-glow" onClick={() => { setEditingId(null); setNewVehicle({ vehicle_number: "", vehicle_type: "Truck", ownership_type: "Owned", capacity_tons: 10, rc_number: "", chassis_number: "", insurance_valid: true, insurance_doc: "", fitness_valid: true, fitness_doc: "", permit_valid: true, permit_doc: "", gps_available: true, is_active: true }); setIsOpen(true); }}>
+              <Button className="rounded-xl shadow-glow" onClick={() => { setEditingId(null); setNewVehicle({ vehicle_number: "", vehicle_type: "Truck", ownership_type: "Owned", capacity_tons: 10, rc_number: "", chassis_number: "", insurance_valid: false, insurance_expiry: "", insurance_doc: "", fitness_valid: false, fitness_expiry: "", fitness_doc: "", permit_valid: false, permit_expiry: "", permit_doc: "", gps_available: true, is_active: true }); setIsOpen(true); }}>
                 <Plus className="size-4 mr-2" /> Register Vehicle
               </Button>
             </DialogTrigger>
@@ -203,7 +212,8 @@ function DispatchVehiclesPage() {
                       <Input
                         value={newVehicle.rc_number}
                         onChange={(e) => setNewVehicle({ ...newVehicle, rc_number: e.target.value })}
-                        placeholder="KA-01-RC-9921"
+                        placeholder="KA01RC9921"
+                        required
                         className="mt-1.5 rounded-xl font-mono text-xs"
                       />
                     </div>
@@ -213,6 +223,7 @@ function DispatchVehiclesPage() {
                         value={newVehicle.chassis_number}
                         onChange={(e) => setNewVehicle({ ...newVehicle, chassis_number: e.target.value })}
                         placeholder="MA3EXXXXXXXXXX"
+                        required
                         className="mt-1.5 rounded-xl font-mono text-xs"
                       />
                     </div>
@@ -228,6 +239,7 @@ function DispatchVehiclesPage() {
                         <input type="checkbox" checked={newVehicle.insurance_valid} onChange={(e) => setNewVehicle({...newVehicle, insurance_valid: e.target.checked})} className="rounded size-4 text-primary" />
                         <span>Insurance Valid</span>
                       </label>
+                      <Input type="date" required value={newVehicle.insurance_expiry} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setNewVehicle({...newVehicle, insurance_expiry: e.target.value})} className="rounded-xl text-xs" aria-label="Insurance expiry date" />
                       <Input
                         type="file"
                         accept="image/*,.pdf"
@@ -237,6 +249,7 @@ function DispatchVehiclesPage() {
                         }}
                         className="rounded-xl text-xs file:mr-2 file:py-1 file:px-2 file:rounded-lg file:border-0 file:text-[10px] file:font-bold file:bg-primary file:text-primary-foreground cursor-pointer"
                       />
+                      {newVehicle.insurance_doc && <p className="text-[10px] text-muted-foreground truncate">Selected: {newVehicle.insurance_doc}</p>}
                     </div>
 
                     <div className="p-3 rounded-xl border bg-card space-y-2">
@@ -244,6 +257,7 @@ function DispatchVehiclesPage() {
                         <input type="checkbox" checked={newVehicle.fitness_valid} onChange={(e) => setNewVehicle({...newVehicle, fitness_valid: e.target.checked})} className="rounded size-4 text-primary" />
                         <span>Fitness Certificate Valid</span>
                       </label>
+                      <Input type="date" required value={newVehicle.fitness_expiry} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setNewVehicle({...newVehicle, fitness_expiry: e.target.value})} className="rounded-xl text-xs" aria-label="Fitness expiry date" />
                       <Input
                         type="file"
                         accept="image/*,.pdf"
@@ -253,6 +267,7 @@ function DispatchVehiclesPage() {
                         }}
                         className="rounded-xl text-xs file:mr-2 file:py-1 file:px-2 file:rounded-lg file:border-0 file:text-[10px] file:font-bold file:bg-primary file:text-primary-foreground cursor-pointer"
                       />
+                      {newVehicle.fitness_doc && <p className="text-[10px] text-muted-foreground truncate">Selected: {newVehicle.fitness_doc}</p>}
                     </div>
 
                     <div className="p-3 rounded-xl border bg-card space-y-2">
@@ -260,6 +275,7 @@ function DispatchVehiclesPage() {
                         <input type="checkbox" checked={newVehicle.permit_valid} onChange={(e) => setNewVehicle({...newVehicle, permit_valid: e.target.checked})} className="rounded size-4 text-primary" />
                         <span>Permit Valid</span>
                       </label>
+                      <Input type="date" required value={newVehicle.permit_expiry} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setNewVehicle({...newVehicle, permit_expiry: e.target.value})} className="rounded-xl text-xs" aria-label="Permit expiry date" />
                       <Input
                         type="file"
                         accept="image/*,.pdf"
@@ -269,6 +285,7 @@ function DispatchVehiclesPage() {
                         }}
                         className="rounded-xl text-xs file:mr-2 file:py-1 file:px-2 file:rounded-lg file:border-0 file:text-[10px] file:font-bold file:bg-primary file:text-primary-foreground cursor-pointer"
                       />
+                      {newVehicle.permit_doc && <p className="text-[10px] text-muted-foreground truncate">Selected: {newVehicle.permit_doc}</p>}
                     </div>
                   </div>
                 </div>

@@ -397,6 +397,7 @@ class GrnLineResponse(ApiModel):
 
     accepted_quantity: Decimal | None = None
     rejected_quantity: Decimal = Decimal("0")
+    held_quantity: Decimal = Decimal("0")
     quality_approved_quantity: Decimal = Decimal("0")
 
     balance_quantity: Decimal = Decimal("0")
@@ -481,6 +482,11 @@ class QualityInspectionLineResponse(ApiModel):
     quality_result: str | None = None
     accepted_quantity: Decimal | None = None
     rejected_quantity: Decimal | None = None
+    held_quantity: Decimal | None = None
+    damaged_quantity: Decimal | None = None
+    rejected_reason: str | None = None
+    damage_reason: str | None = None
+    held_reason: str | None = None
     quality_approved_quantity: Decimal | None = None
 
 

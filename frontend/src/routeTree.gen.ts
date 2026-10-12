@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AssemblyDashboardRouteImport } from './routes/assembly-dashboard'
+import { Route as CustomerOrdersRouteImport } from './routes/customer-orders'
 import { Route as DamageClaimsRouteImport } from './routes/damage-claims'
 import { Route as DispatchRouteImport } from './routes/dispatch'
 import { Route as DispatchDriversRouteImport } from './routes/dispatch-drivers'
@@ -46,6 +47,7 @@ import { Route as VehicleExitRouteImport } from './routes/vehicle-exit'
 import { Route as VehicleQueueRouteImport } from './routes/vehicle-queue'
 import { Route as WarehouseDashboardRouteImport } from './routes/warehouse-dashboard'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
+import { Route as AssemblyDispatchRouteImport } from './routes/assembly.dispatch'
 import { Route as AssemblyFinishedGoodsRouteImport } from './routes/assembly.finished-goods'
 import { Route as AssemblyMaterialRequestsRouteImport } from './routes/assembly.material-requests'
 import { Route as AssemblyOrdersRouteImport } from './routes/assembly.orders'
@@ -72,6 +74,11 @@ const IndexRoute = IndexRouteImport.update({
 const AssemblyDashboardRoute = AssemblyDashboardRouteImport.update({
   id: '/assembly-dashboard',
   path: '/assembly-dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CustomerOrdersRoute = CustomerOrdersRouteImport.update({
+  id: '/customer-orders',
+  path: '/customer-orders',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DamageClaimsRoute = DamageClaimsRouteImport.update({
@@ -250,6 +257,11 @@ const AdminUsersRoute = AdminUsersRouteImport.update({
   path: '/admin/users',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AssemblyDispatchRoute = AssemblyDispatchRouteImport.update({
+  id: '/assembly/dispatch',
+  path: '/assembly/dispatch',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AssemblyFinishedGoodsRoute = AssemblyFinishedGoodsRouteImport.update({
   id: '/assembly/finished-goods',
   path: '/assembly/finished-goods',
@@ -345,6 +357,7 @@ const SupplierAsnsNewRoute = SupplierAsnsNewRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/assembly-dashboard': typeof AssemblyDashboardRoute
+  '/customer-orders': typeof CustomerOrdersRoute
   '/damage-claims': typeof DamageClaimsRoute
   '/dispatch': typeof DispatchRoute
   '/dispatch-drivers': typeof DispatchDriversRoute
@@ -380,6 +393,7 @@ export interface FileRoutesByFullPath {
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
   '/admin/users': typeof AdminUsersRoute
+  '/assembly/dispatch': typeof AssemblyDispatchRoute
   '/assembly/finished-goods': typeof AssemblyFinishedGoodsRoute
   '/assembly/material-requests': typeof AssemblyMaterialRequestsRoute
   '/assembly/orders': typeof AssemblyOrdersRoute
@@ -401,6 +415,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/assembly-dashboard': typeof AssemblyDashboardRoute
+  '/customer-orders': typeof CustomerOrdersRoute
   '/damage-claims': typeof DamageClaimsRoute
   '/dispatch': typeof DispatchRoute
   '/dispatch-drivers': typeof DispatchDriversRoute
@@ -436,6 +451,7 @@ export interface FileRoutesByTo {
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
   '/admin/users': typeof AdminUsersRoute
+  '/assembly/dispatch': typeof AssemblyDispatchRoute
   '/assembly/finished-goods': typeof AssemblyFinishedGoodsRoute
   '/assembly/material-requests': typeof AssemblyMaterialRequestsRoute
   '/assembly/orders': typeof AssemblyOrdersRoute
@@ -458,6 +474,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/assembly-dashboard': typeof AssemblyDashboardRoute
+  '/customer-orders': typeof CustomerOrdersRoute
   '/damage-claims': typeof DamageClaimsRoute
   '/dispatch': typeof DispatchRoute
   '/dispatch-drivers': typeof DispatchDriversRoute
@@ -493,6 +510,7 @@ export interface FileRoutesById {
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
   '/admin/users': typeof AdminUsersRoute
+  '/assembly/dispatch': typeof AssemblyDispatchRoute
   '/assembly/finished-goods': typeof AssemblyFinishedGoodsRoute
   '/assembly/material-requests': typeof AssemblyMaterialRequestsRoute
   '/assembly/orders': typeof AssemblyOrdersRoute
@@ -516,6 +534,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/assembly-dashboard'
+    | '/customer-orders'
     | '/damage-claims'
     | '/dispatch'
     | '/dispatch-drivers'
@@ -551,6 +570,7 @@ export interface FileRouteTypes {
     | '/vehicle-queue'
     | '/warehouse-dashboard'
     | '/admin/users'
+    | '/assembly/dispatch'
     | '/assembly/finished-goods'
     | '/assembly/material-requests'
     | '/assembly/orders'
@@ -572,6 +592,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/assembly-dashboard'
+    | '/customer-orders'
     | '/damage-claims'
     | '/dispatch'
     | '/dispatch-drivers'
@@ -607,6 +628,7 @@ export interface FileRouteTypes {
     | '/vehicle-queue'
     | '/warehouse-dashboard'
     | '/admin/users'
+    | '/assembly/dispatch'
     | '/assembly/finished-goods'
     | '/assembly/material-requests'
     | '/assembly/orders'
@@ -628,6 +650,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/assembly-dashboard'
+    | '/customer-orders'
     | '/damage-claims'
     | '/dispatch'
     | '/dispatch-drivers'
@@ -663,6 +686,7 @@ export interface FileRouteTypes {
     | '/vehicle-queue'
     | '/warehouse-dashboard'
     | '/admin/users'
+    | '/assembly/dispatch'
     | '/assembly/finished-goods'
     | '/assembly/material-requests'
     | '/assembly/orders'
@@ -685,6 +709,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AssemblyDashboardRoute: typeof AssemblyDashboardRoute
+  CustomerOrdersRoute: typeof CustomerOrdersRoute
   DamageClaimsRoute: typeof DamageClaimsRoute
   DispatchRoute: typeof DispatchRoute
   DispatchDriversRoute: typeof DispatchDriversRoute
@@ -720,6 +745,7 @@ export interface RootRouteChildren {
   VehicleQueueRoute: typeof VehicleQueueRoute
   WarehouseDashboardRoute: typeof WarehouseDashboardRoute
   AdminUsersRoute: typeof AdminUsersRoute
+  AssemblyDispatchRoute: typeof AssemblyDispatchRoute
   AssemblyFinishedGoodsRoute: typeof AssemblyFinishedGoodsRoute
   AssemblyMaterialRequestsRoute: typeof AssemblyMaterialRequestsRoute
   AssemblyOrdersRoute: typeof AssemblyOrdersRoute
@@ -753,6 +779,13 @@ declare module '@tanstack/react-router' {
       path: '/assembly-dashboard'
       fullPath: '/assembly-dashboard'
       preLoaderRoute: typeof AssemblyDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/customer-orders': {
+      id: '/customer-orders'
+      path: '/customer-orders'
+      fullPath: '/customer-orders'
+      preLoaderRoute: typeof CustomerOrdersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/damage-claims': {
@@ -1000,6 +1033,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/assembly/dispatch': {
+      id: '/assembly/dispatch'
+      path: '/assembly/dispatch'
+      fullPath: '/assembly/dispatch'
+      preLoaderRoute: typeof AssemblyDispatchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/assembly/finished-goods': {
       id: '/assembly/finished-goods'
       path: '/assembly/finished-goods'
@@ -1125,6 +1165,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AssemblyDashboardRoute: AssemblyDashboardRoute,
+  CustomerOrdersRoute: CustomerOrdersRoute,
   DamageClaimsRoute: DamageClaimsRoute,
   DispatchRoute: DispatchRoute,
   DispatchDriversRoute: DispatchDriversRoute,
@@ -1160,6 +1201,7 @@ const rootRouteChildren: RootRouteChildren = {
   VehicleQueueRoute: VehicleQueueRoute,
   WarehouseDashboardRoute: WarehouseDashboardRoute,
   AdminUsersRoute: AdminUsersRoute,
+  AssemblyDispatchRoute: AssemblyDispatchRoute,
   AssemblyFinishedGoodsRoute: AssemblyFinishedGoodsRoute,
   AssemblyMaterialRequestsRoute: AssemblyMaterialRequestsRoute,
   AssemblyOrdersRoute: AssemblyOrdersRoute,

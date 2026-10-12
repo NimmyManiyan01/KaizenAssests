@@ -110,7 +110,11 @@ class DockAllocationService:
             query = query.where(DockMasterModel.status == status.strip().upper())
         query = query.order_by(DockMasterModel.dock_code)
         result = await session.execute(query)
-        return list(result.scalars().all())
+        docks = list(result.scalars().all())
+        if status and status.strip().upper() == DockStatus.AVAILABLE.value:
+            active_allocations = await DockAllocationService.get_active_allocations_for_docks(session, [dock.id for dock in docks])
+            return [dock for dock in docks if dock.id not in active_allocations]
+        return docks
 
     @staticmethod
     async def get_active_allocations_for_docks(

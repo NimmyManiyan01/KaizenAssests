@@ -854,6 +854,11 @@ function AssemblyOrdersPage() {
                     <DialogDescription className="text-xs text-muted-foreground mt-1">
                       {selectedOrder.product_name} ({selectedOrder.product_code}) · Line: {selectedOrder.assembly_line || selectedOrder.assigned_line || "Unassigned"}
                     </DialogDescription>
+                    {!selectedOrder.assigned_operator && (
+                      <p className="mt-2 text-xs font-semibold text-amber-700">
+                        Operator: Unassigned — assign an operator before production begins.
+                      </p>
+                    )}
                   </div>
 
                   <div className="text-right">
@@ -1013,7 +1018,7 @@ function AssemblyOrdersPage() {
                           </div>
 
                           <div className="rounded-xl border border-border bg-card p-3">
-                            <span className="text-[11px] font-medium text-muted-foreground">In Stock</span>
+                                <span className="text-[11px] font-medium text-muted-foreground">Materials Ready</span>
                             <div className="flex items-center justify-between mt-1">
                               <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
                                 {availableCount}
@@ -1045,7 +1050,7 @@ function AssemblyOrdersPage() {
                             <div className="mt-1">
                               {isAllAvailable ? (
                                 <Badge className="bg-emerald-500/15 text-emerald-700 border-emerald-500/30 text-xs font-semibold">
-                                  READY FOR ISSUE
+                                  MATERIALS RECEIVED
                                 </Badge>
                               ) : (
                                 <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30 text-xs font-semibold">
@@ -1135,7 +1140,7 @@ function AssemblyOrdersPage() {
                                           </Badge>
                                         ) : (
                                           <Badge className="bg-emerald-500/15 text-emerald-700 border-emerald-500/30 text-[10px]">
-                                            AVAILABLE
+                                            RECEIVED
                                           </Badge>
                                         )}
                                       </td>

@@ -89,6 +89,7 @@ type Dock = {
   dock_code: string;
   dock_name: string;
   dock_type: string;
+  direction?: "INBOUND" | "OUTBOUND" | "BOTH";
   location?: string | null;
   description?: string | null;
   status: "AVAILABLE" | "RESERVED" | "OCCUPIED" | "MAINTENANCE";
@@ -140,6 +141,7 @@ export const PREDEFINED_CATEGORIES = [
   { id: "ELECTRICAL", name: "Electrical" },
   { id: "RAW_MATERIAL", name: "Raw Material" },
   { id: "MAIN_RECEIVING", name: "Main Receiving" },
+  { id: "FINISHED_GOODS", name: "Finished Goods / FG" },
 ];
 
 const DOCK_TYPE_CONFIG: Record<string, { prefix: string; namePrefix: string }> = {
@@ -148,6 +150,7 @@ const DOCK_TYPE_CONFIG: Record<string, { prefix: string; namePrefix: string }> =
   ELECTRICAL: { prefix: "EL", namePrefix: "Electrical Dock" },
   ELECTRONICS: { prefix: "EC", namePrefix: "Electronics Dock" },
   MAIN_RECEIVING: { prefix: "MR", namePrefix: "Main Receiving Dock" },
+  FINISHED_GOODS: { prefix: "FG", namePrefix: "Finished Goods Dock" },
   CHEMICAL: { prefix: "CH", namePrefix: "Chemical/Hazardous Dock" },
   HAZARDOUS_ITEMS: { prefix: "HZ", namePrefix: "Chemical/Hazardous Dock" },
 };
@@ -196,6 +199,8 @@ function getCategoryLabel(dockType: string): string {
       return "RAW MATERIAL";
     case "MAIN_RECEIVING":
       return "MAIN RECEIVING";
+    case "FINISHED_GOODS":
+      return "FINISHED GOODS / FG";
     default:
       return dockType ? dockType.replaceAll("_", "/").toUpperCase() : "STANDARD";
   }
@@ -243,6 +248,7 @@ function DockManagement() {
   // Create New Dock State
   const [showCreateDock, setShowCreateDock] = useState(false);
   const [createDockType, setCreateDockType] = useState("RAW_MATERIAL");
+  const [createDockDirection, setCreateDockDirection] = useState("INBOUND");
   const [createDockCode, setCreateDockCode] = useState("");
   const [createDockName, setCreateDockName] = useState("");
   const [createLocation, setCreateLocation] = useState("");
@@ -328,8 +334,10 @@ function DockManagement() {
   // Edit & Maintenance Modals
   const [editDockModalDock, setEditDockModalDock] = useState<Dock | null>(null);
   const [editDockForm, setEditDockForm] = useState({
+    code: "",
     name: "",
     type: "RAW_MATERIAL",
+    direction: "INBOUND" as "INBOUND" | "OUTBOUND" | "BOTH",
     location: "",
     description: "",
   });
@@ -431,6 +439,7 @@ function DockManagement() {
         dock_code: String(data.get("dock_code") || createDockCode),
         dock_name: String(data.get("dock_name") || createDockName),
         dock_type: String(data.get("dock_type") || createDockType),
+        direction: String(data.get("direction") || createDockDirection),
         location: String(data.get("location") || ""),
         description: String(data.get("description") || ""),
         status: String(data.get("status") || "AVAILABLE"),
@@ -457,8 +466,10 @@ function DockManagement() {
     setActionBusy(true);
     try {
       await api.updateDock(editDockModalDock.id, {
+        dock_code: editDockForm.code.trim() || editDockModalDock.dock_code,
         dock_name: editDockForm.name.trim() || editDockModalDock.dock_name,
         dock_type: editDockForm.type,
+        direction: editDockForm.direction,
         location: editDockForm.location.trim() || undefined,
         description: editDockForm.description.trim() || undefined,
       });
@@ -583,7 +594,7 @@ function DockManagement() {
     const chemical = /chemical|hazard|solvent|flammable|fuel|paint|corrosive/.test(material);
     if (chemical) return ["CHEMICAL_HAZARDOUS", "CHEMICAL", "HAZARDOUS_ITEMS"].includes(type);
     if (["CHEMICAL_HAZARDOUS", "CHEMICAL", "HAZARDOUS_ITEMS"].includes(type)) return false;
-    return ["RAW_MATERIAL", "GENERAL", "MAIN_RECEIVING", "ELECTRICAL", "ELECTRONICS"].includes(type);
+    return ["RAW_MATERIAL", "GENERAL", "MAIN_RECEIVING", "ELECTRICAL", "ELECTRONICS", "FINISHED_GOODS"].includes(type);
   }
 
   async function handleReleaseDock() {
@@ -977,8 +988,10 @@ function DockManagement() {
                 onEdit={() => {
                   setEditDockModalDock(dock);
                   setEditDockForm({
+                    code: dock.dock_code,
                     name: dock.dock_name,
                     type: dock.dock_type,
+                    direction: dock.direction || "INBOUND",
                     location: dock.location || "",
                     description: dock.description || "",
                   });
@@ -1571,10 +1584,27 @@ function DockManagement() {
               />
             </div>
             <div>
+              <Label className="text-xs font-semibold">Dock Code</Label>
+              <Input value={editDockForm.code} readOnly className="mt-1 font-mono bg-muted/50" />
+            </div>
+            <div>
               <Label className="text-xs font-semibold">Dock Category</Label>
               <select
                 value={editDockForm.type}
-                onChange={(e) => setEditDockForm({ ...editDockForm, type: e.target.value })}
+                onChange={(e) => {
+                  const type = e.target.value;
+                  const generated = generateDockCodeAndName(
+                    type,
+                    docks.filter((dock) => dock.id !== editDockModalDock?.id),
+                  );
+                  setEditDockForm({
+                    ...editDockForm,
+                    type,
+                    code: generated.code,
+                    name: generated.name,
+                    direction: type === "FINISHED_GOODS" ? "OUTBOUND" : editDockForm.direction,
+                  });
+                }}
                 className="mt-1 w-full h-9 rounded-md border border-input bg-background px-3 text-xs"
               >
                 <option value="CHEMICAL_HAZARDOUS">Chemical / Hazardous</option>
@@ -1582,6 +1612,22 @@ function DockManagement() {
                 <option value="ELECTRICAL">Electrical</option>
                 <option value="RAW_MATERIAL">Raw Material</option>
                 <option value="MAIN_RECEIVING">Main Receiving</option>
+                <option value="FINISHED_GOODS">Finished Goods / FG</option>
+              </select>
+            </div>
+            <div>
+              <Label className="text-xs font-semibold">Dock Direction</Label>
+              <select
+                value={editDockForm.direction}
+                onChange={(e) => {
+                  const direction = e.target.value as "INBOUND" | "OUTBOUND" | "BOTH";
+                  setEditDockForm({ ...editDockForm, direction });
+                }}
+                className="mt-1 w-full h-9 rounded-md border border-input bg-background px-3 text-xs"
+              >
+                <option value="INBOUND">INBOUND</option>
+                <option value="OUTBOUND">OUTBOUND</option>
+                <option value="BOTH">BOTH</option>
               </select>
             </div>
             <div>
@@ -1697,6 +1743,24 @@ function DockManagement() {
                 <option value="ELECTRICAL">ELECTRICAL (Electrical — EL)</option>
                 <option value="ELECTRONICS">ELECTRONICS (Electronics — EC)</option>
                 <option value="MAIN_RECEIVING">MAIN_RECEIVING (Main Receiving — MR)</option>
+                <option value="FINISHED_GOODS">FINISHED_GOODS (Finished Goods / FG)</option>
+              </select>
+            </div>
+
+            <div>
+              <Label htmlFor="create_dock_direction" className="text-xs font-semibold">
+                Dock Direction
+              </Label>
+              <select
+                id="create_dock_direction"
+                name="direction"
+                value={createDockDirection}
+                onChange={(e) => setCreateDockDirection(e.target.value)}
+                className="mt-1.5 h-10 w-full rounded-xl border border-input bg-background px-3 text-xs font-medium focus:ring-2 focus:ring-primary/20"
+              >
+                <option value="INBOUND">INBOUND</option>
+                <option value="OUTBOUND">OUTBOUND</option>
+                <option value="BOTH">BOTH</option>
               </select>
             </div>
 

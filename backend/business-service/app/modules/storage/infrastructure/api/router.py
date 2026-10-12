@@ -565,12 +565,23 @@ async def enrich_putaway_tasks(tasks: list[PutawayTaskModel], session) -> list[d
             )
             if not mat_qr and not is_finished_goods:
                 try:
-                    qr_result = await session.execute(
-                        select(GrnBatchQrModel).where(
-                            func.upper(GrnBatchQrModel.item_code) == t.item_code.upper()
+                    batch_result = await session.execute(
+                        select(GrnBatchModel.id).where(
+                            GrnBatchModel.grn_line_id.in_(
+                                select(GrnLineModel.id).where(
+                                    GrnLineModel.grn_id == t.grn_id,
+                                    func.upper(GrnLineModel.item_code) == t.item_code.upper(),
+                                )
+                            ),
+                            func.upper(GrnBatchModel.batch_number) == func.upper(t.batch_number),
+                            GrnBatchModel.superseded.is_(False),
                         )
                     )
-                    qr_record = qr_result.scalars().first()
+                    batch_id = batch_result.scalar_one_or_none()
+                    qr_result = await session.execute(
+                        select(GrnBatchQrModel).where(GrnBatchQrModel.batch_id == batch_id)
+                    ) if batch_id else None
+                    qr_record = qr_result.scalars().first() if qr_result else None
                     mat_qr = qr_record.qr_code if qr_record else None
                 except Exception:
                     mat_qr = None
@@ -750,7 +761,90 @@ async def list_putaway_tasks(
         query = query.where(PutawayTaskModel.destination_store_id == store_id)
 
     result = await uow.session.execute(query)
-    tasks_list = list(result.scalars().all())
+    raw_tasks = list(result.scalars().all())
+
+    # Resolve the canonical accepted batches from GRN inspection data. If old
+    # posting paths created extra task rows, only batches whose cumulative
+    # quantity fits within the saved QC-approved quantity are eligible.
+    canonical_batches: dict[tuple[uuid.UUID, str], set[str]] = {}
+    grn_ids = {task.grn_id for task in raw_tasks if task.grn_id}
+    if grn_ids:
+        grn_result = await uow.session.execute(
+            select(GrnModel)
+            .options(selectinload(GrnModel.lines).selectinload(GrnLineModel.batches))
+            .where(GrnModel.id.in_(grn_ids))
+        )
+        grns_for_reconciliation = list(grn_result.scalars().all())
+        for grn in grns_for_reconciliation:
+            for line in grn.lines:
+                approved = line.quality_approved_quantity or line.good_quantity or Decimal("0")
+                remaining = approved
+                allowed: set[str] = set()
+                for batch in sorted(line.batches, key=lambda item: item.created_at):
+                    batch_number = str(batch.batch_number or "").strip().upper()
+                    quantity = batch.batch_quantity or Decimal("0")
+                    if batch.superseded or not batch_number or batch_number in allowed or remaining <= Decimal("0"):
+                        continue
+                    if quantity <= Decimal("0"):
+                        continue
+                    allowed.add(batch_number)
+                    remaining -= min(quantity, remaining)
+                if allowed:
+                    canonical_batches[(grn.id, line.item_code.upper())] = allowed
+
+    # Reconcile legacy duplicate active tasks against the canonical batch set.
+    # Keep the records for auditability, but make only approved batch tasks
+    # eligible for normal putaway.
+    if canonical_batches:
+        for task in raw_tasks:
+            item_key = (task.grn_id, task.item_code.upper())
+            allowed = canonical_batches.get(item_key)
+            if not allowed:
+                continue
+            batch = str(task.batch_number or "").strip().upper()
+            if batch not in allowed and task.status not in {"COMPLETED", "STORED", "CANCELLED", "VOID"}:
+                task.status = "CANCELLED"
+
+        # Preserve excess batch rows for auditability, but mark them
+        # superseded so they cannot be used for normal putaway or displayed as
+        # active batches. Canonical batches are selected by GRN link, creation
+        # order, and the QC-approved quantity above.
+        for grn in grns_for_reconciliation if grn_ids else []:
+            for line in grn.lines:
+                allowed = canonical_batches.get((grn.id, line.item_code.upper()))
+                if not allowed:
+                    continue
+                for batch in line.batches:
+                    if str(batch.batch_number or "").strip().upper() not in allowed:
+                        batch.superseded = True
+        await uow.session.flush()
+
+    # A GRN batch is the unit of normal putaway. Older completion paths could
+    # also leave a second line-level task for the same GRN/material. Prefer
+    # the persisted batch tasks and expose each batch only once.
+    batch_keys = {
+        (task.grn_id, task.item_code.upper(), str(task.batch_number).strip().upper())
+        for task in raw_tasks
+        if task.grn_id and task.batch_number and str(task.batch_number).strip()
+    }
+    batch_materials = {(grn_id, item_code) for grn_id, item_code, _ in batch_keys}
+    seen_keys: set[tuple[uuid.UUID | None, str, str]] = set()
+    tasks_list = []
+    for task in raw_tasks:
+        if task.status in {"CANCELLED", "VOID"}:
+            continue
+        item_key = (task.grn_id, task.item_code.upper())
+        batch = str(task.batch_number or "").strip().upper()
+        allowed_batches = canonical_batches.get(item_key)
+        if allowed_batches and batch not in allowed_batches:
+            continue
+        if not batch and item_key in batch_materials:
+            continue
+        key = (task.grn_id, task.item_code.upper(), batch)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        tasks_list.append(task)
     return await enrich_putaway_tasks(tasks_list, uow.session)
 
 
@@ -1850,6 +1944,26 @@ async def resolve_grn_qr(
     batch_number: str | None = None
     hu_number: str | None = None
 
+    # Batch QR identifiers are deterministic and contain the persisted batch
+    # number. Resolve them through GRN batch records first so lookup does not
+    # depend on a legacy material-level QR row.
+    if raw_code.upper().startswith("QR-BATCH-"):
+        batch_number = raw_code[len("QR-BATCH-"):].strip()
+        batch_result = await uow.session.execute(
+            select(GrnBatchModel).where(
+                func.upper(GrnBatchModel.batch_number) == batch_number.upper(),
+                GrnBatchModel.superseded.is_(False),
+            )
+        )
+        batch_obj = batch_result.scalars().first()
+        if batch_obj:
+            line_obj = await uow.session.get(GrnLineModel, batch_obj.grn_line_id)
+            if line_obj:
+                item_code = line_obj.item_code
+                grn_obj = await uow.session.get(GrnModel, line_obj.grn_id)
+                if grn_obj:
+                    grn_number = grn_obj.grn_number
+
     # Step 1: Parse JSON QR payload if applicable
     if (raw_code.startswith("{") and raw_code.endswith("}")) or (raw_code.startswith('"{') and raw_code.endswith('}"')):
         try:
@@ -1883,7 +1997,13 @@ async def resolve_grn_qr(
                         grn_number = grn_number or payload.get("grn_number")
                         batch_number = batch_number or payload.get("batch_number")
                 except Exception:
-                    pass
+                    # GRN batch labels are also emitted as human-readable
+                    # key/value text. Extract the batch identity from that
+                    # payload instead of resolving only the material code.
+                    for payload_line in b_qr.qr_payload.splitlines():
+                        key, separator, value = payload_line.partition(":")
+                        if separator and key.strip().lower() in {"batch", "batch number", "batch_number"}:
+                            batch_number = batch_number or value.strip()
 
     # Step 3: Match HandlingUnitModel
     hu_obj: HandlingUnitModel | None = None
@@ -2026,6 +2146,20 @@ async def resolve_grn_qr(
             )
         )
         task_obj = res_t.scalars().first()
+
+    # Normal GRN putaway tasks are batch-specific. A material-level QR such
+    # as QR-MAT-MAT-LSE-022 is not sufficient because another lot of the same
+    # material could otherwise be stored against this task.
+    required_batch = str(task_obj.batch_number or "").strip() if task_obj else ""
+    resolved_batch = str(batch_number or "").strip()
+    if required_batch and (
+        raw_code.upper().startswith("QR-MAT-")
+        or resolved_batch.upper() != required_batch.upper()
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Material QR must identify batch '{required_batch}'. Scan the QR label for that exact GRN batch.",
+        )
 
     # Calculate quantities. A batch QR represents only that batch, not the
     # entire GRN line (for example, 25 of a 100-unit receipt).

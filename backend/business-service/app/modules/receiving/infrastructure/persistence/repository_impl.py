@@ -952,13 +952,30 @@ class SqlAlchemyGrnRepository(GrnRepository):
                     raise ValueError("Receiving can start only after dock check-in is completed")
 
                 duplicate_result = await self._session.execute(
-                    select(GrnModel.id).where(
+                    select(GrnModel)
+                    .options(selectinload(GrnModel.lines))
+                    .where(
                         GrnModel.asn_id == asn_id_val,
                         GrnModel.status.notin_(["CANCELLED", "VOID"]),
-                    ).limit(1)
+                    )
+                    .limit(1)
                 )
-                if duplicate_result.first() is not None:
-                    raise ValueError("A GRN already exists for this ASN receiving event")
+                existing_for_asn = duplicate_result.scalar_one_or_none()
+                if existing_for_asn is not None:
+                    # This ASN already has the receiving event. Resume and
+                    # update that GRN instead of creating or rejecting a
+                    # second header when the operator clicks Save & Continue.
+                    existing_for_asn.dock_number = dock_number or existing_for_asn.dock_number or assignment.dock_number
+                    existing_for_asn.gate_entry_id = _uuid_or_none(gate.id)
+                    existing_for_asn.gate_entry_number = gate.gate_entry_number
+                    existing_for_asn.vehicle_number = vehicle_number or existing_for_asn.vehicle_number
+                    existing_for_asn.driver_name = driver_name or existing_for_asn.driver_name
+                    existing_for_asn.warehouse_id = warehouse_id or existing_for_asn.warehouse_id
+                    existing_for_asn.asn_id = asn_id_val
+                    existing_for_asn.asn_number = asn.asn_number
+                    existing_for_asn.updated_at = now
+                    await self._session.flush()
+                    return existing_for_asn
         if not is_unexpected and not asn_receipt and (po_uuid or po_number):
             asn = await self.find_latest_asn_for_po(po_id=po_id, po_number=po_number)
             if asn:
@@ -1258,10 +1275,15 @@ class SqlAlchemyGrnRepository(GrnRepository):
         if not batch_quantities or any(q <= Decimal("0") for q in batch_quantities):
             raise ValueError("Batch quantities must be greater than zero")
         existing_batches = await self._session.execute(
-            select(GrnBatchModel.id).where(GrnBatchModel.grn_line_id == grn_line_id)
+            select(GrnBatchModel)
+            .where(GrnBatchModel.grn_line_id == grn_line_id)
+            .order_by(GrnBatchModel.created_at.asc())
         )
-        if existing_batches.first() is not None:
-            raise ValueError("Batches already exist for this GRN line")
+        persisted_batches = list(existing_batches.scalars().all())
+        if persisted_batches:
+            # Batch creation is idempotent. A retry returns the original
+            # records instead of generating another set of LOT identifiers.
+            return persisted_batches
         if sum(batch_quantities, Decimal("0")) != approved_qty:
             raise ValueError("Total batch quantity must equal the QC-accepted quantity")
 
@@ -1271,7 +1293,8 @@ class SqlAlchemyGrnRepository(GrnRepository):
         )
         wh_name = wh_res.scalar_one_or_none() or "Main Warehouse"
 
-        # 1. Reuse existing QR for material if present, otherwise create a new material QR
+        # 1. Reuse the material-level QR if present. Batch QRs below are
+        # intentionally one-per-batch and may share the same item_code.
         qr_res = await self._session.execute(
             select(GrnBatchQrModel).where(GrnBatchQrModel.item_code == line.item_code)
         )
@@ -1315,6 +1338,23 @@ class SqlAlchemyGrnRepository(GrnRepository):
             self._session.add(batch)
             created_batches.append(batch)
 
+        await self._session.flush()
+        for batch in created_batches:
+            self._session.add(GrnBatchQrModel(
+                id=uuid.uuid4(),
+                batch_id=batch.id,
+                item_code=line.item_code,
+                qr_code=f"QR-BATCH-{batch.batch_number}",
+                qr_payload=(
+                    f"Material Code: {line.item_code}\n"
+                    f"Material Name: {line.material_name or line.item_code}\n"
+                    f"GRN ID: {line.grn_id}\n"
+                    f"Batch: {batch.batch_number}\n"
+                    f"Batch Quantity: {batch.batch_quantity} {line.uom or 'PCS'}\n"
+                    "Status: QC_ACCEPTED"
+                ),
+                generated_at=now,
+            ))
         await self._session.flush()
         return created_batches
 
@@ -1360,7 +1400,9 @@ class SqlAlchemyGrnRepository(GrnRepository):
             if line.damage_evidence:
                 ev_qty = max((e.damaged_quantity for e in line.damage_evidence if e.damaged_quantity), default=Decimal("0"))
 
-            damaged_qty = line.damaged_quantity if line.damaged_quantity > Decimal("0") else (line.rejected_quantity if line.rejected_quantity > Decimal("0") else ev_qty)
+            # Rejected and held quantities are separate QC outcomes. Never
+            # substitute them for the actual damaged quantity.
+            damaged_qty = line.damaged_quantity if line.damaged_quantity > Decimal("0") else ev_qty
             if damaged_qty <= Decimal("0"):
                 continue
 
@@ -1510,6 +1552,16 @@ class SqlAlchemyGrnRepository(GrnRepository):
         grn = res.scalar_one_or_none()
         if not grn:
             raise ValueError(f"GRN not found: {grn_id}")
+
+        # ASN is the authoritative inbound document for this project.  A GRN
+        # cannot be completed until its ASN copy has been persisted.
+        has_asn_document = any(
+            "ASN" in str(document.document_type or "").upper()
+            and bool(document.file_path)
+            for document in (grn.documents or [])
+        )
+        if not has_asn_document:
+            raise ValueError("ASN document must be uploaded and saved before completing the GRN")
 
         now = datetime.now(timezone.utc)
         now_naive = now.replace(tzinfo=None)
@@ -1685,8 +1737,33 @@ class SqlAlchemyGrnRepository(GrnRepository):
 
                 # 3. Create putaway task for line or batches
                 if line.batches and len(line.batches) > 0:
+                    eligible_remaining = post_qty
+                    seen_batch_numbers: set[str] = set()
                     for batch in line.batches:
-                        if batch.batch_quantity and batch.batch_quantity > Decimal("0"):
+                        batch_key = str(batch.batch_number or "").strip().upper()
+                        if not batch_key or batch_key in seen_batch_numbers or eligible_remaining <= Decimal("0"):
+                            continue
+                        seen_batch_numbers.add(batch_key)
+                        eligible_quantity = min(batch.batch_quantity or Decimal("0"), eligible_remaining)
+                        if eligible_quantity > Decimal("0"):
+                            existing_task = await self._session.execute(
+                                text("""
+                                    SELECT id FROM putaway_task
+                                    WHERE grn_id = :grn_id
+                                      AND item_code = :code
+                                      AND UPPER(TRIM(COALESCE(batch_number, ''))) = UPPER(TRIM(:batch_number))
+                                      AND status NOT IN ('CANCELLED', 'VOID')
+                                    LIMIT 1
+                                """),
+                                {
+                                    "grn_id": grn.id,
+                                    "code": line.item_code,
+                                    "batch_number": batch.batch_number,
+                                },
+                            )
+                            if existing_task.scalar_one_or_none() is not None:
+                                eligible_remaining -= eligible_quantity
+                                continue
                             task_num = f"PT-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
                             await self._session.execute(
                                 text("""
@@ -1701,7 +1778,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
                                     "grn_num": grn.grn_number,
                                     "code": line.item_code,
                                     "name": line.material_name or line.item_code,
-                                    "qty": batch.batch_quantity,
+                                    "qty": eligible_quantity,
                                     "uom": line.uom or "PCS",
                                     "wh": grn.warehouse_id or "WH-MAIN",
                                     "source": f"RECEIVING_DOCK_{grn.dock_number or '1'}",
@@ -1714,6 +1791,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
                                     "batch_number": batch.batch_number,
                                 },
                             )
+                            eligible_remaining -= eligible_quantity
                 else:
                     task_num = f"PT-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
                     await self._session.execute(
@@ -1898,6 +1976,17 @@ class SqlAlchemyGrnRepository(GrnRepository):
         grn = result.scalar_one_or_none()
         if grn is None:
             return False
+
+        # Dock assignments are operational history and must not be deleted
+        # with the GRN.  The FK is intentionally RESTRICT, so clear the
+        # optional back-reference before removing the GRN.
+        assignments_result = await self._session.execute(
+            select(DockAssignmentModel).where(DockAssignmentModel.prepared_grn_id == grn_id)
+        )
+        for assignment in assignments_result.scalars().all():
+            assignment.prepared_grn_id = None
+        await self._session.flush()
+
         await self._session.delete(grn)
         await self._session.flush()
         return True

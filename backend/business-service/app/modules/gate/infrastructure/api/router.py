@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import asyncio
 import datetime
+import json
 import logging
 import os
 import re
@@ -435,6 +436,41 @@ async def create_supplier_asn(payload: dict = Body(...), uow: UnitOfWork = Depen
             uom=str(raw_line.get("uom") or "PCS"),
         ))
     await uow.session.flush()
+    material_summary = ", ".join(
+        f"{line.item_code} {line.shipped_quantity:g} {line.uom}" for line in asn.lines
+    ) or "—"
+    notification_message = (
+        f"ASN {asn.asn_number} dispatched by {asn.supplier_name or 'supplier'}. "
+        f"Vehicle: {asn.vehicle_number or '—'} · Driver: {asn.driver_name or '—'} "
+        f"({asn.driver_contact or '—'}) · ETA: "
+        f"{asn.expected_arrival_at.isoformat() if asn.expected_arrival_at else '—'} · "
+        f"Materials: {material_summary}"
+    )
+    for target_role in ("GATE_SECURITY", "WAREHOUSE"):
+        uow.session.add(NotificationModel(
+            user_role=target_role,
+            title=f"Supplier ASN Dispatched · {asn.asn_number}",
+            message=notification_message,
+            link="/vehicle-queue" if target_role == "GATE_SECURITY" else "/inventory?tab=putaway",
+            vehicle_number=asn.vehicle_number,
+            driver_name=asn.driver_name,
+            driver_phone=asn.driver_contact,
+            asn_number=asn.asn_number,
+            po_number=asn.po_number,
+            supplier_name=next((entry.get("supplier_name") for entry in asn.logistics if isinstance(entry, dict) and entry.get("type") == "asn_details"), None),
+            notification_type="SUPPLIER_ASN_DISPATCHED",
+            idempotency_key=f"SUPPLIER_ASN_DISPATCHED:{asn.id}:{target_role}",
+            payload_json=json.dumps({
+                "asn_id": str(asn.id),
+                "asn_number": asn.asn_number,
+                "supplier_name": next((entry.get("supplier_name") for entry in asn.logistics if isinstance(entry, dict) and entry.get("type") == "asn_details"), None),
+                "vehicle_number": asn.vehicle_number,
+                "driver_name": asn.driver_name,
+                "driver_contact": asn.driver_contact,
+                "expected_arrival_at": asn.expected_arrival_at.isoformat() if asn.expected_arrival_at else None,
+                "lines": [{"material": line.item_code, "quantity": float(line.shipped_quantity), "uom": line.uom} for line in asn.lines],
+            }),
+        ))
     return _asn_response(asn)
 
 
@@ -2501,11 +2537,21 @@ async def complete_receiving(
     except (ValueError, IndexError):
         next_task_sequence = 1
     tasks_created = 0
+    existing_task_items_result = await uow.session.execute(
+        select(PutawayTaskModel.grn_id, PutawayTaskModel.item_code).where(
+            PutawayTaskModel.grn_id == grn.id,
+            PutawayTaskModel.status.not_in(["CANCELLED", "VOID"]),
+        )
+    )
+    existing_task_items = {
+        (task_grn_id, item_code.upper())
+        for task_grn_id, item_code in existing_task_items_result.all()
+    }
     for grn_line in grn.lines:
         unit = units_by_receiving_line.get(receiving_by_code[grn_line.item_code].id)
         if unit is None and (grn_line.accepted_quantity or 0) > 0:
             raise HTTPException(status_code=409, detail=f"Generate a material label for {grn_line.item_code} before completing receiving")
-        if unit is not None:
+        if unit is not None and (grn.id, grn_line.item_code.upper()) not in existing_task_items:
             unit.grn_line_id = grn_line.id
             unit.grn_number = grn_number
             accepted = grn_line.accepted_quantity or 0
@@ -2540,6 +2586,7 @@ async def complete_receiving(
                 next_task_sequence += 1
                 unit.status = "PUTAWAY_PENDING"
                 tasks_created += 1
+                existing_task_items.add((grn.id, grn_line.item_code.upper()))
             unit.updated_at = completed_at
 
         # Phase 6: Automatic Quarantine record creation for damaged quantity

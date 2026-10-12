@@ -1,14 +1,23 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { JOURNEY_STAGES, type JourneyStage } from "./data/journeyStages";
 import { JourneyCanvas } from "./JourneyCanvas";
-import { DetailReader } from "./DetailReader";
-import { JourneyHUD } from "./JourneyHUD";
+import { api } from "@/lib/api-client";
 
 gsap.registerPlugin(ScrollTrigger);
 
 const OVERVIEW_SCROLL_FRACTION = 0.08;
+const CINEMATIC_TAGLINES = [
+  "Every Journey Begins at the Gate.",
+  "Every Material Counts.",
+  "The Right Material. The Right Place.",
+  "Complete Visibility. Total Control.",
+  "Turning Materials into Possibilities.",
+  "Quality Without Compromise.",
+  "Ready for the World.",
+  "Every Delivery, Seamlessly Dispatched.",
+] as const;
 
 interface WarehouseJourneyProps {
   stages?: JourneyStage[];
@@ -29,6 +38,146 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
 
   const introTweenRef = useRef<gsap.core.Tween | null>(null);
   const overviewRef = useRef({ val: 0 });
+  const [liveSnapshot, setLiveSnapshot] = useState<Record<string, number | string>>({});
+  const [asnRecords, setAsnRecords] = useState<any[]>([]);
+  const [selectedAsnId, setSelectedAsnId] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadAsnJourney = async () => {
+      const [asnResult, gateResult] = await Promise.allSettled([
+        api.getAsns(),
+        api.getGateEntries(),
+      ]);
+      if (cancelled) return;
+      const asns =
+        asnResult.status === "fulfilled" && Array.isArray(asnResult.value) ? asnResult.value : [];
+      const gates =
+        gateResult.status === "fulfilled" && Array.isArray(gateResult.value)
+          ? gateResult.value
+          : [];
+      const enriched = asns.map((asn: any) => {
+        const linked = gates
+          .filter(
+            (gate: any) =>
+              String(gate.asn_id || "") === String(asn.id || "") ||
+              String(gate.asn_number || "").toLowerCase() ===
+                String(asn.asn_number || "").toLowerCase(),
+          )
+          .sort((a: any, b: any) =>
+            String(b.created_at || "").localeCompare(String(a.created_at || "")),
+          )[0];
+        return { ...asn, linked_gate_entry: linked || null };
+      });
+      setAsnRecords(enriched);
+      setSelectedAsnId((current) =>
+        current && enriched.some((asn: any) => String(asn.id || asn.asn_number) === current)
+          ? current
+          : String(enriched[0]?.id || enriched[0]?.asn_number || ""),
+      );
+    };
+    void loadAsnJourney();
+    const timer = window.setInterval(() => void loadAsnJourney(), 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSnapshot = async () => {
+      const [gates, dashboard, inventory, assembly, dispatch, exits] = await Promise.allSettled([
+        api.getGateEntries(),
+        api.getDashboardStats(),
+        api.getWarehouseDashboardMetrics(),
+        api.getAssemblyDashboard(),
+        api.getDispatchKpis(),
+        api.getGateExitQueue(),
+      ]);
+      if (cancelled) return;
+
+      const value = (result: PromiseSettledResult<any>, ...keys: string[]) => {
+        if (result.status !== "fulfilled") return "—";
+        let current = result.value;
+        for (const key of keys) current = current?.[key];
+        return typeof current === "number" || typeof current === "string" ? current : "—";
+      };
+      const count = (result: PromiseSettledResult<any>) => {
+        if (result.status !== "fulfilled") return "—";
+        const data = result.value;
+        if (Array.isArray(data)) return data.length;
+        if (Array.isArray(data?.items)) return data.items.length;
+        return "—";
+      };
+
+      setLiveSnapshot({
+        gateEntries: count(gates),
+        grnRecords: value(dashboard, "stats", "totalGrns"),
+        inventoryAvailable: value(inventory, "available_quantity"),
+        inventoryReserved: value(inventory, "reserved_quantity"),
+        assemblyOrders: value(assembly, "kpis", "total_orders"),
+        assemblyYield: value(assembly, "kpis", "first_pass_yield"),
+        dispatches: value(dispatch, "total"),
+        dispatchReady: value(dispatch, "ready"),
+        gateExits: count(exits),
+      });
+    };
+    void loadSnapshot();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const liveStages = useMemo(
+    () =>
+      stages.map((stage) => {
+        const telemetryByStage: Record<string, Record<string, string>> = {
+          "gate-entry": {
+            "GATE ENTRIES": String(liveSnapshot.gateEntries ?? "—"),
+          },
+          grn: {
+            "GRN RECORDS": String(liveSnapshot.grnRecords ?? "—"),
+          },
+          inventory: {
+            AVAILABLE: String(liveSnapshot.inventoryAvailable ?? "—"),
+            RESERVED: String(liveSnapshot.inventoryReserved ?? "—"),
+          },
+          assembly: {
+            "ACTIVE ORDERS": String(liveSnapshot.assemblyOrders ?? "—"),
+            "FIRST-PASS YIELD": String(liveSnapshot.assemblyYield ?? "—"),
+          },
+          dispatch: {
+            DISPATCHES: String(liveSnapshot.dispatches ?? "—"),
+            READY: String(liveSnapshot.dispatchReady ?? "—"),
+          },
+          "gate-exit": {
+            "EXIT QUEUE": String(liveSnapshot.gateExits ?? "—"),
+          },
+        };
+        const liveTelemetry = telemetryByStage[stage.id];
+        if (!liveTelemetry) return stage;
+        return {
+          ...stage,
+          telemetry: stage.telemetry.map((item) =>
+            liveTelemetry[item.label] ? { ...item, value: liveTelemetry[item.label] } : item,
+          ),
+        };
+      }),
+    [stages, liveSnapshot],
+  );
+
+  const taglineIndex = useMemo(() => {
+    const p = Math.max(0, (scrollProgress - 0.12) / 0.88);
+    if (p < 0.12) return 0;
+    if (p < 0.25) return 1;
+    if (p < 0.38) return 2;
+    if (p < 0.55) return 3;
+    if (p < 0.68) return 4;
+    if (p < 0.78) return 5;
+    if (p < 0.9) return 6;
+    return 7;
+  }, [scrollProgress]);
 
   // Mouse Parallax Lerp
 
@@ -80,16 +229,15 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
       const current = displayedProgress.current;
       const next = reducedMotion
         ? target
-        : current + (target - current) * (1 - Math.exp(-16 * delta));
+        : current + (target - current) * (1 - Math.exp(-20 * delta));
       const settled = Math.abs(target - next) < 0.00001;
       displayedProgress.current = settled ? target : next;
       setScrollProgress(displayedProgress.current);
-      setActiveIndex(
-        Math.min(
-          stages.length - 1,
-          Math.max(0, Math.round(displayedProgress.current * (stages.length - 1))),
-        ),
+      const nextIndex = Math.min(
+        stages.length - 1,
+        Math.max(0, Math.round(displayedProgress.current * (stages.length - 1))),
       );
+      setActiveIndex((currentIndex) => (currentIndex === nextIndex ? currentIndex : nextIndex));
       frame = settled ? null : requestAnimationFrame(tick);
     };
     wakeScrollRef.current = () => {
@@ -151,6 +299,24 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
     };
   }, [mounted, stages.length]);
 
+  useEffect(() => {
+    const replay = () => {
+      introTweenRef.current?.kill();
+      targetProgress.current = 0;
+      displayedProgress.current = 0;
+      overviewRef.current.val = 0;
+      setScrollProgress(0);
+      setOverviewProgress(0);
+      setActiveIndex(0);
+      wakeScrollRef.current?.();
+      requestAnimationFrame(() => {
+        ScrollTrigger.refresh();
+      });
+    };
+    window.addEventListener("kaizenx:replay-journey", replay);
+    return () => window.removeEventListener("kaizenx:replay-journey", replay);
+  }, []);
+
   // Jump to specific stage
   const handleSelectStage = useCallback(
     (index: number) => {
@@ -196,26 +362,27 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
     <section
       id="wms-flow-journey"
       ref={pinRef}
-      className="relative w-full h-screen overflow-hidden bg-slate-950 select-none"
+      className="relative w-full h-screen overflow-hidden bg-[#e7e9e5] select-none"
     >
       {/* 3D WebGL Canvas Layer (Single Persistent World) */}
       {mounted ? (
         <JourneyCanvas
-          stages={stages}
+          stages={liveStages}
           activeIndex={activeIndex}
           scrollProgress={scrollProgress}
           overviewProgress={overviewProgress}
+          selectedAsn={asnRecords.find((asn) => String(asn.id || asn.asn_number) === selectedAsnId)}
           mouseOffset={mouseOffset}
           onSelectStage={handleSelectStage}
         />
       ) : (
-        <div className="absolute inset-0 bg-slate-950 flex items-center justify-center">
+        <div className="absolute inset-0 bg-[#e7e9e5] flex items-center justify-center">
           <div className="size-8 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
         </div>
       )}
 
-      {/* Warehouse Front Facade & Entry Badge */}
-      {overviewProgress < 0.85 ? (
+      {/* Cinematic tagline overlay replaces the operational landing HUD. */}
+      {false ? (
         <div className="pointer-events-none absolute inset-x-0 top-24 sm:top-28 text-center transition-all duration-500">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-950/70 border border-cyan-500/40 backdrop-blur-md mb-2.5 shadow-[0_0_15px_rgba(6,182,212,0.3)]">
             <span className="size-2 rounded-full bg-cyan-400 animate-pulse" />
@@ -230,19 +397,19 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
             Full view of warehouse front facade, security gate, and inbound approach
           </p>
         </div>
-      ) : (
-        <DetailReader stages={stages} activeIndex={activeIndex} />
-      )}
+      ) : null}
 
-      {/* Bottom Interactive HUD & Rail */}
-      <JourneyHUD
-        stages={stages}
-        activeIndex={activeIndex}
-        scrollProgress={scrollProgress}
-        overviewProgress={overviewProgress}
-        onSelectStage={handleSelectStage}
-        onToggleTopView={handleToggleTopView}
-      />
+      <div
+        hidden={scrollProgress < 0.12}
+        className="pointer-events-none absolute inset-x-0 top-1/2 z-30 flex -translate-y-1/2 justify-center px-6 text-center"
+      >
+        <p
+          key={taglineIndex}
+          className="max-w-3xl animate-in fade-in duration-700 text-3xl font-semibold tracking-tight text-white drop-shadow-[0_3px_18px_rgba(0,0,0,0.9)] sm:text-5xl lg:text-6xl"
+        >
+          {CINEMATIC_TAGLINES[taglineIndex]}
+        </p>
+      </div>
     </section>
   );
 }

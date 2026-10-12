@@ -23,6 +23,13 @@ export const Route = createFileRoute("/dispatch-transport-allocation")({
   component: DispatchTransportAllocationPage,
 });
 
+const formatDisplayDate = (value: string | null | undefined) => {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }).format(date);
+};
+
 function DispatchTransportAllocationPage() {
   const [loading, setLoading] = useState(true);
   const [dispatches, setDispatches] = useState<any[]>([]);
@@ -139,14 +146,17 @@ function DispatchTransportAllocationPage() {
     const isActive = drv.is_active !== false;
     const isAvailable = String(drv.status || "").toUpperCase() === "AVAILABLE";
     const hasValidLicense = Boolean(drv.license_number);
-    return isActive && isAvailable && hasValidLicense;
+    const hasCurrentLicense = Boolean(drv.license_expiry_date) && new Date(drv.license_expiry_date) >= new Date(new Date().toDateString());
+    return isActive && isAvailable && hasValidLicense && drv.license_verified === true && hasCurrentLicense;
   });
 
   const eligibleVehicles = vehicles.filter((veh) => {
     const isActive = veh.is_active !== false;
     const isAvailable = String(veh.status || "").toUpperCase() === "AVAILABLE";
     const hasSufficientCapacity = Number(veh.capacity_tons) >= dispatchTons;
-    return isActive && isAvailable && hasSufficientCapacity;
+    const today = new Date().toISOString().slice(0, 10);
+    const documentsValid = veh.insurance_valid === true && veh.fitness_valid === true && veh.permit_valid === true && [veh.insurance_expiry, veh.fitness_expiry, veh.permit_expiry].every((expiry: string) => expiry && String(expiry).slice(0, 10) >= today);
+    return isActive && isAvailable && hasSufficientCapacity && documentsValid;
   });
 
   const handleAllocateBoth = async (e: React.FormEvent) => {
@@ -173,8 +183,6 @@ function DispatchTransportAllocationPage() {
       toast.success("Transport Allocation Successful!", {
         description: `Dispatch ${selectedDispatch?.dispatch_number} updated: Driver Assigned & Vehicle Assigned from Master.`,
       });
-      setSelectedDriverId("");
-      setSelectedVehicleId("");
       void loadData();
     } catch (err) {
       toast.error("Transport allocation failed", {
@@ -266,7 +274,13 @@ function DispatchTransportAllocationPage() {
                         {drv.driver_name || drv.name} (Mobile: {drv.phone || "—"})
                       </option>
                     ))}
+                    {!eligibleDrivers.length && <option value="" disabled>No available drivers found</option>}
                   </select>
+                  {!eligibleDrivers.length && !selectedDispatch?.driver_id && (
+                    <p className="mt-1 text-[11px] text-amber-600">
+                      No active, licensed, available drivers were returned from Driver Master. Register or release a driver before allocation.
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -378,7 +392,7 @@ function DispatchTransportAllocationPage() {
                     <span className="font-mono font-bold text-foreground">
                       {selectedDispatch.origin || "—"} → {selectedDispatch.destination || "—"}
                       {selectedDispatch.expected_delivery_date
-                        ? ` (Expected: ${selectedDispatch.expected_delivery_date})`
+                        ? ` (Expected: ${formatDisplayDate(selectedDispatch.expected_delivery_date)})`
                         : ""}
                     </span>
                   </div>

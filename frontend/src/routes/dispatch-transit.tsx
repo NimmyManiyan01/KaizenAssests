@@ -25,14 +25,7 @@ function DispatchTransitPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [res, driversRes, vehiclesRes] = await Promise.all([
-        api.getDispatches().catch(() => ({ items: [], total: 0 })),
-        api.getDrivers().catch(() => []),
-        api.getVehicles().catch(() => []),
-      ]);
-
-      const driverMap = new Map((driversRes || []).map((d: any) => [String(d.id), d.driver_name || d.name]));
-      const vehicleMap = new Map((vehiclesRes || []).map((v: any) => [String(v.id), v.vehicle_number]));
+      const res = await api.getDispatches().catch(() => ({ items: [], total: 0 }));
 
       const rawItems = res.items || [];
       const transitList = rawItems.filter((o: any) =>
@@ -40,8 +33,8 @@ function DispatchTransitPage() {
       );
 
       const enrichedList = transitList.map((o: any) => {
-        const dName = o.driver_name || driverMap.get(String(o.driver_id)) || (o.driver_id ? "Assigned Driver" : "Not Assigned");
-        const vNum = o.vehicle_number || vehicleMap.get(String(o.vehicle_id)) || (o.vehicle_id ? "Assigned Vehicle" : "Not Assigned");
+        const dName = o.driver_name || o.driver?.name || "Not Assigned";
+        const vNum = o.vehicle_number || o.vehicle?.vehicle_number || "Not Assigned";
         const originStr = o.warehouse_id || "Central Finished Goods Warehouse";
         const destStr = o.destination || o.customer_name || "Unspecified";
         const isInTransit = String(o.status || "").toUpperCase() === "IN_TRANSIT";

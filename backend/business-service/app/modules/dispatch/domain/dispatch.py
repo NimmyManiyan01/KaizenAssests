@@ -5,6 +5,7 @@ from enum import Enum
 import uuid
 
 class DispatchStatus(str, Enum):
+    PENDING = "PENDING"
     DRAFT = "DRAFT"
     STOCK_RESERVED = "STOCK_RESERVED"
     PICKING_IN_PROGRESS = "PICKING_IN_PROGRESS"
@@ -40,6 +41,9 @@ class DispatchItem:
     batch: str | None = None
     bin: str | None = None
     status: str = "PENDING"
+    package_number: str | None = None
+    package_type: str | None = None
+    package_count: int | None = None
 
 @dataclass
 class DispatchOrder:
@@ -73,6 +77,12 @@ class DispatchOrder:
     route_path: str | None = None
     route_deviation: str | None = None
     driver_status: str | None = None
+    gate_exit_vehicle_verified: bool = False
+    gate_exit_driver_verified: bool = False
+    gate_exit_loaded_goods_verified: bool = False
+    gate_exit_security_officer: str | None = None
+    gate_exit_remarks: str | None = None
+    gate_exit_completed_at: datetime | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     recorded_events: list[object] = field(default_factory=list, repr=False)
@@ -113,7 +123,7 @@ class DispatchOrder:
             warehouse_id=warehouse_id,
             dispatch_type=dispatch_type,
             items=items or [],
-            status=DispatchStatus.DRAFT,
+            status=DispatchStatus.PENDING,
             delivery_address=delivery_address,
             destination=destination,
             scheduled_date=scheduled_date,
@@ -140,7 +150,9 @@ class DispatchOrder:
             item.quantity_reserved = qty_to_reserve
             item.quantity_available = max(0.0, item.quantity_available - qty_to_reserve)
             item.status = "RESERVED"
-        self.status = DispatchStatus.STOCK_RESERVED
+        # Keep the order pending after reservation; packing remains the next
+        # operational stage in the existing dispatch workflow.
+        self.status = DispatchStatus.PENDING
         self.updated_at = datetime.now(timezone.utc)
 
     def start_picking(self) -> None:
@@ -188,6 +200,9 @@ class DispatchOrder:
                     if qty != item.quantity_picked:
                         raise ValueError(f"Packed quantity must equal picked quantity for {item.material_code}")
                     item.quantity_packed = qty
+                    item.package_number = p.get("package_number") or item.package_number
+                    item.package_type = p.get("package_type") or item.package_type
+                    item.package_count = p.get("package_count") or item.package_count
                     item.status = "PACKED"
                     break
             else:
@@ -218,7 +233,8 @@ class DispatchOrder:
 
     def verify_loading(self) -> None:
         for item in self.items:
-            item.quantity_loaded = float(item.quantity_packed or item.quantity_ordered)
+            if float(item.quantity_loaded or 0) != float(item.quantity_packed or item.quantity_ordered):
+                raise ValueError(f"Package for {item.material_code} has not been scanned and loaded")
             item.status = "LOADED"
         self.status = DispatchStatus.LOADING_VERIFIED
         self.updated_at = datetime.now(timezone.utc)

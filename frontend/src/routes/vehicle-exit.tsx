@@ -72,6 +72,21 @@ export interface OutboundGateExitException {
   resolved_at?: string;
   created_at: string;
   updated_at: string;
+  gate_exit_vehicle_verified?: boolean;
+  gate_exit_driver_verified?: boolean;
+  gate_exit_loaded_goods_verified?: boolean;
+  gate_exit_security_officer?: string | null;
+  gate_exit_remarks?: string | null;
+  gate_exit_completed_at?: string | null;
+  loaded_goods?: Array<{
+    product?: string;
+    material_code?: string;
+    quantity: number;
+    uom?: string;
+    package_count?: number | null;
+    package_number?: string | null;
+  }>;
+  loading_record_reference?: string | null;
 }
 
 export interface OutboundDispatch {
@@ -120,6 +135,7 @@ function VehicleExit() {
   const [selectedDispatch, setSelectedDispatch] = useState<OutboundDispatch | null>(null);
   const [vehicleVerified, setVehicleVerified] = useState(false);
   const [driverVerified, setDriverVerified] = useState(false);
+  const [loadedGoodsVerified, setLoadedGoodsVerified] = useState(false);
   const [remarks, setRemarks] = useState("");
 
   // Report Mismatch modal state
@@ -219,9 +235,16 @@ function VehicleExit() {
     setSelectedDispatch(dispatch);
     setVehicleVerified(false);
     setDriverVerified(false);
+    setLoadedGoodsVerified(false);
     setRemarks("");
     const storedProof = localStorage.getItem(`gate_exit_proof_${dispatch.id}`);
     setExitVehiclePhotoPreview(storedProof || null);
+    if (["GATE_OUT", "EXIT_COMPLETED", "DISPATCHED"].includes(dispatch.status)) {
+      setVehicleVerified(dispatch.gate_exit_vehicle_verified === true);
+      setDriverVerified(dispatch.gate_exit_driver_verified === true);
+      setLoadedGoodsVerified(dispatch.gate_exit_loaded_goods_verified === true);
+      setRemarks(dispatch.gate_exit_remarks || "");
+    }
   }
 
   function openReportMismatchModal(dispatch: OutboundDispatch) {
@@ -247,10 +270,14 @@ function VehicleExit() {
   async function handleConfirmExit() {
     if (!selectedDispatch) return;
 
-    if (!vehicleVerified || !driverVerified) {
+    if (!vehicleVerified || !driverVerified || !loadedGoodsVerified) {
       toast.error("Security verification required", {
-        description: "Both Vehicle Verified and Driver Verified checks must be confirmed before Gate Exit.",
+        description: "Vehicle, driver, and loaded-goods verification must be confirmed before Gate Exit.",
       });
+      return;
+    }
+    if (!exitVehiclePhotoPreview) {
+      toast.error("Vehicle photo proof required", { description: "Capture vehicle photo proof before approving Gate Exit." });
       return;
     }
 
@@ -262,6 +289,7 @@ function VehicleExit() {
       const res = await api.confirmOutboundGateExit(selectedDispatch.id, {
         vehicle_verified: vehicleVerified,
         driver_verified: driverVerified,
+        loaded_goods_verified: loadedGoodsVerified,
         remarks: remarks.trim() || undefined,
         vehicle_photo_base64: exitVehiclePhotoPreview || undefined,
       });
@@ -619,17 +647,19 @@ function VehicleExit() {
         </CardContent>
       </Card>
 
-      {/* Security Verification & Gate Exit Modal */}
+      {/* Completed Gate Exit Details / Security Verification Modal */}
       <Dialog open={Boolean(selectedDispatch && !reportModalOpen && !resolveModalOpen)} onOpenChange={(open) => !open && setSelectedDispatch(null)}>
         {selectedDispatch && (
           <DialogContent className="max-w-xl rounded-2xl p-6">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-lg font-bold">
                 <ShieldCheck className="size-5 text-primary" />
-                Security Verification & Gate Exit
+                {(["GATE_OUT", "EXIT_COMPLETED", "DISPATCHED"].includes(selectedDispatch.status)) ? "Completed Gate Exit Details" : "Security Verification & Gate Exit"}
               </DialogTitle>
               <DialogDescription>
-                Physically verify the vehicle plate and driver identity against the dispatch manifest before authorizing gate exit.
+                {(["GATE_OUT", "EXIT_COMPLETED", "DISPATCHED"].includes(selectedDispatch.status))
+                  ? "View the completed gate exit verification and dispatch details."
+                  : "Physically verify the vehicle plate and driver identity against the dispatch manifest before authorizing gate exit."}
               </DialogDescription>
             </DialogHeader>
 
@@ -662,16 +692,31 @@ function VehicleExit() {
                   <div>
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground uppercase tracking-wide">Expected Vehicle</span>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-6 px-1.5 text-[10px] font-semibold text-primary border-primary/30 hover:bg-primary-soft/60 rounded-lg flex items-center gap-1 shadow-xs"
-                        onClick={() => setShowExitCamera(true)}
-                        title="Capture Vehicle Photo Proof"
-                      >
-                        <Camera className="size-3 text-primary" /> Capture Photo Proof
-                      </Button>
+                      {selectedDispatch.status === "GATE_OUT" || selectedDispatch.status === "EXIT_COMPLETED" || selectedDispatch.status === "DISPATCHED" ? (
+                        exitVehiclePhotoPreview ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-6 px-1.5 text-[10px] font-semibold text-primary border-primary/30 hover:bg-primary-soft/60 rounded-lg flex items-center gap-1 shadow-xs"
+                            onClick={() => setShowPhotoZoom(true)}
+                            title="View saved vehicle photo"
+                          >
+                            <Camera className="size-3 text-primary" /> View Photo
+                          </Button>
+                        ) : null
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-6 px-1.5 text-[10px] font-semibold text-primary border-primary/30 hover:bg-primary-soft/60 rounded-lg flex items-center gap-1 shadow-xs"
+                          onClick={() => setShowExitCamera(true)}
+                          title="Capture Vehicle Photo Proof"
+                        >
+                          <Camera className="size-3 text-primary" /> Capture Photo Proof
+                        </Button>
+                      )}
                     </div>
                     <p className="font-mono font-bold text-sm text-foreground flex items-center gap-1 mt-0.5">
                       <Truck className="size-3.5 text-primary" /> {selectedDispatch.vehicle_number}
@@ -726,6 +771,31 @@ function VehicleExit() {
                       <Package className="size-3" /> Goods Summary
                     </span>
                     <p className="font-medium text-foreground mt-0.5">{selectedDispatch.items_summary}</p>
+                  </div>
+                )}
+
+                {selectedDispatch.loaded_goods && selectedDispatch.loaded_goods.length > 0 && (
+                  <div className="border-t pt-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground uppercase tracking-wide flex items-center gap-1">
+                        <Package className="size-3" /> Loaded Goods Summary
+                      </span>
+                      {selectedDispatch.loading_record_reference && (
+                        <span className="text-[10px] font-mono text-muted-foreground">
+                          Loading record: {selectedDispatch.loading_record_reference}
+                        </span>
+                      )}
+                    </div>
+                    <div className="rounded-lg border divide-y">
+                      {selectedDispatch.loaded_goods.map((good, index) => (
+                        <div key={`${good.material_code || good.product}-${index}`} className="grid grid-cols-[1fr_auto_auto] gap-3 px-3 py-2 text-xs">
+                          <span className="font-semibold">{good.product || good.material_code || "—"}</span>
+                          <span className="font-mono font-bold">{good.quantity} {good.uom || "Units"}</span>
+                          <span className="text-muted-foreground">{good.package_count ?? "—"} package{good.package_count === 1 ? "" : "s"}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-emerald-700 font-medium">{(["GATE_OUT", "EXIT_COMPLETED", "DISPATCHED"].includes(selectedDispatch.status)) ? "Completed loading record retained for audit." : "Verify these loaded quantities and packages before approving vehicle exit."}</p>
                   </div>
                 )}
 
@@ -785,12 +855,29 @@ function VehicleExit() {
               )}
 
               {/* Already Completed Notice */}
-              {selectedDispatch.status === "GATE_OUT" || selectedDispatch.status === "EXIT_COMPLETED" ? (
+              {selectedDispatch.status === "GATE_OUT" || selectedDispatch.status === "EXIT_COMPLETED" || selectedDispatch.status === "DISPATCHED" ? (
                 <div className="rounded-xl border border-success/30 bg-success-soft p-3 text-xs text-success font-medium flex items-center gap-2">
                   <CheckCircle2 className="size-4 shrink-0" />
                   <span>
-                    Gate Exit already completed on {selectedDispatch.gate_exit?.exit_completed_at ? new Date(selectedDispatch.gate_exit.exit_completed_at).toLocaleString() : "record"} by {selectedDispatch.gate_exit?.security_officer_id || "Security"}.
+                  Gate Exit completed successfully by {selectedDispatch.gate_exit_security_officer || "Security"}{selectedDispatch.gate_exit_completed_at ? ` on ${new Date(selectedDispatch.gate_exit_completed_at).toLocaleString()}` : ""}.
                   </span>
+                </div>
+              ) : null}
+              {selectedDispatch.status === "GATE_OUT" || selectedDispatch.status === "EXIT_COMPLETED" || selectedDispatch.status === "DISPATCHED" ? (
+                <div className="rounded-xl border bg-muted/20 p-4 space-y-3 text-xs">
+                  <h4 className="font-bold uppercase tracking-wider text-muted-foreground">Completed Gate Exit Audit</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div><span className="text-muted-foreground">Exit status</span><p className="font-bold">{selectedDispatch.status}</p></div>
+                    <div><span className="text-muted-foreground">Verified by</span><p className="font-semibold">{selectedDispatch.gate_exit_security_officer || "Security"}</p></div>
+                    <div><span className="text-muted-foreground">Exit date/time</span><p className="font-mono">{selectedDispatch.gate_exit_completed_at ? new Date(selectedDispatch.gate_exit_completed_at).toLocaleString() : "Not recorded"}</p></div>
+                    <div><span className="text-muted-foreground">Verification</span><p className="font-semibold">Vehicle, driver and goods verified</p></div>
+                  </div>
+                  <div className="space-y-2 border-t pt-2">
+                    <Label className="flex items-center gap-2 text-xs"><Checkbox checked={selectedDispatch.gate_exit_vehicle_verified === true} disabled /> Vehicle Verified</Label>
+                    <Label className="flex items-center gap-2 text-xs"><Checkbox checked={selectedDispatch.gate_exit_driver_verified === true} disabled /> Driver Verified</Label>
+                    <Label className="flex items-center gap-2 text-xs"><Checkbox checked={selectedDispatch.gate_exit_loaded_goods_verified === true} disabled /> Loaded Goods Verified</Label>
+                  </div>
+                  {selectedDispatch.gate_exit_remarks && <div className="border-t pt-2"><span className="text-muted-foreground">Saved security remarks</span><p className="mt-1 whitespace-pre-wrap">{selectedDispatch.gate_exit_remarks}</p></div>}
                 </div>
               ) : selectedDispatch.status === "GATE_EXIT_MISMATCH" ? (
                 <div className="flex justify-end pt-2">
@@ -888,7 +975,7 @@ function VehicleExit() {
                     <div className="flex items-center justify-between rounded-xl border border-dashed border-border/80 bg-muted/20 p-2.5 text-xs text-muted-foreground">
                       <div className="flex items-center gap-2">
                         <Camera className="size-4 text-muted-foreground shrink-0" />
-                        <span>Vehicle Photo Proof (Attach photo for security proof)</span>
+                        <span>Vehicle Photo Proof (Capture the actual vehicle plate and vehicle body)</span>
                       </div>
                       <Button
                         type="button"
@@ -910,6 +997,17 @@ function VehicleExit() {
                     <Truck className="size-4 text-primary" />
                     <span>
                       <strong>Vehicle Verified</strong> — Physical vehicle plate matches assigned manifest ({selectedDispatch.vehicle_number})
+                    </span>
+                  </Label>
+
+                  <Label className="flex cursor-pointer items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3 font-medium transition-colors hover:bg-emerald-50">
+                    <Checkbox
+                      checked={loadedGoodsVerified}
+                      onCheckedChange={(checked) => setLoadedGoodsVerified(checked === true)}
+                    />
+                    <Package className="size-4 text-emerald-600" />
+                    <span>
+                      <strong>Loaded Goods Verified</strong> — Product, quantity, and package count match the completed loading record.
                     </span>
                   </Label>
 
@@ -948,7 +1046,7 @@ function VehicleExit() {
               {selectedDispatch.status === "READY_FOR_GATE_EXIT" && (
                 <Button
                   className="rounded-xl shadow-glow"
-                  disabled={!vehicleVerified || !driverVerified || submitting}
+                  disabled={!vehicleVerified || !driverVerified || !loadedGoodsVerified || !exitVehiclePhotoPreview || submitting}
                   onClick={() => void handleConfirmExit()}
                 >
                   {submitting ? (

@@ -68,6 +68,8 @@ function NewAsnPage() {
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [driverName, setDriverName] = useState("");
   const [driverMobile, setDriverMobile] = useState("");
+  const [registeredVehicles, setRegisteredVehicles] = useState<any[]>([]);
+  const [registeredDrivers, setRegisteredDrivers] = useState<any[]>([]);
   const [lines, setLines] = useState<any[]>([
     { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" },
   ]);
@@ -93,6 +95,10 @@ function NewAsnPage() {
       api.getStores({ status: "ALL" }).catch(() => []),
     ]).then(([stores]) => { setWarehouses((stores || []).filter((store: any) => String(store.status || "ACTIVE").toUpperCase() === "ACTIVE")); });
     void api.getMaterials({ status: "ACTIVE" }).then((materials) => setMaterialCatalog((materials || []).map((material: any) => ({ ...material, id: material.id || material.material_id, code: material.code || material.material_code, name: material.name || material.material_name, uom: material.uom || material.base_uom || material.unit_of_measure })))).catch(() => setMaterialCatalog([]));
+    void Promise.all([api.getVehicles().catch(() => []), api.getDrivers().catch(() => [])]).then(([vehicles, drivers]) => {
+      setRegisteredVehicles((vehicles || []).filter((v: any) => v.is_active !== false && String(v.status || "AVAILABLE").toUpperCase() === "AVAILABLE"));
+      setRegisteredDrivers((drivers || []).filter((d: any) => d.is_active !== false && String(d.status || "ACTIVE").toUpperCase() === "ACTIVE"));
+    });
   }, []);
 
   const loadAsnData = async () => {
@@ -422,28 +428,14 @@ function NewAsnPage() {
                     <Label htmlFor="modal-vehicle-number" className="text-[10px] font-bold uppercase text-muted-foreground">
                       Vehicle Number *
                     </Label>
-                    <Input
-                      id="modal-vehicle-number"
-                      required
-                      placeholder="e.g. KA 01 AB 4582"
-                      value={vehicleNumber}
-                      onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())}
-                      className={inputClass}
-                    />
+                    <select id="modal-vehicle-number" required value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} className={`${inputClass} w-full px-3`}><option value="">Select registered vehicle</option>{registeredVehicles.map((v) => <option key={v.id} value={v.vehicle_number}>{v.vehicle_number} · {v.vehicle_type || "Vehicle"} · {v.capacity_tons ?? v.capacity ?? "—"}</option>)}</select>
                   </div>
 
                   <div>
                     <Label htmlFor="modal-driver-name" className="text-[10px] font-bold uppercase text-muted-foreground">
                       Driver Name *
                     </Label>
-                    <Input
-                      id="modal-driver-name"
-                      required
-                      placeholder="e.g. Suresh Gowda"
-                      value={driverName}
-                      onChange={(e) => setDriverName(e.target.value)}
-                      className={inputClass}
-                    />
+                    <select id="modal-driver-name" required value={driverName} onChange={(e) => { const d = registeredDrivers.find((row) => (row.driver_name || row.name) === e.target.value); setDriverName(e.target.value); setDriverMobile(d?.phone || d?.mobile_number || d?.phone_number || ""); }} className={`${inputClass} w-full px-3`}><option value="">Select registered driver</option>{registeredDrivers.map((d) => <option key={d.id} value={d.driver_name || d.name}>{d.driver_name || d.name} · {d.license_number || "License pending"}</option>)}</select>
                   </div>
 
                   <div>

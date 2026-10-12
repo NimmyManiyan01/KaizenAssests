@@ -131,7 +131,8 @@ function AssemblyQualityPage() {
 
   const totalInspected = Number(passedQty) + Number(failedQty) + Number(reworkQty);
   const expectedProduced = inspectItem ? inspectItem.produced_quantity : 0;
-  const isQuantityValid = totalInspected === expectedProduced;
+  const isQuantityValid =
+    Number(passedQty) >= 0 && Number(failedQty) >= 0 && Number(reworkQty) >= 0 && totalInspected === expectedProduced;
 
   const handleInspectSubmit = async () => {
     if (!inspectItem) return;
@@ -169,11 +170,10 @@ function AssemblyQualityPage() {
   const passedQc = inspections.filter((i) => i.qc_status === "PASSED").length;
   const reworkQc = inspections.filter((i) => i.qc_status === "REWORK").length;
   const failedQc = inspections.filter((i) => i.qc_status === "FAILED").length;
+  const completedQc = inspections.filter((i) => i.qc_status && i.qc_status !== "PENDING_INSPECTION").length;
 
   const passRate =
-    totalOrders > 0 && totalOrders !== awaitingQc
-      ? Math.round((passedQc / (totalOrders - awaitingQc)) * 100)
-      : 100;
+    completedQc > 0 ? Math.round((passedQc / completedQc) * 100) : undefined;
 
   // Filtered list
   const filteredInspections = useMemo(() => {
@@ -325,7 +325,7 @@ function AssemblyQualityPage() {
                 {loading ? "..." : passedQc}
               </div>
               <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Stored in FG warehouse</span>
+                <span>Stored in Assembly FG Area</span>
                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
                   Certified
                 </span>
@@ -368,7 +368,7 @@ function AssemblyQualityPage() {
             </div>
             <div className="mt-3">
               <div className="text-3xl font-black tracking-tight text-cyan-600 dark:text-cyan-400 tabular-nums">
-                {loading ? "..." : `${passRate}%`}
+                {loading ? "..." : passRate == null ? "N/A" : `${passRate}%`}
               </div>
               <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
                 <span>Inspection quality yield</span>
@@ -673,7 +673,7 @@ function AssemblyQualityPage() {
                 <span className="font-mono font-semibold text-foreground">
                   {inspectItem?.order_number}
                 </span>
-                . Passed items generate certified Finished Goods stock ready for warehouse pickup.
+                . Passed items generate certified Finished Goods stock stored in the Assembly FG Area, ready for customer dispatch.
               </DialogDescription>
             </DialogHeader>
 

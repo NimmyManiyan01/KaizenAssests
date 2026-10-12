@@ -361,6 +361,11 @@ async def create_grn_header(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    # Commit before returning the identifier. The frontend immediately loads
+    # this GRN when navigating to Item Receiving; relying only on dependency
+    # teardown can race that follow-up GET on fast local clients.
+    await uow.commit()
+
     return GrnHeaderResponse(
         grn_id=str(grn.id),
         grn_number=grn.grn_number,
@@ -423,6 +428,7 @@ async def update_grn_lines(
                 damaged_quantity=line.damaged_quantity,
                 accepted_quantity=line.accepted_quantity,
                 rejected_quantity=line.rejected_quantity,
+                held_quantity=line.held_quantity,
                 quality_approved_quantity=line.quality_approved_quantity,
                 balance_quantity=line.balance_quantity,
                 quality_result=line.quality_result,
@@ -549,6 +555,11 @@ async def update_quality_inspection(
                 "quality_result": line.quality_result,
                 "accepted_quantity": line.accepted_quantity,
                 "rejected_quantity": line.rejected_quantity or Decimal("0"),
+                "held_quantity": line.held_quantity or Decimal("0"),
+                "damaged_quantity": line.damaged_quantity or Decimal("0"),
+                "rejected_reason": line.rejected_reason,
+                "damage_reason": line.damage_reason,
+                "held_reason": line.held_reason,
                 "quality_approved_quantity": line.quality_approved_quantity or Decimal("0"),
             }
             for line in grn.lines
@@ -586,22 +597,14 @@ async def create_batches_for_line(
 
     qr_resp = None
     if line_obj:
-        res_qr = await uow.session.execute(
-            select(GrnBatchQrModel).where(GrnBatchQrModel.item_code == line_obj.item_code)
+        qr_result = await uow.session.execute(
+            select(GrnBatchQrModel).where(GrnBatchQrModel.batch_id.in_([b.id for b in created_batches]))
         )
-        b_qr = res_qr.scalar_one_or_none()
-        if b_qr:
-            qr_resp = GrnBatchQrResponse(
-                qr_id=str(b_qr.id),
-                item_code=b_qr.item_code,
-                batch_id=None,
-                qr_code=b_qr.qr_code,
-                qr_payload=b_qr.qr_payload,
-                generated_at=b_qr.generated_at,
-            )
+        qr_by_batch = {qr.batch_id: qr for qr in qr_result.scalars().all()}
 
     result = []
     for b in created_batches:
+        batch_qr = qr_by_batch.get(b.id)
         result.append(
             BatchWithQrResponse(
                 batch=GrnBatchResponse(
@@ -612,7 +615,11 @@ async def create_batches_for_line(
                     created_by=b.created_by,
                     created_at=b.created_at,
                 ),
-                qr=qr_resp,
+                qr=(GrnBatchQrResponse(
+                    qr_id=str(batch_qr.id), item_code=batch_qr.item_code,
+                    batch_id=str(b.id), qr_code=batch_qr.qr_code,
+                    qr_payload=batch_qr.qr_payload, generated_at=batch_qr.generated_at,
+                ) if batch_qr else None),
             )
         )
     return result
@@ -1847,6 +1854,7 @@ async def get_grn_detail(
                 damaged_quantity=line.damaged_quantity,
                 accepted_quantity=line.accepted_quantity,
                 rejected_quantity=line.rejected_quantity,
+                held_quantity=line.held_quantity,
                 quality_approved_quantity=line.quality_approved_quantity,
                 balance_quantity=line.balance_quantity,
                 quality_result=line.quality_result,

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigation, RefreshCw, Loader2, CheckCircle2, Box, Barcode, ShieldCheck, ScanLine, Truck, User } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { api } from "@/lib/api-client";
+import jsQR from "jsqr";
 
 export const Route = createFileRoute("/dispatch-loading")({
   component: DispatchLoadingPage,
@@ -17,12 +18,28 @@ function DispatchLoadingPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
+  const [loadingBays, setLoadingBays] = useState<any[]>([]);
+  const [selectedBay, setSelectedBay] = useState("");
+  const [packageQr, setPackageQr] = useState("");
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [scanMessage, setScanMessage] = useState("");
+  const [scannedPackages, setScannedPackages] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.getDispatches();
+      const [res, bays] = await Promise.all([api.getDispatches(), api.getDocks({ status: "AVAILABLE", direction: "OUTBOUND" })]);
       setOrders(res.items?.filter((o: any) => ["PACKED", "ROUTE_ASSIGNED", "VEHICLE_ALLOCATED", "DRIVER_ALLOCATED", "LOADING_STARTED"].includes(o.status)) || res.items || []);
+      const availableBays = (Array.isArray(bays) ? bays : []).filter((bay: any) => {
+        const status = String(bay.status || "").toUpperCase();
+        const allocationStatus = String(bay.allocation_status || "").toUpperCase();
+        const direction = String(bay.direction || "").toUpperCase();
+        return bay.is_active !== false && status === "AVAILABLE" && ["OUTBOUND", "BOTH"].includes(direction) && !["RESERVED", "OCCUPIED", "DOCK_ASSIGNED"].includes(allocationStatus);
+      });
+      setLoadingBays(availableBays);
     } catch (e) {
       toast.error("Failed to load loading stage orders", { description: e instanceof Error ? e.message : undefined });
     } finally {
@@ -34,16 +51,94 @@ function DispatchLoadingPage() {
 
   const handleOpenScan = (order: any) => {
     setSelectedOrder(order);
+    setSelectedBay(order.loading_bay || order.loadingBay || order.bay_number || "");
+    setPackageQr("");
+    setScannedPackages([]);
+    setScanMessage("");
     setIsScanModalOpen(true);
   };
 
+  const validatePackage = async (value: string) => {
+    if (!selectedOrder || !selectedBay || !value.trim()) return;
+    try {
+      const updated = await api.scanDispatchPackage(selectedOrder.id, value.trim());
+      setSelectedOrder(updated);
+      setOrders((current) => current.map((order) => order.id === updated.id ? updated : order));
+      setScannedPackages((current) => [...new Set([...current, value.trim()])]);
+      setPackageQr("");
+      setScanMessage("Package verified and loaded.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Package QR validation failed";
+      setScanMessage(message);
+      toast.error("Unable to validate package QR", { description: message });
+    }
+  };
+
+  const decodeImage = async (file: File) => {
+    try {
+      const bitmap = await createImageBitmap(file);
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width; canvas.height = bitmap.height;
+      const context = canvas.getContext("2d");
+      context?.drawImage(bitmap, 0, 0);
+      const image = context?.getImageData(0, 0, canvas.width, canvas.height);
+      const decoded = image ? jsQR(image.data, image.width, image.height)?.data : undefined;
+      if (!decoded) throw new Error("No QR code could be decoded from the image");
+      setPackageQr(decoded);
+      await validatePackage(decoded);
+    } catch (error) {
+      setScanMessage(error instanceof Error ? error.message : "Unable to decode QR image");
+    }
+  };
+
+  useEffect(() => {
+    if (!cameraOpen) return;
+    let cancelled = false;
+    const start = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        if (cancelled) { stream.getTracks().forEach((track) => track.stop()); return; }
+        cameraStreamRef.current = stream;
+        if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+      } catch {
+        setScanMessage("Camera permission was denied or is unavailable.");
+        setCameraOpen(false);
+      }
+    };
+    void start();
+    const timer = window.setInterval(() => {
+      const video = videoRef.current;
+      if (!video || video.readyState < 2 || video.videoWidth === 0) return;
+      const canvas = document.createElement("canvas"); canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      const context = canvas.getContext("2d"); context?.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const image = context?.getImageData(0, 0, canvas.width, canvas.height);
+      const decoded = image ? jsQR(image.data, image.width, image.height)?.data : undefined;
+      if (decoded) { setCameraOpen(false); void validatePackage(decoded); }
+    }, 400);
+    return () => { cancelled = true; window.clearInterval(timer); cameraStreamRef.current?.getTracks().forEach((track) => track.stop()); cameraStreamRef.current = null; };
+  }, [cameraOpen, selectedOrder, selectedBay]);
+
+  const handleAssignBay = () => {
+    if (!selectedOrder || !selectedBay) return;
+    const updated = { ...selectedOrder, loading_bay: selectedBay };
+    setSelectedOrder(updated);
+    setOrders((current) => current.map((order) => order.id === updated.id ? updated : order));
+    toast.success(`Loading bay ${selectedBay} assigned`, { description: `Dispatch ${updated.dispatch_number} is ready for package scanning.` });
+  };
+
   const handleCompleteLoading = async () => {
-    if (!selectedOrder) return;
+    if (!selectedOrder || !selectedBay) {
+      toast.error("Assign a loading bay before loading packages");
+      return;
+    }
+    const packed = (selectedOrder.items || []).reduce((total: number, item: any) => total + Number(item.quantity_packed || 0), 0);
+    const loaded = (selectedOrder.items || []).reduce((total: number, item: any) => total + Number(item.quantity_loaded || 0), 0);
+    if (loaded !== packed) { toast.error("Verify every package QR before completing loading"); return; }
     try {
       await api.startDispatchLoading(selectedOrder.id);
       await api.verifyDispatchLoading(selectedOrder.id);
       await api.verifyDispatchFinal(selectedOrder.id);
-      toast.success("Loading Complete & Verified! Packed Qty (150) matches Loaded Qty (150). Order ready for Gate Exit.");
+      toast.success("Loading complete and verified. Order ready for Gate Exit.");
       setIsScanModalOpen(false);
       setSelectedOrder(null);
       void loadData();
@@ -55,7 +150,7 @@ function DispatchLoadingPage() {
   return (
     <AppShell
       title="Dispatch Loading Bay & Package Scanning"
-      subtitle="Monitor loading bays, vehicle assignments, driver allocation, and package scanning verification"
+      subtitle="Verify the supplier vehicle, loading bay, and package scanning before gate exit"
       actions={
         <Button variant="outline" className="rounded-xl" onClick={() => void loadData()}>
           <RefreshCw className="size-4 mr-2" /> Refresh
@@ -68,7 +163,7 @@ function DispatchLoadingPage() {
         <Card className="rounded-2xl overflow-hidden shadow-sm">
           <div className="p-4 border-b font-semibold flex items-center justify-between">
             <span>Loading Bay Active Queue ({orders.length})</span>
-            <span className="text-xs text-muted-foreground">Vehicles assigned to bays awaiting package scanning & loading</span>
+            <span className="text-xs text-muted-foreground">Supplier vehicles awaiting package scanning & loading</span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
@@ -103,7 +198,7 @@ function DispatchLoadingPage() {
                         </td>
                         <td className="px-4 py-3 text-right">
                           <Button size="sm" className="rounded-lg text-xs font-bold shadow-glow" onClick={() => handleOpenScan(order)}>
-                            <ScanLine className="size-3.5 mr-1.5" /> Scan Packages & Load
+                            <ScanLine className="size-3.5 mr-1.5" /> {bayNo === "Not assigned" ? "Assign Loading Bay" : "Scan Packages & Load"}
                           </Button>
                         </td>
                       </tr>
@@ -135,6 +230,28 @@ function DispatchLoadingPage() {
 
           {selectedOrder && (
             <div className="space-y-4 py-2 text-sm">
+              <div className="p-3 rounded-xl border bg-muted/30 space-y-2">
+                <label className="text-xs font-bold uppercase text-muted-foreground">Loading Bay *</label>
+                <div className="flex gap-2">
+                  <select value={selectedBay} onChange={(e) => setSelectedBay(e.target.value)} className="flex-1 rounded-xl border border-input bg-background px-3 py-2 text-xs font-semibold">
+                    <option value="">-- Assign Loading Bay --</option>
+                    {loadingBays.map((bay: any) => <option key={bay.id || bay.dock_code || bay.dock_number} value={bay.dock_code || bay.dock_number}>{bay.dock_code || bay.dock_number} — {bay.dock_name || bay.name || "Available bay"}</option>)}
+                  </select>
+                  <Button type="button" size="sm" disabled={!selectedBay} onClick={handleAssignBay}>Assign Bay</Button>
+                </div>
+                {!loadingBays.length && <p className="text-[11px] text-amber-600">No available loading bays found in the dock master.</p>}
+              </div>
+              <div className="p-3 rounded-xl border bg-muted/30 space-y-2">
+                <label className="text-xs font-bold uppercase text-muted-foreground">Package QR *</label>
+                <div className="flex gap-2">
+                  <input value={packageQr} onChange={(e) => setPackageQr(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void validatePackage(packageQr); } }} disabled={!selectedBay} placeholder={selectedBay ? "Scan saved package QR / package ID" : "Assign a loading bay first"} className="flex-1 rounded-xl border border-input bg-background px-3 py-2 text-xs font-mono disabled:cursor-not-allowed disabled:opacity-50" />
+                  <Button type="button" variant="outline" size="sm" disabled={!selectedBay} onClick={() => fileInputRef.current?.click()}>Upload QR</Button>
+                  <Button type="button" variant="outline" size="sm" disabled={!selectedBay} onClick={() => setCameraOpen(true)}>Scan Camera</Button>
+                  <input ref={fileInputRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) void decodeImage(file); e.currentTarget.value = ""; }} />
+                </div>
+                {scanMessage && <p className="text-[11px] font-semibold text-amber-700">{scanMessage}</p>}
+                {cameraOpen && <div className="rounded-xl overflow-hidden border"><video ref={videoRef} muted playsInline className="w-full aspect-video bg-black" /><p className="p-2 text-[11px] text-center">Point the camera at a saved package QR code.</p></div>}
+              </div>
               <div className="p-4 rounded-xl bg-muted/40 border grid grid-cols-3 gap-3 text-center">
                 <div>
                   <span className="text-[10px] uppercase text-muted-foreground font-bold block">Expected Items</span>
@@ -184,7 +301,7 @@ function DispatchLoadingPage() {
             <Button variant="outline" className="rounded-xl" onClick={() => setIsScanModalOpen(false)}>
               Cancel
             </Button>
-            <Button className="rounded-xl font-bold shadow-glow" onClick={() => void handleCompleteLoading()}>
+            <Button className="rounded-xl font-bold shadow-glow" disabled={!selectedBay || !selectedOrder || !(selectedOrder.items || []).length || (selectedOrder.items || []).some((item: any) => Number(item.quantity_loaded || 0) !== Number(item.quantity_packed || 0))} onClick={() => void handleCompleteLoading()}>
               Verify & Complete Loading
             </Button>
           </DialogFooter>

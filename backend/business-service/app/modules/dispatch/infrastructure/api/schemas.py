@@ -1,9 +1,10 @@
 from __future__ import annotations
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, date
+import uuid
 
 class DispatchItemResponse(BaseModel):
-    id: str
+    id: uuid.UUID
     material_code: str
     material_name: str
     quantity_ordered: float
@@ -17,18 +18,41 @@ class DispatchItemResponse(BaseModel):
     batch: str | None = None
     bin: str | None = None
     status: str
+    package_number: str | None = None
+    package_type: str | None = None
+    package_count: int | None = None
 
     class Config:
         from_attributes = True
 
+
+class ScanPackageRequest(BaseModel):
+    qr_code: str = Field(..., min_length=1, max_length=128)
+
+
+class ConfirmGateExitRequest(BaseModel):
+    vehicle_verified: bool
+    driver_verified: bool
+    loaded_goods_verified: bool
+    vehicle_photo_base64: str = Field(..., min_length=32)
+    remarks: str | None = None
+
 class DispatchOrderResponse(BaseModel):
-    id: str
+    id: uuid.UUID
     dispatch_number: str
     order_number: str
     customer_name: str
     warehouse_id: str
     status: str
     items: list[DispatchItemResponse] = Field(default_factory=list)
+    loaded_goods: list[dict] = Field(default_factory=list)
+    loading_record_reference: str | None = None
+    gate_exit_vehicle_verified: bool = False
+    gate_exit_driver_verified: bool = False
+    gate_exit_loaded_goods_verified: bool = False
+    gate_exit_security_officer: str | None = None
+    gate_exit_remarks: str | None = None
+    gate_exit_completed_at: datetime | None = None
     driver_id: str | None = None
     driver_name: str | None = None
     vehicle_id: str | None = None
@@ -64,6 +88,8 @@ class DriverResponse(BaseModel):
     phone: str
     email: str | None = None
     license_type: str = "Heavy"
+    license_expiry_date: date | None = None
+    license_verified: bool = False
     is_active: bool = True
     photo_path: str | None = None
     address: str | None = None

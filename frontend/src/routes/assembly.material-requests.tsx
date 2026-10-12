@@ -124,6 +124,7 @@ function AssemblyMaterialRequestsPage() {
   // Create Modal State
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [products, setProducts] = useState<AssemblyProductOption[]>([]);
+  const [rawMaterials, setRawMaterials] = useState<any[]>([]);
   const [creating, setCreating] = useState(false);
   const [formData, setFormData] = useState({
     product_code: "",
@@ -190,12 +191,12 @@ function AssemblyMaterialRequestsPage() {
   // Live BOM Preview
   const [bomPreview, setBomPreview] = useState<AssemblyProductBOMResponse | null>(null);
   const [loadingBOM, setLoadingBOM] = useState(false);
+  const [bomPreviewError, setBomPreviewError] = useState<string | null>(null);
 
   // Detail Modal State
   const [selectedRequest, setSelectedRequest] = useState<AssemblyMaterialRequest | null>(null);
 
-  // Warehouse Issue & Receipt State
-  const [issuingWarehouse, setIssuingWarehouse] = useState<string | null>(null);
+  // Assembly receipt confirmation state
   const [isReceiptOpen, setIsReceiptOpen] = useState(false);
   const [receiptRequest, setReceiptRequest] = useState<AssemblyMaterialRequest | null>(null);
   const [receiptItems, setReceiptItems] = useState<
@@ -224,19 +225,6 @@ function AssemblyMaterialRequestsPage() {
     } finally {
       setLoading(false);
       setRefreshing(false);
-    }
-  };
-
-  const handleWarehouseIssue = async (req: AssemblyMaterialRequest) => {
-    try {
-      setIssuingWarehouse(req.id);
-      const res = await api.warehouseIssueMaterials(req.id);
-      toast.success(`Warehouse issued materials under ${res.issue_number}!`);
-      await loadRequests();
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to issue materials from warehouse.");
-    } finally {
-      setIssuingWarehouse(null);
     }
   };
 
@@ -285,25 +273,18 @@ function AssemblyMaterialRequestsPage() {
 
   const loadProducts = async () => {
     try {
+      // Only BOM-backed products are eligible for an assembly material request.
+      // Raw-material master records must not appear as manufacturable products.
       const [productRows, materialRows] = await Promise.all([
         api.getAssemblyProducts(),
         api.getMaterialComponents(),
       ]);
-      const existingCodes = new Set(productRows.map((p) => p.product_code.toUpperCase()));
-      const materialOptions: AssemblyProductOption[] = materialRows
-        .filter((m: any) => m.code && m.name && !existingCodes.has(String(m.code).toUpperCase()))
-        .map((m: any) => ({
-          id: `material-${m.code}`,
-          product_code: m.code,
-          product_name: m.name,
-          bom_number: "",
-          description: m.category || "Material",
-          uom: m.uom || "PCS",
-        }));
-      const allOptions = [...productRows, ...materialOptions];
-      setProducts(allOptions);
-      if (allOptions.length > 0 && !formData.product_code) {
-        setFormData((prev) => ({ ...prev, product_code: allOptions[0]?.product_code || "" }));
+      setRawMaterials(Array.isArray(materialRows) ? materialRows : []);
+      setProducts(productRows);
+      if (productRows.length > 0 && !productRows.some((p) => p.product_code === formData.product_code)) {
+        setFormData((prev) => ({ ...prev, product_code: productRows[0]?.product_code || "" }));
+      } else if (productRows.length === 0) {
+        setFormData((prev) => ({ ...prev, product_code: "" }));
       }
     } catch (err: any) {
       console.error("Failed to load products master:", err);
@@ -323,16 +304,21 @@ function AssemblyMaterialRequestsPage() {
   useEffect(() => {
     if (isCreateOpen && formData.product_code && formData.target_quantity > 0) {
       loadBOMPreview(formData.product_code, formData.target_quantity);
+    } else {
+      setBomPreview(null);
+      setBomPreviewError(null);
     }
   }, [isCreateOpen, formData.product_code, formData.target_quantity]);
 
   const loadBOMPreview = async (productCode: string, qty: number) => {
     try {
       setLoadingBOM(true);
+      setBomPreviewError(null);
       const res = await api.getProductBOM(productCode, qty);
       setBomPreview(res);
     } catch (err: any) {
       setBomPreview(null);
+      setBomPreviewError(err?.message || "Unable to load the selected product's BOM.");
     } finally {
       setLoadingBOM(false);
     }
@@ -342,6 +328,13 @@ function AssemblyMaterialRequestsPage() {
     e.preventDefault();
     if (!newProductData.product_name.trim()) {
       toast.error("Product name is required.");
+      return;
+    }
+    const components = newProductData.components.filter(
+      (component) => component.material_code && component.quantity_per_unit > 0 && component.uom,
+    );
+    if (!components.length || components.length !== newProductData.components.length) {
+      toast.error("Add at least one valid BOM component with a material, quantity, and UOM.");
       return;
     }
 
@@ -357,7 +350,7 @@ function AssemblyMaterialRequestsPage() {
         product_name: newProductData.product_name.trim(),
         product_code: finalCode,
         description: newProductData.description.trim() || undefined,
-        components: newProductData.components.filter((c) => c.material_code && c.material_name),
+        components,
       });
 
       toast.success(`Product '${created.product_name}' registered with BOM ${created.bom_number}!`);
@@ -388,6 +381,10 @@ function AssemblyMaterialRequestsPage() {
     e.preventDefault();
     if (!formData.product_code) {
       toast.error("Please select a product to manufacture.");
+      return;
+    }
+    if (!bomPreview?.materials?.length) {
+      toast.error("An active BOM with components is required before submitting this request.");
       return;
     }
     if (formData.target_quantity <= 0) {
@@ -895,22 +892,6 @@ function AssemblyMaterialRequestsPage() {
                               Confirm Receipt
                             </Button>
                           )}
-                          {(r.status === "PENDING" || r.status === "SUBMITTED") && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={issuingWarehouse === r.id}
-                              className="h-7 px-3 text-xs font-medium border-blue-500/40 text-blue-600 hover:bg-blue-500/10 dark:text-blue-400 gap-1.5 rounded-lg"
-                              onClick={() => handleWarehouseIssue(r)}
-                            >
-                              {issuingWarehouse === r.id ? (
-                                <RefreshCw className="size-3 animate-spin" />
-                              ) : (
-                                <Warehouse className="size-3" />
-                              )}
-                              Issue from WH
-                            </Button>
-                          )}
                           {r.status === "RECEIVED" && (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
                               <CheckCircle2 className="size-3" />
@@ -967,7 +948,9 @@ function AssemblyMaterialRequestsPage() {
                     required
                   >
                     <option value="" disabled>Select a manufacturable product...</option>
-                    {products.map((p) => (
+                    {products.length === 0 ? (
+                      <option value="" disabled>No active BOM-backed products available</option>
+                    ) : products.map((p) => (
                       <option key={p.id} value={p.product_code}>
                         {p.product_name} ({p.product_code})
                       </option>
@@ -985,6 +968,11 @@ function AssemblyMaterialRequestsPage() {
                     Add
                   </Button>
                 </div>
+                {products.length === 0 && (
+                  <p className="text-[11px] text-amber-600">
+                    No eligible products are configured. Add a product with an active BOM before creating a warehouse request.
+                  </p>
+                )}
               </div>
 
               {/* Quantity & Required Date */}
@@ -1019,18 +1007,22 @@ function AssemblyMaterialRequestsPage() {
                 </div>
               </div>
 
-              {/* Live BOM Requirements Calculation Preview */}
+              {/* Live BOM Material Preview */}
               {loadingBOM ? (
                 <div className="rounded-xl border border-border/80 bg-muted/20 p-3.5 flex items-center justify-center gap-2 text-xs text-muted-foreground">
                   <RefreshCw className="size-3.5 animate-spin text-primary" />
                   <span>Calculating material requirements from Product BOM...</span>
+                </div>
+              ) : bomPreviewError ? (
+                <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3.5 text-xs text-destructive">
+                  {bomPreviewError}
                 </div>
               ) : bomPreview ? (
                 <div className="rounded-xl border border-border bg-card p-3.5 space-y-2">
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-1.5 font-semibold text-foreground">
                       <Layers className="size-3.5 text-primary" />
-                      <span>Required Components ({bomPreview.materials?.length || 0} Items)</span>
+                      <span>BOM Material Preview ({bomPreview.materials?.length || 0} Items)</span>
                     </div>
                     <span className="text-[11px] text-muted-foreground font-mono">
                       BOM: {bomPreview.bom_number}
@@ -1041,39 +1033,25 @@ function AssemblyMaterialRequestsPage() {
                     <table className="w-full text-left">
                       <thead className="bg-muted/60 text-[10px] uppercase text-muted-foreground border-b border-border/60 sticky top-0">
                         <tr>
-                          <th className="p-2 pl-3">Component</th>
-                          <th className="p-2 text-right">Qty/Unit</th>
-                          <th className="p-2 text-right font-semibold">Total Req</th>
-                          <th className="p-2 text-right pr-3">WH Stock</th>
+                          <th className="p-2 pl-3">Raw Material</th>
+                          <th className="p-2 text-right font-semibold">Required Qty</th>
+                          <th className="p-2 text-right pr-3">UOM</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/30">
                         {bomPreview.materials?.map((item, idx) => {
-                          const hasShortage = (item.available_quantity ?? 0) < (item.required_quantity ?? 0);
                           return (
-                            <tr key={idx} className="hover:bg-muted/20">
+                            <tr key={item.material_code || `${item.material_name}-${idx}`} className="hover:bg-muted/20">
                               <td className="p-2 pl-3 font-medium text-foreground truncate max-w-[160px]">
                                 {item.material_code}
                                 <span className="block text-[10px] text-muted-foreground truncate font-normal">
                                   {item.material_name}
                                 </span>
                               </td>
-                              <td className="p-2 text-right text-muted-foreground">
-                                {item.quantity_per_unit} {item.uom}
-                              </td>
                               <td className="p-2 text-right font-bold text-foreground">
-                                {item.required_quantity} {item.uom}
+                                {item.required_quantity}
                               </td>
-                              <td
-                                className={cn(
-                                  "p-2 text-right pr-3 font-semibold",
-                                  hasShortage
-                                    ? "text-rose-600 dark:text-rose-400"
-                                    : "text-emerald-600 dark:text-emerald-400"
-                                )}
-                              >
-                                {item.available_quantity} {item.uom}
-                              </td>
+                              <td className="p-2 text-right pr-3 font-medium">{item.uom}</td>
                             </tr>
                           );
                         })}
@@ -1109,7 +1087,7 @@ function AssemblyMaterialRequestsPage() {
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={creating}
+                  disabled={creating || loadingBOM || !bomPreview || !bomPreview.materials?.length}
                   className="rounded-xl gap-2 bg-primary text-primary-foreground hover:bg-primary/90 font-semibold shadow-soft"
                 >
                   {creating && <RefreshCw className="size-3.5 animate-spin" />}
@@ -1184,6 +1162,35 @@ function AssemblyMaterialRequestsPage() {
                 </div>
               </div>
 
+              <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-foreground">Bill of Materials Components *</label>
+                  <Button type="button" variant="outline" size="sm" className="h-7 rounded-lg text-[11px]" onClick={() => setNewProductData((prev) => ({ ...prev, components: [...prev.components, { material_code: "", material_name: "", quantity_per_unit: 1, uom: "" }] }))}>
+                    <Plus className="mr-1 size-3" /> Add Component
+                  </Button>
+                </div>
+                <div className="grid grid-cols-[1fr_90px_80px_28px] gap-2 text-[10px] font-semibold uppercase text-muted-foreground">
+                  <span>Raw Material</span><span>Qty / Unit</span><span>UOM</span><span />
+                </div>
+                {newProductData.components.map((component, index) => (
+                  <div key={`bom-component-${index}`} className="grid grid-cols-[1fr_90px_80px_28px] items-center gap-2">
+                    <select className="h-8 min-w-0 rounded-lg border border-input bg-card px-2 text-xs" value={component.material_code} required onChange={(e) => {
+                      const material = rawMaterials.find((item) => String(item.code) === e.target.value);
+                      setNewProductData((prev) => ({ ...prev, components: prev.components.map((row, rowIndex) => rowIndex === index ? { ...row, material_code: material?.code || "", material_name: material?.name || "", uom: material?.uom || "" } : row) }));
+                    }}>
+                      <option value="">Select material...</option>
+                      {rawMaterials.map((material) => <option key={material.id || material.code} value={material.code}>{material.name} ({material.code})</option>)}
+                    </select>
+                    <Input type="number" min="0.0001" step="any" value={component.quantity_per_unit} required className="h-8 rounded-lg text-xs" onChange={(e) => setNewProductData((prev) => ({ ...prev, components: prev.components.map((row, rowIndex) => rowIndex === index ? { ...row, quantity_per_unit: Number(e.target.value) } : row) }))} />
+                    <Input value={component.uom} readOnly placeholder="UOM" className="h-8 rounded-lg bg-muted/40 text-xs" />
+                    <Button type="button" variant="ghost" size="sm" className="h-8 px-1 text-destructive" disabled={newProductData.components.length === 1} onClick={() => setNewProductData((prev) => ({ ...prev, components: prev.components.filter((_, rowIndex) => rowIndex !== index) }))}>
+                      <X className="size-3.5" />
+                    </Button>
+                  </div>
+                ))}
+                {!rawMaterials.length && <p className="text-[11px] text-amber-600">No active materials are available in Material Master.</p>}
+              </div>
+
               <DialogFooter className="pt-2">
                 <Button
                   type="button"
@@ -1198,11 +1205,23 @@ function AssemblyMaterialRequestsPage() {
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={addingProduct}
+                  disabled={
+                    addingProduct ||
+                    !newProductData.product_name.trim() ||
+                    !newProductData.components.length ||
+                    newProductData.components.some(
+                      (component) =>
+                        !component.material_code ||
+                        !component.material_name ||
+                        !component.uom ||
+                        !Number.isFinite(component.quantity_per_unit) ||
+                        component.quantity_per_unit <= 0,
+                    )
+                  }
                   className="rounded-xl gap-2 bg-primary text-primary-foreground hover:bg-primary/90 font-semibold shadow-soft"
                 >
                   {addingProduct && <RefreshCw className="size-3.5 animate-spin" />}
-                  Create & Select Product
+                  Create Product & BOM
                 </Button>
               </DialogFooter>
             </form>

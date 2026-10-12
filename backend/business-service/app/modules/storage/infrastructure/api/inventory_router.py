@@ -25,6 +25,7 @@ from app.common.persistence.models import (
     MaterialRequestModel,
     MaterialStockModel,
     NotificationModel,
+    PickTaskModel as AssemblyPickTaskModel,
 )
 from app.modules.quarantine.infrastructure.persistence.models import (
     QuarantineAuditModel,
@@ -495,7 +496,9 @@ async def get_material_inventory_detail(
 
     material_name = mat_obj.material_name if mat_obj else (stk_obj.material_name if stk_obj else m_code)
     category = mat_obj.category if mat_obj else (stk_obj.category if stk_obj else "GENERAL")
-    uom = mat_obj.uom if mat_obj else (stk_obj.uom if stk_obj else "PCS")
+    # Material master does not define UOM in this schema; inventory stock is
+    # the authoritative source for the stored unit.
+    uom = getattr(mat_obj, "uom", None) or (stk_obj.uom if stk_obj else "PCS")
     reorder_point = float(stk_obj.reorder_point) if stk_obj else (float(mat_obj.reorder_point) if mat_obj and hasattr(mat_obj, "reorder_point") else 10.0)
 
     # 2. Locations & Location Balances
@@ -622,6 +625,9 @@ async def get_material_inventory_detail(
         {
             "id": str(m.id),
             "movement_type": m.movement_type,
+            "batch_lot": m.batch_lot,
+            "grn_number": m.grn_number,
+            "reference_document": m.reference_document,
             "from_location": m.from_location,
             "to_location": m.to_location,
             "quantity": float(m.quantity),
@@ -652,6 +658,28 @@ async def get_material_inventory_detail(
         for g in grn_res.scalars().all()
     ]
 
+    putaway_history = [m for m in movements_data if m["movement_type"] == "PUTAWAY"]
+    issue_history = [m for m in movements_data if m["movement_type"] in ("TAKEAWAY", "DISPATCH")]
+    received_history_qty = sum(m["quantity"] for m in putaway_history)
+    issued_history_qty = sum(m["quantity"] for m in issue_history)
+    lineage = {
+        "original_grn": (grn_history_data[0]["grn_number"] if grn_history_data else (putaway_history[0].get("grn_number") if putaway_history else None)),
+        "batch_number": next((m.get("batch_lot") for m in putaway_history if m.get("batch_lot")), None),
+        "original_rack": putaway_history[0]["to_location"] if putaway_history else None,
+        "received_quantity": received_history_qty,
+        "issued_quantity": issued_history_qty,
+        "remaining_quantity": max(0.0, received_history_qty - issued_history_qty),
+        "picking_task": next((m.get("reference_document") for m in issue_history if m.get("reference_document")), None),
+    }
+    issue_reference = next((m.get("reference_document") for m in issue_history if m.get("reference_document")), None)
+    if issue_reference:
+        lineage["picking_task"] = await uow.session.scalar(
+            select(AssemblyPickTaskModel.task_number)
+            .where(AssemblyPickTaskModel.request_number == issue_reference)
+            .order_by(AssemblyPickTaskModel.created_at.desc())
+            .limit(1)
+        )
+
     return {
         "summary": {
             "material_code": m_code,
@@ -678,6 +706,7 @@ async def get_material_inventory_detail(
         "batches": batches_data,
         "movements": movements_data,
         "grn_history": grn_history_data,
+        "inventory_history": lineage,
         "reservations": reservations_data,
     }
 
@@ -817,23 +846,58 @@ async def get_warehouse_inventory_summary(
         batch_details: list[dict[str, Any]] = []
         try:
             movement_rows = await uow.session.execute(
-                select(InventoryMovementHistoryModel.batch_lot, func.sum(InventoryMovementHistoryModel.quantity))
-                .where(
-                    InventoryMovementHistoryModel.movement_type == "PUTAWAY",
-                    InventoryMovementHistoryModel.material_code == m_code,
-                    InventoryMovementHistoryModel.to_bin_id == (loc.bin_id or (b_obj.id if b_obj else None)),
+                select(
+                    InventoryMovementHistoryModel.batch_lot,
+                    InventoryMovementHistoryModel.movement_type,
+                    func.sum(InventoryMovementHistoryModel.quantity),
                 )
-                .group_by(InventoryMovementHistoryModel.batch_lot)
+                .where(
+                    InventoryMovementHistoryModel.material_code == m_code,
+                    or_(
+                        InventoryMovementHistoryModel.to_bin_id == (loc.bin_id or (b_obj.id if b_obj else None)),
+                        InventoryMovementHistoryModel.from_location == loc_code_val,
+                    ),
+                    InventoryMovementHistoryModel.movement_type.in_(["PUTAWAY", "TAKEAWAY", "DISPATCH"]),
+                )
+                .group_by(InventoryMovementHistoryModel.batch_lot, InventoryMovementHistoryModel.movement_type)
             )
+            batch_totals: dict[str, float] = {}
+            for batch, movement_type, quantity in movement_rows.all():
+                batch_key = batch or "-"
+                signed_quantity = float(quantity or 0) * (1 if movement_type == "PUTAWAY" else -1)
+                batch_totals[batch_key] = batch_totals.get(batch_key, 0.0) + signed_quantity
             batch_details = [
-                {"batch_number": batch or "-", "quantity": float(quantity or 0), "uom": bal.uom}
-                for batch, quantity in movement_rows.all()
+                {"batch_number": batch, "quantity": max(0.0, quantity), "uom": bal.uom}
+                for batch, quantity in batch_totals.items()
+                if quantity > 0
             ]
         except Exception:
             batch_details = []
         batch_num = (batch_details[0]["batch_number"] if batch_details else None) or bal.last_grn_number or f"BT-{m_code.replace('MAT-', '')}-101"
         supp_name = supplier_by_mat.get(m_code, "Precision Metal Supplies")
         grn_num = bal.last_grn_number or grn_by_mat.get(m_code, f"GRN-2026-{m_code[-3:]}")
+
+        # Preserve lineage even when the current balance is zero. These are
+        # derived from the persisted movement ledger and issue/task records,
+        # not from the current stock balance.
+        history_rows = (await uow.session.execute(
+            select(InventoryMovementHistoryModel)
+            .where(func.lower(InventoryMovementHistoryModel.material_code) == m_code.lower())
+            .order_by(InventoryMovementHistoryModel.performed_at.asc())
+        )).scalars().all()
+        received_qty = sum((Decimal(str(h.quantity)) for h in history_rows if h.movement_type == "PUTAWAY"), Decimal("0"))
+        issued_qty = sum((Decimal(str(h.quantity)) for h in history_rows if h.movement_type in ("TAKEAWAY", "DISPATCH")), Decimal("0"))
+        original_putaway = next((h for h in history_rows if h.movement_type == "PUTAWAY"), None)
+        issued_movement = next((h for h in reversed(history_rows) if h.movement_type in ("TAKEAWAY", "DISPATCH")), None)
+        request_ref = issued_movement.reference_document if issued_movement else None
+        picking_task_number = None
+        if request_ref:
+            picking_task_number = await uow.session.scalar(
+                select(AssemblyPickTaskModel.task_number)
+                .where(AssemblyPickTaskModel.request_number == request_ref)
+                .order_by(AssemblyPickTaskModel.created_at.desc())
+                .limit(1)
+            )
 
         # Section 23 Recommended Stock Statuses
         if hold_qty > 0:
@@ -861,6 +925,15 @@ async def get_warehouse_inventory_summary(
             "batch": batch_num,
             "batch_number": batch_num,
             "batch_details": batch_details,
+            "inventory_history": {
+                "original_grn": original_putaway.grn_number if original_putaway and original_putaway.grn_number else grn_num,
+                "batch_number": original_putaway.batch_lot if original_putaway else batch_num,
+                "original_rack": original_putaway.to_location if original_putaway else loc_code_val,
+                "received_quantity": float(received_qty),
+                "issued_quantity": float(issued_qty),
+                "remaining_quantity": max(0.0, float(received_qty - issued_qty)),
+                "picking_task": picking_task_number,
+            },
             "supplier": supp_name,
             "supplier_name": supp_name,
             "grn": grn_num,

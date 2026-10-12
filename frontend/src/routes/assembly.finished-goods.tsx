@@ -199,7 +199,7 @@ function AssemblyFinishedGoodsPage() {
   return (
     <AppShell
       title="Finished Goods"
-      subtitle="Assembly FG storage tracking, warehouse pickup readiness, and QR label generation"
+      subtitle="Assembly FG storage tracking, customer dispatch readiness, and QR label generation"
       actions={
         <div className="flex flex-wrap items-center gap-2.5">
           <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-card border border-border/80 shadow-2xs text-xs font-medium text-muted-foreground">
@@ -314,7 +314,7 @@ function AssemblyFinishedGoodsPage() {
           <div className="group relative overflow-hidden rounded-2xl border border-purple-500/20 bg-gradient-to-br from-purple-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-purple-500/35 flex flex-col justify-between">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                WH Transfer Status
+                Dispatch Readiness
               </span>
               <div className="grid size-9 place-items-center rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/20 shadow-2xs">
                 <ShieldCheck className="size-4" />
@@ -325,9 +325,9 @@ function AssemblyFinishedGoodsPage() {
                 AVAILABLE (100%)
               </div>
               <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Ready for pickup</span>
+                <span>Ready for Customer Dispatch</span>
                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-purple-500/10 text-purple-700 dark:text-purple-300">
-                  Pickup
+                  Dispatch
                 </span>
               </div>
             </div>
@@ -379,7 +379,7 @@ function AssemblyFinishedGoodsPage() {
                 Finished Goods Vault
               </h2>
               <p className="text-xs text-muted-foreground">
-                Certified finished products awaiting physical transfer or dispatch to main warehouse
+                QC-approved finished goods stored in Assembly, awaiting customer dispatch
               </p>
             </div>
 
@@ -444,7 +444,7 @@ function AssemblyFinishedGoodsPage() {
                     <th className="py-3 px-3">FG Quantity</th>
                     <th className="py-3 px-3">Status</th>
                     <th className="py-3 px-3">Floor Location</th>
-                    <th className="py-3 px-3">Serial / Identity</th>
+                    <th className="py-3 px-3">FG Batch / QR Identity</th>
                     <th className="py-3 px-3">Certified Date</th>
                     <th className="py-3 px-3 text-right">Label Actions</th>
                   </tr>
@@ -491,7 +491,7 @@ function AssemblyFinishedGoodsPage() {
                         </span>
                       </td>
 
-                      {/* Serial / Identity */}
+                      {/* FG Batch / QR Identity */}
                       <td className="py-3.5 px-3 whitespace-nowrap">
                         <span className="font-mono text-xs text-muted-foreground">
                           {fg.serial_number || "BATCH-" + fg.order_number}
@@ -534,7 +534,7 @@ function AssemblyFinishedGoodsPage() {
                 Finished Goods QR Identification Label
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground mt-1">
-                Print industrial QR identification barcode label for batch palletizing and warehouse pickup.
+                Print the FG batch QR identification label for Assembly storage and customer dispatch.
               </DialogDescription>
             </DialogHeader>
 
@@ -595,6 +595,12 @@ function AssemblyFinishedGoodsPage() {
                       </span>
                     </div>
                     <div className="flex justify-between border-b border-border/40 pb-1">
+                      <span className="text-muted-foreground">FG Batch / QR Identity:</span>
+                      <span className="font-mono font-bold text-foreground">
+                        {selectedFg.serial_number || "Not recorded"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between border-b border-border/40 pb-1">
                       <span className="text-muted-foreground">Staging Rack:</span>
                       <span className="font-mono text-foreground">{selectedFg.location_code}</span>
                     </div>
@@ -607,7 +613,7 @@ function AssemblyFinishedGoodsPage() {
                   </div>
 
                   <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-2 text-center text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
-                    ✓ QC CERTIFIED - READY FOR WAREHOUSE
+                    ✓ QC CERTIFIED - READY FOR CUSTOMER DISPATCH
                   </div>
                 </div>
               </div>
