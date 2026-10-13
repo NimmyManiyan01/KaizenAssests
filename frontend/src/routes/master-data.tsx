@@ -19,13 +19,13 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/master-data")({
   head: () => ({
     meta: [
-      { title: "Master Data · KaizenX" },
+      { title: "Master Data · KaizenAssests" },
       {
         name: "description",
         content:
           "Maintain supplier master records used across procurement and receiving workflows.",
       },
-      { property: "og:title", content: "Master Data · KaizenX" },
+      { property: "og:title", content: "Master Data · KaizenAssests" },
       { property: "og:description", content: "Supplier master records for procurement." },
     ],
   }),

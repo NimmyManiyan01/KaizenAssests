@@ -1,5 +1,5 @@
 /**
- * KaizenX Mobile API Service
+ * KaizenAssests Mobile API Service
  * Connects directly to Python FastAPI backend (Port 8000)
  */
 
@@ -277,7 +277,7 @@ export const mobileApi = {
           0,
         ) || 1,
       dock_number: data.dock_number || '',
-      remarks: data.remarks || 'Gate Entry recorded via KaizenX Mobile Scanner',
+      remarks: data.remarks || 'Gate Entry recorded via KaizenAssests Mobile Scanner',
       status: 'INSIDE_FACILITY',
     };
 

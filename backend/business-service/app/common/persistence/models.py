@@ -543,6 +543,7 @@ class MaterialRequestItemModel(Base):
     variant_code: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     material_name: Mapped[str] = mapped_column(String(255), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    approved_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
     uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
     is_custom: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     custom_material_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
@@ -602,12 +603,15 @@ class FinishedGoodsRequestModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     request_number: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
-    material_code: Mapped[str] = mapped_column(String(64), nullable=False)
-    material_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    # Existing databases use the original finished_goods_* column names.
+    material_code: Mapped[str] = mapped_column("finished_goods_code", String(64), nullable=False)
+    material_name: Mapped[str] = mapped_column("finished_goods_name", String(256), nullable=False)
     variant_code: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
-    warehouse: Mapped[str] = mapped_column(String(128), nullable=False)
+    # Legacy finished_goods_request tables use warehouse_id as the required
+    # column name; keep the Python attribute as warehouse for API compatibility.
+    warehouse: Mapped[str] = mapped_column("warehouse_id", String(128), nullable=False)
     requested_by: Mapped[str] = mapped_column(String(128), nullable=False)
     department: Mapped[str] = mapped_column(String(128), nullable=False)
     priority: Mapped[str] = mapped_column(String(32), nullable=False, default="MEDIUM")
@@ -620,6 +624,12 @@ class FinishedGoodsRequestModel(Base):
     completed_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    supplier_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    supplier_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    vehicle_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    driver_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    driver_contact: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    expected_pickup_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
 
 
 class NotificationModel(Base):

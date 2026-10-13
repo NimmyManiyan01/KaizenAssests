@@ -48,7 +48,7 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/assembly/requests")({
   head: () => ({
     meta: [
-      { title: "Assembly Material Requisitions · KaizenX" },
+      { title: "Assembly Material Requisitions · KaizenAssests" },
       {
         name: "description",
         content:

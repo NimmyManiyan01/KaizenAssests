@@ -85,12 +85,12 @@ export function WarehouseBuilding() {
         {/* Left Wall Panel */}
         <mesh position={[-16, 0, 0]} castShadow receiveShadow>
           <boxGeometry args={[16, 10, 1.2]} />
-          <meshStandardMaterial color="#d4dedb" roughness={0.7} metalness={0.15} />
+          <meshStandardMaterial color="#475569" roughness={0.7} metalness={0.15} />
         </mesh>
         {/* Right Wall Panel */}
         <mesh position={[16, 0, 0]} castShadow receiveShadow>
           <boxGeometry args={[16, 10, 1.2]} />
-          <meshStandardMaterial color="#d4dedb" roughness={0.7} metalness={0.15} />
+          <meshStandardMaterial color="#475569" roughness={0.7} metalness={0.15} />
         </mesh>
         {/* Teal plinth and vertical metal cladding ribs give the facade depth. */}
         {[-16, 16].map((x) => (
@@ -102,7 +102,7 @@ export function WarehouseBuilding() {
             {Array.from({ length: 15 }, (_, i) => (
               <mesh key={i} position={[i - 7, 0.7, 0.64]} castShadow>
                 <boxGeometry args={[0.06, 8.3, 0.09]} />
-                <meshStandardMaterial color="#b8c9c8" metalness={0.35} roughness={0.5} />
+                <meshStandardMaterial color="#64748b" metalness={0.35} roughness={0.5} />
               </mesh>
             ))}
           </group>
@@ -115,7 +115,7 @@ export function WarehouseBuilding() {
         {/* Illuminated Nexus Portal Header Sign */}
         <mesh position={[0, 3.6, 0.75]}>
           <boxGeometry args={[8, 0.9, 0.1]} />
-          <meshStandardMaterial color="#ffffff" emissive="#22d3ee" emissiveIntensity={2.5} />
+          <meshStandardMaterial color="#0f172a" emissive="#38bdf8" emissiveIntensity={1.8} />
         </mesh>
       </group>
 

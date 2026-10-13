@@ -68,9 +68,9 @@ function DispatchLoadingPage() {
       setPackageQr("");
       setScanMessage("Package verified and loaded.");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Package QR validation failed";
+      const message = error instanceof Error ? error.message : "Finished-goods QR validation failed";
       setScanMessage(message);
-      toast.error("Unable to validate package QR", { description: message });
+      toast.error("Unable to validate finished-goods QR", { description: message });
     }
   };
 
@@ -242,15 +242,15 @@ function DispatchLoadingPage() {
                 {!loadingBays.length && <p className="text-[11px] text-amber-600">No available loading bays found in the dock master.</p>}
               </div>
               <div className="p-3 rounded-xl border bg-muted/30 space-y-2">
-                <label className="text-xs font-bold uppercase text-muted-foreground">Package QR *</label>
+                <label className="text-xs font-bold uppercase text-muted-foreground">Finished Goods QR *</label>
                 <div className="flex gap-2">
-                  <input value={packageQr} onChange={(e) => setPackageQr(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void validatePackage(packageQr); } }} disabled={!selectedBay} placeholder={selectedBay ? "Scan saved package QR / package ID" : "Assign a loading bay first"} className="flex-1 rounded-xl border border-input bg-background px-3 py-2 text-xs font-mono disabled:cursor-not-allowed disabled:opacity-50" />
+                  <input value={packageQr} onChange={(e) => setPackageQr(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void validatePackage(packageQr); } }} disabled={!selectedBay} placeholder={selectedBay ? "Upload or enter finished-goods QR" : "Assign a loading bay first"} className="flex-1 rounded-xl border border-input bg-background px-3 py-2 text-xs font-mono disabled:cursor-not-allowed disabled:opacity-50" />
                   <Button type="button" variant="outline" size="sm" disabled={!selectedBay} onClick={() => fileInputRef.current?.click()}>Upload QR</Button>
                   <Button type="button" variant="outline" size="sm" disabled={!selectedBay} onClick={() => setCameraOpen(true)}>Scan Camera</Button>
                   <input ref={fileInputRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) void decodeImage(file); e.currentTarget.value = ""; }} />
                 </div>
                 {scanMessage && <p className="text-[11px] font-semibold text-amber-700">{scanMessage}</p>}
-                {cameraOpen && <div className="rounded-xl overflow-hidden border"><video ref={videoRef} muted playsInline className="w-full aspect-video bg-black" /><p className="p-2 text-[11px] text-center">Point the camera at a saved package QR code.</p></div>}
+                {cameraOpen && <div className="rounded-xl overflow-hidden border"><video ref={videoRef} muted playsInline className="w-full aspect-video bg-black" /><p className="p-2 text-[11px] text-center">Point the camera at a finished-goods QR code.</p></div>}
               </div>
               <div className="p-4 rounded-xl bg-muted/40 border grid grid-cols-3 gap-3 text-center">
                 <div>

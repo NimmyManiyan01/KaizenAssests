@@ -1,5 +1,5 @@
 /**
- * KaizenX Mobile Gate Pass & AMS/WMS Data Models
+ * KaizenAssests Mobile Gate Pass & AMS/WMS Data Models
  * Strictly aligns with PRD Sections 20 & 31
  */
 

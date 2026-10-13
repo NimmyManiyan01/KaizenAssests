@@ -80,7 +80,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "KaizenX — Warehouse Gate Entry & Arrival" },
+      { title: "KaizenAssests — Warehouse Gate Entry & Arrival" },
       {
         name: "description",
         content:

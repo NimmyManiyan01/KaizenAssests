@@ -10,7 +10,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 
-const artwork = require('../assests/kaizenx-splash-reference-v2.png');
+const artwork = require('../assests/kaizenassests-splash-reference-v2.png');
 const WIDTH = 941;
 const HEIGHT = 1672;
 interface SplashScreenProps {
@@ -177,7 +177,7 @@ export function SplashScreen({ onSplashFinish }: SplashScreenProps) {
             },
           ]}
           accessible
-          accessibilityLabel="KGS. KaizenX. Logistics OS. Gate Management Platform."
+          accessibilityLabel="KGS. KaizenAssests. Logistics OS. Gate Management Platform."
         >
           {/* Brand artwork preserves the reference's exact type and gradient logo. */}
           <Image

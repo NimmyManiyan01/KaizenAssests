@@ -48,6 +48,11 @@ function BuildingParts({
   );
 }
 
+function StreetLights() {
+  const positions = [-30, 0, 30].flatMap((z) => [[-108, z], [108, z]]);
+  return <>{positions.map(([x, z]) => <group key={`${x}-${z}`} position={[x, 0, z]}><mesh position={[0, 2.2, 0]} castShadow><cylinderGeometry args={[0.06, 0.09, 4.4, 8]} /><meshStandardMaterial color="#334155" metalness={0.7} roughness={0.35} /></mesh><mesh position={[x < 0 ? 0.38 : -0.38, 4.35, 0]} rotation={[0, 0, x < 0 ? -0.35 : 0.35]}><boxGeometry args={[0.8, 0.08, 0.08]} /><meshStandardMaterial color="#475569" /></mesh><mesh position={[x < 0 ? 0.72 : -0.72, 4.22, 0]}><sphereGeometry args={[0.16, 12, 8]} /><meshStandardMaterial color="#fef3c7" emissive="#fbbf24" emissiveIntensity={2.2} /></mesh></group>)}</>;
+}
+
 export function CityBuildings() {
   const batches = useMemo(() => {
     const solid: Part[] = [],
@@ -63,7 +68,7 @@ export function CityBuildings() {
       d: number,
       color: string,
     ) => parts.push({ position: [x, y, z], scale: [w, h, d], color });
-    const finishes = ["#b8b4aa", "#7b858d", "#b2a698", "#566673"];
+    const finishes = ["#64748b", "#475569", "#3f5368", "#334155"];
     const asphalt = "#30383f",
       pavement = "#a4aaa9",
       marking = "#e5e1ce";
@@ -97,13 +102,15 @@ export function CityBuildings() {
       for (let x = -102; x <= 102; x += 6) add(solid, x, 0.004, z, 3, 0.015, 0.12, marking);
     }
     for (let i = 0; i < 30; i++) {
-      const x = (i % 2 ? 1 : -1) * (48 + (i % 5) * 12);
+      // The first building is the supplier facility and stays with the
+      // supplier truck at the far-side journey starting point.
+      const x = i === 0 ? -96 : (i % 2 ? 1 : -1) * (48 + (i % 5) * 12);
       const z = 12 - Math.floor(i / 2) * 27;
       const w = 7 + (i % 4) * 2,
         d = 8 + (i % 3) * 2;
       const floors = 3 + ((i * 7) % 8),
         h = floors * 3.2;
-      const finish = finishes[i % finishes.length] ?? "#b8b4aa";
+      const finish = finishes[i % finishes.length] ?? "#475569";
       add(solid, x, h / 2, z, w, h, d, finish);
       // Raised pavement, dark ground-floor lobby and entrance canopy.
       add(solid, x, 0.04, z, w + 3, 0.3, d + 3, "#a4aaa9");
@@ -112,7 +119,7 @@ export function CityBuildings() {
       const walkEnd = z + 7;
       if (walkEnd > walkStart)
         add(solid, x, 0.04, (walkStart + walkEnd) / 2, 3, 0.3, walkEnd - walkStart, pavement);
-      add(glass, x, 1.55, z + d / 2 + 0.05, w - 0.6, 2.6, 0.12, "#344f5b");
+      add(glass, x, 1.55, z + d / 2 + 0.05, w - 0.6, 2.6, 0.12, "#0ea5e9");
       add(solid, x, 2.8, z + d / 2 + 0.8, 3.6, 0.18, 1.8, "#343f47");
       add(solid, x, 1.4, z + d / 2 + 0.13, 0.08, 2.5, 0.12, "#aeb8bd");
       for (let f = 1; f < floors; f++) {
@@ -138,7 +145,7 @@ export function CityBuildings() {
           for (let c = 0; c < Math.floor(d / 2); c++) {
             const wz = z - d / 2 + 1.1 + c * 2;
             add(solid, x + side * (w / 2 + 0.06), y, wz, 0.15, 2.15, 1.55, "#38434b");
-            add(glass, x + side * (w / 2 + 0.15), y, wz, 0.04, 1.9, 1.32, "#526b77");
+            add(glass, x + side * (w / 2 + 0.15), y, wz, 0.04, 1.9, 1.32, "#38bdf8");
           }
         }
       }
@@ -156,6 +163,7 @@ export function CityBuildings() {
       <BuildingParts parts={batches.solid} />
       <BuildingParts parts={batches.glass} glass />
       <BuildingParts parts={batches.lit} glass lit />
+      <StreetLights />
       <CityTraffic />
     </group>
   );

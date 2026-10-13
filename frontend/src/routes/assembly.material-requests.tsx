@@ -49,7 +49,7 @@ import { cn, generateProductSKU } from "@/lib/utils";
 
 export const Route = createFileRoute("/assembly/material-requests")({
   beforeLoad: () => requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER"]),
-  head: () => ({ meta: [{ title: "Material Requests · KaizenX" }] }),
+  head: () => ({ meta: [{ title: "Material Requests · KaizenAssests" }] }),
   component: AssemblyMaterialRequestsPage,
 });
 
@@ -90,7 +90,7 @@ function getStatusBadge(status: string) {
       </span>
     );
   }
-  if (s === "PENDING" || s === "SUBMITTED") {
+  if (s === "PENDING" || s === "SUBMITTED" || s === "PENDING_WAREHOUSE_APPROVAL") {
     return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/25">
         <span className="size-1.5 rounded-full bg-amber-500" />
@@ -205,6 +205,7 @@ function AssemblyMaterialRequestsPage() {
       material_name: string;
       issued_quantity: number;
       received_quantity: number;
+      material_scan: string;
       uom: string;
     }>
   >([]);
@@ -237,6 +238,7 @@ function AssemblyMaterialRequestsPage() {
         material_name: it.material_name || it.material_code,
         issued_quantity: it.issued_quantity ?? it.quantity ?? 0,
         received_quantity: it.received_quantity ?? it.issued_quantity ?? it.quantity ?? 0,
+        material_scan: "",
         uom: it.uom || "PCS",
       }));
       setReceiptItems(items);
@@ -255,6 +257,7 @@ function AssemblyMaterialRequestsPage() {
         received_items: receiptItems.map((i) => ({
           material_code: i.material_code,
           received_quantity: Number(i.received_quantity),
+          material_scan: i.material_scan.trim() || undefined,
         })),
         remarks: receiptRemarks,
       });
@@ -1322,6 +1325,7 @@ function AssemblyMaterialRequestsPage() {
                           <th className="py-2.5 px-3">Material Name</th>
                           <th className="py-2.5 px-3 text-right">Required Qty</th>
                           <th className="py-2.5 px-3 text-center">UOM</th>
+                          <th className="py-2.5 px-3">Material QR / Manual Scan</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/40">
@@ -1338,6 +1342,18 @@ function AssemblyMaterialRequestsPage() {
                             </td>
                             <td className="py-2.5 px-3 text-center text-muted-foreground">
                               {item.uom}
+                            </td>
+                            <td className="py-1.5 px-3">
+                              <Input
+                                value={item.material_scan}
+                                placeholder="Scan or enter QR"
+                                onChange={(e) => {
+                                  const updated = [...receiptItems];
+                                  updated[idx].material_scan = e.target.value;
+                                  setReceiptItems(updated);
+                                }}
+                                className="h-7 text-xs font-mono rounded-lg"
+                              />
                             </td>
                           </tr>
                         ))}

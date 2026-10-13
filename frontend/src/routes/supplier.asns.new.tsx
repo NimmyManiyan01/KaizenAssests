@@ -1,27 +1,14 @@
 import { createFileRoute, useSearch } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import {
-  CheckCircle2,
-  Download,
-  FileText,
-  Loader2,
-  Plus,
-  Search,
-  Trash2,
-} from "lucide-react";
+import { CheckCircle2, Download, FileText, Loader2, Plus, Search, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api-client";
 import { getUserInfo } from "@/lib/auth-utils";
 
@@ -65,9 +52,9 @@ function NewAsnPage() {
 
   // Modal Form Inputs
   const [asnNumber, setAsnNumber] = useState("");
-    const [supplierName, setSupplierName] = useState("");
+  const [supplierName, setSupplierName] = useState("");
   const [supplierCompanyName, setSupplierCompanyName] = useState("");
-    const [destinationWarehouse, setDestinationWarehouse] = useState("");
+  const [destinationWarehouse, setDestinationWarehouse] = useState("");
   const [destinationWarehouseId, setDestinationWarehouseId] = useState("");
   const [expectedArrivalDate, setExpectedArrivalDate] = useState("");
   const [vehicleNumber, setVehicleNumber] = useState("");
@@ -87,22 +74,71 @@ function NewAsnPage() {
 
   useEffect(() => {
     loadAsnData();
-    void (currentUser?.supplierId ? api.getSupplier(currentUser.supplierId) : api.getSuppliers({ search: currentUser?.username }))
+    void (
+      currentUser?.supplierId
+        ? api.getSupplier(currentUser.supplierId)
+        : api.getSuppliers({ search: currentUser?.username })
+    )
       .then((result: any) => {
-        const supplierRows = Array.isArray(result) ? result : result?.items || result?.suppliers || [];
-        const supplier = supplierRows.length ? supplierRows.find((item: any) => String(item.id) === String(currentUser?.supplierId) || String(item.username || item.supplier_name || "").toLowerCase() === String(currentUser?.username || "").toLowerCase()) || supplierRows[0] : result;
-        const companyName = supplier?.registered_company_name || supplier?.company_name || supplier?.supplier_name || "";
-        setSupplierCompanyName(companyName);
-        if (companyName) setSupplierName(companyName);
-      }).catch(() => undefined);
-    void Promise.all([
-      api.getStores({ status: "ALL" }).catch(() => []),
-    ]).then(([stores]) => { setWarehouses((stores || []).filter((store: any) => String(store.status || "ACTIVE").toUpperCase() === "ACTIVE")); });
-    void api.getMaterials({ status: "ACTIVE" }).then((materials) => setMaterialCatalog((materials || []).map((material: any) => ({ ...material, id: material.id || material.material_id, code: material.code || material.material_code, name: material.name || material.material_name, uom: material.uom || material.base_uom || material.unit_of_measure })))).catch(() => setMaterialCatalog([]));
-    void Promise.all([api.getVehicles().catch(() => []), api.getDrivers().catch(() => [])]).then(([vehicles, drivers]) => {
-      setRegisteredVehicles((vehicles || []).filter((v: any) => v.is_active !== false && String(v.status || "AVAILABLE").toUpperCase() === "AVAILABLE"));
-      setRegisteredDrivers((drivers || []).filter((d: any) => d.is_active !== false && String(d.status || "ACTIVE").toUpperCase() === "ACTIVE"));
+        const supplierRows = Array.isArray(result)
+          ? result
+          : result?.items || result?.suppliers || [];
+        const supplier = supplierRows.length
+          ? supplierRows.find(
+              (item: any) =>
+                String(item.id) === String(currentUser?.supplierId) ||
+                String(item.username || item.supplier_name || "").toLowerCase() ===
+                  String(currentUser?.username || "").toLowerCase(),
+            ) || supplierRows[0]
+          : result;
+        const companyName =
+          supplier?.registered_company_name ||
+          supplier?.company_name ||
+          supplier?.supplier_name ||
+          "";
+        const displaySupplierName = /seeded supplier/i.test(companyName) ? "MTU" : companyName;
+        setSupplierCompanyName(displaySupplierName);
+        if (displaySupplierName) setSupplierName(displaySupplierName);
+      })
+      .catch(() => undefined);
+    void Promise.all([api.getStores({ status: "ALL" }).catch(() => [])]).then(([stores]) => {
+      setWarehouses(
+        (stores || []).filter(
+          (store: any) => String(store.status || "ACTIVE").toUpperCase() === "ACTIVE",
+        ),
+      );
     });
+    void api
+      .getMaterials({ status: "ACTIVE" })
+      .then((materials) =>
+        setMaterialCatalog(
+          (materials || []).map((material: any) => ({
+            ...material,
+            id: material.id || material.material_id,
+            code: material.code || material.material_code,
+            name: material.name || material.material_name,
+            uom: material.uom || material.base_uom || material.unit_of_measure,
+          })),
+        ),
+      )
+      .catch(() => setMaterialCatalog([]));
+    void Promise.all([api.getVehicles().catch(() => []), api.getDrivers().catch(() => [])]).then(
+      ([vehicles, drivers]) => {
+        setRegisteredVehicles(
+          (vehicles || []).filter(
+            (v: any) =>
+              v.is_active !== false &&
+              String(v.status || "AVAILABLE").toUpperCase() === "AVAILABLE",
+          ),
+        );
+        setRegisteredDrivers(
+          (drivers || []).filter(
+            (d: any) =>
+              d.is_active !== false && String(d.status || "ACTIVE").toUpperCase() === "ACTIVE",
+          ),
+        );
+      },
+    );
   }, []);
 
   const loadAsnData = async () => {
@@ -124,7 +160,9 @@ function NewAsnPage() {
           driver_contact: a.driver_contact || "+91 98450 12345",
           status: a.status || "SUBMITTED",
           created_at: a.created_at || new Date().toISOString(),
-          lines: a.lines || [{ material_name: "Stainless Steel Sheet 304", quantity: 500, uom: "KG" }],
+          lines: a.lines || [
+            { material_name: "Stainless Steel Sheet 304", quantity: 500, uom: "KG" },
+          ],
         }));
         setAsnList(mapped);
       }
@@ -154,6 +192,12 @@ function NewAsnPage() {
     setIsAssignmentOpen(true);
   };
 
+  useEffect(() => {
+    if (search?.open === "create") {
+      void handleOpenCreateModal();
+    }
+  }, [search?.open]);
+
   const continueToAsnForm = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!vehicleNumber || !driverName || !driverMobile.trim()) {
@@ -173,10 +217,24 @@ function NewAsnPage() {
       toast.success(`Component '${created.name}' saved to Database ✓`, {
         description: `Code: ${created.code} · Now available in dropdown`,
       });
-      setMaterialCatalog((prev) => [...prev, { ...created, id: created.id || created.material_id, code: created.code, name: created.name, uom: created.uom || "PCS" }]);
+      setMaterialCatalog((prev) => [
+        ...prev,
+        {
+          ...created,
+          id: created.id || created.material_id,
+          code: created.code,
+          name: created.name,
+          uom: created.uom || "PCS",
+        },
+      ]);
       setLines((prev) => [
         ...prev,
-        { item_code: created.code, material_name: created.name, shipped_quantity: "1", uom: created.uom || "PCS" },
+        {
+          item_code: created.code,
+          material_name: created.name,
+          shipped_quantity: "1",
+          uom: created.uom || "PCS",
+        },
       ]);
       setCustomMaterialName("");
       setIsMaterialPopupOpen(false);
@@ -186,17 +244,30 @@ function NewAsnPage() {
   };
 
   const selectPurchaseOrder = async (id: string) => {
-    if (!id) { setSelectedPo(null); setLines([]); return; }
+    if (!id) {
+      setSelectedPo(null);
+      setLines([]);
+      return;
+    }
     const po = await api.getPurchaseOrder(id);
     setSelectedPo(po);
     const poLines = po?.lines || po?.items || po?.materials || po?.purchase_order_lines || [];
-    setLines(poLines.map((line: any) => ({
-      item_code: line.item_code || line.material_code || line.code || "",
-      material_name: line.material_name || line.material?.name || line.name || "",
-      shipped_quantity: "",
-      remaining_quantity: Number(line.remaining_quantity ?? line.remaining ?? line.balance_quantity ?? line.ordered_quantity ?? line.quantity ?? 0),
-      uom: line.uom || line.unit_of_measure || "PCS",
-    })));
+    setLines(
+      poLines.map((line: any) => ({
+        item_code: line.item_code || line.material_code || line.code || "",
+        material_name: line.material_name || line.material?.name || line.name || "",
+        shipped_quantity: "",
+        remaining_quantity: Number(
+          line.remaining_quantity ??
+            line.remaining ??
+            line.balance_quantity ??
+            line.ordered_quantity ??
+            line.quantity ??
+            0,
+        ),
+        uom: line.uom || line.unit_of_measure || "PCS",
+      })),
+    );
   };
 
   const handleFormSubmit = async (e: React.FormEvent) => {
@@ -240,11 +311,14 @@ function NewAsnPage() {
         status: "SUBMITTED",
       };
 
-      await api.createAsn(payload);
+      const createdAsn = await api.createAsn(payload);
 
       const newRecord: AsnRecord = {
-        id: `asn-${Date.now()}`,
-        asn_number: asnNumber,
+        // Keep the server identifier so the PDF endpoint can resolve this
+        // newly-created ASN immediately. Fall back to the number for older
+        // backend responses, which also support number-based lookup.
+        id: String(createdAsn?.id || createdAsn?.asn_id || createdAsn?.asn_number || asnNumber),
+        asn_number: createdAsn?.asn_number || asnNumber,
         po_number: "",
         supplier_name: supplierName,
         destination_warehouse: destinationWarehouse,
@@ -274,7 +348,13 @@ function NewAsnPage() {
     toast.success(`Downloading Official ASN Certificate: ${record.asn_number}`, {
       description: `Vehicle: ${record.vehicle_number} · Supplier: ${record.supplier_name}`,
     });
-    window.print();
+    // The backend supports lookup by ASN number and this also handles rows
+    // created by older frontend sessions that carried a synthetic id.
+    void api.downloadAsnPdf(record.asn_number || record.id).then(
+      () => toast.success(`Downloaded official ASN certificate: ${record.asn_number}`),
+      (error: any) =>
+        toast.error("ASN PDF download failed", { description: error?.message || "Try again." }),
+    );
   };
 
   const filteredList = asnList.filter((a) => {
@@ -342,15 +422,24 @@ function NewAsnPage() {
                 <tbody className="divide-y divide-border/60 font-medium">
                   {filteredList.map((asn) => (
                     <tr key={asn.id} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-4 py-3 font-mono font-bold text-primary">{asn.asn_number}</td>
+                      <td className="px-4 py-3 font-mono font-bold text-primary">
+                        {asn.asn_number}
+                      </td>
                       <td className="px-4 py-3 font-bold text-foreground">{asn.supplier_name}</td>
-                      <td className="px-4 py-3 font-mono font-bold text-sky-600">{asn.vehicle_number}</td>
+                      <td className="px-4 py-3 font-mono font-bold text-sky-600">
+                        {asn.vehicle_number}
+                      </td>
                       <td className="px-4 py-3">
                         <span className="font-bold">{asn.driver_name}</span>{" "}
-                        <span className="text-muted-foreground font-mono">({asn.driver_contact})</span>
+                        <span className="text-muted-foreground font-mono">
+                          ({asn.driver_contact})
+                        </span>
                       </td>
                       <td className="px-4 py-3 font-bold text-emerald-600">
-                        {asn.delivery_date || asn.expected_arrival_date || asn.expected_arrival_at?.split("T")[0] || "—"}
+                        {asn.delivery_date ||
+                          asn.expected_arrival_date ||
+                          asn.expected_arrival_at?.split("T")[0] ||
+                          "—"}
                       </td>
                       <td className="px-4 py-3">
                         <Badge className="rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
@@ -379,25 +468,100 @@ function NewAsnPage() {
 
         <Dialog open={isAssignmentOpen} onOpenChange={setIsAssignmentOpen}>
           <DialogContent className="max-w-xl rounded-2xl p-6">
-            <DialogHeader><DialogTitle className="text-lg font-black text-primary">Assign vehicle and driver</DialogTitle></DialogHeader>
+            <DialogHeader>
+              <DialogTitle className="text-lg font-black text-primary">
+                Assign vehicle and driver
+              </DialogTitle>
+            </DialogHeader>
             <form onSubmit={continueToAsnForm} className="space-y-5">
-              <p className="text-sm text-muted-foreground">Enter the transport details first. The complete ASN form will open after you click Next.</p>
+              <p className="text-sm text-muted-foreground">
+                Enter the transport details first. The complete ASN form will open after you click
+                Next.
+              </p>
               <div className="grid gap-3 sm:grid-cols-3">
-                <div><Label htmlFor="assignment-vehicle">Vehicle Number *</Label><Input id="assignment-vehicle" required placeholder="Enter vehicle number" value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} className={inputClass} /></div>
-                <div><Label htmlFor="assignment-driver">Driver Name *</Label><Input id="assignment-driver" required placeholder="Enter driver name" value={driverName} onChange={(e) => setDriverName(e.target.value)} className={inputClass} /></div>
-                <div><Label htmlFor="assignment-contact">Driver Contact *</Label><Input id="assignment-contact" required type="tel" value={driverMobile} onChange={(e) => setDriverMobile(e.target.value)} className={inputClass} /></div>
+                <div>
+                  <Label htmlFor="assignment-vehicle">Vehicle Number *</Label>
+                  <Input
+                    id="assignment-vehicle"
+                    required
+                    placeholder="Enter vehicle number"
+                    value={vehicleNumber}
+                    onChange={(e) => setVehicleNumber(e.target.value)}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="assignment-driver">Driver Name *</Label>
+                  <Input
+                    id="assignment-driver"
+                    required
+                    placeholder="Enter driver name"
+                    value={driverName}
+                    onChange={(e) => setDriverName(e.target.value)}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="assignment-contact">Driver Contact *</Label>
+                  <Input
+                    id="assignment-contact"
+                    required
+                    type="tel"
+                    value={driverMobile}
+                    onChange={(e) => setDriverMobile(e.target.value)}
+                    className={inputClass}
+                  />
+                </div>
               </div>
-              <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setIsAssignmentOpen(false)}>Cancel</Button><Button type="submit">Next</Button></div>
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setIsAssignmentOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit">Next</Button>
+              </div>
             </form>
           </DialogContent>
         </Dialog>
 
         <Dialog open={isMaterialPopupOpen} onOpenChange={setIsMaterialPopupOpen}>
           <DialogContent className="max-w-sm rounded-2xl p-6">
-            <DialogHeader><DialogTitle className="text-lg font-black text-primary">Add custom material</DialogTitle></DialogHeader>
-            <form onSubmit={(event) => { event.preventDefault(); void handleAddNewCustomMaterial(); }} className="space-y-4">
-              <div><Label htmlFor="custom-material-name">Material name *</Label><Input id="custom-material-name" autoFocus required placeholder="Enter material name" value={customMaterialName} onChange={(event) => setCustomMaterialName(event.target.value)} className={inputClass} /></div>
-              <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => { setCustomMaterialName(""); setIsMaterialPopupOpen(false); }}>Cancel</Button><Button type="submit">Add Material</Button></div>
+            <DialogHeader>
+              <DialogTitle className="text-lg font-black text-primary">
+                Add custom material
+              </DialogTitle>
+            </DialogHeader>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleAddNewCustomMaterial();
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <Label htmlFor="custom-material-name">Material name *</Label>
+                <Input
+                  id="custom-material-name"
+                  autoFocus
+                  required
+                  placeholder="Enter material name"
+                  value={customMaterialName}
+                  onChange={(event) => setCustomMaterialName(event.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setCustomMaterialName("");
+                    setIsMaterialPopupOpen(false);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit">Add Material</Button>
+              </div>
             </form>
           </DialogContent>
         </Dialog>
@@ -420,19 +584,35 @@ function NewAsnPage() {
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
-                    <Label className="text-[10px] font-bold uppercase text-muted-foreground">ASN Number</Label>
+                    <Label className="text-[10px] font-bold uppercase text-muted-foreground">
+                      ASN Number
+                    </Label>
                     <div className="mt-1 flex h-10 items-center rounded-xl border bg-muted/60 px-3 font-mono font-bold text-primary">
                       {asnNumber}
                     </div>
                   </div>
 
                   <div>
-                    <Label htmlFor="supplier-name" className="text-[10px] font-bold uppercase text-muted-foreground">Supplier Name</Label>
-                    <Input id="supplier-name" readOnly required value={supplierName} className={`${inputClass} bg-muted`} />
+                    <Label
+                      htmlFor="supplier-name"
+                      className="text-[10px] font-bold uppercase text-muted-foreground"
+                    >
+                      Supplier Name
+                    </Label>
+                    <Input
+                      id="supplier-name"
+                      required
+                      value={supplierName}
+                      onChange={(e) => setSupplierName(e.target.value)}
+                      className={`${inputClass} bg-muted`}
+                    />
                   </div>
 
                   <div>
-                    <Label htmlFor="expected-arrival-date" className="text-[10px] font-bold uppercase text-muted-foreground">
+                    <Label
+                      htmlFor="expected-arrival-date"
+                      className="text-[10px] font-bold uppercase text-muted-foreground"
+                    >
                       Expected Arrival Date *
                     </Label>
                     <Input
@@ -444,33 +624,77 @@ function NewAsnPage() {
                       className={inputClass}
                     />
                   </div>
-
                 </div>
               </div>
 
               {/* VEHICLE & DRIVER DETAILS */}
-              <div aria-hidden="true" className="hidden rounded-xl border bg-muted/30 p-4 space-y-3">
+              <div
+                aria-hidden="true"
+                className="hidden rounded-xl border bg-muted/30 p-4 space-y-3"
+              >
                 <h3 className="text-xs font-black uppercase tracking-wider text-primary">
                   2. VEHICLE & DRIVER DETAILS
                 </h3>
 
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div>
-                    <Label htmlFor="modal-vehicle-number" className="text-[10px] font-bold uppercase text-muted-foreground">
+                    <Label
+                      htmlFor="modal-vehicle-number"
+                      className="text-[10px] font-bold uppercase text-muted-foreground"
+                    >
                       Vehicle Number *
                     </Label>
-                    <select id="modal-vehicle-number" required value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} className={`${inputClass} w-full px-3`}><option value="">Select registered vehicle</option>{registeredVehicles.map((v) => <option key={v.id} value={v.vehicle_number}>{v.vehicle_number} · {v.vehicle_type || "Vehicle"} · {v.capacity_tons ?? v.capacity ?? "—"}</option>)}</select>
+                    <select
+                      id="modal-vehicle-number"
+                      required
+                      value={vehicleNumber}
+                      onChange={(e) => setVehicleNumber(e.target.value)}
+                      className={`${inputClass} w-full px-3`}
+                    >
+                      <option value="">Select registered vehicle</option>
+                      {registeredVehicles.map((v) => (
+                        <option key={v.id} value={v.vehicle_number}>
+                          {v.vehicle_number} · {v.vehicle_type || "Vehicle"} ·{" "}
+                          {v.capacity_tons ?? v.capacity ?? "—"}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
-                    <Label htmlFor="modal-driver-name" className="text-[10px] font-bold uppercase text-muted-foreground">
+                    <Label
+                      htmlFor="modal-driver-name"
+                      className="text-[10px] font-bold uppercase text-muted-foreground"
+                    >
                       Driver Name *
                     </Label>
-                    <select id="modal-driver-name" required value={driverName} onChange={(e) => { const d = registeredDrivers.find((row) => (row.driver_name || row.name) === e.target.value); setDriverName(e.target.value); setDriverMobile(d?.phone || d?.mobile_number || d?.phone_number || ""); }} className={`${inputClass} w-full px-3`}><option value="">Select registered driver</option>{registeredDrivers.map((d) => <option key={d.id} value={d.driver_name || d.name}>{d.driver_name || d.name} · {d.license_number || "License pending"}</option>)}</select>
+                    <select
+                      id="modal-driver-name"
+                      required
+                      value={driverName}
+                      onChange={(e) => {
+                        const d = registeredDrivers.find(
+                          (row) => (row.driver_name || row.name) === e.target.value,
+                        );
+                        setDriverName(e.target.value);
+                        setDriverMobile(d?.phone || d?.mobile_number || d?.phone_number || "");
+                      }}
+                      className={`${inputClass} w-full px-3`}
+                    >
+                      <option value="">Select registered driver</option>
+                      {registeredDrivers.map((d) => (
+                        <option key={d.id} value={d.driver_name || d.name}>
+                          {d.driver_name || d.name} · {d.license_number || "License pending"}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
-                    <Label htmlFor="modal-driver-mobile" className="text-[10px] font-bold uppercase text-muted-foreground">
+                    <Label
+                      htmlFor="modal-driver-mobile"
+                      className="text-[10px] font-bold uppercase text-muted-foreground"
+                    >
                       Driver Mobile Number *
                     </Label>
                     <Input
@@ -488,11 +712,32 @@ function NewAsnPage() {
 
               {/* MATERIAL LINE ITEMS TABLE */}
               <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
-                  <div className="flex justify-between items-center flex-wrap gap-2">
+                <div className="flex justify-between items-center flex-wrap gap-2">
                   <h3 className="text-xs font-black uppercase tracking-wider text-primary">
                     2. SHIPPED MATERIALS & QUANTITIES
                   </h3>
-                  <div className="flex justify-end"><Button type="button" variant="outline" size="sm" className="h-8" onClick={() => setLines((rows) => [...rows, { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" }])}>+ Add Row</Button></div>
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8"
+                      onClick={() =>
+                        setLines((rows) => [
+                          ...rows,
+                          {
+                            material_id: "",
+                            item_code: "",
+                            material_name: "",
+                            shipped_quantity: "",
+                            uom: "",
+                          },
+                        ])
+                      }
+                    >
+                      + Add Row
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="overflow-x-auto rounded-xl border bg-background">
@@ -509,7 +754,53 @@ function NewAsnPage() {
                       {lines.map((line, idx) => (
                         <tr key={idx}>
                           <td className="p-2">
-                            <select required value={line.item_id || line.material_id || ""} onChange={(e) => { if (e.target.value === "__add_custom_material__") { setIsMaterialPopupOpen(true); return; } const material = materialCatalog.find((item) => String(item.id) === e.target.value); if (material && lines.some((item, i) => i !== idx && String(item.material_id) === String(material.id))) { toast.error("This material is already selected in the ASN."); return; } setLines((current) => current.map((item, i) => i === idx ? { ...item, material_id: material?.id || "", item_code: material?.code || "", material_name: material?.name || "", uom: material?.uom || "" } : item)); }} className="h-8 w-full rounded-lg border bg-background px-2 text-xs font-semibold"><option value="">Select material</option>{materialCatalog.map((material) => <option key={material.id} value={material.id}>{material.name} ({material.code})</option>)}<option value="__add_custom_material__">＋ Add custom material</option></select>
+                            <select
+                              required
+                              value={line.item_id || line.material_id || ""}
+                              onChange={(e) => {
+                                if (e.target.value === "__add_custom_material__") {
+                                  setIsMaterialPopupOpen(true);
+                                  return;
+                                }
+                                const material = materialCatalog.find(
+                                  (item) => String(item.id) === e.target.value,
+                                );
+                                if (
+                                  material &&
+                                  lines.some(
+                                    (item, i) =>
+                                      i !== idx && String(item.material_id) === String(material.id),
+                                  )
+                                ) {
+                                  toast.error("This material is already selected in the ASN.");
+                                  return;
+                                }
+                                setLines((current) =>
+                                  current.map((item, i) =>
+                                    i === idx
+                                      ? {
+                                          ...item,
+                                          material_id: material?.id || "",
+                                          item_code: material?.code || "",
+                                          material_name: material?.name || "",
+                                          uom: material?.uom || "",
+                                        }
+                                      : item,
+                                  ),
+                                );
+                              }}
+                              className="h-8 w-full rounded-lg border bg-background px-2 text-xs font-semibold"
+                            >
+                              <option value="">Select material</option>
+                              {materialCatalog.map((material) => (
+                                <option key={material.id} value={material.id}>
+                                  {material.name} ({material.code})
+                                </option>
+                              ))}
+                              <option value="__add_custom_material__">
+                                ＋ Add custom material
+                              </option>
+                            </select>
                           </td>
                           <td className="p-2">
                             <Input
@@ -519,14 +810,22 @@ function NewAsnPage() {
                               value={line.shipped_quantity}
                               onChange={(e) =>
                                 setLines((prev) =>
-                                  prev.map((item, i) => (i === idx ? { ...item, shipped_quantity: e.target.value } : item))
+                                  prev.map((item, i) =>
+                                    i === idx
+                                      ? { ...item, shipped_quantity: e.target.value }
+                                      : item,
+                                  ),
                                 )
                               }
                               className="h-8 text-xs font-bold text-right"
                             />
                           </td>
                           <td className="p-2">
-                            <Input readOnly value={line.uom} className="h-8 bg-muted text-xs font-semibold" />
+                            <Input
+                              readOnly
+                              value={line.uom}
+                              className="h-8 bg-muted text-xs font-semibold"
+                            />
                           </td>
                           <td className="p-2 text-center">
                             <Button
@@ -562,7 +861,11 @@ function NewAsnPage() {
                   disabled={submitting}
                   className="rounded-xl font-bold bg-sky-600 hover:bg-sky-700 text-white shadow-md"
                 >
-                  {submitting ? <Loader2 className="mr-2 size-4 animate-spin" /> : <CheckCircle2 className="mr-2 size-4" />}
+                  {submitting ? (
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="mr-2 size-4" />
+                  )}
                   Submit ASN
                 </Button>
               </div>

@@ -40,6 +40,7 @@ from app.modules.quarantine.infrastructure.api.router import router as quarantin
 from app.security.router import router as auth_router
 from app.security.auth_router import router as procurement_auth_router
 from app.modules.procurement.infrastructure.api.router import router as procurement_router
+from app.modules.procurement.infrastructure.api.material_router import router as material_router
 from app.workers.notification_consumer import start_notification_consumer
 from app.workers.outbox_relay import relay_once
 
@@ -48,12 +49,40 @@ logger = get_logger(__name__)
 
 scheduler = AsyncIOScheduler()
 _consumer_task: asyncio.Task | None = None
+_producer_task: asyncio.Task | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    global _consumer_task
+    global _consumer_task, _producer_task
+
+    if not settings.startup_schema_compatibility:
+        async def start_kafka_background() -> None:
+            try:
+                await start_producer()
+            except Exception as exc:
+                logger.debug(f"Kafka producer start skipped (Kafka offline or unavailable): {exc}")
+        _producer_task = asyncio.create_task(start_kafka_background())
+        scheduler.add_job(relay_once, "interval", seconds=settings.outbox_poll_interval_seconds, id="outbox-relay", max_instances=1, coalesce=True)
+        scheduler.start()
+        try:
+            _consumer_task = asyncio.create_task(start_notification_consumer())
+        except Exception as exc:
+            logger.debug(f"Notification consumer task failed to start: {exc}")
+        logger.info("business-service started", extra={"extra_fields": {"environment": settings.environment, "startup_schema_compatibility": False}})
+        yield
+        scheduler.shutdown(wait=False)
+        if _consumer_task is not None:
+            _consumer_task.cancel()
+        if _producer_task is not None and not _producer_task.done():
+            _producer_task.cancel()
+        try:
+            await stop_producer()
+        except Exception:
+            pass
+        logger.info("business-service stopped")
+        return
 
     # Ensure ORM-owned tables exist before applying the legacy compatibility
     # DDL below.  This is especially important for local databases whose data
@@ -1640,6 +1669,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
     app.include_router(procurement_auth_router)
     app.include_router(procurement_router)
+    app.include_router(material_router)
 
     @app.get("/api/debug-assembly")
     async def debug_assembly():

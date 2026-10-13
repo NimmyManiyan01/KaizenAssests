@@ -112,12 +112,21 @@ def _to_zone_response(zone: StoreZoneModel, bins_count: int = 0) -> ZoneResponse
     )
 
 
+def _location_code_for_bin(bin_obj: StoreBinModel) -> str:
+    """Stable path code used by the location master and QR payloads."""
+    # The response helper only receives the bin; its scoped QR identifier is
+    # still available for clients that need the warehouse/zone-prefixed code.
+    return bin_obj.qr_identifier or bin_obj.bin_code
+
+
 def _to_bin_response(bin_obj: StoreBinModel) -> BinResponse:
+    location_code = _location_code_for_bin(bin_obj)
     return BinResponse(
         id=str(bin_obj.id),
         store_id=str(bin_obj.store_id),
         zone_id=str(bin_obj.zone_id),
         bin_code=bin_obj.bin_code,
+        location_code=location_code,
         bin_name=bin_obj.bin_name,
         rack=bin_obj.rack,
         shelf=bin_obj.shelf,
@@ -381,10 +390,12 @@ def _build_zone_qr_response(zone: StoreZoneModel, store: StoreModel) -> ZoneQRRe
 
 
 def _build_bin_qr_response(bin_obj: StoreBinModel, zone: StoreZoneModel, store: StoreModel) -> BinQRResponse:
+    location_code = f"{store.store_code}-{zone.zone_code}-{bin_obj.rack or 'FLOOR'}-{bin_obj.shelf or bin_obj.position or 'GROUND'}-{bin_obj.bin_code}"
     payload_dict = {
         "type": "BIN_QR",
         "bin_id": str(bin_obj.id),
         "bin_code": bin_obj.bin_code,
+        "location_code": location_code,
         "bin_name": bin_obj.bin_name,
         "zone_id": str(zone.id),
         "zone_code": zone.zone_code,
@@ -404,6 +415,7 @@ def _build_bin_qr_response(bin_obj: StoreBinModel, zone: StoreZoneModel, store: 
     return BinQRResponse(
         bin_id=str(bin_obj.id),
         bin_code=bin_obj.bin_code,
+        location_code=location_code,
         bin_name=bin_obj.bin_name,
         zone_id=str(zone.id),
         zone_code=zone.zone_code,
@@ -1541,6 +1553,9 @@ async def create_store_bin(
         clean_code = await generate_next_bin_code(uow.session, zone.id, zone.zone_code)
 
     now = datetime.now(timezone.utc)
+    storage_type = payload.storage_type.strip().upper()
+    if storage_type not in {"RACK", "FLOOR", "GENERAL"}:
+        raise HTTPException(status_code=422, detail="storage_type must be RACK, FLOOR, or GENERAL")
     new_bin = StoreBinModel(
         id=uuid.uuid4(),
         store_id=store.id,
@@ -1550,7 +1565,7 @@ async def create_store_bin(
         rack=payload.rack.strip() if payload.rack else None,
         shelf=payload.shelf.strip() if payload.shelf else None,
         position=payload.position.strip() if payload.position else None,
-        storage_type=payload.storage_type.strip().upper(),
+        storage_type=storage_type,
         capacity=payload.capacity,
         maximum_weight=payload.maximum_weight,
         maximum_volume=payload.maximum_volume,
@@ -1759,6 +1774,9 @@ async def create_zone_bin(
         clean_code = await generate_next_bin_code(uow.session, zone.id, zone.zone_code)
 
     now = datetime.now(timezone.utc)
+    storage_type = payload.storage_type.strip().upper()
+    if storage_type not in {"RACK", "FLOOR", "GENERAL"}:
+        raise HTTPException(status_code=422, detail="storage_type must be RACK, FLOOR, or GENERAL")
     new_bin = StoreBinModel(
         id=uuid.uuid4(),
         store_id=store.id,
@@ -1768,7 +1786,7 @@ async def create_zone_bin(
         rack=payload.rack.strip() if payload.rack else None,
         shelf=payload.shelf.strip() if payload.shelf else None,
         position=payload.position.strip() if payload.position else None,
-        storage_type=payload.storage_type.strip().upper(),
+        storage_type=storage_type,
         capacity=payload.capacity,
         maximum_weight=payload.maximum_weight,
         maximum_volume=payload.maximum_volume,
@@ -1964,6 +1982,25 @@ async def lookup_bin_by_scan(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied: You are not authorized to access this Bin/Store.",
+        )
+
+    # A scanned location is commonly used to complete a putaway.  Do not
+    # allow an inactive parent or bin to enter that workflow, even if an old
+    # QR label is still physically present.
+    if (store.status or "").strip().upper() != "ACTIVE":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Warehouse '{store.store_code}' is not active for putaway.",
+        )
+    if (zone.status or "").strip().upper() != "ACTIVE":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Zone '{zone.zone_code}' is not active for putaway.",
+        )
+    if (bin_obj.status or "").strip().upper() not in {"ACTIVE", "AVAILABLE"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Location '{bin_obj.bin_code}' is not active or available for putaway.",
         )
 
     return _build_bin_qr_response(bin_obj, zone, store)

@@ -313,8 +313,8 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
         ScrollTrigger.refresh();
       });
     };
-    window.addEventListener("kaizenx:replay-journey", replay);
-    return () => window.removeEventListener("kaizenx:replay-journey", replay);
+    window.addEventListener("kaizenassests:replay-journey", replay);
+    return () => window.removeEventListener("kaizenassests:replay-journey", replay);
   }, []);
 
   // Jump to specific stage
@@ -401,11 +401,11 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
 
       <div
         hidden={scrollProgress < 0.12}
-        className="pointer-events-none absolute inset-x-0 top-1/2 z-30 flex -translate-y-1/2 justify-center px-6 text-center"
+        className="pointer-events-none absolute inset-x-0 top-[17%] z-30 flex -translate-y-1/2 justify-center px-6 text-center"
       >
         <p
           key={taglineIndex}
-          className="max-w-3xl animate-in fade-in duration-700 text-3xl font-semibold tracking-tight text-white drop-shadow-[0_3px_18px_rgba(0,0,0,0.9)] sm:text-5xl lg:text-6xl"
+          className="max-w-xl animate-in fade-in duration-700 text-xl font-semibold tracking-tight text-white drop-shadow-[0_3px_18px_rgba(0,0,0,0.9)] sm:text-3xl lg:text-4xl"
         >
           {CINEMATIC_TAGLINES[taglineIndex]}
         </p>

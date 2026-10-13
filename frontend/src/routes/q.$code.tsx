@@ -92,7 +92,7 @@ function ShortLinkResolver() {
             <Warehouse className="size-5" />
           </div>
           <div>
-            <div className="font-bold text-white text-base leading-none">KaizenX</div>
+            <div className="font-bold text-white text-base leading-none">KaizenAssests</div>
             <div className="text-xs text-slate-400 mt-1">Supplier Commercial Portal</div>
           </div>
         </div>

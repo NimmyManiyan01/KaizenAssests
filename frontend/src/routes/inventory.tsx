@@ -50,7 +50,7 @@ import jsQR from "jsqr";
 export const Route = createFileRoute("/inventory")({
   head: () => ({
     meta: [
-      { title: "Warehouse Module · KaizenX" },
+      { title: "Warehouse Module · KaizenAssests" },
       {
         name: "description",
         content:
@@ -454,7 +454,7 @@ function SimpleWarehouseModule() {
       !selectedLocationId ||
       !Number.isFinite(quantity) ||
       quantity <= 0 ||
-      quantity > Number(assignPutawayTask.quantity || 0)
+      quantity > Number(assignPutawayTask.remaining_quantity ?? assignPutawayTask.quantity ?? 0)
     ) {
       toast.error("Select an active rack and enter a valid assignment quantity.");
       return;
@@ -470,6 +470,7 @@ function SimpleWarehouseModule() {
         selectedBinObj?.store_id,
         selectedBinObj?.zone_id,
         selectedBinObj?.id,
+        quantity,
       );
       toast.success(
         `Assigned ${assignPutawayTask.material_name || "Material"} to ${selectedBinObj?.label || selectedLocationId}`,
@@ -781,6 +782,32 @@ function SimpleWarehouseModule() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handlePartialApproveMaterialRequest = async (req: any) => {
+    const requestItems = Array.isArray(req.items) ? req.items : [req];
+    const approvedItems = requestItems.map((item: any) => ({
+      material_code: item.material_code,
+      approved_quantity: Math.min(Number(item.required_quantity ?? item.quantity ?? 0), Number(item.available_quantity ?? item.available ?? 0)),
+    })).filter((item: any) => item.approved_quantity > 0);
+    if (!approvedItems.length) { toast.error("No available stock can be approved for this request."); return; }
+    setIsSubmitting(true);
+    try {
+      await api.approveAssemblyMaterialRequest(req.id || req.request_number, { approved_items: approvedItems, remarks: "Partially approved against current available stock." });
+      toast.success(`Partially approved ${req.request_number || req.id}.`); void fetchData();
+    } catch (err: any) { toast.error(err.message || "Failed to partially approve request"); }
+    finally { setIsSubmitting(false); }
+  };
+
+  const handleRejectMaterialRequest = async (req: any) => {
+    const reason = window.prompt("Reason for rejecting this material request:");
+    if (!reason?.trim()) return;
+    setIsSubmitting(true);
+    try {
+      await api.rejectAssemblyMaterialRequest(req.id || req.request_number, reason.trim());
+      toast.success(`Rejected Material Request ${req.request_number || req.id}.`); void fetchData();
+    } catch (err: any) { toast.error(err.message || "Failed to reject request"); }
+    finally { setIsSubmitting(false); }
   };
 
   // Action: Complete Pickup Task
@@ -1480,7 +1507,7 @@ function SimpleWarehouseModule() {
                       <th className="py-2.5 px-3">Material Code</th>
                       <th className="py-2.5 px-3">Material Name</th>
                       <th className="py-2.5 px-3">Batch</th>
-                      <th className="py-2.5 px-3">Available Stock</th>
+                      <th className="py-2.5 px-3">Available</th>
                       <th className="py-2.5 px-3">Location</th>
                       <th className="py-2.5 px-3 text-right">Action</th>
                     </tr>
@@ -1505,7 +1532,7 @@ function SimpleWarehouseModule() {
                             {item.batch_number || item.batch || "-"}
                           </td>
                           <td className="py-3 px-3 font-bold text-emerald-600">
-                            {item.available ??
+                            Available: {item.available_to_pick_quantity ?? item.available ??
                               item.available_quantity ??
                               item.total_quantity ??
                               "—"}{" "}
@@ -1513,7 +1540,7 @@ function SimpleWarehouseModule() {
                           </td>
                           <td className="py-3 px-3">
                             <Badge variant="outline" className="text-[10px] font-mono">
-                              {item.bin_code || item.location || "—"}
+                              {item.location_code || item.bin_code || item.location || "—"}
                             </Badge>
                           </td>
                           <td className="py-3 px-3 text-right">
@@ -1610,14 +1637,12 @@ function SimpleWarehouseModule() {
                           </Badge>
                         </td>
                         <td className="py-3 px-3 text-right">
-                          {(req.status === "PENDING" || req.status === "SUBMITTED") && (
-                            <Button
-                              size="sm"
-                              onClick={() => handleApproveMaterialRequest(req)}
-                              className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
-                            >
-                              Approve Request
-                            </Button>
+                          {(req.status === "PENDING" || req.status === "SUBMITTED" || req.status === "PENDING_WAREHOUSE_APPROVAL") && (
+                            <div className="flex justify-end gap-1">
+                              <Button size="sm" onClick={() => handleApproveMaterialRequest(req)} className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white">Approve</Button>
+                              <Button size="sm" variant="outline" onClick={() => handlePartialApproveMaterialRequest(req)} className="h-7 text-xs">Partial</Button>
+                              <Button size="sm" variant="outline" onClick={() => handleRejectMaterialRequest(req)} className="h-7 text-xs text-red-600">Reject</Button>
+                            </div>
                           )}
                         </td>
                       </tr>

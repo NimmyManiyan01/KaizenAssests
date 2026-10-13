@@ -27,6 +27,7 @@ from app.modules.dispatch.infrastructure.persistence.repository_impl import (
     SQLAlchemyVehicleRepository,
 )
 from app.modules.dispatch.infrastructure.persistence.models import DispatchModel, DriverModel, VehicleModel
+from app.modules.assembly.infrastructure.persistence.models import AssemblyFinishedGoodsModel, AssemblyFinishedGoodsAllocationModel
 from app.modules.gate.infrastructure.persistence.models import GateEntryModel
 from app.modules.dispatch.infrastructure.api.schemas import (
     DispatchOrderResponse,
@@ -288,7 +289,7 @@ async def create_dispatch(
         order = await uc.create_dispatch(cmd)
         db.add(NotificationModel(
             id=uuid.uuid4(),
-            user_role="DISPATCH",
+            user_role="GATE_SECURITY",
             title="Dispatch Order Created",
             message=f"New Dispatch Order {order.dispatch_number} created for {order.customer_name} (Order Ref: {order.order_number}).",
             link="/dispatch-orders",
@@ -488,8 +489,24 @@ async def scan_dispatch_package(
         raise HTTPException(status_code=404, detail="Dispatch order not found")
     qr = req.qr_code.strip()
     item = next((candidate for candidate in order.items if candidate.package_number == qr), None)
+    # Loading now verifies the QC-approved finished-goods QR generated during
+    # assembly. Resolve that QR to the corresponding dispatch item so a
+    # separate package QR is no longer required.
+    if item is None:
+        fg_result = await db.execute(
+            select(AssemblyFinishedGoodsModel)
+            .join(AssemblyFinishedGoodsAllocationModel, AssemblyFinishedGoodsAllocationModel.finished_goods_id == AssemblyFinishedGoodsModel.id)
+            .where(
+                AssemblyFinishedGoodsAllocationModel.dispatch_order_id == order.id,
+                AssemblyFinishedGoodsAllocationModel.status == "ALLOCATED",
+                AssemblyFinishedGoodsModel.qr_code == qr,
+            )
+        )
+        finished_good = fg_result.scalar_one_or_none()
+        if finished_good:
+            item = next((candidate for candidate in order.items if candidate.material_code == finished_good.product_code), None)
     if not item:
-        raise HTTPException(status_code=400, detail="Package QR is not registered for this dispatch")
+        raise HTTPException(status_code=400, detail="Finished-goods QR is not registered for this dispatch")
     if order.status not in {"PACKED", "ROUTE_ASSIGNED", "VEHICLE_ALLOCATED", "DRIVER_ALLOCATED", "LOADING_STARTED"}:
         raise HTTPException(status_code=400, detail=f"Dispatch is not ready for loading: {order.status}")
     if float(item.quantity_loaded or 0) > 0 or item.status == "LOADED":
@@ -514,8 +531,8 @@ async def verify_dispatch_loading(
         order = await uc.verify_loading(dispatch_id)
         db.add(NotificationModel(
             id=uuid.uuid4(),
-            user_role="DISPATCH",
-            title="Loading Verified",
+            user_role="GATE_SECURITY",
+            title="Loading Verified - Ready for Gate Exit",
             message=f"Loading verified for Dispatch Order {order.dispatch_number}. Ready for Gate Exit.",
             link="/dispatch-loading",
             created_at=datetime.datetime.now(),

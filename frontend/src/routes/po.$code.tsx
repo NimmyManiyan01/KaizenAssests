@@ -81,7 +81,7 @@ function PoPdfViewer() {
         {/* HEADER */}
         <div className="bg-[#2563eb] py-8 px-6 text-center">
           <h1 className="text-white text-3xl font-black uppercase tracking-wider mb-2">Purchase Order</h1>
-          <p className="text-white/90 text-sm">KaizenX Procurement | {poData.poNumber}</p>
+          <p className="text-white/90 text-sm">KaizenAssests Procurement | {poData.poNumber}</p>
         </div>
 
         <div className="p-6 md:p-8">
@@ -202,7 +202,7 @@ function PoPdfViewer() {
           {/* FOOTER */}
           <div className="mt-12 text-center">
             <p className="text-xs text-slate-500">
-              This purchase order is generated from backend procurement records. Amounts reflect the approved PO values stored in KaizenX.
+              This purchase order is generated from backend procurement records. Amounts reflect the approved PO values stored in KaizenAssests.
             </p>
           </div>
         </div>

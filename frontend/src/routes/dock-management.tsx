@@ -46,7 +46,7 @@ import {
 export const Route = createFileRoute("/dock-management")({
   head: () => ({
     meta: [
-      { title: "Dock Management · KaizenX" },
+      { title: "Dock Management · KaizenAssests" },
       {
         name: "description",
         content:
@@ -952,7 +952,7 @@ function DockManagement() {
                           : "—"}
                       </td>
                       <td className="px-4 py-3 text-xs">
-                        <StatusBadge status="AWAITING_DOCK" />
+                        <StatusBadge status="WAITING_FOR_DOCK" />
                       </td>
                       <td className="px-4 py-3 text-right">
                         <Button

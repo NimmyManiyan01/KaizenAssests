@@ -127,7 +127,7 @@ class DockAllocationService:
             select(DockAllocationRequestModel)
             .where(
                 DockAllocationRequestModel.assigned_dock_id.in_(dock_ids),
-                DockAllocationRequestModel.status.in_(["DOCK_ASSIGNED", "RESERVED", "OCCUPIED"])
+                DockAllocationRequestModel.status.in_(["DOCK_ASSIGNED", "RESERVED", "OCCUPIED", "AT_DOCK"])
             )
             .order_by(desc(DockAllocationRequestModel.created_at))
         )

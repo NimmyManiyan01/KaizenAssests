@@ -45,7 +45,7 @@ export function GateEntrySuccessScreen({
 
   const qrToken =
     entryResult?.qr_token ||
-    `KAIZENX:GP-TOKEN:${gatePassNo.replace(/[^A-Z0-9]/g, '')}`;
+    `KAIZENASSESTS:GP-TOKEN:${gatePassNo.replace(/[^A-Z0-9]/g, '')}`;
 
   const currentTimeFormatted = new Date().toLocaleTimeString('en-IN', {
     hour: '2-digit',
@@ -81,7 +81,7 @@ export function GateEntrySuccessScreen({
     try {
       await Share.share({
         title: `Gate Pass ${gatePassNo}`,
-        message: `KAIZENX GATE PASS: ${gatePassNo}\nVehicle: ${vehicleNo}\nSupplier: ${supplierName}\nDock: ${dockNo}\nStatus: INSIDE_FACILITY\nQR Token: ${qrToken}`,
+        message: `KAIZENASSESTS GATE PASS: ${gatePassNo}\nVehicle: ${vehicleNo}\nSupplier: ${supplierName}\nDock: ${dockNo}\nStatus: INSIDE_FACILITY\nQR Token: ${qrToken}`,
       });
     } catch {
       // share cancelled

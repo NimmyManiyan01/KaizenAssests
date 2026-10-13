@@ -4,7 +4,7 @@ import { CatmullRomCurve3, Vector3 } from "three";
 // front link road, then the existing warehouse gate approach.
 const route = new CatmullRomCurve3(
   [
-    new Vector3(-48, 0, 22),
+    new Vector3(-96, 0, 22),
     new Vector3(-100, 0, 22),
     new Vector3(-110, 0, 28),
     new Vector3(-110, 0, 44),
@@ -30,7 +30,7 @@ export function supplierJourney(progress: number) {
   const tangent = route.getTangentAt(travel);
   const emergence = phase(progress, 0, 0.12);
   const handoff = phase(progress, 0.65, 0.76);
-  const envelope = new Vector3(-48, 2.8, 17)
+  const envelope = new Vector3(-96, 2.8, 17)
     .lerp(new Vector3(truck.x - 1.5, 4.5, truck.z), emergence)
     .lerp(new Vector3(-4.35, 2.6, 17), handoff);
   return {

@@ -2432,7 +2432,7 @@ function GrnPageWorkflow() {
         <body>
           <div class="header">
             <div>
-              <div class="brand">KAIZENX • GOODS RECEIPT NOTE</div>
+              <div class="brand">KAIZENASSESTS • GOODS RECEIPT NOTE</div>
               <p style="margin:2px 0 0;font-size:11px;color:#64748b;">Official Material Inbound Quality & Stock Entry Certificate</p>
             </div>
             <div class="tag">GRN NO: ${grnNum}</div>
@@ -3428,33 +3428,45 @@ function GrnPageWorkflow() {
     <AppShell
       title="Goods Receiving (GRN)"
       actions={
-        activeTab !== "wizard" ? (
-          <>
+        <>
             <Button
-              variant={activeTab === "records" ? "default" : "outline"}
-              className="rounded-xl"
+              variant="outline"
+              className="rounded-xl border-primary/30 font-semibold"
               onClick={() => {
-                const nextTab = activeTab === "records" ? "dashboard" : "records";
-                setActiveTab(nextTab);
-                navigate({ to: "/grn", search: { tab: nextTab, page: 1 } });
+                setManualScanText("");
+                setManualScanInputOpen(true);
               }}
             >
-              <ClipboardList className="size-4" />{" "}
-              {activeTab === "records" ? "Dashboard View" : "All GRN Records"}
+              <QrCode className="size-4" /> Paste Material QR Before Putaway
             </Button>
-            <Button
-              className="rounded-xl shadow-glow bg-primary text-primary-foreground font-bold"
-              onClick={() => {
-                startNewGrn();
-                setActiveTab("wizard");
-                setCurrentPage(1);
-                navigate({ to: "/grn", search: { tab: "wizard", page: 1 } });
-              }}
-            >
-              <Plus className="size-4" /> New GRN Entry
-            </Button>
+            {activeTab !== "wizard" && (
+              <>
+                <Button
+                  variant={activeTab === "records" ? "default" : "outline"}
+                  className="rounded-xl"
+                  onClick={() => {
+                    const nextTab = activeTab === "records" ? "dashboard" : "records";
+                    setActiveTab(nextTab);
+                    navigate({ to: "/grn", search: { tab: nextTab, page: 1 } });
+                  }}
+                >
+                  <ClipboardList className="size-4" />{" "}
+                  {activeTab === "records" ? "Dashboard View" : "All GRN Records"}
+                </Button>
+                <Button
+                  className="rounded-xl shadow-glow bg-primary text-primary-foreground font-bold"
+                  onClick={() => {
+                    startNewGrn();
+                    setActiveTab("wizard");
+                    setCurrentPage(1);
+                    navigate({ to: "/grn", search: { tab: "wizard", page: 1 } });
+                  }}
+                >
+                  <Plus className="size-4" /> New GRN Entry
+                </Button>
+              </>
+            )}
           </>
-        ) : undefined
       }
     >
       {/* 📊 GRN OPERATIONS DASHBOARD TAB */}
@@ -4231,14 +4243,6 @@ function GrnPageWorkflow() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Warehouse Name */}
-                  <div className="rounded-xl border bg-muted/10 p-3">
-                    <span className="text-[11px] font-semibold uppercase text-muted-foreground">
-                      Warehouse Name
-                    </span>
-                    <p className="text-sm font-bold text-foreground">{header.warehouse_name}</p>
-                  </div>
-
                   {/* Receiving Dock */}
                   <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 flex flex-col justify-between">
                     <div>
@@ -4808,8 +4812,6 @@ function GrnPageWorkflow() {
                         <th className="px-4 py-3 text-right">Received Qty (Step 2)</th>
                         <th className="px-4 py-3 text-right">Accepted Qty</th>
                         <th className="px-4 py-3 text-right">Damaged Qty</th>
-                        <th className="px-4 py-3 text-right">Rejected Qty</th>
-                        <th className="px-4 py-3 text-right">Held Qty</th>
                         <th className="px-4 py-3 text-center">Quality Status</th>
                       </tr>
                     </thead>
@@ -4824,9 +4826,7 @@ function GrnPageWorkflow() {
                           qualityApproved[rowKey] !== undefined
                             ? qualityApproved[rowKey]
                             : m.good_quantity;
-                        const rejectedVal = m.rejected_quantity || 0;
                         const damagedVal = m.damaged_quantity || 0;
-                        const heldVal = m.held_quantity || 0;
                         const hasInspection = !["", "PENDING", "UNINSPECTED"].includes(
                           String(m.quality_result || "PENDING").toUpperCase(),
                         );
@@ -4892,18 +4892,19 @@ function GrnPageWorkflow() {
                                   const raw = e.target.value;
                                   const val =
                                     raw === "" ? 0 : Math.max(0, Math.min(Number(raw), recQty));
+                                  const accepted = Math.max(0, recQty - val);
                                   setQualityApproved((prev) => ({
                                     ...prev,
-                                    [rowKey]: Number(m.good_quantity || 0),
+                                    [rowKey]: accepted,
                                   }));
                                   setMaterials((prev) =>
                                     prev.map((item, i) =>
                                       i === idx
                                         ? {
                                             ...item,
-                                            good_quantity: item.good_quantity || 0,
+                                            good_quantity: accepted,
                                             damaged_quantity: val,
-                                            quality_approved_quantity: item.good_quantity || 0,
+                                            quality_approved_quantity: accepted,
                                             quality_result: "INSPECTED",
                                           }
                                         : item,
@@ -4911,55 +4912,6 @@ function GrnPageWorkflow() {
                                   );
                                 }}
                                 className="w-28 text-right font-bold text-rose-600 rounded-xl ml-auto"
-                              />
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <Input
-                                type="number"
-                                min={0}
-                                max={recQty}
-                                value={rejectedVal || ""}
-                                placeholder="0"
-                                onChange={(e) =>
-                                  setMaterials((prev) =>
-                                    prev.map((item, i) =>
-                                      i === idx
-                                        ? {
-                                            ...item,
-                                            rejected_quantity: Math.max(
-                                              0,
-                                              Number(e.target.value) || 0,
-                                            ),
-                                            quality_result: "INSPECTED",
-                                          }
-                                        : item,
-                                    ),
-                                  )
-                                }
-                                className="w-28 text-right font-bold text-orange-600 rounded-xl ml-auto"
-                              />
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <Input
-                                type="number"
-                                min={0}
-                                max={recQty}
-                                value={heldVal || ""}
-                                placeholder="0"
-                                onChange={(e) =>
-                                  setMaterials((prev) =>
-                                    prev.map((item, i) =>
-                                      i === idx
-                                        ? {
-                                            ...item,
-                                            held_quantity: Math.max(0, Number(e.target.value) || 0),
-                                            quality_result: "INSPECTED",
-                                          }
-                                        : item,
-                                    ),
-                                  )
-                                }
-                                className="w-28 text-right font-bold text-indigo-600 rounded-xl ml-auto"
                               />
                             </td>
                             <td className="px-4 py-3 text-center">
@@ -6364,21 +6316,20 @@ function GrnPageWorkflow() {
         <Dialog open={manualScanInputOpen} onOpenChange={setManualScanInputOpen}>
           <DialogContent className="sm:max-w-md rounded-2xl p-6 space-y-4">
             <DialogHeader>
-              <DialogTitle className="text-base font-bold flex items-center gap-2">
-                <ScanLine className="size-5 text-primary" /> Barcode / QR Scanner Input
+                <DialogTitle className="text-base font-bold flex items-center gap-2">
+                  <QrCode className="size-5 text-primary" /> Paste Material QR Before Putaway
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
-                Scan with a handheld barcode scanner or paste the raw QR code identifier / payload
-                below.
+                Paste or scan the received material QR after dock GRN and before forklift putaway.
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-2">
               <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">
-                QR Code / Barcode Data
+                Material QR Data
               </label>
               <Textarea
-                placeholder="e.g. QR-MAT-MAT-001 or DMG-GRN-2026-0001-MAT-001-01 or MAT-1001-V002 or paste multi-line QR content"
+                placeholder="Paste material QR code or payload, for example QR-MAT-MAT-001-BATCH-01"
                 value={manualScanText}
                 onChange={(e) => setManualScanText(e.target.value)}
                 className="font-mono text-xs h-28 rounded-xl"
@@ -6522,7 +6473,7 @@ function GrnPageWorkflow() {
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
                 Publishes the damage return in the supplier application for {header.supplier_name} to review.
-                and alerts the internal Procurement team in KaizenX.
+                and alerts the internal Procurement team in KaizenAssests.
               </DialogDescription>
             </DialogHeader>
 

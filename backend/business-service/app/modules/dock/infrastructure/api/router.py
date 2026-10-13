@@ -290,7 +290,7 @@ async def list_docks(
         for d_resp in res:
             # Store Manager must ONLY see docks that have an active allocation assigned to their store
             alloc = d_resp.current_allocation
-            if alloc and alloc.status in ("OCCUPIED", "RESERVED", "ALLOCATED", "DOCK_ASSIGNED"):
+            if alloc and alloc.status in ("OCCUPIED", "RESERVED", "ALLOCATED", "DOCK_ASSIGNED", "AT_DOCK"):
                 alloc_sid = str(alloc.assigned_store_id).lower() if alloc.assigned_store_id else ""
                 alloc_scode = str(alloc.assigned_store_code or "").strip().upper()
                 if (alloc_sid and alloc_sid in user_store_str_ids) or (alloc_scode and alloc_scode in user_store_codes_upper):
@@ -305,7 +305,7 @@ async def list_docks(
             if (
                 (direct_sid and direct_sid in user_store_str_ids)
                 or (direct_scode and direct_scode in user_store_codes_upper)
-            ) and str(d_resp.status or "").upper() in ("OCCUPIED", "RESERVED", "ALLOCATED", "DOCK_ASSIGNED"):
+            ) and str(d_resp.status or "").upper() in ("OCCUPIED", "RESERVED", "ALLOCATED", "DOCK_ASSIGNED", "AT_DOCK"):
                 filtered_res.append(d_resp)
         return filtered_res
 

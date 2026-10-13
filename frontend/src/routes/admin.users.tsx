@@ -40,7 +40,7 @@ import { toast } from "sonner";
 export const Route = createFileRoute("/admin/users")({
   head: () => ({
     meta: [
-      { title: "User Management · KaizenX" },
+      { title: "User Management · KaizenAssests" },
       {
         name: "description",
         content:
@@ -469,7 +469,7 @@ function AddUserDialog({
     form.store_id,
   );
   const normalizedEmail = (
-    form.email.trim() || `${form.username.trim().toLowerCase()}@kaizenx.local`
+    form.email.trim() || `${form.username.trim().toLowerCase()}@kaizenassests.local`
   ).toLowerCase();
   const duplicateField = existingUsers.find(
     (user) =>
@@ -489,7 +489,7 @@ function AddUserDialog({
         full_name: form.full_name,
         employee_id: form.employee_id,
         username: form.username,
-        email: form.email.trim() || `${form.username.trim().toLowerCase()}@kaizenx.local`,
+        email: form.email.trim() || `${form.username.trim().toLowerCase()}@kaizenassests.local`,
         password: form.password,
         store_id: form.store_id,
         status: form.status,

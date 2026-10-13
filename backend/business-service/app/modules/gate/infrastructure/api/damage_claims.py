@@ -13,7 +13,7 @@ from app.common.persistence.models import MaterialStockModel, NotificationModel
 from app.security.dependencies import CurrentUser, get_current_user
 
 router = APIRouter(prefix="/api/damage-claims", tags=["damage-claims"])
-RESPONSES = {"ACCEPT", "REJECT", "PARTIALLY_ACCEPT", "REQUEST_MORE_INFORMATION", "REPLACEMENT_OFFERED", "RETURN_ACCEPTED", "DISPUTE_RAISED"}
+RESPONSES = {"ACCEPT", "REJECT", "PARTIALLY_ACCEPT", "REQUEST_MORE_INFORMATION", "REPLACEMENT_OFFERED", "RETURN_ACCEPTED", "DISPUTE", "DISPUTE_RAISED"}
 RESOLUTIONS = {"REPLACEMENT", "REPAIR_REWORK", "CREDIT_NOTE", "REFUND", "RETURN_REPLACEMENT"}
 now = lambda: datetime.datetime.now(datetime.timezone.utc)
 
@@ -251,7 +251,7 @@ async def respond(claim_id:str, body:ResponseBody, user:CurrentUser=Depends(get_
     if response not in RESPONSES: raise HTTPException(422,"Invalid supplier response")
     if response in {"ACCEPT","PARTIALLY_ACCEPT","REPLACEMENT_OFFERED","RETURN_ACCEPTED"} and resolution not in RESOLUTIONS: raise HTTPException(422,"Select a resolution for an accepted claim")
     claim.supplier_response=response; claim.resolution=resolution; claim.supplier_remarks=body.remarks; claim.return_required=body.return_required; claim.responded_at=now()
-    claim.status = f"APPROVED_{resolution}_PENDING" if response in {"ACCEPT","PARTIALLY_ACCEPT","REPLACEMENT_OFFERED","RETURN_ACCEPTED"} else ("DISPUTED" if response == "DISPUTE_RAISED" else response)
+    claim.status = "ACCEPTED" if response in {"ACCEPT","PARTIALLY_ACCEPT","REPLACEMENT_OFFERED","RETURN_ACCEPTED"} else ("DISPUTED" if response in {"DISPUTE", "DISPUTE_RAISED"} else response)
     uow.session.add(NotificationModel(user_role="PROCUREMENT",title=f"Claim {claim.claim_number} response",message=f"Supplier responded {response.replace('_',' ')}"+(f" — {resolution.replace('_',' ')}" if resolution else ""),link="/procurement/quality-issues"))
     await uow.session.flush(); return {"claim_number":claim.claim_number,"status":claim.status,"response":response,"resolution":resolution}
 

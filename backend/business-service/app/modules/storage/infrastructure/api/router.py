@@ -37,6 +37,7 @@ from app.modules.storage.infrastructure.persistence.models import (
     InventoryMovementHistoryModel,
     PutawayMovementModel,
     PutawayTaskModel,
+    PutawayLocationAssignmentModel,
     StorageLocationModel,
 )
 from app.modules.store.infrastructure.persistence.models import (
@@ -208,6 +209,7 @@ class LocationAssignmentRequest(BaseModel):
     zone_id: Any = None
     bin_id: Any = None
     location_id: Any = None
+    quantity: Decimal | None = None
 
 
 class PutawayConfirmationRequest(BaseModel):
@@ -363,6 +365,8 @@ def task_response(task: PutawayTaskModel) -> dict:
         "material_qr": (task.placement_metadata or {}).get("unit_qr") if task.finished_goods_id else None,
         "barcode_value": None,
         "quantity": float(task.quantity),
+        "accepted_quantity": float(task.quantity),
+        "remaining_quantity": 0.0 if task.status in {"COMPLETED", "PUTAWAY_COMPLETED"} else float(task.quantity),
         "uom": task.uom,
         "warehouse_id": task.warehouse_id,
         "source_location": task.source_location,
@@ -484,6 +488,23 @@ async def enrich_putaway_tasks(tasks: list[PutawayTaskModel], session) -> list[d
                     pass
 
         results = []
+        assignment_totals: dict[uuid.UUID, Decimal] = {}
+        assignment_rows_by_task: dict[uuid.UUID, list[PutawayLocationAssignmentModel]] = {}
+        task_ids = [t.id for t in tasks]
+        if task_ids:
+            assignment_rows = await session.execute(
+                select(
+                    PutawayLocationAssignmentModel.putaway_task_id,
+                    func.coalesce(func.sum(PutawayLocationAssignmentModel.quantity), 0),
+                ).where(PutawayLocationAssignmentModel.putaway_task_id.in_(task_ids))
+                .group_by(PutawayLocationAssignmentModel.putaway_task_id)
+            )
+            assignment_totals = {row[0]: Decimal(str(row[1] or 0)) for row in assignment_rows.all()}
+            assignment_detail_rows = await session.execute(
+                select(PutawayLocationAssignmentModel).where(PutawayLocationAssignmentModel.putaway_task_id.in_(task_ids))
+            )
+            for assignment in assignment_detail_rows.scalars().all():
+                assignment_rows_by_task.setdefault(assignment.putaway_task_id, []).append(assignment)
         for t in tasks:
             grn = grns.get(t.grn_id)
             hu = hus.get(t.handling_unit_id) if t.handling_unit_id else None
@@ -604,6 +625,16 @@ async def enrich_putaway_tasks(tasks: list[PutawayTaskModel], session) -> list[d
                 "material_qr": mat_qr,
                 "barcode_value": hu.barcode_value if hu else None,
                 "quantity": float(t.quantity),
+                "accepted_quantity": float(t.quantity),
+                "remaining_quantity": 0.0 if t.status in {"COMPLETED", "PUTAWAY_COMPLETED"} else max(0.0, float(Decimal(str(t.quantity)) - assignment_totals.get(t.id, Decimal("0")))),
+                "location_assignments": [
+                    {
+                        "location_code": a.location_code,
+                        "quantity": float(a.quantity),
+                        "destination_bin_id": str(a.destination_bin_id) if a.destination_bin_id else None,
+                    }
+                    for a in assignment_rows_by_task.get(t.id, [])
+                ],
                 "putaway_quantity": recorded_putaway_quantity,
                 "uom": t.uom,
                 "warehouse_id": t.warehouse_id,
@@ -1040,11 +1071,33 @@ async def list_inventory_location_balances(
     store_map = {s.id: s for s in stores_result.scalars().all()}
     zones_result = await uow.session.execute(select(StoreZoneModel))
     zone_map = {z.id: z for z in zones_result.scalars().all()}
+    balance_rows = result.all()
+    task_ids = {balance.last_putaway_task_id for balance, _ in balance_rows if balance.last_putaway_task_id}
+    task_map = {}
+    if task_ids:
+        task_result = await uow.session.execute(select(PutawayTaskModel).where(PutawayTaskModel.id.in_(task_ids)))
+        task_map = {t.id: t for t in task_result.scalars().all()}
+    grn_ids = {t.grn_id for t in task_map.values() if t.grn_id}
+    grn_map = {}
+    if grn_ids:
+        grn_result = await uow.session.execute(select(GrnModel).where(GrnModel.id.in_(grn_ids)))
+        grn_map = {g.id: g for g in grn_result.scalars().all()}
+    material_codes = {balance.material_code for balance, _ in balance_rows}
+    stock_result = await uow.session.execute(select(MaterialStockModel).where(MaterialStockModel.material_code.in_(material_codes))) if material_codes else None
+    stock_map = {s.material_code: s for s in stock_result.scalars().all()} if stock_result else {}
+    quarantine_result = await uow.session.execute(
+        select(GrnLineModel.item_code, func.coalesce(func.sum(GrnLineModel.damaged_quantity + GrnLineModel.rejected_quantity), 0))
+        .where(GrnLineModel.item_code.in_(material_codes)).group_by(GrnLineModel.item_code)
+    ) if material_codes else None
+    quarantined_map = {row[0]: Decimal(str(row[1] or 0)) for row in quarantine_result.all()} if quarantine_result else {}
 
     output = []
-    for balance, location in result.all():
+    for balance, location in balance_rows:
         store_obj = store_map.get(location.store_id) if location.store_id else None
         zone_obj = zone_map.get(location.zone_id) if location.zone_id else None
+        task_obj = task_map.get(balance.last_putaway_task_id)
+        grn_obj = grn_map.get(task_obj.grn_id) if task_obj else None
+        stock_obj = stock_map.get(balance.material_code)
         output.append({
             "id": str(balance.id),
             "material_code": balance.material_code,
@@ -1061,11 +1114,20 @@ async def list_inventory_location_balances(
             "zone": location.zone,
             "rack": location.rack,
             "bin": location.bin,
+            "location_code": location.location_code,
+            "batch_number": task_obj.batch_number if task_obj else None,
             "quantity": float(balance.quantity),
+            "total_physical_quantity": float(balance.quantity),
             "available_quantity": float(balance.available_quantity),
+            "available_to_pick_quantity": float(balance.available_quantity),
+            "reserved_quantity": float(stock_obj.allocated_quantity if stock_obj else 0),
+            "quarantined_quantity": float(quarantined_map.get(balance.material_code, 0)),
             "uom": balance.uom,
             "last_putaway_task_id": str(balance.last_putaway_task_id),
             "last_grn_number": balance.last_grn_number,
+            "original_grn": balance.last_grn_number,
+            "supplier_name": grn_obj.supplier_name if grn_obj else None,
+            "received_date": grn_obj.created_at.isoformat() if grn_obj and grn_obj.created_at else (task_obj.created_at.isoformat() if task_obj and task_obj.created_at else None),
             "updated_at": balance.updated_at.isoformat(),
         })
     return output
@@ -1118,6 +1180,26 @@ async def get_handling_unit(
     return handling_unit_response(unit, task)
 
 
+@router.post("/handling-units/{scan_value}/verify-label")
+async def verify_handling_unit_label(
+    scan_value: str,
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+):
+    """Mark a successfully scanned material label as readable."""
+    unit_result = await uow.session.execute(select(HandlingUnitModel).where(
+        (HandlingUnitModel.hu_number == normalize_hu_scan(scan_value))
+        | (HandlingUnitModel.barcode_value == normalize_hu_scan(scan_value))
+    ).with_for_update())
+    unit = unit_result.scalar_one_or_none()
+    if unit is None:
+        raise HTTPException(status_code=404, detail="Handling unit was not found")
+    unit.status = "LABEL_VERIFIED"
+    unit.updated_at = datetime.datetime.now(datetime.timezone.utc)
+    await uow.session.flush()
+    return handling_unit_response(unit)
+
+
 @router.get("/{task_id}")
 async def get_putaway_task(
     task_id: str,
@@ -1164,6 +1246,24 @@ async def assign_storage_location(
     if task.status in ("PUTAWAY_COMPLETED", "COMPLETED", "STORED"):
         raise HTTPException(status_code=409, detail="Completed putaway tasks cannot be reassigned")
 
+    # Lock the task while calculating the split remainder so concurrent
+    # managers cannot assign more than the accepted quantity.
+    locked_task = await uow.session.scalar(
+        select(PutawayTaskModel).where(PutawayTaskModel.id == task.id).with_for_update()
+    )
+    task = locked_task or task
+    assigned_total = await uow.session.scalar(
+        select(func.coalesce(func.sum(PutawayLocationAssignmentModel.quantity), 0)).where(
+            PutawayLocationAssignmentModel.putaway_task_id == task.id
+        )
+    )
+    remaining_quantity = Decimal(str(task.quantity or 0)) - Decimal(str(assigned_total or 0))
+    requested_quantity = Decimal(str(request.quantity if request.quantity is not None else remaining_quantity))
+    if requested_quantity <= 0:
+        raise HTTPException(status_code=422, detail="Assignment quantity must be greater than zero")
+    if requested_quantity > remaining_quantity:
+        raise HTTPException(status_code=409, detail=f"Assignment exceeds remaining putaway quantity ({remaining_quantity})")
+
     # Destination Store selection
     if request.store_id:
         store = await _resolve_store_entity(uow.session, request.store_id)
@@ -1187,6 +1287,10 @@ async def assign_storage_location(
                 raise HTTPException(status_code=422, detail=f"Bin '{bin_obj.bin_code}' does not belong to Zone '{zone.zone_code}'")
             if bin_obj.store_id != store.id:
                 raise HTTPException(status_code=422, detail=f"Bin '{bin_obj.bin_code}' does not belong to Store '{store.store_code}'")
+            if bin_obj.allowed_material_category and task.material_category:
+                allowed = {v.strip().upper() for v in bin_obj.allowed_material_category.split(",") if v.strip()}
+                if task.material_category.strip().upper() not in allowed:
+                    raise HTTPException(status_code=422, detail="Selected location does not permit this material category")
 
         # Resolve or create a storage_location associated with this store, zone, and bin
         location = None
@@ -1195,7 +1299,7 @@ async def assign_storage_location(
                 StorageLocationModel.warehouse_id == task.warehouse_id,
                 StorageLocationModel.active.is_(True),
                 (StorageLocationModel.zone_id == zone.id) | (StorageLocationModel.zone == zone.zone_code),
-                StorageLocationModel.capacity - StorageLocationModel.occupied_quantity >= task.quantity,
+                StorageLocationModel.capacity - StorageLocationModel.occupied_quantity >= requested_quantity,
             )
             if bin_obj:
                 loc_query = loc_query.where(StorageLocationModel.bin_id == bin_obj.id)
@@ -1249,7 +1353,7 @@ async def assign_storage_location(
             raise HTTPException(status_code=422, detail="Storage location is unavailable")
         if location.warehouse_id != task.warehouse_id:
             raise HTTPException(status_code=422, detail="Storage location belongs to a different warehouse")
-        if location.capacity - location.occupied_quantity < task.quantity:
+        if location.capacity - location.occupied_quantity < requested_quantity:
             raise HTTPException(status_code=409, detail="Storage location has insufficient available capacity")
         
         store = None
@@ -1267,6 +1371,35 @@ async def assign_storage_location(
     else:
         raise HTTPException(status_code=422, detail="Specify destination store_id or storage location_id")
 
+    location_code = (
+        task.destination_bin_code
+        or task.destination_bin
+        or (location.location_code if 'location' in locals() and location else None)
+        or task.destination_zone
+        or "UNASSIGNED"
+    )
+    existing_assignment = await uow.session.scalar(
+        select(PutawayLocationAssignmentModel).where(
+            PutawayLocationAssignmentModel.putaway_task_id == task.id,
+            PutawayLocationAssignmentModel.destination_bin_id == task.destination_bin_id,
+        ).with_for_update()
+    )
+    if existing_assignment:
+        existing_assignment.quantity = Decimal(str(existing_assignment.quantity or 0)) + requested_quantity
+        existing_assignment.assigned_by = user.username
+        existing_assignment.assigned_at = datetime.datetime.now(datetime.timezone.utc)
+    else:
+        uow.session.add(PutawayLocationAssignmentModel(
+            putaway_task_id=task.id,
+            destination_store_id=task.destination_store_id,
+            destination_zone_id=task.destination_zone_id,
+            destination_bin_id=task.destination_bin_id,
+            location_code=location_code,
+            quantity=requested_quantity,
+            assigned_by=user.username,
+            assigned_at=datetime.datetime.now(datetime.timezone.utc),
+        ))
+
     task.status = "ASSIGNED"
     task.location_assigned_by = user.username
     task.location_assigned_at = datetime.datetime.now(datetime.timezone.utc)
@@ -1281,7 +1414,7 @@ async def assign_storage_location(
         else f"GRN {task.grn_number}"
     )
     notif_msg = (
-        f"Material {task.material_name} ({task.item_code}) x {task.quantity} {task.uom} "
+        f"Material {task.material_name} ({task.item_code}) x {requested_quantity} {task.uom} "
         f"assigned to {store_name_disp} ({store_code_disp}) from {source_label}."
     )
     # Store-scoped notification
@@ -1355,6 +1488,12 @@ async def complete_putaway(
     task = await _resolve_task(uow.session, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Putaway task not found")
+    # Serialize confirmations for the same task so concurrent scans cannot
+    # both pass the remaining-quantity check.
+    locked_task = await uow.session.scalar(
+        select(PutawayTaskModel).where(PutawayTaskModel.id == task.id).with_for_update()
+    )
+    task = locked_task or task
     if task.status in ("PUTAWAY_COMPLETED", "COMPLETED", "STORED"):
         raise HTTPException(status_code=409, detail="Putaway task is already completed")
 
@@ -1447,6 +1586,9 @@ async def complete_putaway(
             status_code=409,
             detail=f"Material is {handling_unit.status.lower()} and cannot be put away into storage",
         )
+    if handling_unit and task.batch_number and handling_unit.batch_number:
+        if handling_unit.batch_number.strip().upper() != task.batch_number.strip().upper():
+            raise HTTPException(status_code=422, detail="Scanned material batch does not match the putaway task batch")
 
     # 2. Validate Location / Zone / Bin Scan
     loc_scan_info = normalize_zone_scan(request.location_scan)
@@ -1595,6 +1737,18 @@ async def complete_putaway(
     if task.destination_store_id and target_bin.store_id != task.destination_store_id:
         raise HTTPException(status_code=422, detail=f"Target Bin '{target_bin.bin_code}' does not belong to assigned destination Store")
 
+    # When a task has been split, the physical scan must target one of its
+    # persisted location instructions, and cannot consume more than the
+    # quantity assigned to that location.
+    location_assignment = await uow.session.scalar(
+        select(PutawayLocationAssignmentModel).where(
+            PutawayLocationAssignmentModel.putaway_task_id == task.id,
+            PutawayLocationAssignmentModel.destination_bin_id == target_bin.id,
+        )
+    )
+    if location_assignment is None and task.destination_bin_id != target_bin.id:
+        raise HTTPException(status_code=422, detail="Scanned location is not assigned to this putaway task")
+
     # 3. Resolve or Create Storage Location for the Store Zone + Bin
     location = None
     if task.destination_location_id:
@@ -1649,6 +1803,19 @@ async def complete_putaway(
             status_code=422,
             detail=f"Confirmed quantity ({request.quantity}) exceeds remaining task quantity ({task.quantity} {task.uom})",
         )
+    if location_assignment is not None:
+        stored_at_location = await uow.session.scalar(
+            select(func.coalesce(func.sum(PutawayMovementModel.confirmed_quantity), 0)).where(
+                PutawayMovementModel.putaway_task_id == task.id,
+                func.upper(PutawayMovementModel.location_scan) == target_bin.bin_code.upper(),
+            )
+        )
+        assignment_remaining = Decimal(str(location_assignment.quantity or 0)) - Decimal(str(stored_at_location or 0))
+        if request.quantity > assignment_remaining:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Confirmed quantity ({request.quantity}) exceeds this location assignment remainder ({assignment_remaining} {task.uom})",
+            )
     if target_bin.occupied_quantity + request.quantity > target_bin.capacity:
         raise HTTPException(status_code=409, detail=f"Target Bin '{target_bin.bin_code}' has insufficient capacity")
 
@@ -1673,11 +1840,12 @@ async def complete_putaway(
 
     completed_at = datetime.datetime.now(datetime.timezone.utc)
     available_before = stock.available_quantity
-    # Putaway completion moves produced stock into warehouse inventory. Keep
-    # the canonical on-hand total in sync with available stock; this is
-    # especially important for Assembly finished goods, which do not arrive
-    # through the GRN receipt-posting flow.
-    stock.on_hand_quantity = stock.on_hand_quantity + request.quantity
+    # GRN receipt already posted accepted quantity into aggregate on-hand at
+    # staging. Putaway only transfers that quantity to a final location and
+    # makes it pickable. Assembly finished goods have no GRN receipt posting,
+    # so their on-hand is increased here.
+    if not task.grn_id:
+        stock.on_hand_quantity = stock.on_hand_quantity + request.quantity
     stock.available_quantity = stock.available_quantity + request.quantity
     stock.updated_at = completed_at.replace(tzinfo=None)
     target_bin.occupied_quantity = target_bin.occupied_quantity + request.quantity
@@ -1769,7 +1937,7 @@ async def complete_putaway(
             material_name=getattr(task, "material_name", None) or task.item_code,
             material_qr=material_scan_record,
             grn_number=task.grn_number,
-            batch_lot=None,
+            batch_lot=task.batch_number,
             from_location=src_loc_str,
             to_location=dest_loc_str,
             from_bin_id=None,

@@ -25,7 +25,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { api } from "@/lib/api-client";
 
 export const Route = createFileRoute("/vehicle-queue")({
-  head: () => ({ meta: [{ title: "Inbound Arrivals · KaizenX" }] }),
+  head: () => ({ meta: [{ title: "Inbound Arrivals · KaizenAssests" }] }),
   component: InboundArrivals,
 });
 
@@ -53,6 +53,7 @@ type Arrival = {
   allocation_request_id?: string | null;
   movement_started_by?: string | null;
   movement_started_at?: string | null;
+  facility_entry_at?: string | null;
   dock_checked_in_by?: string | null;
   dock_arrival_at?: string | null;
   allocation_arrived_at?: string | null;
@@ -120,6 +121,7 @@ function InboundArrivals() {
   const [uploadedInvoiceFile, setUploadedInvoiceFile] = useState<string | null>(
     "invoice_copy_inv9901.pdf",
   );
+  const [asnDocumentFile, setAsnDocumentFile] = useState<File | null>(null);
   const [uploadedVehiclePhoto, setUploadedVehiclePhoto] = useState<string | null>(
     "truck_front_plate_ka01ab4582.jpg",
   );
@@ -453,6 +455,8 @@ function InboundArrivals() {
               formData.append("asn_reference", selectedAsn);
               formData.append("supplier_name", selectedSupplier);
               formData.append("driver_name", driverNameInput);
+              if (driverMobileInput.trim()) formData.append("driver_contact", driverMobileInput.trim());
+              if (asnDocumentFile) formData.append("po_document", asnDocumentFile, asnDocumentFile.name);
               const asnQuantity = asnMaterials.reduce(
                 (total, line) => total + Number(line.shipped_quantity ?? line.quantity ?? 0),
                 0,
@@ -562,6 +566,19 @@ function InboundArrivals() {
                     readOnly
                     value={autoExpectedDate}
                     className="h-9 w-full rounded-xl border bg-muted/50 px-3 font-bold text-xs text-emerald-600 dark:text-emerald-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    ASN Document Photograph / Upload *
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*,.pdf"
+                    required
+                    onChange={(event) => setAsnDocumentFile(event.target.files?.[0] || null)}
+                    className="h-9 w-full rounded-xl border bg-background px-2 py-2 text-[11px]"
                   />
                 </div>
 
@@ -1177,6 +1194,7 @@ function ArrivalDetails({
           <Detail label="Driver" value={arrival.driver_name} />
           <Detail label="Driver contact" value={arrival.driver_contact} />
           <Detail label="Arrival time" value={new Date(arrival.arrival_time).toLocaleString()} />
+          <Detail label="Facility entry" value={arrival.facility_entry_at ? new Date(arrival.facility_entry_at).toLocaleString() : "Not entered"} />
         </dl>
         <div className="mt-5 border-t pt-4">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Vehicle photo</p>
@@ -1200,7 +1218,7 @@ function ArrivalDetails({
             <dt className="text-muted-foreground">Gate entry</dt>
             <dd className="font-mono">{arrival.gate_entry_number}</dd>
             <dt className="text-muted-foreground">Entry time</dt>
-            <dd>{new Date(arrival.arrival_time).toLocaleString()}</dd>
+            <dd>{arrival.facility_entry_at ? new Date(arrival.facility_entry_at).toLocaleString() : "Not entered"}</dd>
             <dt className="hidden text-muted-foreground">Transporter</dt>
             <dd className="hidden">{arrival.shipment.transporter || "—"}</dd>
             <dt className="hidden text-muted-foreground">Packages</dt>
@@ -1224,7 +1242,12 @@ function ArrivalDetails({
                 : "Not checked in"}
             </dd>
           </dl>
-          {arrival.status === "DOCK_ASSIGNED" && arrival.allocation_request_id && (
+          {arrival.status === "DOCK_ASSIGNED" && (
+            <Button className="mt-4 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700" onClick={onMove} disabled={busy}>
+              <ShieldCheck className="size-4" /> Allow Entry
+            </Button>
+          )}
+          {arrival.assigned_dock_id && (arrival.status === "INSIDE_FACILITY" || arrival.status === "MOVING_TO_DOCK") && (
             <Button className="mt-4 rounded-lg" onClick={onDockCheckIn} disabled={busy}>
               <ShieldCheck className="size-4" /> Confirm Dock Check-In
             </Button>

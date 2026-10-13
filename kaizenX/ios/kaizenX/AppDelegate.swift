@@ -24,7 +24,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     window = UIWindow(frame: UIScreen.main.bounds)
 
     factory.startReactNative(
-      withModuleName: "kaizenX",
+      withModuleName: "kaizenAssests",
       in: window,
       launchOptions: launchOptions
     )

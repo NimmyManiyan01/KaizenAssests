@@ -134,7 +134,7 @@ function LoginPage() {
         <div className="relative z-10">
           <div className="flex items-center gap-2 text-2xl font-bold tracking-tight">
             <Warehouse className="h-8 w-8" />
-            <span>KaizenX</span>
+            <span>KaizenAssests</span>
           </div>
           <div className="mt-20">
             <h1 className="text-5xl font-extrabold leading-tight">
@@ -184,7 +184,7 @@ function LoginPage() {
             <div className="lg:hidden flex justify-center mb-6">
               <div className="flex items-center gap-2 text-2xl font-bold text-primary">
                 <Warehouse className="h-8 w-8" />
-                <span>KaizenX</span>
+                <span>KaizenAssests</span>
               </div>
             </div>
             <h2 className="text-3xl font-bold tracking-tight">Staff Login</h2>
@@ -287,7 +287,7 @@ function LoginPage() {
             <p className="text-xs text-muted-foreground">
               By signing in, you agree to our Terms of Service and Privacy Policy.
               <br />
-              &copy; 2026 KaizenX Industrial Systems.
+              &copy; 2026 KaizenAssests Industrial Systems.
             </p>
           </div>
         </div>

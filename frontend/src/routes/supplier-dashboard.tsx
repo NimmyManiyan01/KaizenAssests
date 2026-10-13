@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -45,6 +45,7 @@ const statuses: Record<string, string> = {
 };
 
 function SupplierDashboard() {
+  const navigate = useNavigate();
   const [asns, setAsns] = useState<any[]>([]);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<any>(null);
@@ -284,7 +285,7 @@ function SupplierDashboard() {
           </div>
 
           <Button
-            onClick={handleOpenCreateModal}
+            onClick={() => navigate({ to: "/supplier/asns/new?open=create" as any })}
             className="rounded-xl font-extrabold shadow-sm bg-sky-600 hover:bg-sky-700 text-white px-4 h-10 text-xs"
           >
             <Plus className="mr-1.5 size-4" /> Create ASN
@@ -627,22 +628,20 @@ function SupplierDashboard() {
                       {lines.map((line, idx) => (
                         <tr key={idx}>
                           <td className="p-2">
-                            <select required value={line.material_id || ""} onChange={(e) => { const material = materialCatalog.find((item) => String(item.id) === e.target.value); if (material && lines.some((item, i) => i !== idx && String(item.material_id) === String(material.id))) { toast.error("This material is already selected in the ASN."); return; } setLines((current) => current.map((item, i) => i === idx ? { ...item, material_id: material?.id || "", item_code: material?.code || "", material_name: material?.name || "", uom: material?.uom || "" } : item)); }} className="h-8 w-full rounded-lg border bg-background px-2 text-xs font-semibold"><option value="">Select material</option>{materialCatalog.filter((material) => `${material.name || ""} ${material.code || ""}`.toLowerCase().includes(materialSearch.toLowerCase())).map((material) => <option key={material.id} value={material.id}>{material.name} ({material.code})</option>)}</select>{/* Material Master selection */}
-                            {/*
-                              <select
+                            <select
                               required
                               value={line.material_name}
                               onChange={(e) => {
                                 const val = e.target.value;
-                                const matched = materialCatalog.find((m) => m.name === val);
+                                const matched = materialCatalog.find((m) => m.name === val || m.material_name === val);
                                 setLines((prev) =>
                                   prev.map((item, i) =>
                                     i === idx
                                       ? {
                                           ...item,
                                           material_name: val,
-                                          item_code: matched?.code || item.item_code,
-                                          uom: matched?.uom || item.uom || "PCS",
+                                          item_code: matched?.code || matched?.material_code || item.item_code,
+                                          uom: matched?.uom || matched?.base_uom || item.uom || "PCS",
                                         }
                                       : item
                                   )
@@ -652,11 +651,11 @@ function SupplierDashboard() {
                             >
                               <option value="">-- Select Material Component from Database --</option>
                               {materialCatalog.map((mat, mIdx) => (
-                                <option key={mat.code || mIdx} value={mat.name}>
-                                  {mat.name} ({mat.category || "Component"})
+                                <option key={mat.code || mat.material_code || mIdx} value={mat.name || mat.material_name}>
+                                  {mat.name || mat.material_name} ({mat.category || "Component"})
                                 </option>
                               ))}
-                            </select> */}
+                            </select>
                           </td>
                           <td className="p-2">
                             <Input

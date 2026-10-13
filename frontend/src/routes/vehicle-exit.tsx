@@ -14,7 +14,6 @@ import {
   MapPin,
   Maximize2,
   Package,
-  PlusCircle,
   RefreshCw,
   Scale,
   Search,
@@ -50,7 +49,7 @@ export const Route = createFileRoute("/vehicle-exit")({
   // immediately redirect the user away.
   beforeLoad: () =>
     requireRole(["WAREHOUSE", "WAREHOUSE_MANAGER", "GATE_SECURITY", "GATE_OPERATOR", "ADMIN", "SUPERUSER"]),
-  head: () => ({ meta: [{ title: "Vehicle Exit · Outbound Gate Security · KaizenX" }] }),
+  head: () => ({ meta: [{ title: "Vehicle Exit · Outbound Gate Security · KaizenAssests" }] }),
   component: VehicleExit,
 });
 
@@ -379,32 +378,12 @@ function VehicleExit() {
     }
   }
 
-  async function handleSeedTestData() {
-    try {
-      setLoading(true);
-      const res = await api.seedSampleDispatches(true);
-      toast.success("Test dispatches generated", {
-        description: `Generated ${res.count || 3} sample READY_FOR_GATE_EXIT dispatches with complete manifest details.`,
-      });
-      await loadQueue(true);
-    } catch (error: any) {
-      toast.error("Failed to seed test dispatches", {
-        description: error.message || "Ensure server is running.",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }
-
   return (
     <AppShell
       title="Outbound Vehicle Exit"
       subtitle="Security verification and gate exit confirmation for outbound vehicles (Warehouse → Customer)"
       actions={
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="rounded-xl shadow-sm border-primary/30 text-primary hover:bg-primary-soft/50" onClick={() => void handleSeedTestData()}>
-            <PlusCircle className="size-4 text-primary" /> Seed Test Data
-          </Button>
           <Button variant="outline" className="rounded-xl shadow-sm" onClick={() => void loadQueue()}>
             <RefreshCw className="size-4" /> Refresh Queue
           </Button>

@@ -1,5 +1,5 @@
 /**
- * Vehicle Plate Formatting & Barcode/QR Parsing Utility for KaizenX Mobile
+ * Vehicle Plate Formatting & Barcode/QR Parsing Utility for KaizenAssests Mobile
  */
 
 export function formatVehiclePlate(value: string): string {
@@ -58,7 +58,7 @@ export function parseScannedQrCode(scannedText: string): {
 
   const upper = clean.toUpperCase();
 
-  if (upper.includes("KAIZENX:GATE_ENTRY:") || upper.includes("NEXUSWMS:GATE_ENTRY:")) {
+  if (upper.includes("KAIZENASSESTS:GATE_ENTRY:") || upper.includes("NEXUSWMS:GATE_ENTRY:")) {
     const parts = upper.split(":");
     return { type: "GATE_ENTRY", reference: parts[parts.length - 1] || upper };
   }

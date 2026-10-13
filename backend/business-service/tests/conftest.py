@@ -1,19 +1,68 @@
+"""Safety gates for backend tests."""
+
+from __future__ import annotations
+
+import os
+from urllib.parse import unquote, urlparse
+
+
+TEST_DATABASE_ENV = "KAIZENASSESTS_TEST_DATABASE_URL"
+PROTECTED_DATABASE_NAMES = {
+    "ams_business",
+    "ams_business_dev",
+    "ams_business_development",
+    "ams_business_staging",
+    "ams_business_prod",
+    "ams_business_production",
+}
+
+
+def _get_test_database_url() -> str:
+    raw_url = os.environ.get(TEST_DATABASE_ENV, "").strip()
+    if not raw_url:
+        raise RuntimeError(
+            f"Refusing to run tests: set {TEST_DATABASE_ENV} to a dedicated "
+            "disposable PostgreSQL test database URL."
+        )
+
+    parsed = urlparse(raw_url)
+    database_name = unquote(parsed.path.lstrip("/")).lower()
+    safe_name = database_name.startswith("kaizenassests_test_") or database_name.endswith("_test")
+    if parsed.scheme.lower() not in {"postgresql", "postgresql+asyncpg"}:
+        raise RuntimeError(f"Refusing to run tests: {TEST_DATABASE_ENV} must use PostgreSQL.")
+    if not database_name or database_name in PROTECTED_DATABASE_NAMES or not safe_name:
+        raise RuntimeError(
+            f"Refusing to run tests: database '{database_name or '<missing>'}' is not an "
+            "allowlisted disposable test database. Use a name prefixed with "
+            "'kaizenassests_test_' or suffixed with '_test'."
+        )
+    return raw_url
+
+
+# Set the application setting before importing the app session module.
+os.environ["DATABASE_URL"] = _get_test_database_url()
+
 import pytest
 from sqlalchemy import text
+
 from app.database.session import session_scope
+
 
 _db_initialized = False
 
+
 @pytest.fixture(autouse=True)
 async def ensure_db_schema_compatible():
+    """Run legacy compatibility additions only inside the test database."""
+
     global _db_initialized
     if _db_initialized:
         return
     _db_initialized = True
-    try:
-        async with session_scope() as session:
-            # 1. notification table
-            for col in [
+
+    async with session_scope() as session:
+        for table, columns in {
+            "notification": [
                 ("dock_code", "VARCHAR(64)"),
                 ("dock_name", "VARCHAR(128)"),
                 ("dock_location", "VARCHAR(256)"),
@@ -26,14 +75,8 @@ async def ensure_db_schema_compatible():
                 ("driver_phone", "VARCHAR(32)"),
                 ("asn_number", "VARCHAR(64)"),
                 ("po_number", "VARCHAR(64)"),
-            ]:
-                try:
-                    await session.execute(text(f"ALTER TABLE notification ADD COLUMN IF NOT EXISTS {col[0]} {col[1]}"))
-                except Exception:
-                    pass
-
-            # 2. dock_assignment table
-            for col in [
+            ],
+            "dock_assignment": [
                 ("assigned_store_id", "UUID"),
                 ("assigned_store_code", "VARCHAR(64)"),
                 ("assigned_store_name", "VARCHAR(128)"),
@@ -61,128 +104,15 @@ async def ensure_db_schema_compatible():
                 ("receiving_completed_at", "TIMESTAMP WITH TIME ZONE"),
                 ("dock_released_by", "VARCHAR(128)"),
                 ("dock_released_at", "TIMESTAMP WITH TIME ZONE"),
-            ]:
-                try:
-                    await session.execute(text(f"ALTER TABLE dock_assignment ADD COLUMN IF NOT EXISTS {col[0]} {col[1]}"))
-                except Exception:
-                    pass
-
-            try:
-                await session.execute(text("ALTER TABLE dock_masters ADD COLUMN IF NOT EXISTS store_id UUID"))
-            except Exception:
-                pass
-
-            for col in [
-                ("assigned_store_id", "UUID"),
-                ("assigned_store_code", "VARCHAR(64)"),
-                ("assigned_store_name", "VARCHAR(128)"),
-                ("assigned_store_manager_id", "VARCHAR(128)"),
-                ("assigned_store_manager_username", "VARCHAR(128)"),
-                ("assigned_store_manager_name", "VARCHAR(128)"),
-            ]:
-                try:
-                    await session.execute(text(f"ALTER TABLE dock_allocation_requests ADD COLUMN IF NOT EXISTS {col[0]} {col[1]}"))
-                except Exception:
-                    pass
-
-            # 3. receiving_line table
-            for col in [
-                ("physical_condition_ok", "BOOLEAN"),
-                ("packaging_ok", "BOOLEAN"),
-                ("specifications_ok", "BOOLEAN"),
-                ("serial_batch_number", "VARCHAR(128)"),
-                ("serial_batch_verified", "BOOLEAN NOT NULL DEFAULT FALSE"),
-                ("disposition_status", "VARCHAR(32)"),
-                ("quarantine_location", "VARCHAR(128)"),
-                ("quarantined_by", "VARCHAR(128)"),
-                ("quarantined_at", "TIMESTAMP WITH TIME ZONE"),
-                ("good_quantity", "NUMERIC(18, 4)"),
-                ("damaged_quantity", "NUMERIC(18, 4)"),
-                ("rejected_quantity", "NUMERIC(18, 4)"),
-                ("condition_result", "VARCHAR(32)"),
-                ("inspection_required", "BOOLEAN NOT NULL DEFAULT FALSE"),
-                ("condition_notes", "TEXT"),
-                ("condition_checked_by", "VARCHAR(128)"),
-                ("condition_checked_at", "TIMESTAMP WITH TIME ZONE"),
-            ]:
-                try:
-                    await session.execute(text(f"ALTER TABLE receiving_line ADD COLUMN IF NOT EXISTS {col[0]} {col[1]}"))
-                except Exception:
-                    pass
-
-            # 4. grn table
-            for col in [
-                ("po_number", "VARCHAR(64)"),
-                ("grn_number", "VARCHAR(64)"),
-                ("asn_id", "UUID"),
-                ("asn_number", "VARCHAR(64)"),
-                ("gate_entry_id", "UUID"),
-                ("gate_entry_number", "VARCHAR(64)"),
-                ("supplier_name", "VARCHAR(255)"),
-                ("supplier_company_name", "VARCHAR(255)"),
-                ("warehouse_id", "VARCHAR(64)"),
-                ("warehouse_name", "VARCHAR(255)"),
-                ("dock_number", "VARCHAR(32)"),
-                ("vehicle_number", "VARCHAR(64)"),
-                ("driver_name", "VARCHAR(128)"),
-                ("invoice_number", "VARCHAR(128)"),
-                ("receipt_type", "VARCHAR(32) DEFAULT 'PO_RECEIPT'"),
-                ("receipt_date", "TIMESTAMP WITH TIME ZONE"),
-                ("received_by", "VARCHAR(128)"),
-                ("status", "VARCHAR(32) DEFAULT 'DRAFT'"),
-                ("posted_by", "VARCHAR(128)"),
-                ("posted_at", "TIMESTAMP WITH TIME ZONE"),
-                ("verification_notes", "TEXT"),
-                ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP"),
-                ("updated_at", "TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP"),
-            ]:
-                try:
-                    await session.execute(text(f"ALTER TABLE grn ADD COLUMN IF NOT EXISTS {col[0]} {col[1]}"))
-                except Exception:
-                    pass
-
-            # 5. grn_line table
-            for col in [
-                ("material_name", "VARCHAR(256)"),
-                ("material_category", "VARCHAR(128)"),
-                ("uom", "VARCHAR(32)"),
-                ("ordered_quantity", "NUMERIC(18, 4)"),
-                ("received_quantity", "NUMERIC(18, 4) DEFAULT 0"),
-                ("good_quantity", "NUMERIC(18, 4) DEFAULT 0"),
-                ("damaged_quantity", "NUMERIC(18, 4) DEFAULT 0"),
-                ("accepted_quantity", "NUMERIC(18, 4)"),
-                ("rejected_quantity", "NUMERIC(18, 4) DEFAULT 0"),
-                ("quality_approved_quantity", "NUMERIC(18, 4) DEFAULT 0"),
-                ("balance_quantity", "NUMERIC(18, 4) DEFAULT 0"),
-                ("quality_result", "VARCHAR(32)"),
-            ]:
-                try:
-                    await session.execute(text(f"ALTER TABLE grn_line ADD COLUMN IF NOT EXISTS {col[0]} {col[1]}"))
-                except Exception:
-                    pass
-
-            # 6. storage_location table
-            for col in [
-                ("store_id", "UUID"),
-                ("zone_id", "UUID"),
-                ("bin_id", "UUID"),
-            ]:
-                try:
-                    await session.execute(text(f"ALTER TABLE storage_location ADD COLUMN IF NOT EXISTS {col[0]} {col[1]}"))
-                except Exception:
-                    pass
-
-            # 7. putaway_task table
-            for col in [
-                ("destination_store_id", "UUID"),
-                ("destination_zone_id", "UUID"),
-                ("destination_bin_id", "UUID"),
-            ]:
-                try:
-                    await session.execute(text(f"ALTER TABLE putaway_task ADD COLUMN IF NOT EXISTS {col[0]} {col[1]}"))
-                except Exception:
-                    pass
-
-            await session.commit()
-    except Exception:
-        pass
+            ],
+        }.items():
+            exists = await session.scalar(text("SELECT to_regclass(:table_name)"), {"table_name": table})
+            if exists is None:
+                continue
+            for column_name, column_type in columns:
+                await session.execute(
+                    text(
+                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS "
+                        f"{column_name} {column_type}"
+                    )
+                )

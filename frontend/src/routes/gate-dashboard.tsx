@@ -28,7 +28,7 @@ import { requireRole } from "@/lib/auth-utils";
 
 export const Route = createFileRoute("/gate-dashboard")({
   beforeLoad: () => requireRole("GATE_SECURITY"),
-  head: () => ({ meta: [{ title: "Gate Security Dashboard · KaizenX" }] }),
+  head: () => ({ meta: [{ title: "Gate Security Dashboard · KaizenAssests" }] }),
   component: GateDashboard,
 });
 

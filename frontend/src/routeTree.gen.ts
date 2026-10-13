@@ -54,6 +54,8 @@ import { Route as AssemblyOrdersRouteImport } from './routes/assembly.orders'
 import { Route as AssemblyProductionRouteImport } from './routes/assembly.production'
 import { Route as AssemblyQualityRouteImport } from './routes/assembly.quality'
 import { Route as AssemblyRequestsRouteImport } from './routes/assembly.requests'
+import { Route as GateFinishedGoodsPickupRouteImport } from './routes/gate.finished-goods-pickup'
+import { Route as GateFinishedGoodsPickupExitRouteImport } from './routes/gate.finished-goods-pickup-exit'
 import { Route as PoCodeRouteImport } from './routes/po.$code'
 import { Route as QCodeRouteImport } from './routes/q.$code'
 import { Route as SupplierDispatchRouteImport } from './routes/supplier.dispatch'
@@ -294,6 +296,17 @@ const AssemblyRequestsRoute = AssemblyRequestsRouteImport.update({
   path: '/assembly/requests',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GateFinishedGoodsPickupRoute = GateFinishedGoodsPickupRouteImport.update({
+  id: '/gate/finished-goods-pickup',
+  path: '/gate/finished-goods-pickup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GateFinishedGoodsPickupExitRoute =
+  GateFinishedGoodsPickupExitRouteImport.update({
+    id: '/gate/finished-goods-pickup-exit',
+    path: '/gate/finished-goods-pickup-exit',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const PoCodeRoute = PoCodeRouteImport.update({
   id: '/po/$code',
   path: '/po/$code',
@@ -406,6 +419,8 @@ export interface FileRoutesByFullPath {
   '/assembly/production': typeof AssemblyProductionRoute
   '/assembly/quality': typeof AssemblyQualityRoute
   '/assembly/requests': typeof AssemblyRequestsRoute
+  '/gate/finished-goods-pickup': typeof GateFinishedGoodsPickupRoute
+  '/gate/finished-goods-pickup-exit': typeof GateFinishedGoodsPickupExitRoute
   '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
   '/supplier/dispatch': typeof SupplierDispatchRoute
@@ -465,6 +480,8 @@ export interface FileRoutesByTo {
   '/assembly/production': typeof AssemblyProductionRoute
   '/assembly/quality': typeof AssemblyQualityRoute
   '/assembly/requests': typeof AssemblyRequestsRoute
+  '/gate/finished-goods-pickup': typeof GateFinishedGoodsPickupRoute
+  '/gate/finished-goods-pickup-exit': typeof GateFinishedGoodsPickupExitRoute
   '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
   '/supplier/dispatch': typeof SupplierDispatchRoute
@@ -525,6 +542,8 @@ export interface FileRoutesById {
   '/assembly/production': typeof AssemblyProductionRoute
   '/assembly/quality': typeof AssemblyQualityRoute
   '/assembly/requests': typeof AssemblyRequestsRoute
+  '/gate/finished-goods-pickup': typeof GateFinishedGoodsPickupRoute
+  '/gate/finished-goods-pickup-exit': typeof GateFinishedGoodsPickupExitRoute
   '/po/$code': typeof PoCodeRoute
   '/q/$code': typeof QCodeRoute
   '/supplier/dispatch': typeof SupplierDispatchRoute
@@ -586,6 +605,8 @@ export interface FileRouteTypes {
     | '/assembly/production'
     | '/assembly/quality'
     | '/assembly/requests'
+    | '/gate/finished-goods-pickup'
+    | '/gate/finished-goods-pickup-exit'
     | '/po/$code'
     | '/q/$code'
     | '/supplier/dispatch'
@@ -645,6 +666,8 @@ export interface FileRouteTypes {
     | '/assembly/production'
     | '/assembly/quality'
     | '/assembly/requests'
+    | '/gate/finished-goods-pickup'
+    | '/gate/finished-goods-pickup-exit'
     | '/po/$code'
     | '/q/$code'
     | '/supplier/dispatch'
@@ -704,6 +727,8 @@ export interface FileRouteTypes {
     | '/assembly/production'
     | '/assembly/quality'
     | '/assembly/requests'
+    | '/gate/finished-goods-pickup'
+    | '/gate/finished-goods-pickup-exit'
     | '/po/$code'
     | '/q/$code'
     | '/supplier/dispatch'
@@ -764,6 +789,8 @@ export interface RootRouteChildren {
   AssemblyProductionRoute: typeof AssemblyProductionRoute
   AssemblyQualityRoute: typeof AssemblyQualityRoute
   AssemblyRequestsRoute: typeof AssemblyRequestsRoute
+  GateFinishedGoodsPickupRoute: typeof GateFinishedGoodsPickupRoute
+  GateFinishedGoodsPickupExitRoute: typeof GateFinishedGoodsPickupExitRoute
   PoCodeRoute: typeof PoCodeRoute
   QCodeRoute: typeof QCodeRoute
   SupplierDispatchRoute: typeof SupplierDispatchRoute
@@ -1095,6 +1122,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AssemblyRequestsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/gate/finished-goods-pickup': {
+      id: '/gate/finished-goods-pickup'
+      path: '/gate/finished-goods-pickup'
+      fullPath: '/gate/finished-goods-pickup'
+      preLoaderRoute: typeof GateFinishedGoodsPickupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/gate/finished-goods-pickup-exit': {
+      id: '/gate/finished-goods-pickup-exit'
+      path: '/gate/finished-goods-pickup-exit'
+      fullPath: '/gate/finished-goods-pickup-exit'
+      preLoaderRoute: typeof GateFinishedGoodsPickupExitRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/po/$code': {
       id: '/po/$code'
       path: '/po/$code'
@@ -1228,6 +1269,8 @@ const rootRouteChildren: RootRouteChildren = {
   AssemblyProductionRoute: AssemblyProductionRoute,
   AssemblyQualityRoute: AssemblyQualityRoute,
   AssemblyRequestsRoute: AssemblyRequestsRoute,
+  GateFinishedGoodsPickupRoute: GateFinishedGoodsPickupRoute,
+  GateFinishedGoodsPickupExitRoute: GateFinishedGoodsPickupExitRoute,
   PoCodeRoute: PoCodeRoute,
   QCodeRoute: QCodeRoute,
   SupplierDispatchRoute: SupplierDispatchRoute,

@@ -45,7 +45,7 @@ import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/assembly/production")({
   beforeLoad: () => requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER"]),
-  head: () => ({ meta: [{ title: "Production · KaizenX" }] }),
+  head: () => ({ meta: [{ title: "Production · KaizenAssests" }] }),
   component: AssemblyProductionPage,
 });
 
@@ -110,6 +110,9 @@ function AssemblyProductionPage() {
   const [completeOrder, setCompleteOrder] = useState<AssemblyProductionOrder | null>(null);
   const [producedQuantity, setProducedQuantity] = useState<number>(0);
   const [productionNotes, setProductionNotes] = useState<string>("");
+  const [wastageQuantity, setWastageQuantity] = useState<number>(0);
+  const [wastageMaterialCode, setWastageMaterialCode] = useState<string>("");
+  const [wastageReason, setWastageReason] = useState<string>("");
   const [completing, setCompleting] = useState(false);
 
   // Start Production Confirmation State
@@ -157,6 +160,9 @@ function AssemblyProductionPage() {
     setCompleteOrder(order);
     setProducedQuantity(order.target_quantity);
     setProductionNotes("");
+    setWastageQuantity(0);
+    setWastageMaterialCode("");
+    setWastageReason("");
   };
 
   const handleCompleteSubmit = async () => {
@@ -171,6 +177,9 @@ function AssemblyProductionPage() {
       const res = await api.completeAssemblyProduction(completeOrder.id, {
         produced_quantity: Number(producedQuantity),
         notes: productionNotes.trim() || undefined,
+        wastage_quantity: Number(wastageQuantity) || 0,
+        wastage_material_code: wastageMaterialCode.trim() || undefined,
+        wastage_reason: wastageReason.trim() || undefined,
       });
       toast.success(res.message || `Production completed for ${completeOrder.order_number}`);
       setCompleteOrder(null);
@@ -767,6 +776,15 @@ function AssemblyProductionPage() {
                       {completeOrder.assigned_line || "Line 1"}
                     </span>
                   </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">Material Wastage (Optional)</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input type="number" min={0} step="any" value={wastageQuantity} onChange={(e) => setWastageQuantity(Number(e.target.value))} placeholder="Quantity" className="h-9 text-xs rounded-xl" />
+                    <Input value={wastageMaterialCode} onChange={(e) => setWastageMaterialCode(e.target.value)} placeholder="Material code" className="h-9 text-xs rounded-xl" />
+                  </div>
+                  <Input value={wastageReason} onChange={(e) => setWastageReason(e.target.value)} placeholder="Wastage / exception reason" className="h-9 text-xs rounded-xl" />
                 </div>
 
                 <div className="space-y-1.5">

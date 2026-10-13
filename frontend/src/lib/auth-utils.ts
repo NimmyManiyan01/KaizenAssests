@@ -89,8 +89,14 @@ export function getRequiredRolesForPath(pathname: string): string[] | null {
     pathname === "/damage-claims"
   )
     return ["SUPPLIER", "PROCUREMENT", "MANAGER", "ADMIN", "SUPERUSER"];
+  if (pathname.startsWith("/gate/finished-goods-pickup"))
+    return ["GATE_SECURITY", "GATE_OPERATOR", "ADMIN", "SUPERUSER"];
+  if (pathname.startsWith("/assembly/quality"))
+    return ["QUALITY", "QC", "ASSEMBLY", "ASSEMBLY_MANAGER", "ADMIN", "SUPERUSER"];
   if (pathname.startsWith("/assembly"))
     return ["ASSEMBLY", "ASSEMBLY_MANAGER", "ADMIN", "SUPERUSER"];
+  if (["/dispatch-picking-packing", "/dispatch-loading"].includes(pathname))
+    return ["ASSEMBLY", "ASSEMBLY_MANAGER", "DISPATCH", "DISPATCH_MANAGER", "ADMIN", "SUPERUSER"];
   // These outbound gate screens use a dispatch-prefixed URL, but are operated
   // from the gate-security sidebar. Keep them ahead of the broader dispatch
   // route match so gate users are not redirected back to their dashboard.

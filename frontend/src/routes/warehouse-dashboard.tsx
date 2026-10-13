@@ -6,7 +6,7 @@ import { Loader2 } from "lucide-react";
 export const Route = createFileRoute("/warehouse-dashboard")({
   head: () => ({
     meta: [
-      { title: "Warehouse Control Center · KaizenX" },
+      { title: "Warehouse Control Center · KaizenAssests" },
       {
         name: "description",
         content: "Authoritative operational warehouse dashboard.",

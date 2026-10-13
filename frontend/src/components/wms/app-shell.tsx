@@ -136,7 +136,7 @@ const dispatchNav = [
   { label: "Dashboard", to: "/dispatch", icon: LayoutDashboard },
   { label: "Customer Orders", to: "/customer-orders", icon: ClipboardList },
   { label: "Dispatch Orders", to: "/dispatch-orders", icon: ClipboardList },
-  { label: "Packing", to: "/dispatch-picking-packing", icon: PackageCheck },
+  { label: "Picking & Packing", to: "/dispatch-picking-packing", icon: PackageCheck },
   { label: "Loading", to: "/dispatch-loading", icon: Navigation },
   { label: "Gate Out", to: "/dispatch-gate-out", icon: DoorOpen },
   { label: "Reports", to: "/dispatch-reports", icon: BarChart3 },
@@ -149,6 +149,7 @@ const storeManagerNav = [
   { label: "Material Requests", to: "/inventory?tab=requests", icon: ClipboardList },
   { label: "Picking", to: "/inventory?tab=picking", icon: ListOrdered },
   { label: "Locations", to: "/inventory?tab=locations", icon: Building2 },
+  { label: "Material Issue", to: "/inventory?tab=material-issue", icon: ClipboardList },
 ];
 
 const assemblyNav = [
@@ -158,10 +159,27 @@ const assemblyNav = [
   { label: "Quality Check", to: "/assembly/quality", icon: ShieldCheck },
   { label: "Dispatch", to: "/assembly/dispatch", icon: Truck },
   { label: "Finished Goods Records", to: "/assembly/finished-goods", icon: PackageCheck },
+  { label: "Picking & Packing", to: "/dispatch-picking-packing", icon: PackageCheck },
+  { label: "Loading", to: "/dispatch-loading", icon: Navigation },
+];
+
+const warehouseOperatorNav = [
+  { label: "Dashboard", to: "/inventory?tab=dashboard", icon: LayoutDashboard },
+  { label: "Putaway Tasks", to: "/inventory?tab=putaway", icon: PackageCheck },
+  { label: "QR Scanning", to: "/inventory?tab=putaway", icon: QrCode },
+  { label: "Picking Tasks", to: "/inventory?tab=picking", icon: ListOrdered },
+];
+
+const qualityNav = [
+  { label: "Incoming QC", to: "/grn?tab=records", icon: ShieldCheck },
+  { label: "Finished-Goods QC", to: "/assembly/quality", icon: ShieldCheck },
+  { label: "QC History", to: "/assembly/quality?status=ALL", icon: ClipboardList },
 ];
 
 const warehouseNav = [
   { label: "Dashboard", to: "/inventory?tab=dashboard", icon: LayoutDashboard },
+  { label: "ASN Arrivals", to: "/vehicle-queue", icon: Truck },
+  { label: "GRN", to: "/grn", icon: ClipboardList },
   { label: "Putaway", to: "/inventory?tab=putaway", icon: PackageCheck },
   { label: "Inventory", to: "/inventory?tab=inventory", icon: Boxes },
   { label: "Assembly Requisitions", to: "/warehouse/assembly-requisitions", icon: ClipboardList },
@@ -172,8 +190,9 @@ const warehouseNav = [
 
 const supplierNav = [
   { label: "Dashboard", to: "/supplier-dashboard", icon: LayoutDashboard },
-  { label: "Create ASN", to: "/supplier/asns/new", icon: Truck },
+  { label: "Create ASN", to: "/supplier/asns/new?open=create", icon: Truck },
   { label: "Dispatch", to: "/supplier/dispatch", icon: Truck },
+  { label: "FG Dispatch Requests", to: "/supplier/dispatch", icon: PackageCheck },
   { label: "Damage Returns", to: "/damage-claims", icon: ShieldAlert },
 ];
 
@@ -205,12 +224,19 @@ const gateSecurityNav = [
   { label: "Active Gate Entries", to: "/vehicle-queue", icon: Truck },
   { label: "Gate Passes", to: "/vehicle-queue?tab=passes", icon: QrCode },
   { label: "Vehicle Exit", to: "/vehicle-exit", icon: LogOut },
+  { label: "FG Pickup Gate Entry", to: "/gate/finished-goods-pickup", icon: QrCode },
+  { label: "FG Pickup Gate Exit", to: "/gate/finished-goods-pickup-exit", icon: LogOut },
   { label: "Entry & Exit History", to: "/vehicle-queue?tab=history", icon: ClipboardList },
   { label: "Notifications", to: "/notifications", icon: Bell },
 ];
 
 const adminNav = [
+  { label: "Dashboard", to: "/admin/users", icon: LayoutDashboard },
   { label: "User Management", to: "/admin/users", icon: Users },
+  { label: "Supplier Master", to: "/master-data?module=suppliers", icon: Building2 },
+  { label: "Material Master", to: "/master-data?module=materials", icon: Database },
+  { label: "Warehouse Locations", to: "/inventory?tab=locations", icon: Warehouse },
+  { label: "Audit Logs", to: "/notifications", icon: ClipboardList },
   { label: "Warehouse", to: "/warehouse-dashboard", icon: Warehouse },
 ];
 
@@ -294,9 +320,11 @@ function getStrictRoleNav(user: { username?: string; roles?: string[] } | null):
   if (hasUserRole(user, "SUPPLIER")) return supplierNav;
   if (hasUserRole(user, "GATE_SECURITY") || hasUserRole(user, "GATE_OPERATOR"))
     return gateSecurityNav;
+  if (hasUserRole(user, "QUALITY") || hasUserRole(user, "QC")) return qualityNav;
   if (hasUserRole(user, "ASSEMBLY") || hasUserRole(user, "ASSEMBLY_MANAGER")) return assemblyNav;
   if (hasUserRole(user, "STORE_MANAGER") || hasUserRole(user, "STORE_KEEPER"))
     return storeManagerNav;
+  if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "STORE_OPERATOR")) return warehouseOperatorNav;
   if (isDispatchSession(user)) return dispatchNav;
   if (isGrnSession(user)) return grnNav;
   return warehouseNav;
@@ -306,9 +334,11 @@ function getRoleLabel(user: { username?: string; roles?: string[] } | null): str
   if (hasUserRole(user, "ADMIN") || hasUserRole(user, "SUPERUSER")) return "Administrator";
   if (hasUserRole(user, "MANAGER")) return "Manager";
   if (hasUserRole(user, "GATE_SECURITY")) return "Security Officer";
+  if (hasUserRole(user, "QUALITY") || hasUserRole(user, "QC")) return "Quality Inspector";
   if (hasUserRole(user, "ASSEMBLY") || hasUserRole(user, "ASSEMBLY_MANAGER"))
     return "Assembly Manager";
   if (hasUserRole(user, "STORE_MANAGER")) return "Store Manager";
+  if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "STORE_OPERATOR")) return "Warehouse Operator";
   if (hasUserRole(user, "STORE_KEEPER")) return "Store Keeper";
   if (isDispatchSession(user)) return "Dispatch Manager";
   if (isGrnSession(user)) return "GRN / Operations Manager";
@@ -447,7 +477,7 @@ export function AppShell({
     (user?.roles?.includes("ASSEMBLY") ||
       user?.roles?.includes("ASSEMBLY_MANAGER") ||
       user?.roles?.includes("ASSEMBLY_OPERATOR"));
-  const isAssemblyRoute = path === "/assembly-dashboard";
+  const isAssemblyRoute = path === "/assembly-dashboard" || path === "/dispatch-picking-packing" || path === "/dispatch-loading";
   const isStoreUser =
     mounted && (user?.roles?.includes("STORE_MANAGER") || user?.roles?.includes("STORE_KEEPER"));
   const isStoreRoute = path === "/my-store" || path.startsWith("/my-store");
@@ -481,7 +511,8 @@ export function AppShell({
       user?.roles?.includes("DISPATCH_MANAGER") ||
       user?.username?.toLowerCase() === "dispatch");
   const isDispatchRoute =
-    path === "/dispatch" || path.startsWith("/dispatch-") || path.startsWith("/dispatch/");
+    (path === "/dispatch" || path.startsWith("/dispatch-") || path.startsWith("/dispatch/")) &&
+    !["/dispatch-picking-packing", "/dispatch-loading"].includes(path);
   const isAdminUser =
     mounted && (user?.roles?.includes("ADMIN") || user?.roles?.includes("SUPERUSER"));
   const isNotificationsRoute = path.startsWith("/notifications");
@@ -626,7 +657,7 @@ export function AppShell({
                   <Warehouse className="size-5" />
                 </div>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold tracking-tight">KaizenX</p>
+                  <p className="truncate text-sm font-semibold tracking-tight">KaizenAssests</p>
                   <p className="truncate text-[11px] text-muted-foreground">Pune DC - Plant 1200</p>
                 </div>
               </div>
@@ -715,7 +746,7 @@ export function AppShell({
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold tracking-wider uppercase bg-gradient-to-r from-primary via-blue-600 to-teal bg-clip-text text-transparent">
-                    KaizenX
+                    KaizenAssests
                   </p>
                   <p className="truncate text-[10px] font-mono text-muted-foreground font-semibold">
                     Pune DC · Plant 1200

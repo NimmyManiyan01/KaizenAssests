@@ -251,7 +251,7 @@ async def forward_quality_issue_to_supplier(
         "Portal Access:\n"
         f"{cred_text}\n"
         f"Quick Login Link: {magic_link}\n\n"
-        "Regards,\nKaizenX Procurement Team"
+        "Regards,\nKaizenAssests Procurement Team"
     )
 
     details = [

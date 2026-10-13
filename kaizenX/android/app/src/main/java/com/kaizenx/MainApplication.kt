@@ -1,4 +1,4 @@
-package com.kaizenx
+package com.kaizenassests
 
 import android.app.Application
 import com.facebook.react.PackageList

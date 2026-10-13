@@ -81,6 +81,22 @@ class PutawayTaskModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class PutawayLocationAssignmentModel(Base):
+    """A quantity-level instruction allowing one putaway task to be split across locations."""
+    __tablename__ = "putaway_location_assignment"
+    __table_args__ = (UniqueConstraint("putaway_task_id", "destination_bin_id", name="uq_putaway_task_location"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    putaway_task_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("putaway_task.id", ondelete="CASCADE"), nullable=False, index=True)
+    destination_store_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store.id", ondelete="SET NULL"), nullable=True)
+    destination_zone_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store_zone.id", ondelete="SET NULL"), nullable=True)
+    destination_bin_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store_bin.id", ondelete="SET NULL"), nullable=True, index=True)
+    location_code: Mapped[str] = mapped_column(String(128), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    assigned_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class HandlingUnitModel(Base):
     __tablename__ = "handling_unit"
 
@@ -100,7 +116,7 @@ class HandlingUnitModel(Base):
     grn_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False)
     current_location: Mapped[str] = mapped_column(String(128), nullable=False, default="RECEIVING_AREA")
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="LABEL_GENERATED", index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="QR_PENDING", index=True)
     generated_by: Mapped[str] = mapped_column(String(128), nullable=False)
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
