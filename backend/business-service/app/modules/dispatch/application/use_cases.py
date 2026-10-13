@@ -68,6 +68,9 @@ class DispatchUseCases:
             dispatch_number=cmd.dispatch_number,
             notes=cmd.notes,
         )
+        # Reserve the selected Assembly FG quantities atomically with creation.
+        # The domain validates availability and keeps the order in PENDING.
+        order.reserve_stock()
         return await self.dispatch_repo.save(order)
 
     async def get_dispatch(self, dispatch_id: str) -> DispatchOrder | None:
@@ -125,6 +128,10 @@ class DispatchUseCases:
         vehicle = await self.vehicle_repo.get_by_id(cmd.vehicle_id)
         if not vehicle:
             raise ValueError(f"Vehicle not found: {cmd.vehicle_id}")
+        if order.driver_id:
+            driver = await self.driver_repo.get_by_id(order.driver_id)
+            if driver and str(vehicle.vehicle_type).upper() in {"TRUCK", "HEAVY", "TRAILER"} and str(driver.license_type).upper() == "STANDARD":
+                raise ValueError("Standard license is not compatible with this heavy vehicle")
         order.allocate_vehicle(cmd.vehicle_id)
         vehicle.status = VehicleStatus.ASSIGNED
         await self.vehicle_repo.save(vehicle)
@@ -166,7 +173,7 @@ class DispatchUseCases:
         if order.vehicle_id:
             v = await self.vehicle_repo.get_by_id(order.vehicle_id)
             if v:
-                v.status = VehicleStatus.AVAILABLE
+                v.status = VehicleStatus.AVAILABLE if self._vehicle_documents_valid(v) else VehicleStatus.MAINTENANCE
                 await self.vehicle_repo.save(v)
         if order.driver_id:
             d = await self.driver_repo.get_by_id(order.driver_id)
@@ -182,7 +189,7 @@ class DispatchUseCases:
         if order.vehicle_id:
             v = await self.vehicle_repo.get_by_id(order.vehicle_id)
             if v:
-                v.status = VehicleStatus.AVAILABLE
+                v.status = VehicleStatus.AVAILABLE if self._vehicle_documents_valid(v) else VehicleStatus.MAINTENANCE
                 await self.vehicle_repo.save(v)
         if order.driver_id:
             d = await self.driver_repo.get_by_id(order.driver_id)
@@ -253,6 +260,8 @@ class DispatchUseCases:
             phone=cmd.phone,
             email=cmd.email,
             license_type=cmd.license_type,
+            license_expiry_date=cmd.license_expiry_date,
+            license_verified=cmd.license_verified,
             is_active=cmd.is_active,
             photo_path=cmd.photo_path,
             address=cmd.address,
@@ -270,6 +279,8 @@ class DispatchUseCases:
         driver.phone = cmd.phone
         driver.email = cmd.email
         driver.license_type = cmd.license_type
+        driver.license_expiry_date = cmd.license_expiry_date
+        driver.license_verified = cmd.license_verified
         driver.is_active = cmd.is_active
         if cmd.photo_path:
             driver.photo_path = cmd.photo_path
@@ -289,6 +300,10 @@ class DispatchUseCases:
         return await self.vehicle_repo.list_all()
 
     async def create_vehicle(self, cmd: CreateVehicleCommand) -> DispatchOrder | Vehicle:
+        self._validate_vehicle_compliance(cmd)
+        normalized_number = cmd.vehicle_number.upper().replace(" ", "").replace("-", "")
+        if any(v.vehicle_number.upper().replace(" ", "").replace("-", "") == normalized_number for v in await self.vehicle_repo.list_all()):
+            raise ValueError(f"Vehicle number already exists: {cmd.vehicle_number}")
         vehicle = Vehicle.create(
             vehicle_number=cmd.vehicle_number,
             vehicle_type=cmd.vehicle_type,
@@ -316,6 +331,10 @@ class DispatchUseCases:
         vehicle = await self.vehicle_repo.get_by_id(vehicle_id)
         if not vehicle:
             raise ValueError(f"Vehicle not found: {vehicle_id}")
+        self._validate_vehicle_compliance(cmd)
+        normalized_number = cmd.vehicle_number.upper().replace(" ", "").replace("-", "")
+        if any(v.id != vehicle_id and v.vehicle_number.upper().replace(" ", "").replace("-", "") == normalized_number for v in await self.vehicle_repo.list_all()):
+            raise ValueError(f"Vehicle number already exists: {cmd.vehicle_number}")
         vehicle.vehicle_number = cmd.vehicle_number
         vehicle.vehicle_type = cmd.vehicle_type
         vehicle.ownership_type = cmd.ownership_type
@@ -336,6 +355,30 @@ class DispatchUseCases:
         vehicle.puc_expiry = cmd.puc_expiry
         vehicle.rc_book_number = cmd.rc_book_number
         return await self.vehicle_repo.save(vehicle)
+
+    @staticmethod
+    def _validate_vehicle_compliance(cmd: CreateVehicleCommand) -> None:
+        from datetime import date
+        for label, value in (("Insurance", cmd.insurance_expiry), ("Fitness", cmd.fitness_expiry), ("Permit", cmd.permit_expiry)):
+            if not value or value < date.today().isoformat():
+                raise ValueError(f"{label} expiry date must be present and not expired")
+        if not (cmd.insurance_valid and cmd.fitness_valid and cmd.permit_valid):
+            raise ValueError("Insurance, fitness and permit must be verified before vehicle registration")
+
+    @staticmethod
+    def _vehicle_documents_valid(vehicle: Vehicle) -> bool:
+        from datetime import date
+        return bool(
+            vehicle.insurance_valid
+            and vehicle.fitness_valid
+            and vehicle.permit_valid
+            and vehicle.insurance_expiry
+            and vehicle.fitness_expiry
+            and vehicle.permit_expiry
+            and vehicle.insurance_expiry >= date.today().isoformat()
+            and vehicle.fitness_expiry >= date.today().isoformat()
+            and vehicle.permit_expiry >= date.today().isoformat()
+        )
 
     async def delete_vehicle(self, vehicle_id: str) -> bool:
         vehicle = await self.vehicle_repo.get_by_id(vehicle_id)

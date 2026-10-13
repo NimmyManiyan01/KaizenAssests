@@ -103,9 +103,9 @@ function DispatchOverviewPage() {
       ) : (
         <div className="space-y-6">
           {/* KPI Summary Cards */}
-          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <KpiCard
-              title="Total Dispatch"
+              title="Total Dispatches"
               value={kpis.todays_dispatches}
               icon={Truck}
               color="text-blue-500 bg-blue-500/10"
@@ -117,28 +117,16 @@ function DispatchOverviewPage() {
               color="text-amber-500 bg-amber-500/10"
             />
             <KpiCard
-              title="Ready"
+              title="Ready to Dispatch"
               value={kpis.dispatch_ready || kpis.ready_for_gate_exit}
               icon={ShieldCheck}
               color="text-emerald-500 bg-emerald-500/10"
             />
             <KpiCard
-              title="Loading"
-              value={kpis.loading}
-              icon={Navigation}
-              color="text-purple-500 bg-purple-500/10"
-            />
-            <KpiCard
-              title="In Transit"
-              value={kpis.in_transit}
-              icon={MapPin}
+              title="Dispatched"
+              value={kpis.dispatched}
+              icon={CheckCircle2}
               color="text-blue-600 bg-blue-600/10"
-            />
-            <KpiCard
-              title="Delayed"
-              value={kpis.delayed}
-              icon={AlertTriangle}
-              color="text-rose-500 bg-rose-500/10"
             />
           </div>
 
@@ -153,12 +141,12 @@ function DispatchOverviewPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="font-bold">Dispatch</TableHead>
-                  <TableHead className="font-bold">Order No</TableHead>
+                  <TableHead className="font-bold">Dispatch No.</TableHead>
                   <TableHead className="font-bold">Customer</TableHead>
-                  <TableHead className="font-bold">Qty</TableHead>
-                  <TableHead className="font-bold">Driver</TableHead>
+                  <TableHead className="font-bold">Product</TableHead>
+                  <TableHead className="font-bold">Quantity</TableHead>
                   <TableHead className="font-bold">Status</TableHead>
+                  <TableHead className="font-bold text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -171,15 +159,14 @@ function DispatchOverviewPage() {
                 ) : (
                   dispatches.map((d) => {
                     const qty = d.total_qty || d.items?.reduce((acc: number, i: any) => acc + (i.quantity_ordered || i.quantity || 0), 0) || 0;
-                    const driver = d.driver_name || d.driver_id || "Unassigned";
                     return (
                       <TableRow key={d.id || d.dispatch_number}>
                         <TableCell className="font-mono font-bold text-primary">{d.dispatch_number}</TableCell>
-                        <TableCell className="font-mono">{d.order_number}</TableCell>
                         <TableCell className="font-semibold">{d.customer_name}</TableCell>
+                        <TableCell>{d.product_name || d.items?.[0]?.product_name || d.items?.[0]?.material_name || "-"}</TableCell>
                         <TableCell className="font-mono">{qty}</TableCell>
-                        <TableCell>{driver}</TableCell>
                         <TableCell><StatusBadge status={d.status} /></TableCell>
+                        <TableCell className="text-right"><Link to="/dispatch-orders"><Button size="sm" variant="ghost" className="text-xs">View</Button></Link></TableCell>
                       </TableRow>
                     );
                   })

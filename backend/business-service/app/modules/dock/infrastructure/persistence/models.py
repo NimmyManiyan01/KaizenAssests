@@ -18,6 +18,7 @@ class DockMasterModel(Base):
     dock_code: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)
     dock_name: Mapped[str] = mapped_column(String(128), nullable=False)
     dock_type: Mapped[str] = mapped_column(String(32), nullable=False, default="RAW_MATERIAL", index=True)
+    direction: Mapped[str] = mapped_column(String(16), nullable=False, default="INBOUND", index=True)
     location: Mapped[str | None] = mapped_column(String(128), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="AVAILABLE", index=True)

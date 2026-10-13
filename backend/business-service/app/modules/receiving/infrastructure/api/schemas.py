@@ -29,7 +29,7 @@ from app.common.api_model import ApiModel
 # COMMON TYPES
 # ============================================================================
 
-ReceiptType = Literal["PO_RECEIPT", "UNEXPECTED_DELIVERY"]
+ReceiptType = Literal["PO_RECEIPT", "ASN_RECEIPT", "UNEXPECTED_DELIVERY"]
 
 GrnStatus = Literal[
     "DRAFT",
@@ -214,6 +214,7 @@ class CreateGrnHeaderRequest(ApiModel):
     grn_id: str | None = None
     po_id: str | None = None
     po_number: str | None = Field(default=None, max_length=64)
+    asn_number: str | None = Field(default=None, max_length=64)
 
     gate_entry_id: str | None = None
     gate_entry_number: str | None = Field(default=None, max_length=64)
@@ -237,6 +238,7 @@ class CreateGrnHeaderRequest(ApiModel):
         "grn_id",
         "po_id",
         "po_number",
+        "asn_number",
         "gate_entry_id",
         "gate_entry_number",
         "invoice_number",
@@ -335,6 +337,11 @@ class GrnLineReceivingRequest(ApiModel):
 
     good_quantity: NonNegativeQuantity = Decimal("0")
     damaged_quantity: NonNegativeQuantity = Decimal("0")
+    rejected_quantity: NonNegativeQuantity = Decimal("0")
+    held_quantity: NonNegativeQuantity = Decimal("0")
+    rejected_reason: str | None = None
+    damage_reason: str | None = None
+    held_reason: str | None = None
     allow_over_receipt: bool = False
     over_receipt_reason: str | None = None
 
@@ -390,6 +397,7 @@ class GrnLineResponse(ApiModel):
 
     accepted_quantity: Decimal | None = None
     rejected_quantity: Decimal = Decimal("0")
+    held_quantity: Decimal = Decimal("0")
     quality_approved_quantity: Decimal = Decimal("0")
 
     balance_quantity: Decimal = Decimal("0")
@@ -445,6 +453,10 @@ class QualityInspectionLineRequest(ApiModel):
 
     accepted_quantity: NonNegativeQuantity = Decimal("0")
     rejected_quantity: NonNegativeQuantity = Decimal("0")
+    held_quantity: NonNegativeQuantity = Decimal("0")
+    rejected_reason: str | None = None
+    damage_reason: str | None = None
+    held_reason: str | None = None
     quality_approved_quantity: NonNegativeQuantity = Decimal("0")
     good_quantity: NonNegativeQuantity | None = None
     damaged_quantity: NonNegativeQuantity | None = None
@@ -470,6 +482,11 @@ class QualityInspectionLineResponse(ApiModel):
     quality_result: str | None = None
     accepted_quantity: Decimal | None = None
     rejected_quantity: Decimal | None = None
+    held_quantity: Decimal | None = None
+    damaged_quantity: Decimal | None = None
+    rejected_reason: str | None = None
+    damage_reason: str | None = None
+    held_reason: str | None = None
     quality_approved_quantity: Decimal | None = None
 
 

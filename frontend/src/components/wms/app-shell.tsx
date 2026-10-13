@@ -36,7 +36,6 @@ import {
   Inbox,
   GitFork,
   Navigation,
-  MapPin,
   CheckCircle2,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -64,7 +63,7 @@ function getUserInitials(user: UserInfo | null): string {
     .split(/[\s._-]+/)
     .filter(Boolean);
   if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase();
+    return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase();
   }
   return name.substring(0, 2).toUpperCase();
 }
@@ -117,10 +116,17 @@ function getUserRoleLabel(user: UserInfo | null): string {
   if (roles.includes("WAREHOUSE") || roles.includes("WAREHOUSE_MANAGER")) {
     return "Warehouse Manager";
   }
-  return roles[0].replace(/_/g, " ");
+  return roles[0]?.replace(/_/g, " ") ?? "User";
 }
 
-const grnNav = [
+type NavItem = {
+  label: string;
+  to: string;
+  icon: any;
+  count?: number;
+};
+
+const grnNav: NavItem[] = [
   { label: "Dashboard", to: "/grn?tab=dashboard", icon: LayoutDashboard },
   { label: "Create GRN", to: "/grn?tab=wizard", icon: PlusCircle },
   { label: "GRN History", to: "/grn?tab=records", icon: ClipboardList },
@@ -128,15 +134,11 @@ const grnNav = [
 
 const dispatchNav = [
   { label: "Dashboard", to: "/dispatch", icon: LayoutDashboard },
+  { label: "Customer Orders", to: "/customer-orders", icon: ClipboardList },
   { label: "Dispatch Orders", to: "/dispatch-orders", icon: ClipboardList },
-  { label: "Picking & Packing", to: "/dispatch-picking-packing", icon: PackageCheck },
-  { label: "Transport Allocation", to: "/dispatch-transport-allocation", icon: Truck },
-  { label: "Driver Master", to: "/dispatch-drivers", icon: Users },
-  { label: "Vehicle Master", to: "/dispatch-vehicles", icon: Warehouse },
+  { label: "Packing", to: "/dispatch-picking-packing", icon: PackageCheck },
   { label: "Loading", to: "/dispatch-loading", icon: Navigation },
   { label: "Gate Out", to: "/dispatch-gate-out", icon: DoorOpen },
-  { label: "In Transit", to: "/dispatch-transit", icon: MapPin },
-  { label: "Exceptions", to: "/dispatch-exceptions", icon: AlertTriangle },
   { label: "Reports", to: "/dispatch-reports", icon: BarChart3 },
 ];
 
@@ -151,13 +153,11 @@ const storeManagerNav = [
 
 const assemblyNav = [
   { label: "Dashboard", to: "/assembly-dashboard", icon: LayoutDashboard },
-  { label: "Finished Goods Requests", to: "/assembly/finished-goods-requests", icon: PackageCheck },
-  { label: "Material Requests", to: "/assembly/requests", icon: ClipboardList },
-  { label: "Material/Pickup Status", to: "/assembly-material-issues", icon: PackageCheck },
-  { label: "Assembly Orders", to: "/assembly-orders", icon: Factory },
-  { label: "Production", to: "/assembly-progress", icon: ListOrdered },
-  { label: "Finished Goods", to: "/assembly-finished-goods", icon: Boxes },
-  { label: "Genealogy", to: "/assembly-genealogy", icon: GitFork },
+  { label: "Material Requests", to: "/assembly/material-requests", icon: Boxes },
+  { label: "Production", to: "/assembly/production", icon: Factory },
+  { label: "Quality Check", to: "/assembly/quality", icon: ShieldCheck },
+  { label: "Dispatch", to: "/assembly/dispatch", icon: Truck },
+  { label: "Finished Goods Records", to: "/assembly/finished-goods", icon: PackageCheck },
 ];
 
 const warehouseNav = [
@@ -172,6 +172,9 @@ const warehouseNav = [
 
 const supplierNav = [
   { label: "Dashboard", to: "/supplier-dashboard", icon: LayoutDashboard },
+  { label: "Dispatch", to: "/supplier-dashboard?view=dispatch", icon: Truck },
+  { label: "Vehicle Registration", to: "/dispatch-vehicles", icon: Truck },
+  { label: "Driver Registration", to: "/dispatch-drivers", icon: Users },
   { label: "Create ASN", to: "/supplier/asns/new", icon: Truck },
 ];
 
@@ -418,15 +421,7 @@ export function AppShell({
     (user?.roles?.includes("ASSEMBLY") ||
       user?.roles?.includes("ASSEMBLY_MANAGER") ||
       user?.roles?.includes("ASSEMBLY_OPERATOR"));
-  const isAssemblyRoute =
-    path === "/assembly-dashboard" ||
-    path === "/assembly-orders" ||
-    path.startsWith("/assembly/") ||
-    path === "/assembly-material-issues" ||
-    path === "/assembly-progress" ||
-    path === "/assembly-finished-goods" ||
-    path === "/assembly-genealogy" ||
-    path === "/assembly-reports";
+  const isAssemblyRoute = path === "/assembly-dashboard";
   const isStoreUser =
     mounted && (user?.roles?.includes("STORE_MANAGER") || user?.roles?.includes("STORE_KEEPER"));
   const isStoreRoute = path === "/my-store" || path.startsWith("/my-store");
@@ -530,10 +525,12 @@ export function AppShell({
       const targetTab = targetParams.get("tab");
       const targetPage = targetParams.get("page");
       const targetModule = targetParams.get("module");
+      const targetAction = targetParams.get("action");
       const currentParams = new URLSearchParams(searchStr);
       const currentTab = currentParams.get("tab") || (path === "/grn" ? "dashboard" : "");
       const currentPage = currentParams.get("page") || "";
       const currentModule = currentParams.get("module") || "";
+      const currentAction = currentParams.get("action") || "";
       if (targetPage && targetTab) {
         return path === targetPath && targetTab === currentTab && targetPage === currentPage;
       }
@@ -549,6 +546,12 @@ export function AppShell({
           path === targetPath &&
           (targetModule === currentModule || (!currentModule && targetModule === "warehouse"))
         );
+      }
+      if (targetAction) {
+        return path === targetPath && targetAction === currentAction;
+      }
+      if (targetPath === "/vehicle-queue" && !targetTab && !targetPage && !targetModule && !targetAction) {
+        return path === targetPath && !currentTab && !currentPage && !currentModule && !currentAction;
       }
       return fullHref === to || (searchStr ? fullHref.startsWith(to) : to === "/grn?tab=dashboard");
     }

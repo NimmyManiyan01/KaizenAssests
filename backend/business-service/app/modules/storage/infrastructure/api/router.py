@@ -478,8 +478,8 @@ def task_response(task: PutawayTaskModel) -> dict:
         "grn_number": task.grn_number,
         "handling_unit_id": str(task.handling_unit_id) if task.handling_unit_id else None,
         "item_code": task.item_code,
-        "batch_number": task.batch_number,
         "material_name": task.material_name,
+        "batch_number": task.batch_number,
         "material_qr": (task.placement_metadata or {}).get("unit_qr") if task.finished_goods_id else None,
         "barcode_value": None,
         "quantity": float(task.quantity),
@@ -683,6 +683,28 @@ async def enrich_putaway_tasks(tasks: list[PutawayTaskModel], session) -> list[d
                 or (hu.hu_number if hu and hu.hu_number else None)
                 or None
             )
+            if not mat_qr and not is_finished_goods:
+                try:
+                    batch_result = await session.execute(
+                        select(GrnBatchModel.id).where(
+                            GrnBatchModel.grn_line_id.in_(
+                                select(GrnLineModel.id).where(
+                                    GrnLineModel.grn_id == t.grn_id,
+                                    func.upper(GrnLineModel.item_code) == t.item_code.upper(),
+                                )
+                            ),
+                            func.upper(GrnBatchModel.batch_number) == func.upper(t.batch_number),
+                            GrnBatchModel.superseded.is_(False),
+                        )
+                    )
+                    batch_id = batch_result.scalar_one_or_none()
+                    qr_result = await session.execute(
+                        select(GrnBatchQrModel).where(GrnBatchQrModel.batch_id == batch_id)
+                    ) if batch_id else None
+                    qr_record = qr_result.scalars().first() if qr_result else None
+                    mat_qr = qr_record.qr_code if qr_record else None
+                except Exception:
+                    mat_qr = None
 
             unit_metadata = t.placement_metadata or {}
             recorded_putaway_quantity = unit_metadata.get("putaway_quantity")
@@ -697,8 +719,8 @@ async def enrich_putaway_tasks(tasks: list[PutawayTaskModel], session) -> list[d
                 "grn_number": None if t.finished_goods_id else t.grn_number,
                 "handling_unit_id": str(t.handling_unit_id) if t.handling_unit_id else None,
                 "item_code": t.item_code,
-                "batch_number": t.batch_number,
                 "material_name": t.material_name,
+                "batch_number": t.batch_number,
                 "material_qr": mat_qr,
                 "barcode_value": hu.barcode_value if hu else None,
                 "quantity": float(t.quantity),
@@ -859,7 +881,90 @@ async def list_putaway_tasks(
         query = query.where(PutawayTaskModel.destination_store_id == store_id)
 
     result = await uow.session.execute(query)
-    tasks_list = list(result.scalars().all())
+    raw_tasks = list(result.scalars().all())
+
+    # Resolve the canonical accepted batches from GRN inspection data. If old
+    # posting paths created extra task rows, only batches whose cumulative
+    # quantity fits within the saved QC-approved quantity are eligible.
+    canonical_batches: dict[tuple[uuid.UUID, str], set[str]] = {}
+    grn_ids = {task.grn_id for task in raw_tasks if task.grn_id}
+    if grn_ids:
+        grn_result = await uow.session.execute(
+            select(GrnModel)
+            .options(selectinload(GrnModel.lines).selectinload(GrnLineModel.batches))
+            .where(GrnModel.id.in_(grn_ids))
+        )
+        grns_for_reconciliation = list(grn_result.scalars().all())
+        for grn in grns_for_reconciliation:
+            for line in grn.lines:
+                approved = line.quality_approved_quantity or line.good_quantity or Decimal("0")
+                remaining = approved
+                allowed: set[str] = set()
+                for batch in sorted(line.batches, key=lambda item: item.created_at):
+                    batch_number = str(batch.batch_number or "").strip().upper()
+                    quantity = batch.batch_quantity or Decimal("0")
+                    if batch.superseded or not batch_number or batch_number in allowed or remaining <= Decimal("0"):
+                        continue
+                    if quantity <= Decimal("0"):
+                        continue
+                    allowed.add(batch_number)
+                    remaining -= min(quantity, remaining)
+                if allowed:
+                    canonical_batches[(grn.id, line.item_code.upper())] = allowed
+
+    # Reconcile legacy duplicate active tasks against the canonical batch set.
+    # Keep the records for auditability, but make only approved batch tasks
+    # eligible for normal putaway.
+    if canonical_batches:
+        for task in raw_tasks:
+            item_key = (task.grn_id, task.item_code.upper())
+            allowed = canonical_batches.get(item_key)
+            if not allowed:
+                continue
+            batch = str(task.batch_number or "").strip().upper()
+            if batch not in allowed and task.status not in {"COMPLETED", "STORED", "CANCELLED", "VOID"}:
+                task.status = "CANCELLED"
+
+        # Preserve excess batch rows for auditability, but mark them
+        # superseded so they cannot be used for normal putaway or displayed as
+        # active batches. Canonical batches are selected by GRN link, creation
+        # order, and the QC-approved quantity above.
+        for grn in grns_for_reconciliation if grn_ids else []:
+            for line in grn.lines:
+                allowed = canonical_batches.get((grn.id, line.item_code.upper()))
+                if not allowed:
+                    continue
+                for batch in line.batches:
+                    if str(batch.batch_number or "").strip().upper() not in allowed:
+                        batch.superseded = True
+        await uow.session.flush()
+
+    # A GRN batch is the unit of normal putaway. Older completion paths could
+    # also leave a second line-level task for the same GRN/material. Prefer
+    # the persisted batch tasks and expose each batch only once.
+    batch_keys = {
+        (task.grn_id, task.item_code.upper(), str(task.batch_number).strip().upper())
+        for task in raw_tasks
+        if task.grn_id and task.batch_number and str(task.batch_number).strip()
+    }
+    batch_materials = {(grn_id, item_code) for grn_id, item_code, _ in batch_keys}
+    seen_keys: set[tuple[uuid.UUID | None, str, str]] = set()
+    tasks_list = []
+    for task in raw_tasks:
+        if task.status in {"CANCELLED", "VOID"}:
+            continue
+        item_key = (task.grn_id, task.item_code.upper())
+        batch = str(task.batch_number or "").strip().upper()
+        allowed_batches = canonical_batches.get(item_key)
+        if allowed_batches and batch not in allowed_batches:
+            continue
+        if not batch and item_key in batch_materials:
+            continue
+        key = (task.grn_id, task.item_code.upper(), batch)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        tasks_list.append(task)
     return await enrich_putaway_tasks(tasks_list, uow.session)
 
 
@@ -1176,7 +1281,7 @@ async def assign_storage_location(
     task = await _resolve_task(uow.session, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Putaway task not found")
-    if task.status in ("PUTAWAY_COMPLETED", "STORED"):
+    if task.status in ("PUTAWAY_COMPLETED", "COMPLETED", "STORED"):
         raise HTTPException(status_code=409, detail="Completed putaway tasks cannot be reassigned")
 
     # Destination Store selection
@@ -1282,7 +1387,7 @@ async def assign_storage_location(
     else:
         raise HTTPException(status_code=422, detail="Specify destination store_id or storage location_id")
 
-    task.status = "ASSIGNED_TO_STORE"
+    task.status = "ASSIGNED"
     task.location_assigned_by = user.username
     task.location_assigned_at = datetime.datetime.now(datetime.timezone.utc)
 
@@ -1334,7 +1439,7 @@ async def start_putaway(
     task = await _resolve_task(uow.session, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Putaway task not found")
-    if task.status in ("PUTAWAY_COMPLETED", "STORED"):
+    if task.status in ("PUTAWAY_COMPLETED", "COMPLETED", "STORED"):
         raise HTTPException(status_code=409, detail="Putaway task is already completed")
     if task.status == "PUTAWAY_IN_PROGRESS":
         return task_response(task)
@@ -1349,7 +1454,7 @@ async def start_putaway(
                     detail="Access denied: You can only start putaway tasks assigned to your Store",
                 )
 
-    task.status = "PUTAWAY_IN_PROGRESS"
+    task.status = "IN_PROGRESS"
     task.started_by = user.username
     task.started_at = datetime.datetime.now(datetime.timezone.utc)
     await uow.session.flush()
@@ -1399,7 +1504,7 @@ async def complete_putaway(
             response["duplicate_confirmation"] = True
             response["confirmed_quantity"] = float(prior_confirmation.confirmed_quantity)
             return response
-    if task.status in ("PUTAWAY_COMPLETED", "STORED"):
+    if task.status in ("PUTAWAY_COMPLETED", "COMPLETED", "STORED"):
         raise HTTPException(status_code=409, detail="Putaway task is already completed")
 
     roles_upper = {r.upper() for r in user.roles}
@@ -1408,21 +1513,16 @@ async def complete_putaway(
     is_warehouse_user = bool(roles_upper.intersection({"WAREHOUSE_MANAGER", "WAREHOUSE"}))
     can_execute_finished_goods = is_finished_goods_task and is_warehouse_user
 
-    # Reject Warehouse Manager explicitly
-    if is_warehouse_user and not is_store_user and not can_execute_finished_goods:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Warehouse Manager is not authorized to execute Putaway. Physical putaway must be performed by the assigned Store Manager.",
-        )
-
-    if not is_store_user and not can_execute_finished_goods and "ADMIN" not in roles_upper and "SUPERUSER" not in roles_upper:
+    # Warehouse users may execute only against the task's assigned store/rack;
+    # the strict destination-store and assigned-rack checks below remain in force.
+    if not is_store_user and not is_warehouse_user and not can_execute_finished_goods and "ADMIN" not in roles_upper and "SUPERUSER" not in roles_upper:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied: Only Store Keepers or Store Managers assigned to this Store can complete physical putaway",
         )
 
     # Store isolation: Physical Putaway confirmation into a Store is performed by assigned Store Keeper/Manager
-    if task.destination_store_id and not can_execute_finished_goods and "ADMIN" not in roles_upper and "SUPERUSER" not in roles_upper:
+    if task.destination_store_id and not is_warehouse_user and not can_execute_finished_goods and "ADMIN" not in roles_upper and "SUPERUSER" not in roles_upper:
         user_store_ids, user_store_codes = await get_user_store_context(user, uow)
         if user_store_ids or user_store_codes:
             store_match = False
@@ -1439,9 +1539,9 @@ async def complete_putaway(
                     detail="Cannot complete Putaway tasks belonging to another Store",
                 )
 
-    if task.status != "PUTAWAY_IN_PROGRESS":
-        if task.status in ("ASSIGNED_TO_STORE", "PUTAWAY_PENDING") and task.destination_store_id:
-            task.status = "PUTAWAY_IN_PROGRESS"
+    if task.status != "IN_PROGRESS":
+        if task.status in ("ASSIGNED", "ASSIGNED_TO_STORE", "PUTAWAY_PENDING", "PENDING") and task.destination_store_id:
+            task.status = "IN_PROGRESS"
             task.started_by = user.username
             task.started_at = datetime.datetime.now(datetime.timezone.utc)
         else:
@@ -1715,24 +1815,24 @@ async def complete_putaway(
             id=uuid.uuid4(),
             material_id=material.id,
             material_code=task.item_code,
-            on_hand=Decimal("0.0"),
-            allocated=Decimal("0.0"),
-            available=Decimal("0.0"),
+            on_hand_quantity=Decimal("0.0"),
+            allocated_quantity=Decimal("0.0"),
+            available_quantity=Decimal("0.0"),
             uom=task.uom or "PCS",
-            warehouse_id=task.warehouse_id,
+            warehouse_id=task.warehouse_id or "MAIN",
             updated_at=datetime.datetime.now(),
         )
         uow.session.add(stock)
         await uow.session.flush()
 
     completed_at = datetime.datetime.now(datetime.timezone.utc)
-    available_before = stock.available
+    available_before = stock.available_quantity
     # Putaway completion moves produced stock into warehouse inventory. Keep
     # the canonical on-hand total in sync with available stock; this is
     # especially important for Assembly finished goods, which do not arrive
     # through the GRN receipt-posting flow.
-    stock.on_hand = stock.on_hand + request.quantity
-    stock.available = stock.available + request.quantity
+    stock.on_hand_quantity = stock.on_hand_quantity + request.quantity
+    stock.available_quantity = stock.available_quantity + request.quantity
     stock.updated_at = completed_at.replace(tzinfo=None)
     target_bin.occupied_quantity = target_bin.occupied_quantity + request.quantity
     location.occupied_quantity = location.occupied_quantity + request.quantity
@@ -1780,12 +1880,12 @@ async def complete_putaway(
     if remaining_task_qty <= 0:
         task.placement_metadata = {**(task.placement_metadata or {}), "putaway_quantity": float(request.quantity)}
         task.quantity = Decimal("0")
-        task.status = "PUTAWAY_COMPLETED"
+        task.status = "COMPLETED"
         task.completed_by = user.username
         task.completed_at = completed_at
     else:
         task.quantity = remaining_task_qty
-        task.status = "PUTAWAY_IN_PROGRESS"
+        task.status = "PARTIALLY_COMPLETED"
         task.started_by = task.started_by or user.username
         task.started_at = task.started_at or completed_at
 
@@ -2003,6 +2103,26 @@ async def resolve_grn_qr(
     batch_number: str | None = request.batch_number.strip() if request.batch_number else None
     hu_number: str | None = None
 
+    # Batch QR identifiers are deterministic and contain the persisted batch
+    # number. Resolve them through GRN batch records first so lookup does not
+    # depend on a legacy material-level QR row.
+    if raw_code.upper().startswith("QR-BATCH-"):
+        batch_number = raw_code[len("QR-BATCH-"):].strip()
+        batch_result = await uow.session.execute(
+            select(GrnBatchModel).where(
+                func.upper(GrnBatchModel.batch_number) == batch_number.upper(),
+                GrnBatchModel.superseded.is_(False),
+            )
+        )
+        batch_obj = batch_result.scalars().first()
+        if batch_obj:
+            line_obj = await uow.session.get(GrnLineModel, batch_obj.grn_line_id)
+            if line_obj:
+                item_code = line_obj.item_code
+                grn_obj = await uow.session.get(GrnModel, line_obj.grn_id)
+                if grn_obj:
+                    grn_number = grn_obj.grn_number
+
     # Step 1: Parse JSON QR payload if applicable
     if (raw_code.startswith("{") and raw_code.endswith("}")) or (raw_code.startswith('"{') and raw_code.endswith('}"')):
         try:
@@ -2036,7 +2156,13 @@ async def resolve_grn_qr(
                         grn_number = grn_number or payload.get("grn_number")
                         batch_number = batch_number or payload.get("batch_number")
                 except Exception:
-                    pass
+                    # GRN batch labels are also emitted as human-readable
+                    # key/value text. Extract the batch identity from that
+                    # payload instead of resolving only the material code.
+                    for payload_line in b_qr.qr_payload.splitlines():
+                        key, separator, value = payload_line.partition(":")
+                        if separator and key.strip().lower() in {"batch", "batch number", "batch_number"}:
+                            batch_number = batch_number or value.strip()
 
     # Step 3: Match HandlingUnitModel
     hu_obj: HandlingUnitModel | None = None
@@ -2194,6 +2320,20 @@ async def resolve_grn_qr(
             task_query = task_query.where(func.upper(PutawayTaskModel.batch_number) == batch_number.upper())
         res_t = await uow.session.execute(task_query.order_by(PutawayTaskModel.created_at.asc()))
         task_obj = res_t.scalars().first()
+
+    # Normal GRN putaway tasks are batch-specific. A material-level QR such
+    # as QR-MAT-MAT-LSE-022 is not sufficient because another lot of the same
+    # material could otherwise be stored against this task.
+    required_batch = str(task_obj.batch_number or "").strip() if task_obj else ""
+    resolved_batch = str(batch_number or "").strip()
+    if required_batch and (
+        raw_code.upper().startswith("QR-MAT-")
+        or resolved_batch.upper() != required_batch.upper()
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Material QR must identify batch '{required_batch}'. Scan the QR label for that exact GRN batch.",
+        )
 
     # Calculate quantities. A batch QR represents only that batch, not the
     # entire GRN line (for example, 25 of a 100-unit receipt).
@@ -2431,8 +2571,10 @@ async def resolve_bin_qr(
     target_zone = await uow.session.get(StoreZoneModel, bin_obj.zone_id) if bin_obj.zone_id else None
     target_store = await uow.session.get(StoreModel, bin_obj.store_id) if bin_obj.store_id else None
 
-    # Check store_id filter if passed
-    if request.store_id and bin_obj.store_id != request.store_id:
+    # Check store_id filter if passed. API clients commonly send UUIDs as
+    # strings; normalize before comparing with the database UUID value.
+    requested_store_id = _parse_uuid(request.store_id)
+    if request.store_id and requested_store_id and bin_obj.store_id != requested_store_id:
         raise HTTPException(
             status_code=422,
             detail=f"Bin '{bin_obj.bin_code}' belongs to store '{target_store.store_code if target_store else bin_obj.store_id}', which does not match the required store.",
@@ -2486,14 +2628,9 @@ async def execute_putaway(
     is_admin = bool(roles_upper.intersection({"ADMIN", "SUPERUSER"}))
     is_store_user = bool(roles_upper.intersection({"STORE_MANAGER", "STORE_KEEPER"})) or ("putaway:execute" in (user.permissions or []))
 
-    # Reject Warehouse Manager explicitly
-    if ("WAREHOUSE_MANAGER" in roles_upper or "WAREHOUSE" in roles_upper) and not is_store_user:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Warehouse Manager is not authorized to execute Putaway. Physical putaway must be performed by the assigned Store Manager.",
-        )
+    is_warehouse_user = bool(roles_upper.intersection({"WAREHOUSE_MANAGER", "WAREHOUSE"}))
 
-    if not is_store_user and not is_admin:
+    if not is_store_user and not is_warehouse_user and not is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied: Only Store Managers or Store Keepers assigned to this Store can execute Putaway.",
@@ -2720,9 +2857,9 @@ async def execute_putaway(
             id=uuid.uuid4(),
             material_id=material.id,
             material_code=item_code,
-            on_hand=Decimal("0.0"),
-            allocated=Decimal("0.0"),
-            available=Decimal("0.0"),
+            on_hand_quantity=Decimal("0.0"),
+            allocated_quantity=Decimal("0.0"),
+            available_quantity=Decimal("0.0"),
             uom=uom,
             warehouse_id=warehouse_id,
             updated_at=datetime.datetime.now(),
@@ -2731,9 +2868,9 @@ async def execute_putaway(
         await uow.session.flush()
 
     completed_at = datetime.datetime.now(datetime.timezone.utc)
-    available_before = stock.available
-    stock.on_hand = stock.on_hand + request.quantity
-    stock.available = stock.available + request.quantity
+    available_before = stock.available_quantity
+    stock.on_hand_quantity = stock.on_hand_quantity + request.quantity
+    stock.available_quantity = stock.available_quantity + request.quantity
     stock.updated_at = completed_at.replace(tzinfo=None)
 
     target_bin.occupied_quantity = target_bin.occupied_quantity + request.quantity
@@ -2804,12 +2941,12 @@ async def execute_putaway(
         if is_completed or task.quantity <= request.quantity:
             task.placement_metadata = {**(task.placement_metadata or {}), "putaway_quantity": float(request.quantity if task.quantity <= request.quantity else task.quantity)}
             task.quantity = Decimal("0")
-            task.status = "PUTAWAY_COMPLETED"
+            task.status = "COMPLETED"
             task.completed_by = user.username
             task.completed_at = completed_at
         else:
             task.quantity = task.quantity - request.quantity
-            task.status = "PUTAWAY_IN_PROGRESS"
+            task.status = "PARTIALLY_COMPLETED"
             task.started_by = task.started_by or user.username
             task.started_at = task.started_at or completed_at
 
@@ -2846,7 +2983,7 @@ async def execute_putaway(
             confirmed_quantity=request.quantity,
             uom=uom,
             inventory_available_before=available_before,
-            inventory_available_after=stock.available,
+            inventory_available_after=stock.available_quantity,
             confirmed_by=user.username,
             confirmed_at=completed_at,
         )
@@ -2867,7 +3004,7 @@ async def execute_putaway(
             quantity=request.quantity,
             uom=uom,
             stock_before=available_before,
-            stock_after=stock.available,
+            stock_after=stock.available_quantity,
             performed_by=user.username,
             user_role=",".join(user.roles or []),
             warehouse_id=warehouse_id,
@@ -2901,6 +3038,6 @@ async def execute_putaway(
         "remaining_available_quantity": float(remaining_available),
         "task_id": str(task.id) if task else None,
         "inventory_available_before": float(available_before),
-        "inventory_available_after": float(stock.available),
+        "inventory_available_after": float(stock.available_quantity),
     }
 

@@ -30,40 +30,8 @@ class DockAllocationService:
 
     @staticmethod
     async def seed_default_docks_if_empty(session: AsyncSession) -> None:
-        """Helper to seed initial 9 docks when explicitly invoked (e.g. by test fixtures or setup scripts)."""
-        result = await session.execute(select(func.count(DockMasterModel.id)))
-        if result.scalar() == 0:
-            default_store_id = None
-            try:
-                from app.modules.store.infrastructure.persistence.models import StoreModel
-                store_res = await session.execute(select(StoreModel.id).order_by(StoreModel.created_at.asc()).limit(1))
-                default_store_id = store_res.scalars().first()
-            except Exception:
-                default_store_id = None
-
-            initial_docks = [
-                {"code": "RM-01", "name": "Raw Material Dock 01", "type": DockType.RAW_MATERIAL.value, "location": "North Warehouse"},
-                {"code": "RM-02", "name": "Raw Material Dock 02", "type": DockType.RAW_MATERIAL.value, "location": "East Warehouse"},
-                {"code": "CH-01", "name": "Chemical/Hazardous Dock 01", "type": DockType.CHEMICAL_HAZARDOUS.value, "location": "South Warehouse"},
-                {"code": "CH-02", "name": "Chemical/Hazardous Dock 02", "type": DockType.CHEMICAL_HAZARDOUS.value, "location": "South Warehouse"},
-                {"code": "EL-01", "name": "Electrical Dock 01", "type": DockType.ELECTRICAL.value, "location": "North Warehouse"},
-                {"code": "EL-02", "name": "Electrical Dock 02", "type": DockType.ELECTRICAL.value, "location": "North Warehouse"},
-                {"code": "EC-01", "name": "Electronics Dock 01", "type": DockType.ELECTRONICS.value, "location": "West Warehouse"},
-                {"code": "EC-02", "name": "Electronics Dock 02", "type": DockType.ELECTRONICS.value, "location": "West Warehouse"},
-                {"code": "MR-01", "name": "Main Receiving Dock", "type": DockType.MAIN_RECEIVING.value, "location": "North Warehouse"},
-            ]
-            for d in initial_docks:
-                dock = DockMasterModel(
-                    dock_code=d["code"],
-                    dock_name=d["name"],
-                    dock_type=d["type"],
-                    location=d["location"],
-                    status=DockStatus.AVAILABLE.value,
-                    is_active=True,
-                    store_id=default_store_id,
-                )
-                session.add(dock)
-            await session.commit()
+        """No automatic dock seeding; docks are created through the Dock Management UI."""
+        return None
 
     @staticmethod
     async def sync_pending_gate_entries(session: AsyncSession) -> None:
@@ -84,16 +52,24 @@ class DockAllocationService:
                 vehicle_number=entry.vehicle_number,
                 vendor_reference=entry.ocr_supplier_name,
                 material_reference=entry.ocr_product_material,
-                material_description=entry.material_description,
-                quantity=entry.ocr_quantity if entry.ocr_quantity is not None else entry.total_quantity,
+                material_description=entry.ocr_product_material,
+                quantity=entry.ocr_quantity if entry.ocr_quantity is not None else 0,
             )
         await session.flush()
 
     @staticmethod
     async def get_overview_metrics(session: AsyncSession) -> dict:
         await DockAllocationService.sync_pending_gate_entries(session)
+        from app.modules.gate.infrastructure.persistence.models import DockModel
         docks_result = await session.execute(select(DockMasterModel).where(DockMasterModel.is_active == True))
         docks = docks_result.scalars().all()
+        receiving_docks_result = await session.execute(select(DockModel))
+        receiving_status = {
+            dock.dock_number.upper(): dock.status
+            for dock in receiving_docks_result.scalars().all()
+        }
+        dock_ids = [dock.id for dock in docks]
+        active_allocations = await DockAllocationService.get_active_allocations_for_docks(session, dock_ids)
 
         pending_result = await session.execute(
             select(func.count(DockAllocationRequestModel.id)).where(
@@ -104,8 +80,18 @@ class DockAllocationService:
 
         return {
             "total_docks": len(docks),
-            "available_docks": sum(1 for d in docks if d.status == DockStatus.AVAILABLE.value),
-            "occupied_docks": sum(1 for d in docks if d.status == DockStatus.OCCUPIED.value),
+            "available_docks": sum(
+                1 for d in docks
+                if d.status == DockStatus.AVAILABLE.value
+                and receiving_status.get(d.dock_code.upper(), DockStatus.AVAILABLE.value) == DockStatus.AVAILABLE.value
+                and d.id not in active_allocations
+            ),
+            "occupied_docks": sum(
+                1 for d in docks
+                if d.status == DockStatus.OCCUPIED.value
+                or receiving_status.get(d.dock_code.upper()) == DockStatus.OCCUPIED.value
+                or d.id in active_allocations
+            ),
             "reserved_docks": sum(1 for d in docks if d.status in [DockStatus.RESERVED.value, "DOCK_ASSIGNED"]),
             "maintenance_docks": sum(1 for d in docks if d.status == DockStatus.MAINTENANCE.value),
             "pending_allocations_count": pending_count,
@@ -124,7 +110,11 @@ class DockAllocationService:
             query = query.where(DockMasterModel.status == status.strip().upper())
         query = query.order_by(DockMasterModel.dock_code)
         result = await session.execute(query)
-        return list(result.scalars().all())
+        docks = list(result.scalars().all())
+        if status and status.strip().upper() == DockStatus.AVAILABLE.value:
+            active_allocations = await DockAllocationService.get_active_allocations_for_docks(session, [dock.id for dock in docks])
+            return [dock for dock in docks if dock.id not in active_allocations]
+        return docks
 
     @staticmethod
     async def get_active_allocations_for_docks(
@@ -413,9 +403,14 @@ class DockAllocationService:
             select(DockModel).where(DockModel.dock_number == dock.dock_code).with_for_update()
         )).scalar_one_or_none()
         if gate_dock is None:
-            warehouse_id = getattr(assigned_store, "warehouse_id", None)
-            if not warehouse_id:
-                raise HTTPException(status_code=422, detail="Assigned store has no warehouse configured for gate receiving")
+            # Older store rows may not have a warehouse value, and some docks
+            # are intentionally not tied to a store. Keep gate receiving
+            # functional by using the application's default warehouse.
+            warehouse_id = (
+                getattr(assigned_store, "warehouse_id", None)
+                or getattr(dock, "warehouse_id", None)
+                or "Main Warehouse"
+            )
             gate_dock = DockModel(
                 dock_number=dock.dock_code,
                 warehouse_id=warehouse_id,
@@ -439,9 +434,9 @@ class DockAllocationService:
             po_id=gate_entry.po_id,
             vehicle_number=gate_entry.vehicle_number,
             dock_number=dock.dock_code,
-            assigned_store_id=assigned_store.id,
-            assigned_store_code=assigned_store.store_code,
-            assigned_store_name=assigned_store.store_name,
+            assigned_store_id=assigned_store.id if assigned_store else None,
+            assigned_store_code=assigned_store.store_code if assigned_store else None,
+            assigned_store_name=assigned_store.store_name if assigned_store else None,
             assigned_store_manager_id=req.assigned_store_manager_id,
             assigned_store_manager_username=req.assigned_store_manager_username,
             assigned_store_manager_name=req.assigned_store_manager_name,
@@ -722,7 +717,7 @@ class DockAllocationService:
     async def mark_vehicle_arrived(
         session: AsyncSession, allocation_request_id: uuid.UUID, performed_by: str
     ) -> DockAllocationRequestModel:
-        """Vehicle Arrival transition (DOCK_ASSIGNED/RESERVED -> OCCUPIED)."""
+        """Record physical arrival at the assigned dock (DOCK_ASSIGNED -> AT_DOCK)."""
         from sqlalchemy import desc
         req_query = await session.execute(
             select(DockAllocationRequestModel)
@@ -788,14 +783,43 @@ class DockAllocationService:
                     )
                 )
 
+        arrived_at = datetime.now(timezone.utc)
+
+        # Persist the same check-in timestamp on the gate assignment consumed by
+        # the inbound-arrivals details view. The allocation request remains the
+        # source of the transition, while DockAssignment stores the warehouse
+        # workflow timestamps.
+        try:
+            from app.modules.gate.infrastructure.persistence.models import GateEntryModel, DockAssignmentModel
+            gate_result = await session.execute(
+                select(GateEntryModel).where(
+                    or_(
+                        GateEntryModel.gate_entry_number == req.existing_gate_pass_id,
+                        GateEntryModel.vehicle_number == req.vehicle_number,
+                    )
+                )
+            )
+            for gate_entry in gate_result.scalars().all():
+                assignment_result = await session.execute(
+                    select(DockAssignmentModel).where(DockAssignmentModel.gate_entry_id == gate_entry.id)
+                )
+                assignment = assignment_result.scalar_one_or_none()
+                if assignment:
+                    assignment.dock_arrival_at = arrived_at
+                    assignment.dock_checked_in_by = performed_by
+        except Exception:
+            # Status transition must not be lost if a legacy gate record has no
+            # corresponding DockAssignment row; the allocation record remains authoritative.
+            pass
+
         # Update GateEntryModel if present
         await DockAllocationService._sync_gate_entry_status(
-            session, req.existing_gate_pass_id, req.vehicle_number, "OCCUPIED"
+            session, req.existing_gate_pass_id, req.vehicle_number, "AT_DOCK"
         )
 
         previous_status = req.status
-        req.status = "OCCUPIED"
-        req.arrived_at = datetime.now(timezone.utc)
+        req.status = "AT_DOCK"
+        req.arrived_at = arrived_at
 
         session.add(
             DockAllocationHistoryModel(
@@ -803,7 +827,7 @@ class DockAllocationService:
                 dock_id=req.assigned_dock_id,
                 action=AllocationAction.ARRIVED.value,
                 previous_status=previous_status,
-                new_status="OCCUPIED",
+                new_status="AT_DOCK",
                 performed_by=performed_by,
                 performed_at=datetime.now(timezone.utc),
                 remarks=f"Vehicle arrived at allocated Dock {dock_code}",
@@ -841,7 +865,7 @@ class DockAllocationService:
         ).scalar_one_or_none()
         if not req:
             raise HTTPException(status_code=404, detail="Request not found")
-        if req.status != "DOCK_ASSIGNED":
+        if req.status != "AT_DOCK":
             raise HTTPException(status_code=409, detail=f"Receiving cannot start while allocation is {req.status}")
 
         previous_status = req.status

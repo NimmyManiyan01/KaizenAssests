@@ -19,6 +19,7 @@ rfq_supplier_link = Table(
     Base.metadata,
     Column("rfq_id", GUID, ForeignKey("rfq.id"), primary_key=True),
     Column("supplier_id", GUID, ForeignKey("supplier.id"), primary_key=True),
+    extend_existing=True,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
@@ -324,6 +325,7 @@ class AsnModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     logistics: Mapped[Optional[list[dict]]] = mapped_column(JSON, nullable=True)
 
+    supplier: Mapped[Optional[SupplierModel]] = relationship("SupplierModel")
     lines: Mapped[List[AsnLineModel]] = relationship(back_populates="asn", cascade="all, delete-orphan")
     documents: Mapped[List[AsnDocumentModel]] = relationship(back_populates="asn", cascade="all, delete-orphan")
 
@@ -536,9 +538,9 @@ class MaterialRequestItemModel(Base):
     )
     material_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("material.id", ondelete="SET NULL"), nullable=True)
     material_variant_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("material_variant.id", ondelete="SET NULL"), nullable=True)
-    item_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    material_code: Mapped[str] = mapped_column(String(64), nullable=False)
     variant_code: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    item_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    material_name: Mapped[str] = mapped_column(String(255), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
     is_custom: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -547,6 +549,9 @@ class MaterialRequestItemModel(Base):
     request: Mapped[MaterialRequestModel] = relationship("MaterialRequestModel", back_populates="items")
     material: Mapped[Optional["MaterialModel"]] = relationship("MaterialModel")
     variant: Mapped[Optional["MaterialVariantModel"]] = relationship("MaterialVariantModel")
+
+    item_code = synonym("material_code")
+    item_name = synonym("material_name")
 
 
 class MaterialStockModel(Base):
@@ -562,19 +567,17 @@ class MaterialStockModel(Base):
     material_code: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     variant_code: Mapped[Optional[str]] = mapped_column(String(128), index=True, nullable=True)
     location_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    warehouse_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, default="Main Warehouse")
     on_hand_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
     allocated_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
     available_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
     uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
-    # Existing warehouse flows refer to the same balances through these
-    # shorter names. Synonyms keep both vocabularies mapped to the same DB
-    # columns, so locked stock changes are persisted rather than transient.
+    # Synonyms map both vocabularies to the actual DB columns
     on_hand = synonym("on_hand_quantity")
     allocated = synonym("allocated_quantity")
     available = synonym("available_quantity")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=datetime.now, onupdate=datetime.now)
 
     @property
     def material_name(self) -> str:
@@ -675,13 +678,20 @@ class PickTaskModel(Base):
     __tablename__ = "pick_task"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    task_number: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     request_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, nullable=True)
     request_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    material_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    material_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
-    quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 4), nullable=True)
-    uom: Mapped[Optional[str]] = mapped_column(String(32), default="PCS")
-    status: Mapped[Optional[str]] = mapped_column(String(64), default="PICKED")
+    warehouse_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    department: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    items: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(64), default="COMPLETED")
+    destination: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    assigned_to: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    assigned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 
@@ -689,14 +699,26 @@ class MaterialIssueModel(Base):
     __tablename__ = "material_issue"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    issue_number: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     pick_task_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("pick_task.id"), nullable=True)
-    requisition_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    material_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    material_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
-    quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 4), nullable=True)
-    uom: Mapped[Optional[str]] = mapped_column(String(32), default="PCS")
-    status: Mapped[Optional[str]] = mapped_column(String(64), default="ISSUED")
+    request_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, nullable=True)
+    department: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    items: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     issued_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     received_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     issued_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class SupplierUserModel(Base):
+    __tablename__ = "supplier_user"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        GUID, ForeignKey("supplier.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    must_change_password: Mapped[bool] = mapped_column(default=False, nullable=False)
+
+    supplier: Mapped["SupplierModel"] = relationship("SupplierModel")
+

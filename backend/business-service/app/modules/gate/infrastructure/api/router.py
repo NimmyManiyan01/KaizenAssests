@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import asyncio
 import datetime
+import json
 import logging
 import os
 import re
@@ -76,13 +77,15 @@ def _asn_response(asn: AsnModel) -> dict:
         "po_id": asn.po_id,
         "po_number": asn.po_number,
         "supplier_id": str(asn.supplier_id) if asn.supplier_id else None,
-        "supplier_name": details.get("supplier_name"),
+        "supplier_name": details.get("supplier_name") or (asn.supplier.supplier_name if asn.supplier else None),
         "destination_warehouse": details.get("destination_warehouse"),
+        "destination_warehouse_id": details.get("destination_warehouse_id"),
         "vehicle_number": asn.vehicle_number,
         "driver_name": asn.driver_name,
         "driver_contact": asn.driver_contact,
         "expected_arrival_at": asn.expected_arrival_at.isoformat() if asn.expected_arrival_at else None,
         "delivery_date": asn.expected_arrival_at.date().isoformat() if asn.expected_arrival_at else None,
+        "expected_arrival_date": asn.expected_arrival_at.date().isoformat() if asn.expected_arrival_at else None,
         "shipment_date": asn.shipment_date.isoformat() if asn.shipment_date else None,
         "status": asn.status,
         "transporter": asn.transporter,
@@ -105,7 +108,7 @@ async def list_expected_deliveries(
     supplier_id: str | None = Query(default=None),
     uow: UnitOfWork = Depends(get_uow),
 ) -> list[dict]:
-    query = select(AsnModel).options(selectinload(AsnModel.lines)).order_by(AsnModel.created_at.desc())
+    query = select(AsnModel).options(selectinload(AsnModel.lines), selectinload(AsnModel.supplier)).order_by(AsnModel.created_at.desc())
     if supplier_id:
         try:
             query = query.where(AsnModel.supplier_id == uuid.UUID(supplier_id))
@@ -144,17 +147,20 @@ _custom_materials_store: list[dict] = []
 
 @preview_router.get("/materials")
 async def get_material_components(uow: UnitOfWork = Depends(get_uow)) -> list[dict]:
+    materials: list[dict] = []
     try:
         from app.common.persistence.models import MaterialModel
         res = await uow.session.execute(select(MaterialModel))
         db_mats = res.scalars().all()
-        if db_mats and len(db_mats) > 0:
-            db_list = [{"code": m.material_code, "name": m.material_name, "category": m.category, "uom": m.base_uom} for m in db_mats]
-            return db_list + _custom_materials_store
+        materials.extend(
+            {"id": str(m.id), "code": m.material_code, "name": m.material_name, "category": m.category, "uom": m.base_uom, "status": m.status}
+            for m in db_mats
+            if m.material_code and m.material_name
+        )
     except Exception:
         pass
 
-    return DEFAULT_MATERIAL_COMPONENTS + _custom_materials_store
+    return [material for material in materials if str(material.get("status") or "ACTIVE").upper() == "ACTIVE"]
 
 
 @preview_router.post("/materials")
@@ -245,7 +251,23 @@ async def get_expected_delivery(reference: str, uow: UnitOfWork = Depends(get_uo
             )
     if asn is None:
         raise HTTPException(status_code=404, detail=f"ASN '{reference}' not found")
-    return _asn_response(asn)
+    response = _asn_response(asn)
+    gate_result = await uow.session.execute(
+        select(GateEntryModel)
+        .where(GateEntryModel.asn_id == asn.id)
+        .order_by(GateEntryModel.created_at.desc())
+        .limit(1)
+    )
+    gate_entry = gate_result.scalars().first()
+    if gate_entry:
+        response["gate_entry_number"] = gate_entry.gate_entry_number
+        response["gate_entry"] = {
+            "gate_entry_number": gate_entry.gate_entry_number,
+            "vehicle_number": gate_entry.vehicle_number,
+            "driver_name": gate_entry.driver_name,
+            "dock_number": gate_entry.assigned_dock_id,
+        }
+    return response
 
 
 @preview_router.post("/asns", status_code=status.HTTP_201_CREATED)
@@ -284,6 +306,7 @@ async def create_supplier_asn(payload: dict = Body(...), uow: UnitOfWork = Depen
     if not isinstance(submitted_lines, list):
         raise HTTPException(status_code=422, detail="lines must be a list")
     validated_lines: list[tuple[dict, Decimal]] = []
+    submitted_material_ids: set[str] = set()
     for raw_line in submitted_lines:
         if not isinstance(raw_line, dict):
             raise HTTPException(status_code=422, detail="each ASN line must be an object")
@@ -296,6 +319,15 @@ async def create_supplier_asn(payload: dict = Body(...), uow: UnitOfWork = Depen
             raise HTTPException(status_code=422, detail="shipped_quantity must be a finite number")
         if validated_quantity < 0:
             raise HTTPException(status_code=422, detail="shipped_quantity cannot be negative")
+        material_id = str(raw_line.get("material_id") or "").strip()
+        if material_id:
+            if material_id in submitted_material_ids:
+                raise HTTPException(status_code=422, detail="A material cannot be selected more than once in the same ASN")
+            try:
+                uuid.UUID(material_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail="material_id must be a valid material identifier") from exc
+            submitted_material_ids.add(material_id)
         validated_lines.append((raw_line, validated_quantity))
 
     if po_model and validated_lines:
@@ -391,17 +423,54 @@ async def create_supplier_asn(payload: dict = Body(...), uow: UnitOfWork = Depen
             "type": "asn_details",
             "supplier_name": str(payload.get("supplier_name") or "").strip(),
             "destination_warehouse": str(payload.get("destination_warehouse") or "").strip(),
+            "destination_warehouse_id": str(payload.get("destination_warehouse_id") or "").strip() or None,
         }],
     )
     uow.session.add(asn)
     for raw_line, quantity in validated_lines:
         asn.lines.append(AsnLineModel(
+            material_id=uuid.UUID(str(raw_line["material_id"])) if raw_line.get("material_id") else None,
             item_code=str(raw_line.get("item_code") or raw_line.get("material_code") or "ITEM"),
             material_name=str(raw_line.get("material_name") or raw_line.get("material_description") or ""),
             shipped_quantity=quantity,
             uom=str(raw_line.get("uom") or "PCS"),
         ))
     await uow.session.flush()
+    material_summary = ", ".join(
+        f"{line.item_code} {line.shipped_quantity:g} {line.uom}" for line in asn.lines
+    ) or "—"
+    notification_message = (
+        f"ASN {asn.asn_number} dispatched by {asn.supplier_name or 'supplier'}. "
+        f"Vehicle: {asn.vehicle_number or '—'} · Driver: {asn.driver_name or '—'} "
+        f"({asn.driver_contact or '—'}) · ETA: "
+        f"{asn.expected_arrival_at.isoformat() if asn.expected_arrival_at else '—'} · "
+        f"Materials: {material_summary}"
+    )
+    for target_role in ("GATE_SECURITY", "WAREHOUSE"):
+        uow.session.add(NotificationModel(
+            user_role=target_role,
+            title=f"Supplier ASN Dispatched · {asn.asn_number}",
+            message=notification_message,
+            link="/vehicle-queue" if target_role == "GATE_SECURITY" else "/inventory?tab=putaway",
+            vehicle_number=asn.vehicle_number,
+            driver_name=asn.driver_name,
+            driver_phone=asn.driver_contact,
+            asn_number=asn.asn_number,
+            po_number=asn.po_number,
+            supplier_name=next((entry.get("supplier_name") for entry in asn.logistics if isinstance(entry, dict) and entry.get("type") == "asn_details"), None),
+            notification_type="SUPPLIER_ASN_DISPATCHED",
+            idempotency_key=f"SUPPLIER_ASN_DISPATCHED:{asn.id}:{target_role}",
+            payload_json=json.dumps({
+                "asn_id": str(asn.id),
+                "asn_number": asn.asn_number,
+                "supplier_name": next((entry.get("supplier_name") for entry in asn.logistics if isinstance(entry, dict) and entry.get("type") == "asn_details"), None),
+                "vehicle_number": asn.vehicle_number,
+                "driver_name": asn.driver_name,
+                "driver_contact": asn.driver_contact,
+                "expected_arrival_at": asn.expected_arrival_at.isoformat() if asn.expected_arrival_at else None,
+                "lines": [{"material": line.item_code, "quantity": float(line.shipped_quantity), "uom": line.uom} for line in asn.lines],
+            }),
+        ))
     return _asn_response(asn)
 
 
@@ -1137,12 +1206,13 @@ async def create_gate_entry(
 
     # 1. Block only a duplicate arrival for the same PO and vehicle. A single
     # PO can have multiple ASN shipments and therefore multiple vehicles.
-    active_result = await uow.session.execute(
-        select(GateEntryModel).where(
-            GateEntryModel.po_number == po_num,
-            GateEntryModel.status.notin_([GateEntryStatus.REJECTED.value]),
-        )
-    )
+    duplicate_filters = [
+        GateEntryModel.po_number == po_num,
+        GateEntryModel.status.notin_([GateEntryStatus.REJECTED.value]),
+    ]
+    if asn:
+        duplicate_filters.append(GateEntryModel.asn_id == asn.id)
+    active_result = await uow.session.execute(select(GateEntryModel).where(*duplicate_filters))
     active_entries = [_gate_entry_from_model(model) for model in active_result.scalars().all()]
     GateVerificationService.check_duplicate_active_entry(active_entries, po_num, plate)
 
@@ -1154,7 +1224,7 @@ async def create_gate_entry(
     if asn:
         ocr_res = OcrResult(
             po_number=po_num,
-            supplier_name=po_record.supplier_name if po_record else "",
+            supplier_name=(po_record.supplier_name if po_record and po_record.supplier_name else request.supplier_name or ""),
             material_description=", ".join(line.material_name or line.item_code for line in asn.lines),
             total_quantity=sum(float(line.shipped_quantity or 0) for line in asn.lines),
             po_date=po_record.po_date if po_record else "",
@@ -1373,10 +1443,26 @@ async def list_inbound_arrivals(
             GateEntryStatus.EXIT_APPROVED.value,
             GateEntryStatus.GATE_EXIT_COMPLETED.value,
         ]))
-        .order_by(GateEntryModel.created_at.asc())
+        # A single ASN must resolve to one active gate entry in the warehouse
+        # queue. Newest-first ensures an older duplicate cannot surface a
+        # different gate-pass number in Arrival Details.
+        .order_by(GateEntryModel.created_at.desc())
     )
+    allocation_result = await uow.session.execute(select(DockAllocationRequestModel))
+    allocations_by_gate_pass = {
+        allocation.existing_gate_pass_id: allocation
+        for allocation in allocation_result.scalars().all()
+        if allocation.existing_gate_pass_id
+    }
     arrivals = []
+    seen_asn_keys: set[str] = set()
     for gate_entry, asn, po, assignment in result.all():
+        allocation = allocations_by_gate_pass.get(gate_entry.gate_entry_number)
+        asn_key = str(asn.id) if asn else (asn.asn_number if asn else None)
+        if asn_key and asn_key in seen_asn_keys:
+            continue
+        if asn_key:
+            seen_asn_keys.add(asn_key)
         if store_scoped:
             if not assignment or not assignment.assigned_store_id:
                 continue
@@ -1402,6 +1488,9 @@ async def list_inbound_arrivals(
             "arrival_time": gate_entry.created_at.isoformat(),
             "expected_arrival_at": asn.expected_arrival_at.isoformat() if asn and asn.expected_arrival_at else None,
             "status": (
+                allocation.status
+                if allocation and allocation.status in {"DOCK_ASSIGNED", "AT_DOCK", "OCCUPIED"}
+                else
                 GateEntryStatus.AWAITING_DOCK.value
                 if gate_entry.status in {
                     GateEntryStatus.PO_VERIFIED.value,
@@ -1417,10 +1506,18 @@ async def list_inbound_arrivals(
             "po_id": str(po.id) if po else None,
             "assigned_by": assignment.assigned_by if assignment else None,
             "assigned_at": assignment.assigned_at.isoformat() if assignment else None,
+            "allocation_request_id": str(allocation.id) if allocation else None,
             "movement_started_by": assignment.movement_started_by if assignment else None,
             "movement_started_at": assignment.movement_started_at.isoformat() if assignment and assignment.movement_started_at else None,
             "dock_checked_in_by": assignment.dock_checked_in_by if assignment else None,
-            "dock_arrival_at": assignment.dock_arrival_at.isoformat() if assignment and assignment.dock_arrival_at else None,
+            "dock_arrival_at": (
+                assignment.dock_arrival_at.isoformat()
+                if assignment and assignment.dock_arrival_at
+                else allocation.arrived_at.isoformat()
+                if allocation and allocation.arrived_at
+                else None
+            ),
+            "allocation_arrived_at": allocation.arrived_at.isoformat() if allocation and allocation.arrived_at else None,
             "unloading_started_by": assignment.unloading_started_by if assignment else None,
             "unloading_started_at": assignment.unloading_started_at.isoformat() if assignment and assignment.unloading_started_at else None,
             "quality_inspected_by": assignment.quality_inspected_by if assignment else None,
@@ -2440,11 +2537,21 @@ async def complete_receiving(
     except (ValueError, IndexError):
         next_task_sequence = 1
     tasks_created = 0
+    existing_task_items_result = await uow.session.execute(
+        select(PutawayTaskModel.grn_id, PutawayTaskModel.item_code).where(
+            PutawayTaskModel.grn_id == grn.id,
+            PutawayTaskModel.status.not_in(["CANCELLED", "VOID"]),
+        )
+    )
+    existing_task_items = {
+        (task_grn_id, item_code.upper())
+        for task_grn_id, item_code in existing_task_items_result.all()
+    }
     for grn_line in grn.lines:
         unit = units_by_receiving_line.get(receiving_by_code[grn_line.item_code].id)
         if unit is None and (grn_line.accepted_quantity or 0) > 0:
             raise HTTPException(status_code=409, detail=f"Generate a material label for {grn_line.item_code} before completing receiving")
-        if unit is not None:
+        if unit is not None and (grn.id, grn_line.item_code.upper()) not in existing_task_items:
             unit.grn_line_id = grn_line.id
             unit.grn_number = grn_number
             accepted = grn_line.accepted_quantity or 0
@@ -2479,6 +2586,7 @@ async def complete_receiving(
                 next_task_sequence += 1
                 unit.status = "PUTAWAY_PENDING"
                 tasks_created += 1
+                existing_task_items.add((grn.id, grn_line.item_code.upper()))
             unit.updated_at = completed_at
 
         # Phase 6: Automatic Quarantine record creation for damaged quantity

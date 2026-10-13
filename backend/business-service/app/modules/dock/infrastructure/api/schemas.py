@@ -10,6 +10,7 @@ class CreateDockMasterRequest(BaseModel):
     dock_code: str = Field(..., min_length=1, max_length=32)
     dock_name: str = Field(..., min_length=1, max_length=128)
     dock_type: str = Field(..., min_length=1, max_length=32)
+    direction: str = Field("INBOUND", pattern="^(INBOUND|OUTBOUND|BOTH)$")
     location: Optional[str] = Field(None, max_length=128)
     description: Optional[str] = None
     status: str = Field(..., min_length=1, max_length=32)
@@ -25,6 +26,7 @@ class UpdateDockMasterRequest(BaseModel):
     dock_code: Optional[str] = Field(None, min_length=1, max_length=32)
     dock_name: Optional[str] = Field(None, min_length=1, max_length=128)
     dock_type: Optional[str] = Field(None, max_length=32)
+    direction: Optional[str] = Field(None, pattern="^(INBOUND|OUTBOUND|BOTH)$")
     location: Optional[str] = Field(None, max_length=128)
     description: Optional[str] = None
     is_active: Optional[bool] = None
@@ -37,6 +39,7 @@ class AutoCreateAllocationRequest(BaseModel):
     material_reference: Optional[str] = None
     material_description: Optional[str] = None
     quantity: Optional[Decimal] = None
+    uom: Optional[str] = None
     priority: str = "NORMAL"
 
 
@@ -62,6 +65,7 @@ class AllocationRequestResponse(BaseModel):
     material_reference: Optional[str] = None
     material_description: Optional[str] = None
     quantity: Optional[Decimal] = None
+    uom: Optional[str] = None
     security_approved_at: datetime
     priority: str
     status: str
@@ -93,6 +97,7 @@ class DockMasterResponse(BaseModel):
     dock_code: str
     dock_name: str
     dock_type: str
+    direction: str = "INBOUND"
     location: Optional[str] = None
     description: Optional[str] = None
     status: str

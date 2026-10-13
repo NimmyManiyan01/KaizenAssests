@@ -11,8 +11,8 @@ export const BUSINESS_API_URL =
   (typeof window !== "undefined"
     ? window.location.hostname.includes("loca.lt")
       ? "https://wms-mobile-backend-8000.loca.lt"
-      : `${window.location.protocol}//${window.location.hostname}:8001`
-    : "http://localhost:8001");
+      : `${window.location.protocol}//${window.location.hostname}:8000`
+    : "http://localhost:8000");
 import { clearAuthSession, getAuthToken, storeAuthSession, getUserInfo } from "./auth-utils";
 function getApiErrorMessage(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== "object") return fallback;
@@ -201,7 +201,11 @@ export const api = {
       const devUser = {
         token: response.token || `token-${Date.now()}`,
         username: response.username || username,
-        roles: response.roles || (username.toLowerCase().includes("warehouse") ? ["WAREHOUSE", "WAREHOUSE_MANAGER"] : ["ADMIN"]),
+        roles:
+          response.roles ||
+          (username.toLowerCase().includes("warehouse")
+            ? ["WAREHOUSE", "WAREHOUSE_MANAGER"]
+            : ["ADMIN"]),
         employee_id: response.employee_id || "EMP-001",
         full_name: response.full_name || username,
         store_id: response.store_id,
@@ -213,7 +217,8 @@ export const api = {
     } catch {
       const uLower = username.toLowerCase();
       const isWarehouse = uLower.includes("warehouse");
-      const isGate = uLower.includes("gate") || uLower.includes("security") || uLower.includes("emp-8042");
+      const isGate =
+        uLower.includes("gate") || uLower.includes("security") || uLower.includes("emp-8042");
       const isGrn = uLower.includes("grn") || uLower.includes("receiving");
       const isAssembly = uLower.includes("assembly");
       const isStore = uLower.includes("store") || uLower.includes("keeper");
@@ -223,18 +228,18 @@ export const api = {
       const roles = isWarehouse
         ? ["WAREHOUSE", "WAREHOUSE_MANAGER"]
         : isManager
-        ? ["MANAGER"]
-        : isGate
-        ? ["GATE_SECURITY"]
-        : isGrn
-        ? ["GRN", "WAREHOUSE"]
-        : isAssembly
-        ? ["ASSEMBLY_MANAGER"]
-        : isStore
-        ? ["STORE_MANAGER", "STORE_KEEPER"]
-        : isSupplier
-        ? ["SUPPLIER"]
-        : ["ADMIN", "SUPERUSER"];
+          ? ["MANAGER"]
+          : isGate
+            ? ["GATE_SECURITY"]
+            : isGrn
+              ? ["GRN", "WAREHOUSE"]
+              : isAssembly
+                ? ["ASSEMBLY_MANAGER"]
+                : isStore
+                  ? ["STORE_MANAGER", "STORE_KEEPER"]
+                  : isSupplier
+                    ? ["SUPPLIER"]
+                    : ["ADMIN", "SUPERUSER"];
 
       const mockUser = {
         token: `mock-jwt-${username}-token`,
@@ -258,14 +263,11 @@ export const api = {
   },
 
   async magicLogin(token: string): Promise<any> {
-    const response = await request<any>(
-      `${BUSINESS_API_URL}/api/v1/procurement/auth/magic-login`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
-      },
-    );
+    const response = await request<any>(`${BUSINESS_API_URL}/api/v1/procurement/auth/magic-login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
     const supplierUser = {
       token: response.token,
       username: response.username,
@@ -321,7 +323,7 @@ export const api = {
   },
 
   async getDocks(
-    statusOrParams?: string | { dock_type?: string; status?: string },
+    statusOrParams?: string | { dock_type?: string; status?: string; direction?: string },
     type?: string,
   ): Promise<any[]> {
     const query = new URLSearchParams();
@@ -330,6 +332,8 @@ export const api = {
         query.set("dock_type", statusOrParams.dock_type);
       if (statusOrParams.status && statusOrParams.status !== "ALL")
         query.set("status", statusOrParams.status);
+      if (statusOrParams.direction && statusOrParams.direction !== "ALL")
+        query.set("direction", statusOrParams.direction);
     } else {
       if (statusOrParams && statusOrParams !== "ALL") query.set("status", statusOrParams);
       if (type && type !== "ALL") query.set("dock_type", type);
@@ -384,10 +388,10 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-          allocation_request_id: allocationRequestId,
-          dock_id: dockId,
-          assigned_store_id: (storeManagerIdOrOpts as any)?.assignedStoreId || null,
-          store_manager_id: smId,
+        allocation_request_id: allocationRequestId,
+        dock_id: dockId,
+        assigned_store_id: (storeManagerIdOrOpts as any)?.assignedStoreId || null,
+        store_manager_id: smId,
         store_manager_username: smUsername,
         store_manager_name: smName,
       }),
@@ -445,11 +449,13 @@ export const api = {
     dock_number?: string;
     dock_name?: string;
     dock_type: string;
+    direction?: "INBOUND" | "OUTBOUND" | "BOTH";
     location?: string;
     description?: string;
     status?: string;
     is_active?: boolean;
     warehouse_id?: string;
+    store_type?: string;
     capacity?: number;
   }): Promise<any> {
     const code = (payload.dock_code || payload.dock_number || "").trim().toUpperCase();
@@ -462,6 +468,7 @@ export const api = {
         dock_code: code,
         dock_name: name,
         dock_type: payload.dock_type,
+        direction: payload.direction || "INBOUND",
         location: payload.location || null,
         description: payload.description || null,
         status: payload.status || "AVAILABLE",
@@ -477,6 +484,7 @@ export const api = {
           dock_number?: string;
           dock_name?: string;
           dock_type?: string;
+          direction?: "INBOUND" | "OUTBOUND" | "BOTH";
           location?: string;
           description?: string;
           status?: string;
@@ -766,18 +774,24 @@ export const api = {
     if (status?.toUpperCase() === "ALL") {
       const params = new URLSearchParams({ limit: "200" });
       if (search?.trim()) params.set("search", search.trim());
-      const result = await request<{ items?: any[] }>(`${BUSINESS_API_URL}/api/dispatches?${params.toString()}`, {
-        cache: "no-store",
-      });
+      const result = await request<{ items?: any[] }>(
+        `${BUSINESS_API_URL}/api/dispatches?${params.toString()}`,
+        {
+          cache: "no-store",
+        },
+      );
       return result?.items || [];
     }
     const params = new URLSearchParams();
     if (status) params.set("status", status);
     if (search?.trim()) params.set("search", search.trim());
     const query = params.toString();
-    return request<any[]>(`${BUSINESS_API_URL}/api/dispatches/ready-for-gate-exit${query ? `?${query}` : ""}`, {
-      cache: "no-store",
-    });
+    return request<any[]>(
+      `${BUSINESS_API_URL}/api/dispatches/ready-for-gate-exit${query ? `?${query}` : ""}`,
+      {
+        cache: "no-store",
+      },
+    );
   },
 
   async getOutboundDispatch(dispatchId: string): Promise<any> {
@@ -786,13 +800,22 @@ export const api = {
 
   async confirmOutboundGateExit(
     dispatchId: string,
-    payload: { vehicle_verified: boolean; driver_verified: boolean; remarks?: string; vehicle_photo_base64?: string },
+    payload: {
+      vehicle_verified: boolean;
+      driver_verified: boolean;
+      loaded_goods_verified: boolean;
+      remarks?: string;
+      vehicle_photo_base64?: string;
+    },
   ): Promise<any> {
-    void payload;
-    return request<any>(`${BUSINESS_API_URL}/api/dispatches/${encodeURIComponent(dispatchId)}/dispatch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/dispatches/${encodeURIComponent(dispatchId)}/dispatch`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
   },
 
   async reportOutboundGateExitMismatch(
@@ -804,11 +827,14 @@ export const api = {
       actual_driver?: string;
     },
   ): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/dispatch/${encodeURIComponent(dispatchId)}/report-mismatch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/dispatch/${encodeURIComponent(dispatchId)}/report-mismatch`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
   },
 
   async resolveOutboundGateExitMismatch(
@@ -821,11 +847,14 @@ export const api = {
       new_driver_phone?: string;
     },
   ): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/dispatch/${encodeURIComponent(dispatchId)}/resolve-mismatch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/dispatch/${encodeURIComponent(dispatchId)}/resolve-mismatch`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
   },
 
   async seedSampleDispatches(force = false): Promise<any> {
@@ -1106,6 +1135,13 @@ export const api = {
     if (status) params.append("status", status);
     const qs = params.toString() ? `?${params.toString()}` : "";
     return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions${qs}`);
+  },
+  async getAssemblyMaterialRequests(search?: string, status?: string): Promise<any[]> {
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    if (status) params.set("status", status);
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/material-requests${qs}`);
   },
   async getAssemblyRequisition(id: string): Promise<any> {
     return request<any>(
@@ -1400,7 +1436,12 @@ export const api = {
     return [];
   },
   async getSupplierReplacementRequest(id: string): Promise<any> {
-    return { id, status: "SUPPLIER_ACCEPTED", original_asn_id: "", reason: "Damaged Material Replacement" };
+    return {
+      id,
+      status: "SUPPLIER_ACCEPTED",
+      original_asn_id: "",
+      reason: "Damaged Material Replacement",
+    };
   },
 
   async acceptSupplierReplacementRequest(_id: string): Promise<any> {
@@ -1416,24 +1457,16 @@ export const api = {
   },
 
   async getAsn(id: string): Promise<any> {
-    try {
-      return await request<any>(`${BUSINESS_API_URL}/api/gate/asn/${encodeURIComponent(id)}`, { cache: "no-store" });
-    } catch {
-      return {
-        id,
-        asn_number: id.startsWith("ASN") ? id : "",
-        po_number: "",
-        supplier_name: "",
-        vehicle_number: "",
-        driver_name: "",
-        driver_contact: "",
-        status: "SUBMITTED",
-      };
-    }
+    // Do not turn a failed lookup into a fabricated empty ASN context. The
+    // GRN wizard needs the persisted ASN, gate entry, vehicle and dock data
+    // before it can save Step 1.
+    return request<any>(`${BUSINESS_API_URL}/api/gate/asn/${encodeURIComponent(id)}`, {
+      cache: "no-store",
+    });
   },
 
   async getArrivalNotifications(): Promise<any[]> {
-    return [];
+    return this.getNotifications("GATE_SECURITY");
   },
 
   async createAsn(data: any): Promise<any> {
@@ -1459,39 +1492,25 @@ export const api = {
 
   async getNextAsnNumber(): Promise<{ asnNumber: string }> {
     const pendingKey = "kaizen-pending-asn-number-v2";
-    if (typeof window !== "undefined") {
-      const pending = window.localStorage.getItem(pendingKey);
-      if (pending) return { asnNumber: pending };
-    }
+    // A pending number may belong to a previous database lifecycle. Never use
+    // it to generate a new ASN after records have been cleared.
+    if (typeof window !== "undefined") window.localStorage.removeItem(pendingKey);
     try {
-      const result = await request<any>(`${BUSINESS_API_URL}/api/v1/gate/asns/next-number`);
+      // The database is authoritative. Do not reuse a cached pending number,
+      // because it can survive a backend data reset and skip the new sequence.
+      const result = await request<any>(`${BUSINESS_API_URL}/api/gate/asns/next-number`);
       if (typeof window !== "undefined" && result?.asnNumber) {
         window.localStorage.setItem(pendingKey, result.asnNumber);
       }
       return result;
     } catch {
-      // Keep the local/demo fallback sequential as well. The backend endpoint
-      // remains authoritative whenever it is available.
-      const key = "kaizen-next-asn-sequence-v2";
-      const pending = window.localStorage.getItem(pendingKey);
-      if (pending) return { asnNumber: pending };
-      const stored = Number.parseInt(window.localStorage.getItem(key) || "0", 10);
-      const next = Number.isFinite(stored) ? stored + 1 : 1;
-      const asnNumber = `ASN-${new Date().getFullYear()}-${next}`;
-      window.localStorage.setItem(pendingKey, asnNumber);
-      return {
-        asnNumber,
-      };
+      throw new Error("Unable to retrieve the next ASN number from the backend.");
     }
   },
 
   async getMaterialComponents(): Promise<any[]> {
-    try {
-      const res = await request<any[]>(`${BUSINESS_API_URL}/api/v1/gate/materials`);
-      if (Array.isArray(res) && res.length > 0) return res;
-    } catch {}
-
-    return [
+    return request<any[]>(`${BUSINESS_API_URL}/api/gate/materials`);
+    /*
       { code: "MAT-RAD-001", name: "SKID MOUNTED RADIATOR", category: "Heavy Components", uom: "PCS" },
       { code: "MAT-ECP-002", name: "ENGINE CONTROL PANEL", category: "Control Systems", uom: "PCS" },
       { code: "MAT-EXS-003", name: "EXHAUST SILENCER", category: "Exhaust Systems", uom: "PCS" },
@@ -1514,12 +1533,12 @@ export const api = {
       { code: "MAT-GWR-020", name: "Genset with radiator", category: "Gensets", uom: "SET" },
       { code: "MAT-GNR-021", name: "Genset without radiator", category: "Gensets", uom: "SET" },
       { code: "MAT-LSE-022", name: "Loose Item", category: "General Accessories", uom: "BOX" },
-    ];
+    ]; */
   },
 
   async createMaterialComponent(name: string, uom: string = "PCS"): Promise<any> {
     try {
-      return await request<any>(`${BUSINESS_API_URL}/api/v1/gate/materials`, {
+      return await request<any>(`${BUSINESS_API_URL}/api/gate/materials`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, uom }),
@@ -1706,17 +1725,23 @@ export const api = {
     return Array.isArray(response) ? response : [];
   },
   async rejectAssemblyRequisition(id: string, reason: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions/${encodeURIComponent(id)}/reject`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason }),
-    });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly-requisitions/${encodeURIComponent(id)}/reject`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      },
+    );
   },
   async confirmAssemblyReceipt(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions/${encodeURIComponent(id)}/confirm-receipt`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly-requisitions/${encodeURIComponent(id)}/confirm-receipt`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   },
 
   subscribeNotifications(role: string, onChange: () => void): () => void {
@@ -1769,120 +1794,6 @@ export const api = {
       `${BUSINESS_API_URL}/api/v1/procurement/global-search?q=${encodeURIComponent(q)}`,
     );
   },
-  async getAssemblyDashboard(): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/dashboard`);
-  },
-
-  async getAssemblyReports(): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/reports`);
-  },
-
-  async getAssemblyModuleOverview(section: string): Promise<any> {
-    return request<any>(
-      `${BUSINESS_API_URL}/api/v1/assembly/overview/${encodeURIComponent(section)}`,
-    );
-  },
-
-  async getAssemblyOrders(): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/orders`);
-  },
-
-  async updateAssemblyOrderDetails(id: string, data: any): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(data),
-    });
-  },
-
-  async updateAssemblyOrder(id: string, data: any): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${id}/status`, {
-      method: "PATCH",
-      body: JSON.stringify(data),
-    });
-  },
-
-  async getOrderRequirements(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${id}/requirements`);
-  },
-
-  async getAssemblyOrder(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${id}`);
-  },
-
-  async getAssemblyMaterialIssue(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${id}/material-issue`);
-  },
-
-  async updateAssemblyStep(orderId: string, stepId: string, status: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${orderId}/steps/${stepId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ status }),
-    });
-  },
-
-  async updateAssemblyProgress(orderId: string, completedQuantity: number): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${orderId}/progress`, {
-      method: "PATCH",
-      body: JSON.stringify({ completed_quantity: completedQuantity }),
-    });
-  },
-
-  async getAssemblyConsumption(orderId: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${orderId}/consumption`);
-  },
-
-  async recordAssemblyConsumption(orderId: string, data: any): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${orderId}/consumption`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    });
-  },
-
-  async getAssemblyScrap(orderId: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${orderId}/scrap`);
-  },
-
-  async createAssemblyScrap(orderId: string, data: any): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${orderId}/scrap`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  },
-
-  async approveAssemblyScrap(orderId: string, scrapId: string, approvedBy: string): Promise<any> {
-    return request<any>(
-      `${BUSINESS_API_URL}/api/v1/assembly/orders/${orderId}/scrap/${scrapId}/approve`,
-      {
-        method: "PATCH",
-        body: JSON.stringify({ approved_by: approvedBy }),
-      },
-    );
-  },
-
-  async getAssemblyQualityInspection(orderId: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${orderId}/quality-inspection`);
-  },
-
-  async recordAssemblyQualityInspection(orderId: string, data: any): Promise<any> {
-    return request<any>(
-      `${BUSINESS_API_URL}/api/v1/assembly/orders/${orderId}/quality-inspection`,
-      {
-        method: "PUT",
-        body: JSON.stringify(data),
-      },
-    );
-  },
-
-  async getFinishedGoods(): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/finished-goods`);
-  },
-
-  async getGenealogy(identifier: string): Promise<any> {
-    return request<any>(
-      `${BUSINESS_API_URL}/api/v1/assembly/genealogy/${encodeURIComponent(identifier)}`,
-    );
-  },
-
 
   // ============================
   // WAREHOUSE MATERIAL MASTER
@@ -1908,7 +1819,7 @@ export const api = {
 
     const query = params.toString();
 
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/materials${query ? `?${query}` : ""}`);
+    return request<any[]>(`${BUSINESS_API_URL}/api/gate/materials${query ? `?${query}` : ""}`);
   },
 
   async getMaterial(id: string): Promise<any> {
@@ -1966,7 +1877,7 @@ export const api = {
     );
   },
 
-  async getAssemblyFinishedGoods(): Promise<any[]> {
+  async getLegacyAssemblyFinishedGoods(): Promise<any[]> {
     return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/finished-goods`);
   },
 
@@ -2028,7 +1939,9 @@ export const api = {
   },
 
   async getFinishedGoodsRequest(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/finished-goods-requests/${encodeURIComponent(id)}`);
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/procurement/finished-goods-requests/${encodeURIComponent(id)}`,
+    );
   },
 
   async createFinishedGoodsRequest(data: {
@@ -2210,6 +2123,7 @@ export const api = {
     store_name: string;
     description?: string;
     warehouse_id?: string;
+    store_type?: string;
     store_manager_id?: string;
     store_manager_name?: string;
     status?: string;
@@ -2628,16 +2542,20 @@ export const api = {
     if (params?.material_code) query.append("material_code", params.material_code);
     if (params?.store_id && params.store_id !== "ALL") query.append("store_id", params.store_id);
     if (params?.zone_id && params.zone_id !== "ALL") query.append("zone_id", params.zone_id);
-    if (params?.warehouse_id && params.warehouse_id !== "ALL") query.append("warehouse_id", params.warehouse_id);
+    if (params?.warehouse_id && params.warehouse_id !== "ALL")
+      query.append("warehouse_id", params.warehouse_id);
     if (params?.category && params.category !== "ALL") query.append("category", params.category);
     if (params?.batch && params.batch !== "ALL") query.append("batch", params.batch);
     if (params?.supplier && params.supplier !== "ALL") query.append("supplier", params.supplier);
     if (params?.grn && params.grn !== "ALL") query.append("grn", params.grn);
     if (params?.location && params.location !== "ALL") query.append("location", params.location);
-    if (params?.stock_status && params.stock_status !== "ALL") query.append("stock_status", params.stock_status);
-    if (params?.qc_status && params.qc_status !== "ALL") query.append("qc_status", params.qc_status);
+    if (params?.stock_status && params.stock_status !== "ALL")
+      query.append("stock_status", params.stock_status);
+    if (params?.qc_status && params.qc_status !== "ALL")
+      query.append("qc_status", params.qc_status);
     if (params?.expiry && params.expiry !== "ALL") query.append("expiry", params.expiry);
-    if (params?.availability && params.availability !== "ALL") query.append("availability", params.availability);
+    if (params?.availability && params.availability !== "ALL")
+      query.append("availability", params.availability);
     if (params?.status_filter && params.status_filter !== "ALL")
       query.append("status_filter", params.status_filter);
     if (params?.search) query.append("search", params.search);
@@ -2670,7 +2588,9 @@ export const api = {
     });
   },
   async getMaterialInventoryDetail(materialCode: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/materials/${encodeURIComponent(materialCode)}/detail`);
+    return request<any>(
+      `${BUSINESS_API_URL}/api/storage/inventory/materials/${encodeURIComponent(materialCode)}/detail`,
+    );
   },
   async getStockLedger(params?: {
     material_code?: string;
@@ -2943,7 +2863,21 @@ export const api = {
     });
   },
   async getGrnDetail(grnId: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/receiving/grn/${grnId}`);
+    try {
+      return await request<any>(
+        `${BUSINESS_API_URL}/api/receiving/grn/${encodeURIComponent(grnId)}`,
+      );
+    } catch (error) {
+      // A deleted/stale local session is handled by the GRN screen. Do not
+      // surface it as an unhandled console error or resume invalid data.
+      if (error instanceof Error && /\b404\b|GRN not found/i.test(error.message)) return null;
+      throw error;
+    }
+  },
+  async deleteGrn(grnId: string): Promise<void> {
+    await request<void>(`${BUSINESS_API_URL}/api/receiving/grn/${encodeURIComponent(grnId)}`, {
+      method: "DELETE",
+    });
   },
   async getGrn(grnId: string): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/receiving/grn/${grnId}`);
@@ -3030,8 +2964,40 @@ export const api = {
     return resolveMediaUrl(path);
   },
   async getDispatches(status?: string): Promise<{ items: any[]; total: number }> {
-    const url = status ? `${BUSINESS_API_URL}/api/dispatches?status=${encodeURIComponent(status)}` : `${BUSINESS_API_URL}/api/dispatches`;
+    const url = status
+      ? `${BUSINESS_API_URL}/api/dispatches?status=${encodeURIComponent(status)}`
+      : `${BUSINESS_API_URL}/api/dispatches`;
     return request<{ items: any[]; total: number }>(url, { cache: "no-store" });
+  },
+  async getEligibleCustomerOrders(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/customer-orders/eligible`, {
+      cache: "no-store",
+    });
+  },
+  async getCustomerOrders(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/customer-orders`, { cache: "no-store" });
+  },
+  async getCustomerOrderProducts(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/customer-orders/products`, {
+      cache: "no-store",
+    });
+  },
+  async getCustomerOrderFinishedGoods(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/customer-orders/finished-goods`, {
+      cache: "no-store",
+    });
+  },
+  async createCustomerOrder(payload: any): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/customer-orders`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  async confirmCustomerOrder(id: string): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/customer-orders/${encodeURIComponent(id)}/confirm`,
+      { method: "POST" },
+    );
   },
   async getDispatch(id: string): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}`, { cache: "no-store" });
@@ -3043,7 +3009,9 @@ export const api = {
     });
   },
   async reserveDispatchStock(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/reserve-stock`, { method: "POST" });
+    return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/reserve-stock`, {
+      method: "POST",
+    });
   },
   async startDispatchPicking(id: string): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/picking`, { method: "POST" });
@@ -3082,10 +3050,21 @@ export const api = {
     });
   },
   async startDispatchLoading(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/loading/start`, { method: "POST" });
+    return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/loading/start`, {
+      method: "POST",
+    });
   },
   async verifyDispatchLoading(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/loading/verify`, { method: "POST" });
+    return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/loading/verify`, {
+      method: "POST",
+    });
+  },
+  async scanDispatchPackage(id: string, qrCode: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/loading/scan-package`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ qr_code: qrCode }),
+    });
   },
   async verifyDispatchFinal(id: string): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}/verify`, { method: "POST" });
@@ -3110,7 +3089,9 @@ export const api = {
   },
   async getDispatchesReadyForGateExit(): Promise<any[]> {
     try {
-      const res = await request<any[]>(`${BUSINESS_API_URL}/api/dispatches/ready-for-gate-exit`, { cache: "no-store" });
+      const res = await request<any[]>(`${BUSINESS_API_URL}/api/dispatches/ready-for-gate-exit`, {
+        cache: "no-store",
+      });
       return Array.isArray(res) ? res : [];
     } catch {
       return [];
@@ -3159,13 +3140,31 @@ export const api = {
       method: "DELETE",
     });
   },
-
-  // Inventory API endpoints (Parts E, F, J, K, L, M)
-  async getMovementReasons(): Promise<string[]> {
-    return request<string[]>(`${BUSINESS_API_URL}/api/v1/inventory/movement-reasons`);
+  async getAssemblyDashboard(): Promise<AssemblyDashboardResponse> {
+    return request<AssemblyDashboardResponse>(`${BUSINESS_API_URL}/api/v1/assembly/dashboard`, {
+      cache: "no-store",
+    });
   },
-  async getStockStatuses(): Promise<string[]> {
-    return request<string[]>(`${BUSINESS_API_URL}/api/v1/inventory/stock-statuses`);
+  async getAssemblyProducts(): Promise<AssemblyProductOption[]> {
+    return request<AssemblyProductOption[]>(`${BUSINESS_API_URL}/api/v1/assembly/products`, {
+      cache: "no-store",
+    });
+  },
+  async createAssemblyProduct(payload: {
+    product_name: string;
+    product_code: string;
+    description?: string;
+    components?: Array<{
+      material_code: string;
+      material_name: string;
+      quantity_per_unit: number;
+      uom?: string;
+    }>;
+  }): Promise<AssemblyProductOption> {
+    return request<AssemblyProductOption>(`${BUSINESS_API_URL}/api/v1/assembly/products`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
   async getAdjustmentReasons(): Promise<string[]> {
     return request<string[]>(`${BUSINESS_API_URL}/api/v1/inventory/adjustment-reasons`);
@@ -3184,35 +3183,219 @@ export const api = {
   }): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/v1/inventory/bin-transfer`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
   },
-  async getMaterialInventoryDetail(materialCode: string): Promise<any> {
-    return request<any>(
-      `${BUSINESS_API_URL}/api/storage/inventory/materials/${encodeURIComponent(materialCode)}/detail`,
+  async getAssemblyLines(): Promise<AssemblyLineOption[]> {
+    return request<AssemblyLineOption[]>(`${BUSINESS_API_URL}/api/v1/assembly/lines`, {
+      cache: "no-store",
+    });
+  },
+  async getAssemblyOrders(params?: {
+    search?: string;
+    status?: string;
+    priority?: string;
+  }): Promise<AssemblyOrder[]> {
+    const q = new URLSearchParams();
+    if (params?.search) q.append("search", params.search);
+    if (params?.status && params.status !== "ALL") q.append("status", params.status);
+    if (params?.priority && params.priority !== "ALL") q.append("priority", params.priority);
+    const queryStr = q.toString() ? `?${q.toString()}` : "";
+    return request<AssemblyOrder[]>(`${BUSINESS_API_URL}/api/v1/assembly/orders${queryStr}`, {
+      cache: "no-store",
+    });
+  },
+  async createAssemblyOrder(data: CreateAssemblyOrderPayload): Promise<AssemblyOrder> {
+    return request<AssemblyOrder>(`${BUSINESS_API_URL}/api/v1/assembly/orders`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  async getAssemblyOrderDetail(orderId: string): Promise<AssemblyOrder> {
+    return request<AssemblyOrder>(
+      `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}`,
+      {
+        cache: "no-store",
+      },
     );
   },
-  async getWarehouseInventorySummary(params?: Record<string, string | undefined>): Promise<any[]> {
-    const query = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([k, v]) => {
-        if (v && v !== "ALL") query.set(k, v);
-      });
-    }
-    const qStr = query.toString() ? `?${query.toString()}` : "";
-    return request<any[]>(`${BUSINESS_API_URL}/api/storage/inventory/warehouse-summary${qStr}`);
+  async getAssemblyOrderMaterials(orderId: string): Promise<AssemblyOrderMaterialsResponse> {
+    return request<AssemblyOrderMaterialsResponse>(
+      `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}/materials`,
+      { cache: "no-store" },
+    );
   },
-  async getStockLedger(params?: Record<string, string | undefined>): Promise<any[]> {
-    const query = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([k, v]) => {
-        if (v && v !== "ALL") query.set(k, v);
-      });
-    }
-    const qStr = query.toString() ? `?${query.toString()}` : "";
-    return request<any[]>(`${BUSINESS_API_URL}/api/storage/inventory/ledger${qStr}`);
+  async getProductBOM(productCode: string, quantity = 1): Promise<AssemblyProductBOMResponse> {
+    return request<AssemblyProductBOMResponse>(
+      `${BUSINESS_API_URL}/api/v1/assembly/products/${encodeURIComponent(productCode)}/bom?quantity=${quantity}`,
+      { cache: "no-store" },
+    );
   },
+  async getAssemblyMaterialRequests(params?: {
+    search?: string;
+    status?: string;
+  }): Promise<AssemblyMaterialRequest[]> {
+    const q = new URLSearchParams();
+    if (params?.search) q.append("search", params.search);
+    if (params?.status && params.status !== "ALL") q.append("status", params.status);
+    const queryStr = q.toString() ? `?${q.toString()}` : "";
+    return request<AssemblyMaterialRequest[]>(
+      `${BUSINESS_API_URL}/api/v1/assembly/material-requests${queryStr}`,
+      {
+        cache: "no-store",
+      },
+    );
+  },
+  async createAssemblyMaterialRequest(
+    data: CreateAssemblyMaterialRequestPayload,
+  ): Promise<AssemblyMaterialRequest> {
+    return request<AssemblyMaterialRequest>(
+      `${BUSINESS_API_URL}/api/v1/assembly/material-requests`,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    );
+  },
+  async getAssemblyMaterialRequestDetail(requestId: string): Promise<AssemblyMaterialRequest> {
+    return request<AssemblyMaterialRequest>(
+      `${BUSINESS_API_URL}/api/v1/assembly/material-requests/${encodeURIComponent(requestId)}`,
+      { cache: "no-store" },
+    );
+  },
+  async getAssemblyPickingTasks(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/material-requests/picking-tasks`, {
+      cache: "no-store",
+    });
+  },
+  async completeAssemblyPickingTask(
+    id: string,
+    data: { material_scan: string; zone_scan: string; quantity: number },
+  ): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/material-requests/picking-tasks/${encodeURIComponent(id)}/complete`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+  },
+  async approveAssemblyMaterialRequest(requestId: string): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/material-requests/${encodeURIComponent(requestId)}/approve`,
+      { method: "POST", body: "{}" },
+    );
+  },
+  async warehouseIssueMaterials(requestId: string, payload?: { remarks?: string }): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/material-requests/${encodeURIComponent(requestId)}/warehouse-issue`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload || {}),
+      },
+    );
+  },
+  async confirmAssemblyMaterialReceipt(
+    requestId: string,
+    payload?: {
+      received_items?: Array<{ material_code: string; received_quantity: number }>;
+      remarks?: string;
+    },
+  ): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/material-requests/${encodeURIComponent(requestId)}/confirm-receipt`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload || {}),
+      },
+    );
+  },
+  async getAssemblyProductionOrders(params?: {
+    search?: string;
+    status?: string;
+  }): Promise<AssemblyProductionOrder[]> {
+    const q = new URLSearchParams();
+    if (params?.search) q.append("search", params.search);
+    if (params?.status && params.status !== "ALL") q.append("status", params.status);
+    const queryStr = q.toString() ? `?${q.toString()}` : "";
+    return request<AssemblyProductionOrder[]>(
+      `${BUSINESS_API_URL}/api/v1/assembly/production/orders${queryStr}`,
+      {
+        cache: "no-store",
+      },
+    );
+  },
+  async startAssemblyProduction(orderId: string): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}/start-production`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    );
+  },
+  async completeAssemblyProduction(
+    orderId: string,
+    payload: { produced_quantity: number; notes?: string },
+  ): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}/complete-production`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  },
+  async getAssemblyQualityInspections(params?: {
+    search?: string;
+    status?: string;
+  }): Promise<AssemblyQualityInspectionItem[]> {
+    const q = new URLSearchParams();
+    if (params?.search) q.append("search", params.search);
+    if (params?.status && params.status !== "ALL") q.append("status", params.status);
+    const queryStr = q.toString() ? `?${q.toString()}` : "";
+    return request<AssemblyQualityInspectionItem[]>(
+      `${BUSINESS_API_URL}/api/v1/assembly/quality/inspections${queryStr}`,
+      {
+        cache: "no-store",
+      },
+    );
+  },
+  async performAssemblyQualityInspection(payload: {
+    order_id: string;
+    passed_quantity: number;
+    failed_quantity?: number;
+    rework_quantity?: number;
+    notes?: string;
+  }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/quality/inspect`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  async getAssemblyFinishedGoods(params?: {
+    search?: string;
+  }): Promise<AssemblyFinishedGoodItem[]> {
+    const q = new URLSearchParams();
+    if (params?.search) q.append("search", params.search);
+    const queryStr = q.toString() ? `?${q.toString()}` : "";
+    return request<AssemblyFinishedGoodItem[]>(
+      `${BUSINESS_API_URL}/api/v1/assembly/finished-goods${queryStr}`,
+      {
+        cache: "no-store",
+      },
+    );
+  },
+  async getAssemblyFinishedGoodsDetail(fgId: string): Promise<AssemblyFinishedGoodDetail> {
+    return request<AssemblyFinishedGoodDetail>(
+      `${BUSINESS_API_URL}/api/v1/assembly/finished-goods/${encodeURIComponent(fgId)}`,
+      {
+        cache: "no-store",
+      },
+    );
+  },
+
   async getMaterialIssues(status?: string): Promise<any[]> {
     const qStr = status && status !== "ALL" ? `?status=${encodeURIComponent(status)}` : "";
     return request<any[]>(`${BUSINESS_API_URL}/api/storage/inventory/material-issues${qStr}`);
@@ -3352,7 +3535,10 @@ export const api = {
   async getMobileTasksSummary(): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/mobile-tasks-summary`);
   },
-  async getInventoryTraceability(params?: { material_code?: string; batch_number?: string }): Promise<any> {
+  async getInventoryTraceability(params?: {
+    material_code?: string;
+    batch_number?: string;
+  }): Promise<any> {
     const q = new URLSearchParams();
     if (params?.material_code) q.append("material_code", params.material_code);
     if (params?.batch_number) q.append("batch_number", params.batch_number);
@@ -3367,5 +3553,283 @@ export const api = {
     return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/notifications${qStr}`);
   },
 };
+
+export interface AssemblyQualityInspectionItem {
+  order_id: string;
+  order_number: string;
+  product_code: string;
+  product_name: string;
+  uom: string;
+  produced_quantity: number;
+  target_quantity: number;
+  passed_quantity: number;
+  failed_quantity: number;
+  rework_quantity: number;
+  qc_status: string;
+  order_status: string;
+  inspected_by?: string | null;
+  inspected_at?: string | null;
+  notes?: string | null;
+  can_inspect: boolean;
+  completed_at?: string | null;
+}
+
+export interface AssemblyFinishedGoodItem {
+  id: string;
+  order_id: string;
+  order_number: string;
+  product_code: string;
+  product_name: string;
+  quantity: number;
+  uom: string;
+  status: string;
+  warehouse_id: string;
+  location_code: string;
+  qr_code?: string | null;
+  serial_number?: string | null;
+  posted_at: string | null;
+}
+
+export interface AssemblyFinishedGoodDetail extends AssemblyFinishedGoodItem {
+  label_payload?: {
+    title: string;
+    product_name: string;
+    product_code: string;
+    order_number: string;
+    quantity: string;
+    serial_number?: string;
+    qr_code?: string;
+    location: string;
+    inspected_by: string;
+    date: string | null;
+  };
+}
+
+export interface AssemblyProductionOrder {
+  id: string;
+  order_number: string;
+  product_code: string;
+  product_name: string;
+  target_quantity: number;
+  produced_quantity: number;
+  rejected_quantity: number;
+  uom: string;
+  status: string;
+  priority: string;
+  required_date: string | null;
+  assigned_line?: string | null;
+  assigned_operator?: string | null;
+  material_request_number?: string | null;
+  can_start: boolean;
+  can_complete: boolean;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string | null;
+}
+
+export interface AssemblyMaterialRequestItem {
+  id?: string;
+  material_code: string;
+  material_name: string;
+  quantity: number;
+  available_quantity?: number;
+  shortage?: number;
+  uom: string;
+  status?: string;
+  issued_quantity?: number;
+  received_quantity?: number;
+}
+
+export interface AssemblyMaterialRequest {
+  id: string;
+  request_number: string;
+  order_id?: string | null;
+  order_number?: string | null;
+  order_status?: string | null;
+  product_code?: string;
+  product_name?: string;
+  target_quantity?: number;
+  uom?: string;
+  items_count: number;
+  warehouse_id: string;
+  status: string;
+  priority: string;
+  required_date: string | null;
+  remarks?: string | null;
+  created_at: string | null;
+  material_received_by?: string | null;
+  material_received_at?: string | null;
+  material_issue?: {
+    id: string;
+    issue_number: string;
+    issued_by: string;
+    received_by: string;
+    issued_at: string;
+    items: any[];
+  } | null;
+  approval_history?: any[];
+  items: AssemblyMaterialRequestItem[];
+}
+
+export interface CreateAssemblyMaterialRequestPayload {
+  product_code: string;
+  target_quantity: number;
+  required_date: string;
+  remarks?: string;
+  priority?: string;
+  assembly_line?: string;
+  order_id?: string;
+}
+
+export interface AssemblyOrderMaterialsResponse {
+  order_id: string;
+  order_number: string;
+  product_code: string;
+  product_name: string;
+  target_quantity: number;
+  uom: string;
+  summary: {
+    total_components: number;
+    available_components: number;
+    shortage_components: number;
+    status: string;
+  };
+  materials: AssemblyOrderItem[];
+}
+
+export interface AssemblyProductBOMResponse {
+  product_code: string;
+  product_name: string;
+  bom_number: string;
+  target_quantity: number;
+  uom: string;
+  summary: {
+    total_components: number;
+    available_components: number;
+    shortage_components: number;
+    has_shortage: boolean;
+  };
+  materials: AssemblyOrderItem[];
+}
+
+export interface AssemblyKPIs {
+  open_orders: number;
+  material_pending: number;
+  in_production: number;
+  qc_pending: number;
+  completed_today: number;
+}
+
+export interface AssemblyOrderItem {
+  material_code: string;
+  material_name: string;
+  quantity_per_unit: number;
+  required_quantity: number;
+  available_quantity: number;
+  requested_quantity?: number;
+  received_quantity?: number;
+  shortage?: number;
+  uom: string;
+  status: string;
+}
+
+export interface AssemblyWorkStep {
+  id: string;
+  sequence: number;
+  name: string;
+  instruction?: string;
+  expected_time_minutes?: number;
+  qc_required?: boolean;
+  status: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  started_by?: string | null;
+  completed_by?: string | null;
+}
+
+export interface AssemblyOrder {
+  id: string;
+  order_number: string;
+  product_code: string;
+  product_name: string;
+  bom_id?: string | null;
+  bom_number?: string | null;
+  target_quantity: number;
+  planned_quantity: number;
+  completed_quantity: number;
+  rejected_quantity: number;
+  uom: string;
+  required_date: string | null;
+  assembly_line: string | null;
+  assigned_line: string | null;
+  assigned_operator: string | null;
+  priority: string;
+  status: string;
+  notes: string | null;
+  progress: number;
+  items: AssemblyOrderItem[];
+  assembly_steps: AssemblyWorkStep[];
+  created_by: string;
+  created_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AssemblyAttentionItem {
+  id: string;
+  order_number: string;
+  product_name: string;
+  type: string;
+  severity: "CRITICAL" | "WARNING" | "INFO";
+  item_name?: string;
+  required?: number;
+  available?: number;
+  shortage?: number;
+  uom?: string;
+  message: string;
+}
+
+export interface AssemblyActivityItem {
+  id: string;
+  order_number: string;
+  action: string;
+  description: string;
+  user: string;
+  timestamp: string;
+}
+
+export interface AssemblyDashboardResponse {
+  kpis: AssemblyKPIs;
+  active_orders: AssemblyOrder[];
+  needs_attention: AssemblyAttentionItem[];
+  recent_activity: AssemblyActivityItem[];
+}
+
+export interface AssemblyProductOption {
+  id: string;
+  product_code: string;
+  product_name: string;
+  bom_number: string;
+  description: string;
+  uom: string;
+}
+
+export interface AssemblyLineOption {
+  id: string;
+  code: string;
+  name: string;
+  status: string;
+}
+
+export interface CreateAssemblyOrderPayload {
+  product_code: string;
+  product_name?: string;
+  target_quantity: number;
+  required_date: string;
+  assembly_line?: string;
+  priority?: string;
+  notes?: string;
+}
 
 export const apiClient = api;

@@ -29,6 +29,7 @@ from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Numeric,
@@ -458,6 +459,11 @@ class GrnLineModel(Base):
         server_default="0",
     )
 
+    held_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0"), server_default="0")
+    rejected_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    damage_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    held_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # --------------------------------------------------------
     # Quality Approved Quantity
     #
@@ -670,6 +676,8 @@ class GrnBatchModel(Base):
         Numeric(18, 4),
         nullable=False,
     )
+    superseded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false", index=True)
+    superseded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false", index=True)
 
     # --------------------------------------------------------
     # Audit Information
@@ -820,13 +828,13 @@ class GrnBatchQrModel(Base):
     )
 
     # --------------------------------------------------------
-    # Material Information (Primary Unique Key for QR)
+    # Material information. A material can have many GRN batches, so this
+    # column must be indexed but must not be unique.
     # --------------------------------------------------------
 
     item_code: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        unique=True,
         index=True,
     )
 

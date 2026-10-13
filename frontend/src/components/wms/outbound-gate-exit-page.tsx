@@ -19,19 +19,9 @@ export function OutboundGateExitPage({ title = "Gate Exit", subtitle = "Verify o
       // The queue itself is the source of truth. Auxiliary master-data calls
       // must not prevent persisted ready dispatches from appearing.
       const readyOrders = await api.getDispatchesReadyForGateExit();
-      const [driversResult, vehiclesResult] = await Promise.allSettled([
-        api.getDrivers(),
-        api.getVehicles(),
-      ]);
-      const drivers = driversResult.status === "fulfilled" ? driversResult.value : [];
-      const vehicles = vehiclesResult.status === "fulfilled" ? vehiclesResult.value : [];
-      const driverById = new Map((drivers || []).map((driver: any) => [String(driver.id), driver]));
-      const vehicleById = new Map((vehicles || []).map((vehicle: any) => [String(vehicle.id), vehicle]));
-      setOrders((readyOrders || []).map((order: any) => ({
-        ...order,
-        driver_name: order.driver_name || driverById.get(String(order.driver_id))?.driver_name,
-        vehicle_number: order.vehicle_number || vehicleById.get(String(order.vehicle_id))?.vehicle_number,
-      })));
+      // Supplier-provided vehicle and driver details are persisted on the
+      // dispatch/ASN record. Internal transport master data is not required.
+      setOrders(readyOrders || []);
     }
     catch (error) { toast.error("Unable to load gate exit queue", { description: error instanceof Error ? error.message : undefined }); }
     finally { setLoading(false); }
@@ -53,7 +43,7 @@ export function OutboundGateExitPage({ title = "Gate Exit", subtitle = "Verify o
     <div className="grid gap-4 sm:grid-cols-3 mb-6">
       <Card className="rounded-2xl p-5"><p className="text-xs uppercase font-bold text-muted-foreground">Ready for verification</p><p className="text-3xl font-bold mt-2">{orders.length}</p></Card>
       <Card className="rounded-2xl p-5"><p className="text-xs uppercase font-bold text-muted-foreground">Control point</p><p className="text-lg font-bold mt-2 flex items-center gap-2"><ShieldCheck className="size-5 text-emerald-600" />Outbound Gate</p></Card>
-      <Card className="rounded-2xl p-5"><p className="text-xs uppercase font-bold text-muted-foreground">Verification rule</p><p className="text-sm font-semibold mt-2">Vehicle + driver must match allocation</p></Card>
+      <Card className="rounded-2xl p-5"><p className="text-xs uppercase font-bold text-muted-foreground">Verification rule</p><p className="text-sm font-semibold mt-2">Supplier vehicle + driver must match the dispatch</p></Card>
     </div>
     <Card className="rounded-2xl overflow-hidden">
       <div className="p-4 border-b flex items-center justify-between"><div><h2 className="font-bold">Outbound Gate Queue</h2><p className="text-xs text-muted-foreground mt-1">Only loaded dispatches appear here.</p></div><Truck className="size-5 text-primary" /></div>

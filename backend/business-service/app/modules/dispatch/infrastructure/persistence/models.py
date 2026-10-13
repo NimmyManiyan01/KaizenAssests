@@ -38,6 +38,12 @@ class DispatchModel(Base):
     route_path = Column(String(255), nullable=True, default="Bangalore - Ramanagara - Mandya - Mysore")
     route_deviation = Column(String(128), nullable=True, default="None (On Track)")
     driver_status = Column(String(64), nullable=True, default="Active / Driving")
+    gate_exit_vehicle_verified = Column(Boolean, nullable=False, default=False)
+    gate_exit_driver_verified = Column(Boolean, nullable=False, default=False)
+    gate_exit_loaded_goods_verified = Column(Boolean, nullable=False, default=False)
+    gate_exit_security_officer = Column(String(128), nullable=True)
+    gate_exit_remarks = Column(Text, nullable=True)
+    gate_exit_completed_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
@@ -63,6 +69,9 @@ class DispatchItemModel(Base):
     batch = Column(String(64), nullable=True)
     bin = Column(String(64), nullable=True)
     status = Column(String(32), nullable=False, default="PENDING")
+    package_number = Column(String(128), nullable=True)
+    package_type = Column(String(64), nullable=True)
+    package_count = Column(Numeric(18, 4), nullable=True)
 
     dispatch_order = relationship("DispatchModel", back_populates="items")
 
@@ -93,6 +102,8 @@ class DriverModel(Base):
     phone = Column(String(32), nullable=False)
     email = Column(String(128), nullable=True)
     license_type = Column(String(32), nullable=False, default="Heavy")
+    license_expiry_date = Column(DateTime(timezone=False), nullable=True)
+    license_verified = Column(Boolean, nullable=False, default=False)
     is_active = Column(Boolean, nullable=False, default=True)
     photo_path = Column(String(255), nullable=True)
     address = Column(Text, nullable=True)

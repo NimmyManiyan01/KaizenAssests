@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
-import { useEffect, useState, useMemo, useCallback, type FormEvent } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import {
   Boxes,
   Search,
@@ -15,6 +15,7 @@ import {
   Plus,
   Eye,
   Scan,
+  Camera,
   Clock,
   Layers,
   Tag,
@@ -44,6 +45,7 @@ import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import QRCode from "qrcode";
+import jsQR from "jsqr";
 
 export const Route = createFileRoute("/inventory")({
   head: () => ({
@@ -51,7 +53,8 @@ export const Route = createFileRoute("/inventory")({
       { title: "Warehouse Module · KaizenX" },
       {
         name: "description",
-        content: "Authoritative, simple end-to-end Warehouse & Inventory operations control system.",
+        content:
+          "Authoritative, simple end-to-end Warehouse & Inventory operations control system.",
       },
     ],
   }),
@@ -64,7 +67,9 @@ function SimpleWarehouseModule() {
   const navigate = useNavigate();
   const searchParams: any = useSearch({ from: "/inventory" });
   const tabOptions: TabType[] = ["dashboard", "putaway", "inventory", "picking", "locations"];
-  const activeTab: TabType = tabOptions.includes(searchParams?.tab) ? searchParams.tab : "dashboard";
+  const activeTab: TabType = tabOptions.includes(searchParams?.tab)
+    ? searchParams.tab
+    : "dashboard";
 
   // Data States (All coming strictly from backend)
   const [loading, setLoading] = useState<boolean>(true);
@@ -87,16 +92,45 @@ function SimpleWarehouseModule() {
 
   // Selected Detail Modals
   const [selectedInventory, setSelectedInventory] = useState<any>(null);
+  const [selectedPutawayGroup, setSelectedPutawayGroup] = useState<any>(null);
   const [assignPutawayTask, setAssignPutawayTask] = useState<any>(null);
-  const [putawayToConfirm, setPutawayToConfirm] = useState<any>(null);
-  const [putawayConfirmation, setPutawayConfirmation] = useState({ material_scan: "", location_scan: "", quantity: "" });
+  const [scanPutawayTask, setScanPutawayTask] = useState<any>(null);
+  const [putawayScan, setPutawayScan] = useState({ materialQr: "", rackQr: "", quantity: "" });
+  const [putawayQrImages, setPutawayQrImages] = useState({ material: "", rack: "" });
+  const [qrPreview, setQrPreview] = useState<{ title: string; image: string } | null>(null);
+  const [putawayScanValid, setPutawayScanValid] = useState(false);
+  const [materialQrVerified, setMaterialQrVerified] = useState(false);
+  const [rackQrVerified, setRackQrVerified] = useState(false);
+  const [qrScanError, setQrScanError] = useState("");
+  const [cameraField, setCameraField] = useState<"material" | "rack" | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement>(null);
+  const cameraCanvasRef = useRef<HTMLCanvasElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState("");
   const [pickupToConfirm, setPickupToConfirm] = useState<any>(null);
-  const [pickupConfirmation, setPickupConfirmation] = useState({ material_scan: "", zone_scan: "", quantity: "" });
+  const [pickupConfirmation, setPickupConfirmation] = useState({
+    material_scan: "",
+    zone_scan: "",
+    quantity: "",
+  });
+  const [pickupQrImages, setPickupQrImages] = useState({ material: "", rack: "" });
   const [selectedLocationId, setSelectedLocationId] = useState("");
+  const [assignStoreId, setAssignStoreId] = useState("");
+  const [assignZoneId, setAssignZoneId] = useState("");
+  const [assignQuantity, setAssignQuantity] = useState("");
 
   // Location Creation Modals
-  const [createLocationType, setCreateLocationType] = useState<"store" | "zone" | "bin" | null>(null);
-  const [newStoreForm, setNewStoreForm] = useState({ store_code: "", store_name: "", description: "" });
+  const [createLocationType, setCreateLocationType] = useState<
+    "store" | "zone" | "rack" | "bin" | null
+  >(null);
+  const [newStoreForm, setNewStoreForm] = useState({
+    store_code: "",
+    store_name: "",
+    description: "",
+    store_type: "RAW_MATERIAL",
+    status: "ACTIVE",
+    warehouse_id: "",
+  });
   const [newZoneForm, setNewZoneForm] = useState({ store_id: "", zone_code: "", zone_name: "" });
   const [newBinForm, setNewBinForm] = useState({
     store_id: "",
@@ -106,16 +140,63 @@ function SimpleWarehouseModule() {
     rack: "",
     position: "",
   });
-  const [bulkRackOpen, setBulkRackOpen] = useState(false);
-  const [bulkRackForm, setBulkRackForm] = useState({
-    store_id: "", zone_id: "", rack_code: "", bin_code_prefix: "", bin_code_start: "1",
-    count: "", position_prefix: "", position_start: "1", code_width: "3", capacity: "",
-  });
+  const [newBinRows, setNewBinRows] = useState([{ rack: "", position: "", bin_code: "" }]);
+  const [rackGenerator, setRackGenerator] = useState({ prefix: "RACK-", start: "1", count: "10" });
   const [viewBinQrModal, setViewBinQrModal] = useState<any>(null);
   const [binQrImage, setBinQrImage] = useState<string | null>(null);
 
   // Submitting States
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!cameraField) return;
+    let cancelled = false;
+    setCameraError("");
+    void navigator.mediaDevices
+      ?.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
+      .then((stream) => {
+        if (cancelled) return stream.getTracks().forEach((track) => track.stop());
+        cameraStreamRef.current = stream;
+        if (cameraVideoRef.current) {
+          cameraVideoRef.current.srcObject = stream;
+          void cameraVideoRef.current.play();
+        }
+      })
+      .catch(() =>
+        setCameraError(
+          "Camera permission was denied or is unavailable. Enter the QR value manually.",
+        ),
+      );
+    return () => {
+      cancelled = true;
+      cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    };
+  }, [cameraField]);
+
+  useEffect(() => {
+    if (!cameraField) return;
+    const timer = window.setInterval(() => {
+      const video = cameraVideoRef.current;
+      const canvas = cameraCanvasRef.current;
+      if (!video || !canvas || video.readyState < 2 || !video.videoWidth) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return;
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const image = context.getImageData(0, 0, canvas.width, canvas.height);
+      const result = jsQR(image.data, image.width, image.height);
+      if (result?.data) {
+        setPutawayScan((current) => ({
+          ...current,
+          [cameraField === "material" ? "materialQr" : "rackQr"]: result.data,
+        }));
+        setCameraField(null);
+      }
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [cameraField]);
 
   useEffect(() => {
     const value = viewBinQrModal?.qr_identifier;
@@ -124,12 +205,16 @@ function SimpleWarehouseModule() {
       return;
     }
     let active = true;
-    void QRCode.toDataURL(value).then((dataUrl) => {
-      if (active) setBinQrImage(dataUrl);
-    }).catch(() => {
-      if (active) setBinQrImage(null);
-    });
-    return () => { active = false; };
+    void QRCode.toDataURL(value)
+      .then((dataUrl) => {
+        if (active) setBinQrImage(dataUrl);
+      })
+      .catch(() => {
+        if (active) setBinQrImage(null);
+      });
+    return () => {
+      active = false;
+    };
   }, [viewBinQrModal]);
 
   // Load Real Operational Data (No Hardcoded Fallbacks)
@@ -139,31 +224,176 @@ function SimpleWarehouseModule() {
       const [
         putawaysRes,
         inventoryRes,
-        requestsRes,
         pickupsRes,
         storesRes,
+        materialCatalogRes,
+        assemblyRequestsRes,
+        assemblyPickingTasksRes,
       ] = await Promise.all([
         api.getPutawayTasks(),
         api.getWarehouseInventorySummary(),
-        api.getMaterialRequests(),
         api.getPickupTasks(),
         api.getStores(),
+        api.getMaterialComponents(),
+        api.getAssemblyMaterialRequests(),
+        api.getAssemblyPickingTasks(),
       ]);
 
-      setPutawayTasks(Array.isArray(putawaysRes) ? putawaysRes : []);
-      setInventorySummary(Array.isArray(inventoryRes) ? inventoryRes : []);
-      setMaterialRequests(Array.isArray(requestsRes) ? requestsRes : []);
-      setPickupTasks(Array.isArray(pickupsRes) ? pickupsRes : []);
+      let normalizedPutawayTasks = (Array.isArray(putawaysRes) ? putawaysRes : []).filter(
+        (task: any, index: number, tasks: any[]) => {
+          const grn = String(task.grn_id || task.grn_number || "").toUpperCase();
+          const item = String(task.item_code || task.material_code || "").toUpperCase();
+          const batch = String(task.batch_number || task.batchNumber || "")
+            .trim()
+            .toUpperCase();
+          if (!batch) return true;
+          return (
+            tasks.findIndex(
+              (candidate: any) =>
+                String(candidate.grn_id || candidate.grn_number || "").toUpperCase() === grn &&
+                String(candidate.item_code || candidate.material_code || "").toUpperCase() ===
+                  item &&
+                String(candidate.batch_number || candidate.batchNumber || "")
+                  .trim()
+                  .toUpperCase() === batch,
+            ) === index
+          );
+        },
+      );
+      // Reconcile legacy task rows against the saved GRN batches. This keeps
+      // old duplicate posting attempts out of the queue without deleting
+      // historical records.
+      const grnKeys = Array.from(
+        new Set(
+          normalizedPutawayTasks.map((task: any) => task.grn_id).filter((value: any) => value),
+        ),
+      );
+      const canonicalByGrnMaterial = new Map<string, Set<string>>();
+      await Promise.all(
+        grnKeys.map(async (grnKey) => {
+          try {
+            const detail = await api.getGrnDetail(String(grnKey));
+            for (const line of Array.isArray(detail?.lines) ? detail.lines : []) {
+              const approved = Number(line.quality_approved_quantity ?? line.good_quantity ?? 0);
+              let remaining = approved;
+              const allowed = new Set<string>();
+              for (const batch of [...(Array.isArray(line.batches) ? line.batches : [])].sort(
+                (a: any, b: any) =>
+                  String(a.created_at || "").localeCompare(String(b.created_at || "")),
+              )) {
+                const batchNumber = String(batch.batch_number || "")
+                  .trim()
+                  .toUpperCase();
+                const quantity = Number(batch.batch_quantity || 0);
+                if (!batchNumber || allowed.has(batchNumber) || remaining <= 0 || quantity <= 0)
+                  continue;
+                allowed.add(batchNumber);
+                remaining -= Math.min(quantity, remaining);
+              }
+              if (allowed.size > 0) {
+                canonicalByGrnMaterial.set(
+                  `${grnKey}:${String(line.item_code || "").toUpperCase()}`,
+                  allowed,
+                );
+              }
+            }
+          } catch {
+            // The task endpoint remains the source if a legacy GRN cannot be read.
+          }
+        }),
+      );
+      normalizedPutawayTasks = normalizedPutawayTasks.filter((task: any) => {
+        const batch = String(task.batch_number || task.batchNumber || "")
+          .trim()
+          .toUpperCase();
+        if (!batch || !task.grn_id) return true;
+        const allowed = canonicalByGrnMaterial.get(
+          `${task.grn_id}:${String(task.item_code || task.material_code || "").toUpperCase()}`,
+        );
+        return !allowed || allowed.has(batch);
+      });
+      setPutawayTasks(normalizedPutawayTasks);
+      const assemblyRequests = (
+        Array.isArray(assemblyRequestsRes) ? assemblyRequestsRes : []
+      ).flatMap((req: any) =>
+        (Array.isArray(req.items) ? req.items : []).map((item: any) => ({
+          ...req,
+          id: req.id,
+          request_number: req.request_number,
+          material_code: item.material_code,
+          material_name: item.material_name,
+          quantity: item.quantity,
+          required_quantity: item.quantity,
+          uom: item.uom,
+          available: item.available_quantity,
+          available_quantity: item.available_quantity,
+        })),
+      );
+      setMaterialRequests(assemblyRequests);
+      const stockRows = Array.isArray(inventoryRes) ? inventoryRes : [];
+      const stockCodes = new Set(
+        stockRows.map((row: any) => String(row.material_code || row.code || "").toUpperCase()),
+      );
+      const catalogRows = (Array.isArray(materialCatalogRes) ? materialCatalogRes : [])
+        .filter((material: any) => material.code && material.name)
+        .filter((material: any) => !stockCodes.has(String(material.code).toUpperCase()))
+        .map((material: any) => ({
+          material_code: material.code,
+          material_name: material.name,
+          batch_number: "-",
+          available_quantity: 0,
+          on_hand_quantity: 0,
+          total_quantity: 0,
+          uom: material.uom || "PCS",
+          location: "-",
+          is_catalog_item: true,
+        }));
+      setInventorySummary([...stockRows, ...catalogRows]);
+      const assemblyPickingTasks = (
+        Array.isArray(assemblyPickingTasksRes) ? assemblyPickingTasksRes : []
+      ).flatMap((task: any) =>
+        (Array.isArray(task.items) ? task.items : []).map((item: any) => ({
+          id: `${task.id}:${item.material_code}`,
+          task_number: task.task_number,
+          assembly_order_number: task.request_number,
+          material_code: item.material_code,
+          material_name: item.material_name,
+          quantity:
+            item.picked_quantity ??
+            item.issued_quantity ??
+            item.required_quantity ??
+            item.requested_quantity,
+          requested_quantity: item.requested_quantity ?? item.required_quantity,
+          picked_quantity: item.picked_quantity ?? item.issued_quantity ?? 0,
+          batch_number:
+            item.batch_number || item.batch_lot_number || task.confirmation?.batch_number,
+          uom: item.uom,
+          pick_location: item.pick_location || task.pick_location || task.destination,
+          confirmation: task.confirmation,
+          status: task.status,
+          assembly_pick_task_id: task.id,
+        })),
+      );
+      setPickupTasks([...(Array.isArray(pickupsRes) ? pickupsRes : []), ...assemblyPickingTasks]);
       setStores(Array.isArray(storesRes) ? storesRes : []);
 
-      const locationRows = await Promise.all((Array.isArray(storesRes) ? storesRes : []).map(async (store: any) => {
-        const storeZones = await api.getStoreZones(store.id);
-        const storeBins = await Promise.all((Array.isArray(storeZones) ? storeZones : []).map((zone: any) => api.getStoreBins(store.id, zone.id)));
-        return { zones: storeZones, bins: storeBins.flat() };
-      }));
+      const locationRows = await Promise.all(
+        (Array.isArray(storesRes) ? storesRes : []).map(async (store: any) => {
+          const storeZones = await api.getStoreZones(store.id);
+          const storeBins = await Promise.all(
+            (Array.isArray(storeZones) ? storeZones : []).map((zone: any) =>
+              api.getZoneBins(zone.id),
+            ),
+          );
+          return { zones: storeZones, bins: storeBins.flat() };
+        }),
+      );
       setZones(locationRows.flatMap((row) => row.zones || []));
       setBins(locationRows.flatMap((row) => row.bins || []));
-      const [dockRows, pendingDockRows] = await Promise.all([api.getDocks(), api.getPendingAllocations()]);
+      const [dockRows, pendingDockRows] = await Promise.all([
+        api.getDocks(),
+        api.getPendingAllocations(),
+      ]);
       setDocks(Array.isArray(dockRows) ? dockRows : []);
       setDockRequests(Array.isArray(pendingDockRows) ? pendingDockRows : []);
     } catch (err: any) {
@@ -185,7 +415,17 @@ function SimpleWarehouseModule() {
 
   // Flattened Bins List for Single Location Selector (Strictly from DB)
   const allFlattenedBins = useMemo(() => {
-    const list: Array<{ id: string; label: string; bin_code: string; store_id: string; zone_id: string; rack?: string; position?: string; qr_identifier?: string; status?: string }> = [];
+    const list: Array<{
+      id: string;
+      label: string;
+      bin_code: string;
+      store_id: string;
+      zone_id: string;
+      rack?: string;
+      position?: string;
+      qr_identifier?: string;
+      status?: string;
+    }> = [];
     if (bins && bins.length > 0) {
       bins.forEach((b) => {
         list.push({
@@ -207,33 +447,33 @@ function SimpleWarehouseModule() {
   // Action: Assign Storage Location to Putaway Task
   const handleConfirmAssignPutaway = async () => {
     if (!assignPutawayTask) return;
-    if (!selectedLocationId) {
-      toast.error("Please select a Storage Location.");
+    const quantity = Number(assignQuantity);
+    if (
+      !assignStoreId ||
+      !assignZoneId ||
+      !selectedLocationId ||
+      !Number.isFinite(quantity) ||
+      quantity <= 0 ||
+      quantity > Number(assignPutawayTask.quantity || 0)
+    ) {
+      toast.error("Select an active rack and enter a valid assignment quantity.");
       return;
     }
     setIsSubmitting(true);
     try {
-      const selectedBinObj = allFlattenedBins.find((b) => b.id === selectedLocationId || b.bin_code === selectedLocationId);
+      const selectedBinObj = allFlattenedBins.find(
+        (b) => b.id === selectedLocationId || b.bin_code === selectedLocationId,
+      );
       await api.assignPutawayLocation(
         assignPutawayTask.id,
         selectedBinObj?.id,
         selectedBinObj?.store_id,
         selectedBinObj?.zone_id,
-        selectedBinObj?.id
+        selectedBinObj?.id,
       );
-      setPutawayTasks((prev) =>
-        prev.map((t) =>
-          t.id === assignPutawayTask.id
-            ? {
-                ...t,
-                destination_bin_code: selectedBinObj?.label || selectedLocationId,
-                destination_bin: selectedBinObj?.label || selectedLocationId,
-                status: "ASSIGNED_TO_STORE",
-              }
-            : t
-        )
+      toast.success(
+        `Assigned ${assignPutawayTask.material_name || "Material"} to ${selectedBinObj?.label || selectedLocationId}`,
       );
-      toast.success(`Assigned ${assignPutawayTask.material_name || "Material"} to ${selectedBinObj?.label || selectedLocationId}`);
       setAssignPutawayTask(null);
       void fetchData();
     } catch (err: any) {
@@ -243,21 +483,272 @@ function SimpleWarehouseModule() {
     }
   };
 
-  const handleConfirmPutaway = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!putawayToConfirm) return;
+  const openAssignPutaway = (task: any) => {
+    setAssignPutawayTask(task);
+    setAssignStoreId(task.destination_store_id || task.assigned_store_id || "");
+    setAssignZoneId(task.destination_zone_id || "");
+    setSelectedLocationId(task.destination_bin_id || "");
+    setAssignQuantity(String(task.quantity ?? ""));
+  };
+
+  const openPutawayScan = (task: any) => {
+    setScanPutawayTask(task);
+    setPutawayScan({ materialQr: "", rackQr: "", quantity: String(task.quantity ?? "") });
+    setPutawayScanValid(false);
+    setMaterialQrVerified(false);
+    setRackQrVerified(false);
+    setQrScanError("");
+  };
+
+  const pickupMaterialQrValue =
+    pickupToConfirm?.confirmation?.material_qr ||
+    pickupToConfirm?.material_qr ||
+    (pickupToConfirm?.batch_number ? `QR-BATCH-${pickupToConfirm.batch_number}` : "") ||
+    pickupToConfirm?.material_code ||
+    "";
+  const pickupRackQrValue =
+    pickupToConfirm?.confirmation?.rack_qr ||
+    pickupToConfirm?.rack_qr ||
+    pickupToConfirm?.pick_location ||
+    "";
+
+  const decodeQrUpload = (file: File, field: "material" | "rack") => {
+    if (!/image\/(png|jpeg|jpg)/i.test(file.type)) {
+      setQrScanError("Upload a PNG, JPG, or JPEG QR image.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context) return setQrScanError("Could not read the uploaded image.");
+        context.drawImage(image, 0, 0);
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+        const decoded = jsQR(pixels.data, pixels.width, pixels.height);
+        if (!decoded?.data) {
+          setQrScanError(
+            `No readable ${field === "material" ? "Material" : "Rack"} QR found in the image.`,
+          );
+          return;
+        }
+        setQrScanError("");
+        setPutawayScan((current) => ({
+          ...current,
+          [field === "material" ? "materialQr" : "rackQr"]: decoded.data,
+        }));
+      };
+      image.onerror = () => setQrScanError("Could not load the uploaded image.");
+      image.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const decodePickupQrUpload = (file: File, field: "material" | "rack") => {
+    if (!/image\/(png|jpeg|jpg)/i.test(file.type)) {
+      toast.error("Upload a PNG, JPG, or JPEG QR image.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context) return toast.error("Could not read the uploaded QR image.");
+        context.drawImage(image, 0, 0);
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+        const decoded = jsQR(pixels.data, pixels.width, pixels.height);
+        if (!decoded?.data)
+          return toast.error(`No readable ${field === "material" ? "material" : "rack"} QR found.`);
+        setPickupConfirmation((current) => ({
+          ...current,
+          [field === "material" ? "material_scan" : "zone_scan"]: decoded.data,
+        }));
+      };
+      image.onerror = () => toast.error("Could not load the uploaded QR image.");
+      image.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const downloadQrValue = async (value: string, title: string) => {
+    if (!value.trim()) {
+      toast.error(`No ${title.toLowerCase()} value is available to generate a QR.`);
+      return;
+    }
+    try {
+      const image = await QRCode.toDataURL(value.trim(), { width: 320, margin: 2 });
+      const link = document.createElement("a");
+      link.href = image;
+      link.download = `${title.replaceAll(" ", "-").toLowerCase()}.png`;
+      link.click();
+    } catch {
+      toast.error(`Unable to generate the ${title.toLowerCase()} QR.`);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    const quantity = Number(putawayScan.quantity);
+    setPutawayScanValid(false);
+    setMaterialQrVerified(false);
+    setRackQrVerified(false);
+    if (
+      !scanPutawayTask ||
+      !putawayScan.materialQr.trim() ||
+      !putawayScan.rackQr.trim() ||
+      !Number.isFinite(quantity) ||
+      quantity <= 0 ||
+      quantity > Number(scanPutawayTask.quantity || 0)
+    )
+      return;
+    void Promise.allSettled([
+      api.resolveGrnQr(putawayScan.materialQr.trim()),
+      api.resolveBinQr(putawayScan.rackQr.trim(), scanPutawayTask.destination_store_id),
+    ])
+      .then(([materialResult, rackResult]) => {
+        if (materialResult.status === "rejected")
+          throw new Error("Material QR could not be resolved.");
+        if (rackResult.status === "rejected") throw new Error("Rack QR could not be resolved.");
+        const material = materialResult.value;
+        const rack = rackResult.value;
+        const materialMatches =
+          String(material.material_code || "").toUpperCase() ===
+            String(scanPutawayTask.item_code || "").toUpperCase() &&
+          (!material.putaway_task_id || material.putaway_task_id === scanPutawayTask.id) &&
+          (!scanPutawayTask.batch_number ||
+            String(material.batch_lot_number || "").toUpperCase() ===
+              String(scanPutawayTask.batch_number).toUpperCase());
+        const rackMatches =
+          (!scanPutawayTask.destination_bin_id ||
+            rack.bin_id === scanPutawayTask.destination_bin_id) &&
+          String(rack.bin_code || "").toUpperCase() ===
+            String(
+              scanPutawayTask.destination_bin_code ||
+                scanPutawayTask.destination_bin ||
+                rack.bin_code,
+            ).toUpperCase();
+        if (active) {
+          setMaterialQrVerified(materialMatches);
+          setRackQrVerified(rackMatches);
+          setPutawayScanValid(materialMatches && rackMatches);
+          if (!materialMatches && !rackMatches)
+            setQrScanError("Material QR batch and Rack QR do not match this putaway task.");
+          else if (!materialMatches)
+            setQrScanError(
+              `Material QR does not match batch ${scanPutawayTask.batch_number || "the assigned batch"}.`,
+            );
+          else if (!rackMatches)
+            setQrScanError(
+              `Rack QR does not match assigned rack ${scanPutawayTask.destination_bin_code || scanPutawayTask.destination_bin || "the assigned rack"}.`,
+            );
+        }
+      })
+      .catch((error: any) => {
+        if (active) {
+          setMaterialQrVerified(false);
+          setRackQrVerified(false);
+          setPutawayScanValid(false);
+          setQrScanError(error?.message || "QR validation failed.");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [scanPutawayTask, putawayScan.materialQr, putawayScan.rackQr, putawayScan.quantity]);
+
+  useEffect(() => {
+    if (!scanPutawayTask) {
+      setPutawayQrImages({ material: "", rack: "" });
+      return;
+    }
+    let active = true;
+    const assignedBin = allFlattenedBins.find(
+      (bin) =>
+        bin.id === scanPutawayTask.destination_bin_id ||
+        bin.bin_code === scanPutawayTask.destination_bin_code,
+    );
+    const previewMaterialQr =
+      putawayScan.materialQr.trim() ||
+      scanPutawayTask.material_qr ||
+      (scanPutawayTask.batch_number ? `QR-BATCH-${scanPutawayTask.batch_number}` : "") ||
+      scanPutawayTask.barcode_value ||
+      "";
+    const previewRackQr =
+      putawayScan.rackQr.trim() ||
+      assignedBin?.qr_identifier ||
+      scanPutawayTask.destination_bin_code ||
+      scanPutawayTask.destination_bin ||
+      "";
+    void Promise.all([
+      previewMaterialQr
+        ? QRCode.toDataURL(previewMaterialQr, { width: 180, margin: 1 })
+        : Promise.resolve(""),
+      previewRackQr
+        ? QRCode.toDataURL(previewRackQr, { width: 180, margin: 1 })
+        : Promise.resolve(""),
+    ])
+      .then(([material, rack]) => {
+        if (active) setPutawayQrImages({ material, rack });
+      })
+      .catch(() => {
+        if (active) setPutawayQrImages({ material: "", rack: "" });
+      });
+    return () => {
+      active = false;
+    };
+  }, [scanPutawayTask, putawayScan.materialQr, putawayScan.rackQr, allFlattenedBins]);
+
+  const handleConfirmPutaway = async () => {
+    if (!scanPutawayTask) return;
+    const quantity = Number(putawayScan.quantity);
+    if (
+      !putawayScan.materialQr.trim() ||
+      !putawayScan.rackQr.trim() ||
+      !Number.isFinite(quantity) ||
+      quantity <= 0
+    ) {
+      toast.error("Scan the material QR and rack QR, then enter a valid quantity.");
+      return;
+    }
     setIsSubmitting(true);
     try {
-      await api.startPutaway(putawayToConfirm.id);
-      await api.completePutaway(putawayToConfirm.id, {
-        material_scan: putawayConfirmation.material_scan.trim(),
-        location_scan: putawayConfirmation.location_scan.trim(),
-        quantity: Number(putawayConfirmation.quantity),
-        confirmation_id: putawayToConfirm.confirmation_id,
+      const resolved = await api.resolveGrnQr(putawayScan.materialQr.trim());
+      if (resolved.putaway_task_id && resolved.putaway_task_id !== scanPutawayTask.id) {
+        throw new Error("The scanned material does not match this putaway task.");
+      }
+      if (
+        String(resolved.material_code || "").toUpperCase() !==
+        String(scanPutawayTask.item_code || "").toUpperCase()
+      ) {
+        throw new Error("The scanned material does not match this putaway task.");
+      }
+      const rack = await api.resolveBinQr(
+        putawayScan.rackQr.trim(),
+        scanPutawayTask.destination_store_id,
+      );
+      if (
+        scanPutawayTask.destination_bin_id &&
+        rack.bin_id !== scanPutawayTask.destination_bin_id
+      ) {
+        throw new Error(
+          `Wrong rack. Scan ${scanPutawayTask.destination_bin_code || scanPutawayTask.destination_bin}.`,
+        );
+      }
+      await api.executePutaway({
+        task_id: scanPutawayTask.id,
+        grn_qr_code: putawayScan.materialQr.trim(),
+        bin_qr_code: putawayScan.rackQr.trim(),
+        quantity,
       });
-      toast.success("QR scans validated and putaway quantity confirmed.");
-      setPutawayToConfirm(null);
-      setPutawayConfirmation({ material_scan: "", location_scan: "", quantity: "" });
+      toast.success("Putaway confirmed and inventory updated.");
+      setScanPutawayTask(null);
       await fetchData(true);
     } catch (err: any) {
       toast.error(err.message || "Putaway confirmation failed");
@@ -273,15 +764,17 @@ function SimpleWarehouseModule() {
 
     if (availQty < reqQty) {
       toast.error(
-        `Insufficient stock. Requested: ${reqQty} ${req.uom || ""}, available: ${availQty} ${req.uom || ""}, shortage: ${reqQty - availQty} ${req.uom || ""}.`
+        `Insufficient stock. Requested: ${reqQty} ${req.uom || ""}, available: ${availQty} ${req.uom || ""}, shortage: ${reqQty - availQty} ${req.uom || ""}.`,
       );
       return;
     }
 
     setIsSubmitting(true);
     try {
-      await api.approveMaterialRequest(req.id || req.request_number);
-      toast.success(`Approved Material Request ${req.request_number || req.id}. Reserved ${reqQty} ${req.uom || ""} and created a pick task.`);
+      await api.approveAssemblyMaterialRequest(req.id || req.request_number);
+      toast.success(
+        `Approved Material Request ${req.request_number || req.id}. Stock verified; picking can now begin.`,
+      );
       void fetchData();
     } catch (err: any) {
       toast.error(err.message || "Failed to approve request");
@@ -296,12 +789,19 @@ function SimpleWarehouseModule() {
     if (!pickupToConfirm) return;
     setIsSubmitting(true);
     try {
-      await api.completePickupTask(pickupToConfirm.id, {
-        material_scan: pickupConfirmation.material_scan.trim(),
-        zone_scan: pickupConfirmation.zone_scan.trim(),
-        quantity: Number(pickupConfirmation.quantity),
-        confirmation_id: pickupToConfirm.confirmation_id,
-      });
+      if (pickupToConfirm.assembly_pick_task_id) {
+        await api.completeAssemblyPickingTask(pickupToConfirm.assembly_pick_task_id, {
+          material_scan: pickupConfirmation.material_scan.trim(),
+          zone_scan: pickupConfirmation.zone_scan.trim(),
+          quantity: Number(pickupConfirmation.quantity),
+        });
+      } else {
+        await api.completePickupTask(pickupToConfirm.id, {
+          material_scan: pickupConfirmation.material_scan.trim(),
+          zone_scan: pickupConfirmation.zone_scan.trim(),
+          quantity: Number(pickupConfirmation.quantity),
+        });
+      }
       toast.success("Pick confirmed and inventory updated.");
       setPickupToConfirm(null);
       setPickupConfirmation({ material_scan: "", zone_scan: "", quantity: "" });
@@ -313,57 +813,83 @@ function SimpleWarehouseModule() {
     }
   };
 
-  const handleCreateBulkRack = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setIsSubmitting(true);
-    try {
-      const created = await api.createBulkRack(bulkRackForm.store_id, {
-        zone_id: bulkRackForm.zone_id,
-        rack_code: bulkRackForm.rack_code.trim(),
-        bin_code_prefix: bulkRackForm.bin_code_prefix.trim(),
-        bin_code_start: Number(bulkRackForm.bin_code_start),
-        count: Number(bulkRackForm.count),
-        position_prefix: bulkRackForm.position_prefix.trim(),
-        position_start: Number(bulkRackForm.position_start),
-        code_width: Number(bulkRackForm.code_width),
-        capacity: Number(bulkRackForm.capacity),
-      });
-      toast.success(`Created ${created.length} rack positions with unique QR labels.`);
-      setBulkRackOpen(false);
-      setBulkRackForm({ store_id: "", zone_id: "", rack_code: "", bin_code_prefix: "", bin_code_start: "1", count: "", position_prefix: "", position_start: "1", code_width: "3", capacity: "" });
-      await fetchData(true);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to create rack positions");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   // Action: Create Location Sub-Form (Warehouse, Zone, Bin)
-  const handleCreateLocationSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  async function printRackQrLabels() {
+    const store = stores.find((s) => s.id === newBinForm.store_id);
+    const zone = zones.find((z) => z.id === newBinForm.zone_id);
+    const start = Number(rackGenerator.start) || 1;
+    const count = Math.min(100, Math.max(1, Number(rackGenerator.count) || 1));
+    const prefix = rackGenerator.prefix.trim() || "RACK-";
+    const labels = await Promise.all(
+      Array.from({ length: count }, async (_, i) => {
+        const code = `${prefix}${String(start + i).padStart(3, "0")}`;
+        const payload = `QR-RACK-${store?.store_code || "WAREHOUSE"}-${zone?.zone_code || "ZONE"}-${code}`;
+        return { code, image: await QRCode.toDataURL(payload, { width: 220, margin: 1 }) };
+      }),
+    );
+    const win = window.open("", "_blank", "width=900,height=800");
+    if (!win) {
+      toast.error("Please allow popups to print QR labels");
+      return;
+    }
+    win.document.write(
+      `<html><head><title>Rack QR Labels</title><style>body{font-family:Arial;padding:16px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.label{text-align:center;border:1px solid #999;padding:8px;break-inside:avoid}.label img{width:150px;height:150px}@media print{.label{break-inside:avoid}}</style></head><body><h2>${store?.store_name || "Warehouse"} / ${zone?.zone_code || "Zone"}</h2><div class="grid">${labels.map((l) => `<div class="label"><img src="${l.image}"/><b>${l.code}</b></div>`).join("")}</div><script>window.onload=()=>{window.print()}</script></body></html>`,
+    );
+    win.document.close();
+  }
+
+  const handleCreateLocationSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     try {
       if (createLocationType === "store") {
-        if (!newStoreForm.store_code || !newStoreForm.store_name) {
-          toast.error("Please fill in Store Code and Store Name.");
+        const storeName = newStoreForm.store_name.trim();
+        if (!storeName) {
+          toast.error("Please enter a warehouse name.");
           return;
         }
-        await api.createStore(newStoreForm);
-        toast.success(`✓ Warehouse created: ${newStoreForm.store_name} (${newStoreForm.store_code})`);
+        const nextCode = await api.getNextStoreCode();
+        const generatedStoreCode = nextCode?.suggested_store_code;
+        const createdStore = await api.createStore({
+          store_name: storeName,
+          store_code: generatedStoreCode,
+          description: undefined,
+          store_type: newStoreForm.store_type,
+          status: "ACTIVE",
+          warehouse_id: newStoreForm.warehouse_id || "Main Warehouse",
+        });
+        toast.success(
+          `Warehouse created: ${createdStore?.store_name || storeName} (${createdStore?.store_code || generatedStoreCode || "auto-generated"})`,
+        );
+        setNewStoreForm({
+          store_code: "",
+          store_name: "",
+          description: "",
+          store_type: "RAW_MATERIAL",
+          status: "ACTIVE",
+          warehouse_id: "",
+        });
       } else if (createLocationType === "zone") {
         const targetStoreId = newZoneForm.store_id;
         if (!targetStoreId) {
           toast.error("Select a warehouse before creating a zone.");
           return;
         }
-        if (!newZoneForm.zone_code || !newZoneForm.zone_name) {
-          toast.error("Please fill in Zone Code and Zone Name.");
+        if (!newZoneForm.zone_name.trim()) {
+          toast.error("Please enter a zone name.");
           return;
         }
-        await api.createZone(targetStoreId, newZoneForm);
-        toast.success(`✓ Storage Zone created: ${newZoneForm.zone_name} (${newZoneForm.zone_code})`);
-      } else if (createLocationType === "bin") {
+        const nextZone = await api.getNextZoneCode(targetStoreId);
+        const generatedZoneCode = nextZone?.suggested_zone_code;
+        const createdZone = await api.createZone(targetStoreId, {
+          zone_name: newZoneForm.zone_name.trim(),
+          zone_code: generatedZoneCode,
+        });
+        setNewZoneForm({ store_id: "", zone_code: "", zone_name: "" });
+        toast.success(
+          `Zone created: ${createdZone?.zone_name || newZoneForm.zone_name} (${createdZone?.zone_code || generatedZoneCode || "auto-generated"})`,
+        );
+      } else if (createLocationType === "rack") {
         const targetStoreId = newBinForm.store_id;
         const targetZoneId = newBinForm.zone_id;
         if (!targetStoreId || !targetZoneId) {
@@ -372,26 +898,120 @@ function SimpleWarehouseModule() {
         }
         const selectedZoneObj = zones.find((z) => z.id === targetZoneId);
 
-        if (!newBinForm.bin_code) {
-          toast.error("Please enter a Bin Code.");
+        const prefix = rackGenerator.prefix.trim() || "RACK-";
+        const start = Number(rackGenerator.start);
+        const count = Number(rackGenerator.count);
+        if (
+          !Number.isInteger(start) ||
+          !Number.isInteger(count) ||
+          start < 1 ||
+          count < 1 ||
+          count > 100
+        ) {
+          toast.error("Enter a valid starting number and between 1 and 100 racks.");
           return;
         }
 
-        const qrVal = `LOC-${stores.find(s => s.id === targetStoreId)?.store_code}-${selectedZoneObj?.zone_code}-${newBinForm.bin_code}`;
-
-        const binRes = await api.createBin(targetStoreId, targetZoneId, {
-          bin_code: newBinForm.bin_code,
-          bin_name: newBinForm.bin_code,
-          rack: newBinForm.rack,
-          position: newBinForm.position,
-          qr_identifier: qrVal,
+        const storeCode = stores.find((s) => s.id === targetStoreId)?.store_code;
+        const rackCodes = Array.from(
+          { length: count },
+          (_, i) => `${prefix}${String(start + i).padStart(3, "0")}`,
+        );
+        const existingBins = await api.getZoneBins(targetZoneId);
+        const existingCodes = new Set(
+          (existingBins || []).map((b: any) => String(b.bin_code || "").toUpperCase()),
+        );
+        const duplicateCodes = rackCodes.filter((code) => existingCodes.has(code.toUpperCase()));
+        if (duplicateCodes.length) {
+          toast.error(`Rack codes already exist: ${duplicateCodes.join(", ")}`);
+          return;
+        }
+        await Promise.all(
+          rackCodes.map((code) =>
+            api.createBin(targetZoneId, {
+              bin_code: code,
+              bin_name: code,
+              rack: code,
+              position: "",
+              qr_identifier: `QR-RACK-${storeCode}-${selectedZoneObj?.zone_code}-${code}`,
+            }),
+          ),
+        );
+        setNewBinRows([{ rack: "", position: "", bin_code: "" }]);
+        toast.success(
+          `✓ Storage Bin created: ${newBinForm.bin_code} (Rack: ${newBinForm.rack}, Shelf: ${newBinForm.position}) with Auto QR Code!`,
+        );
+      } else if (createLocationType === "bin") {
+        const row = newBinRows[0];
+        if (
+          !newBinForm.store_id ||
+          !newBinForm.zone_id ||
+          !row.rack.trim() ||
+          !row.position.trim() ||
+          !row.bin_code.trim()
+        ) {
+          toast.error("Select warehouse, zone, rack, shelf/position, and bin code.");
+          return;
+        }
+        const existingBins = await api.getZoneBins(newBinForm.zone_id);
+        if (
+          (existingBins || []).some(
+            (b: any) => String(b.bin_code).toUpperCase() === row.bin_code.trim().toUpperCase(),
+          )
+        ) {
+          toast.error(`Bin code '${row.bin_code}' already exists in this zone.`);
+          return;
+        }
+        const store = stores.find((s) => s.id === newBinForm.store_id);
+        const zone = zones.find((z) => z.id === newBinForm.zone_id);
+        await api.createBin(newBinForm.zone_id, {
+          bin_code: row.bin_code.trim(),
+          bin_name: row.bin_code.trim(),
+          rack: row.rack.trim(),
+          position: row.position.trim(),
+          qr_identifier: `QR-BIN-${store?.store_code}-${zone?.zone_code}-${row.bin_code.trim()}`,
         });
-        toast.success(`✓ Storage Bin created: ${newBinForm.bin_code} (Rack: ${newBinForm.rack}, Shelf: ${newBinForm.position}) with Auto QR Code!`);
+        toast.success(`Bin ${row.bin_code} created with a unique QR.`);
       }
       setCreateLocationType(null);
-      void fetchData(true);
+      await fetchData(true);
     } catch (err: any) {
       toast.error(err.message || "Failed to create location entity");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteWarehouse = async () => {
+    const identifier = window
+      .prompt(
+        `Enter the warehouse code or name to delete:\n${stores.map((store) => `${store.store_code} — ${store.store_name}`).join("\n")}`,
+      )
+      ?.trim();
+    if (!identifier) return;
+    const target = stores.find(
+      (store) =>
+        String(store.id) === identifier ||
+        String(store.store_code).toLowerCase() === identifier.toLowerCase() ||
+        String(store.store_name).toLowerCase() === identifier.toLowerCase(),
+    );
+    if (!target) {
+      toast.error("Warehouse not found. Enter an existing warehouse code or name.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Delete warehouse ${target.store_name} (${target.store_code}) and its configured zones/bins?`,
+      )
+    )
+      return;
+    setIsSubmitting(true);
+    try {
+      await api.deleteStore(target.id);
+      toast.success(`Warehouse ${target.store_code} deleted.`);
+      await fetchData(true);
+    } catch (err: any) {
+      toast.error(err.message || "Unable to delete warehouse.");
     } finally {
       setIsSubmitting(false);
     }
@@ -402,12 +1022,15 @@ function SimpleWarehouseModule() {
     return inventorySummary.filter((item) => {
       const matchesSearch =
         !invSearch ||
-        (item.material_name || item.material || "").toLowerCase().includes(invSearch.toLowerCase()) ||
+        (item.material_name || item.material || "")
+          .toLowerCase()
+          .includes(invSearch.toLowerCase()) ||
         (item.material_code || "").toLowerCase().includes(invSearch.toLowerCase()) ||
         (item.batch_number || item.batch || "").toLowerCase().includes(invSearch.toLowerCase());
 
       const matchesWarehouse =
-        invWarehouseFilter === "ALL" || (item.warehouse_id || item.store_name || "").includes(invWarehouseFilter);
+        invWarehouseFilter === "ALL" ||
+        (item.warehouse_id || item.store_name || "").includes(invWarehouseFilter);
 
       const matchesStatus = invStatusFilter === "ALL" || item.status === invStatusFilter;
 
@@ -415,11 +1038,94 @@ function SimpleWarehouseModule() {
     });
   }, [inventorySummary, invSearch, invWarehouseFilter, invStatusFilter]);
 
+  const [agingAlertDays, setAgingAlertDays] = useState(15);
+  const agingRows = useMemo(() => {
+    const now = Date.now();
+    return inventorySummary.map((item: any) => {
+      const storedAt = item.putaway_date || item.putaway_completed_at || item.stored_at || item.received_at || item.grn_accepted_at || item.created_at;
+      const storedTime = storedAt ? new Date(storedAt).getTime() : NaN;
+      const ageDays = Number.isFinite(storedTime) ? Math.max(0, Math.floor((now - storedTime) / 86400000)) : null;
+      const qc = String(item.qc_status || item.quality_status || item.status || "").toUpperCase();
+      const expiry = item.expiry_date || item.expiration_date;
+      const expired = Boolean(expiry && new Date(expiry).getTime() < now);
+      const onHold = ["HOLD", "QC_HOLD", "QUARANTINED", "REJECTED", "QUALITY_FAILED"].includes(qc);
+      return { item, storedAt, ageDays, expired, onHold };
+    }).filter((row) => row.ageDays !== null && !row.onHold && !row.expired && Number(row.item.available ?? row.item.available_quantity ?? row.item.on_hand_quantity ?? row.item.total_quantity ?? 0) > 0).sort((a, b) => (a.ageDays! < b.ageDays! ? 1 : -1));
+  }, [inventorySummary]);
+  const agingAlerts = agingRows.filter((row) => (row.ageDays ?? 0) >= agingAlertDays);
+
   // Dashboard Aggregates (Real backend numbers)
-  const pendingPutawayCount = putawayTasks.filter((t) => t.status === "PENDING" || t.status === "CREATED").length;
-  const pendingRequestsCount = materialRequests.filter((r) => r.status === "PENDING" || r.status === "SUBMITTED").length;
-  const pendingPickingCount = pickupTasks.filter((p) => p.status === "PENDING" || p.status === "IN_PROGRESS").length;
-  const totalAvailableStock = inventorySummary.reduce((acc, i) => acc + Number(i.available || i.available_quantity || 0), 0);
+  const pendingPutawayCount = putawayTasks.filter(
+    (t) => t.status === "PENDING" || t.status === "CREATED",
+  ).length;
+  const pendingRequestsCount = materialRequests.filter(
+    (r) => r.status === "PENDING" || r.status === "SUBMITTED",
+  ).length;
+  const pendingPickingCount = pickupTasks.filter(
+    (p) => p.status === "PENDING" || p.status === "IN_PROGRESS",
+  ).length;
+  const groupedPutawayTasks = useMemo(() => {
+    const groups = new Map<string, any>();
+    for (const task of putawayTasks) {
+      const key =
+        task.grn_number ||
+        task.grnNumber ||
+        task.order_number ||
+        task.asn_number ||
+        task.asnNumber ||
+        task.id;
+      const group = groups.get(key) || {
+        key,
+        grn_number: task.grn_number || task.grnNumber,
+        asn_number: task.asn_number || task.asnNumber,
+        tasks: [],
+        batches: new Set<string>(),
+        materials: new Set<string>(),
+        quantity: 0,
+        uom: task.uom || "",
+        status: task.status,
+      };
+      group.tasks.push(task);
+      if (task.batch_number || task.batchNumber)
+        group.batches.add(task.batch_number || task.batchNumber);
+      if (task.material_name || task.item_code)
+        group.materials.add(task.material_name || task.item_code);
+      group.quantity += Number(task.quantity || task.received_quantity || 0);
+      if (task.status !== "COMPLETED" && task.status !== "STORED") group.status = task.status;
+      groups.set(key, group);
+    }
+    return Array.from(groups.values()).map((group) => ({
+      ...group,
+      batch_count: group.batches.size,
+      material_count: group.materials.size,
+      material_names: Array.from(group.materials),
+      batch_details: group.tasks.map((task: any) => ({
+        batch_number: task.batch_number || task.batchNumber || "-",
+        quantity: task.quantity ?? task.received_quantity ?? 0,
+        uom: task.uom || "PCS",
+      })),
+      status: group.tasks.every((task: any) =>
+        ["COMPLETED", "PUTAWAY_COMPLETED", "STORED"].includes(
+          String(task.status || "").toUpperCase(),
+        ),
+      )
+        ? "COMPLETED"
+        : group.tasks.some(
+              (task: any) => String(task.status || "").toUpperCase() === "PARTIALLY_COMPLETED",
+            )
+          ? "PARTIALLY_COMPLETED"
+          : group.tasks.every(
+                (task: any) =>
+                  task.destination_bin_id || task.destination_bin_code || task.destination_bin,
+              )
+            ? "ASSIGNED"
+            : "PENDING",
+    }));
+  }, [putawayTasks]);
+  const totalAvailableStock = inventorySummary.reduce(
+    (acc, i) => acc + Number(i.available || i.available_quantity || 0),
+    0,
+  );
 
   const handleAllocateDockFromLocations = async (requestId: string) => {
     const dockId = dockChoices[requestId];
@@ -459,7 +1165,7 @@ function SimpleWarehouseModule() {
   };
 
   return (
-    <AppShell title="Warehouse Control Center">
+    <AppShell activeItem="/inventory">
       <div className="space-y-6 pb-12">
         {/* Header Title Bar */}
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
@@ -470,55 +1176,75 @@ function SimpleWarehouseModule() {
             </h1>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" onClick={() => void fetchData()} title="Refresh Data">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => void fetchData()}
+              title="Refresh Data"
+            >
               <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
             </Button>
           </div>
         </div>
 
         {/* 7 Simple Warehouse Navbar Sub-Tabs */}
-        <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as TabType)} className="w-full">
-          {false && <TabsList className="bg-slate-100 dark:bg-slate-900 p-1 rounded-xl flex flex-wrap gap-1 w-full justify-start border border-slate-200 dark:border-slate-800">
-            <TabsTrigger value="dashboard" className="gap-2 px-4 py-2 text-xs font-semibold">
-              <Boxes className="h-4 w-4" />
-              Dashboard
-            </TabsTrigger>
-            <TabsTrigger value="putaway" className="gap-2 px-4 py-2 text-xs font-semibold">
-              <PackageCheck className="h-4 w-4" />
-              Putaway
-              {pendingPutawayCount > 0 && (
-                <Badge variant="secondary" className="ml-1 bg-amber-500/15 text-amber-700 dark:text-amber-400 font-bold px-1.5 py-0.2">
-                  {pendingPutawayCount}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="inventory" className="gap-2 px-4 py-2 text-xs font-semibold">
-              <Boxes className="h-4 w-4" />
-              Inventory
-            </TabsTrigger>
-            <TabsTrigger value="requests" className="gap-2 px-4 py-2 text-xs font-semibold">
-              <ClipboardList className="h-4 w-4" />
-              Material Requests
-              {pendingRequestsCount > 0 && (
-                <Badge variant="secondary" className="ml-1 bg-blue-500/15 text-blue-700 dark:text-blue-400 font-bold px-1.5 py-0.2">
-                  {pendingRequestsCount}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="picking" className="gap-2 px-4 py-2 text-xs font-semibold">
-              <ListOrdered className="h-4 w-4" />
-              Picking
-              {pendingPickingCount > 0 && (
-                <Badge variant="secondary" className="ml-1 bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 font-bold px-1.5 py-0.2">
-                  {pendingPickingCount}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="locations" className="gap-2 px-4 py-2 text-xs font-semibold">
-              <Building2 className="h-4 w-4" />
-              Locations
-            </TabsTrigger>
-          </TabsList>}
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => handleTabChange(v as TabType)}
+          className="w-full"
+        >
+          {false && (
+            <TabsList className="bg-slate-100 dark:bg-slate-900 p-1 rounded-xl flex flex-wrap gap-1 w-full justify-start border border-slate-200 dark:border-slate-800">
+              <TabsTrigger value="dashboard" className="gap-2 px-4 py-2 text-xs font-semibold">
+                <Boxes className="h-4 w-4" />
+                Dashboard
+              </TabsTrigger>
+              <TabsTrigger value="putaway" className="gap-2 px-4 py-2 text-xs font-semibold">
+                <PackageCheck className="h-4 w-4" />
+                Putaway
+                {pendingPutawayCount > 0 && (
+                  <Badge
+                    variant="secondary"
+                    className="ml-1 bg-amber-500/15 text-amber-700 dark:text-amber-400 font-bold px-1.5 py-0.2"
+                  >
+                    {pendingPutawayCount}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="inventory" className="gap-2 px-4 py-2 text-xs font-semibold">
+                <Boxes className="h-4 w-4" />
+                Inventory
+              </TabsTrigger>
+              <TabsTrigger value="requests" className="gap-2 px-4 py-2 text-xs font-semibold">
+                <ClipboardList className="h-4 w-4" />
+                Material Requests
+                {pendingRequestsCount > 0 && (
+                  <Badge
+                    variant="secondary"
+                    className="ml-1 bg-blue-500/15 text-blue-700 dark:text-blue-400 font-bold px-1.5 py-0.2"
+                  >
+                    {pendingRequestsCount}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="picking" className="gap-2 px-4 py-2 text-xs font-semibold">
+                <ListOrdered className="h-4 w-4" />
+                Picking
+                {pendingPickingCount > 0 && (
+                  <Badge
+                    variant="secondary"
+                    className="ml-1 bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 font-bold px-1.5 py-0.2"
+                  >
+                    {pendingPickingCount}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="locations" className="gap-2 px-4 py-2 text-xs font-semibold">
+                <Building2 className="h-4 w-4" />
+                Locations
+              </TabsTrigger>
+            </TabsList>
+          )}
 
           {/* ========================================================================= */}
           {/* 1. DASHBOARD TAB */}
@@ -528,7 +1254,9 @@ function SimpleWarehouseModule() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <Card className="p-4 border-l-4 border-l-emerald-500 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Available Inventory</span>
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Available Inventory
+                  </span>
                   <CheckCircle2 className="h-5 w-5 text-emerald-500" />
                 </div>
                 <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-slate-100">
@@ -539,28 +1267,40 @@ function SimpleWarehouseModule() {
 
               <Card className="p-4 border-l-4 border-l-amber-500 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Putaway Pending</span>
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Putaway Pending
+                  </span>
                   <PackageCheck className="h-5 w-5 text-amber-500" />
                 </div>
-                <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-slate-100">{pendingPutawayCount} Tasks</div>
+                <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-slate-100">
+                  {pendingPutawayCount} Tasks
+                </div>
                 <p className="text-xs text-slate-500 mt-1">From Posted GRNs</p>
               </Card>
 
               <Card className="p-4 border-l-4 border-l-blue-500 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Material Requests</span>
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Material Requests
+                  </span>
                   <ClipboardList className="h-5 w-5 text-blue-500" />
                 </div>
-                <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-slate-100">{pendingRequestsCount} Requisitions</div>
+                <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-slate-100">
+                  {pendingRequestsCount} Requisitions
+                </div>
                 <p className="text-xs text-slate-500 mt-1">Awaiting Warehouse Approval</p>
               </Card>
 
               <Card className="p-4 border-l-4 border-l-indigo-500 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Picking Queue</span>
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Picking Queue
+                  </span>
                   <ListOrdered className="h-5 w-5 text-indigo-500" />
                 </div>
-                <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-slate-100">{pendingPickingCount} Tasks</div>
+                <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-slate-100">
+                  {pendingPickingCount} Tasks
+                </div>
                 <p className="text-xs text-slate-500 mt-1">Current warehouse stock</p>
               </Card>
             </div>
@@ -581,7 +1321,7 @@ function SimpleWarehouseModule() {
                     <th className="py-2.5 px-3">Material</th>
                     <th className="py-2.5 px-3">Batch</th>
                     <th className="py-2.5 px-3">Quantity</th>
-                    <th className="py-2.5 px-3">Assigned Rack / Bin</th>
+                    <th className="py-2.5 px-3">Assigned Rack</th>
                     <th className="py-2.5 px-3">Status</th>
                     <th className="py-2.5 px-3 text-right">Actions</th>
                   </tr>
@@ -594,16 +1334,46 @@ function SimpleWarehouseModule() {
                       </td>
                     </tr>
                   ) : (
-                    putawayTasks.map((t) => (
+                    groupedPutawayTasks.map((t) => (
                       <tr key={t.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
-                        <td className="py-3 px-3 font-semibold text-indigo-600">{t.grn_number || t.task_number || t.id}</td>
-                        <td className="py-3 px-3 font-medium">{t.material_name || t.item_code}</td>
-                        <td className="py-3 px-3 font-mono text-slate-500">{t.batch_number || t.batch || "UNTRACKED"}</td>
-                        <td className="py-3 px-3 font-bold">{t.quantity ?? "—"} {t.uom || ""}</td>
+                        <td className="py-3 px-3 font-semibold text-indigo-600">
+                          {t.grn_number || t.key}
+                        </td>
+                        <td className="py-3 px-3 font-medium">
+                          <button
+                            type="button"
+                            className="text-left hover:text-indigo-600"
+                            onClick={() => setSelectedPutawayGroup(t)}
+                          >
+                            {t.material_names?.join(", ") || "-"}
+                            {t.material_count > 1 && (
+                              <span className="ml-1 text-slate-400">({t.material_count})</span>
+                            )}
+                          </button>
+                        </td>
+                        <td className="py-3 px-3 font-mono text-slate-500">
+                          {t.batch_count ? (
+                            <button
+                              type="button"
+                              className="underline hover:text-indigo-600"
+                              onClick={() => setSelectedPutawayGroup(t)}
+                            >
+                              {t.batch_count} batch{t.batch_count === 1 ? "" : "es"}
+                            </button>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                        <td className="py-3 px-3 font-bold">
+                          {t.quantity ?? "—"} {t.uom || ""}
+                        </td>
                         <td className="py-3 px-3">
-                          {t.destination_rack || t.destination_bin_code || t.destination_bin ? (
-                            <Badge variant="outline" className="bg-emerald-50 text-emerald-700 font-mono text-[10px]">
-                              {t.destination_rack ? `${t.destination_rack}${t.destination_bin_code || t.destination_bin ? ` / ${t.destination_bin_code || t.destination_bin}` : ""}` : (t.destination_bin_code || t.destination_bin)}
+                          {t.tasks[0]?.destination_bin_code || t.tasks[0]?.destination_bin ? (
+                            <Badge
+                              variant="outline"
+                              className="bg-emerald-50 text-emerald-700 font-mono text-[10px]"
+                            >
+                              {t.tasks[0]?.destination_bin_code || t.tasks[0]?.destination_bin}
                             </Badge>
                           ) : (
                             <span className="text-slate-400 italic">Unassigned</span>
@@ -613,50 +1383,55 @@ function SimpleWarehouseModule() {
                           <Badge
                             className={cn(
                               "text-[10px] font-bold uppercase",
-                              t.status === "COMPLETED" || t.status === "STORED" ? "bg-emerald-500/15 text-emerald-700" : "bg-amber-500/15 text-amber-700"
+                              t.status === "COMPLETED" || t.status === "STORED"
+                                ? "bg-emerald-500/15 text-emerald-700"
+                                : "bg-amber-500/15 text-amber-700",
                             )}
                           >
-                            {(t.status || "OPEN").replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (letter: string) => letter.toUpperCase())}
+                            {t.status || "—"}
                           </Badge>
                         </td>
                         <td className="py-3 px-3 text-right">
-                          {(() => {
-                            const isAssigned =
-                              t.status === "ASSIGNED_TO_STORE" ||
-                              t.status === "IN_PROGRESS" ||
-                              Boolean(t.destination_bin_code || t.destination_bin || t.destination_bin_id || t.destination_location_id);
-                            const isCompleted = ["COMPLETED", "PUTAWAY_COMPLETED", "STORED"].includes((t.status || "").toUpperCase());
-
-                            return (
-                              <Button
-                                size="sm"
-                                variant={isAssigned ? "secondary" : "outline"}
-                                disabled={isCompleted}
-                                onClick={() => {
-                                  setAssignPutawayTask(t);
-                                }}
-                                className={cn(
-                                  "h-7 text-xs border-indigo-200 text-indigo-700",
-                                  isCompleted && "opacity-50 cursor-not-allowed bg-slate-100 text-slate-400 border-slate-200 shadow-none pointer-events-none"
-                                )}
-                              >
-                                {isAssigned ? "Change Rack" : "Assign Rack"}
-                              </Button>
-                            );
-                          })()}
-                          {(t.destination_location_id || t.destination_bin_id) && !["COMPLETED", "PUTAWAY_COMPLETED", "STORED"].includes((t.status || "").toUpperCase()) && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                setPutawayToConfirm({ ...t, confirmation_id: globalThis.crypto.randomUUID() });
-                                setPutawayConfirmation({ material_scan: "", location_scan: "", quantity: String(t.remaining_quantity ?? t.quantity ?? "") });
-                              }}
-                              className="h-7 ml-1 text-xs text-indigo-700"
-                            >
-                              <Scan className="h-3.5 w-3.5 mr-1" /> Scan / Put Away
-                            </Button>
-                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openAssignPutaway(t.tasks[0])}
+                            disabled={["PUTAWAY_COMPLETED", "COMPLETED", "STORED"].includes(
+                              String(t.status || "").toUpperCase(),
+                            )}
+                            title={
+                              ["PUTAWAY_COMPLETED", "COMPLETED", "STORED"].includes(
+                                String(t.status || "").toUpperCase(),
+                              )
+                                ? "Completed putaway tasks cannot be reassigned"
+                                : undefined
+                            }
+                            className="h-7 text-xs border-indigo-200 text-indigo-700"
+                          >
+                            Assign Rack
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openPutawayScan(t.tasks[0])}
+                            disabled={
+                              !t.tasks[0]?.destination_bin_id ||
+                              t.status === "PUTAWAY_COMPLETED" ||
+                              t.status === "COMPLETED" ||
+                              t.status === "STORED"
+                            }
+                            className="h-7 text-xs border-emerald-200 text-emerald-700"
+                          >
+                            <Scan className="mr-1 h-3 w-3" /> Scan QR
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setSelectedPutawayGroup(t)}
+                            className="h-7 text-xs"
+                          >
+                            View Details
+                          </Button>
                         </td>
                       </tr>
                     ))
@@ -720,11 +1495,21 @@ function SimpleWarehouseModule() {
                     ) : (
                       filteredInventory.map((item, idx) => (
                         <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
-                          <td className="py-3 px-3 font-mono font-semibold text-indigo-600">{item.material_code || "-"}</td>
-                          <td className="py-3 px-3 font-medium text-slate-900 dark:text-slate-100">{item.material_name || item.material}</td>
-                          <td className="py-3 px-3 font-mono text-slate-500">{item.batch_number || item.batch || "-"}</td>
+                          <td className="py-3 px-3 font-mono font-semibold text-indigo-600">
+                            {item.material_code || "-"}
+                          </td>
+                          <td className="py-3 px-3 font-medium text-slate-900 dark:text-slate-100">
+                            {item.material_name || item.material}
+                          </td>
+                          <td className="py-3 px-3 font-mono text-slate-500">
+                            {item.batch_number || item.batch || "-"}
+                          </td>
                           <td className="py-3 px-3 font-bold text-emerald-600">
-                            {item.available ?? item.available_quantity ?? item.total_quantity ?? "—"} {item.uom || ""}
+                            {item.available ??
+                              item.available_quantity ??
+                              item.total_quantity ??
+                              "—"}{" "}
+                            {item.uom || ""}
                           </td>
                           <td className="py-3 px-3">
                             <Badge variant="outline" className="text-[10px] font-mono">
@@ -732,7 +1517,29 @@ function SimpleWarehouseModule() {
                             </Badge>
                           </td>
                           <td className="py-3 px-3 text-right">
-                            <Button size="sm" variant="ghost" onClick={() => setSelectedInventory(item)} className="h-7 text-xs text-indigo-600">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setSelectedInventory(item);
+                                void api
+                                  .getMaterialInventoryDetail(String(item.material_code || ""))
+                                  .then((detail: any) => {
+                                    setSelectedInventory((current: any) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            inventory_history: detail?.inventory_history,
+                                            detail_batches: detail?.batches,
+                                            detail_movements: detail?.movements,
+                                          }
+                                        : current,
+                                    );
+                                  })
+                                  .catch(() => undefined);
+                              }}
+                              className="h-7 text-xs text-indigo-600"
+                            >
                               <Eye className="h-3.5 w-3.5 mr-1" /> View Details
                             </Button>
                           </td>
@@ -775,23 +1582,35 @@ function SimpleWarehouseModule() {
                   ) : (
                     materialRequests.map((req) => (
                       <tr key={req.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
-                        <td className="py-3 px-3 font-semibold text-indigo-600">{req.request_number || req.id}</td>
-                        <td className="py-3 px-3 text-slate-600">{req.assembly_order || req.assembly_order_number || "-"}</td>
-                        <td className="py-3 px-3 font-medium">{req.material_name || req.material_code}</td>
-                        <td className="py-3 px-3 font-bold text-slate-900 dark:text-slate-100">{req.quantity ?? req.required_quantity ?? "—"} {req.uom || ""}</td>
-                        <td className="py-3 px-3 font-bold text-emerald-600">{req.available ?? req.available_quantity ?? "—"} {req.uom || ""}</td>
+                        <td className="py-3 px-3 font-semibold text-indigo-600">
+                          {req.request_number || req.id}
+                        </td>
+                        <td className="py-3 px-3 text-slate-600">
+                          {req.assembly_order || req.assembly_order_number || "-"}
+                        </td>
+                        <td className="py-3 px-3 font-medium">
+                          {req.material_name || req.material_code}
+                        </td>
+                        <td className="py-3 px-3 font-bold text-slate-900 dark:text-slate-100">
+                          {req.quantity ?? req.required_quantity ?? "—"} {req.uom || ""}
+                        </td>
+                        <td className="py-3 px-3 font-bold text-emerald-600">
+                          {req.available ?? req.available_quantity ?? "—"} {req.uom || ""}
+                        </td>
                         <td className="py-3 px-3">
                           <Badge
                             className={cn(
                               "text-[10px] font-bold uppercase",
-                              req.status === "APPROVED" ? "bg-emerald-500/15 text-emerald-700" : "bg-blue-500/15 text-blue-700"
+                              req.status === "APPROVED"
+                                ? "bg-emerald-500/15 text-emerald-700"
+                                : "bg-blue-500/15 text-blue-700",
                             )}
                           >
                             {req.status || "—"}
                           </Badge>
                         </td>
                         <td className="py-3 px-3 text-right">
-                          {req.status !== "APPROVED" && (
+                          {(req.status === "PENDING" || req.status === "SUBMITTED") && (
                             <Button
                               size="sm"
                               onClick={() => handleApproveMaterialRequest(req)}
@@ -813,6 +1632,13 @@ function SimpleWarehouseModule() {
           {/* 5. PICKING TAB */}
           {/* ========================================================================= */}
           <TabsContent value="picking" className="space-y-6 mt-6">
+            <Card className="overflow-hidden rounded-2xl border-amber-200 bg-amber-50/40 p-5 dark:border-amber-900/50 dark:bg-amber-950/10">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-start gap-3"><Clock className="mt-0.5 size-5 text-amber-600" /><div><h3 className="text-sm font-bold uppercase tracking-wider text-amber-900 dark:text-amber-200">Raw Material Aging Reminder</h3><p className="mt-1 text-xs text-amber-800/80 dark:text-amber-200/80">Oldest eligible raw-material batches appear first. QC holds and expired stock are excluded.</p></div></div>
+                <div className="flex items-center gap-1.5"><span className="text-[10px] font-bold uppercase text-muted-foreground">Alert after</span>{[15, 30].map((days) => <Button key={days} size="sm" variant={agingAlertDays === days ? "default" : "outline"} className="h-7 rounded-lg px-2 text-[10px]" onClick={() => setAgingAlertDays(days)}>{days} days</Button>)}</div>
+              </div>
+              {agingAlerts.length === 0 ? <p className="mt-4 text-xs text-muted-foreground">No eligible raw-material batches have reached the selected aging threshold.</p> : <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-xs"><thead className="border-b border-amber-200 text-[10px] uppercase text-amber-900/70"><tr><th className="p-2">Material</th><th className="p-2">Batch</th><th className="p-2">Rack</th><th className="p-2">Quantity</th><th className="p-2">Storage date</th><th className="p-2">Age</th></tr></thead><tbody>{agingAlerts.map(({ item, storedAt, ageDays }) => <tr key={`${item.material_code}-${item.batch_number}-${item.bin_code || item.rack || item.location}`} className="border-b border-amber-100"><td className="p-2 font-semibold">{item.material_name || item.material_code || "—"}</td><td className="p-2 font-mono">{item.batch_number || item.batch || "—"}</td><td className="p-2 font-mono">{item.rack || item.rack_code || item.bin_code || item.location || "—"}</td><td className="p-2 font-bold">{item.available ?? item.available_quantity ?? item.on_hand_quantity ?? item.total_quantity ?? "—"} {item.uom || ""}</td><td className="p-2">{storedAt ? new Date(storedAt).toLocaleDateString() : "—"}</td><td className="p-2 font-bold text-amber-700">Stored {ageDays} days</td></tr>)}</tbody></table></div>}
+            </Card>
             <Card className="p-5 overflow-x-auto">
               <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 uppercase tracking-wider">
                 Warehouse Picking Queue (Operator Pick Tasks)
@@ -839,20 +1665,36 @@ function SimpleWarehouseModule() {
                   ) : (
                     pickupTasks.map((p) => (
                       <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
-                        <td className="py-3 px-3 font-semibold text-indigo-600">{p.task_number || p.id}</td>
-                        <td className="py-3 px-3 text-slate-600">{p.assembly_order_number || p.assembly_order || "-"}</td>
-                        <td className="py-3 px-3 font-medium">{p.material_name || p.material_code}</td>
+                        <td className="py-3 px-3 font-semibold text-indigo-600">
+                          <button
+                            type="button"
+                            className="underline underline-offset-2"
+                            onClick={() => setPickupToConfirm(p)}
+                          >
+                            {p.task_number || p.id}
+                          </button>
+                        </td>
+                        <td className="py-3 px-3 text-slate-600">
+                          {p.assembly_order_number || p.assembly_order || "-"}
+                        </td>
+                        <td className="py-3 px-3 font-medium">
+                          {p.material_name || p.material_code}
+                        </td>
                         <td className="py-3 px-3">
                           <Badge variant="outline" className="bg-slate-50 font-mono text-[10px]">
                             {p.pick_location || "—"}
                           </Badge>
                         </td>
-                        <td className="py-3 px-3 font-bold">{p.quantity ?? "—"} {p.uom || ""}</td>
+                        <td className="py-3 px-3 font-bold">
+                          {p.quantity ?? "—"} {p.uom || ""}
+                        </td>
                         <td className="py-3 px-3">
                           <Badge
                             className={cn(
                               "text-[10px] font-bold uppercase",
-                              p.status === "COMPLETED" ? "bg-emerald-500/15 text-emerald-700" : "bg-indigo-500/15 text-indigo-700"
+                              p.status === "COMPLETED"
+                                ? "bg-emerald-500/15 text-emerald-700"
+                                : "bg-indigo-500/15 text-indigo-700",
                             )}
                           >
                             {p.status || "—"}
@@ -862,7 +1704,7 @@ function SimpleWarehouseModule() {
                           {p.status !== "COMPLETED" && (
                             <Button
                               size="sm"
-                              onClick={() => setPickupToConfirm({ ...p, confirmation_id: globalThis.crypto.randomUUID() })}
+                              onClick={() => setPickupToConfirm(p)}
                               className="h-7 text-xs bg-indigo-600 hover:bg-indigo-700 text-white"
                             >
                               Confirm Pick
@@ -886,67 +1728,192 @@ function SimpleWarehouseModule() {
                 <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                   <Building2 className="h-5 w-5 text-indigo-600" /> Warehouse Location Hierarchy
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">Warehouse → Zone → Rack → Shelf/Position → Bin</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Warehouse → Zone → Rack → Shelf/Position → Bin
+                </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" onClick={() => setCreateLocationType("store")} className="gap-1 text-xs">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCreateLocationType("store")}
+                  className="gap-1 text-xs"
+                >
                   <Plus className="h-3.5 w-3.5 text-indigo-600" /> Add Warehouse
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => setCreateLocationType("zone")} className="gap-1 text-xs">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isSubmitting || !stores.length}
+                  onClick={() => void handleDeleteWarehouse()}
+                  className="gap-1 text-xs text-red-600 border-red-200 hover:bg-red-50"
+                >
+                  Delete Warehouse
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCreateLocationType("zone")}
+                  className="gap-1 text-xs"
+                >
                   <Plus className="h-3.5 w-3.5 text-indigo-600" /> Add Zone
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => setBulkRackOpen(true)} className="gap-1 text-xs">
-                  <Layers className="h-3.5 w-3.5 text-indigo-600" /> Bulk Create Rack
-                </Button>
-                <Button size="sm" onClick={() => setCreateLocationType("bin")} className="gap-1 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold shadow-sm">
+                <Button
+                  size="sm"
+                  onClick={() => setCreateLocationType("bin")}
+                  className="gap-1 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold shadow-sm"
+                >
                   <Plus className="h-3.5 w-3.5" /> Add Bin
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCreateLocationType("rack")}
+                  className="gap-1 text-xs"
+                >
+                  <Plus className="h-3.5 w-3.5 text-indigo-600" /> Add Rack
                 </Button>
               </div>
             </div>
 
-            {false && <Card className="p-5 space-y-4">
-              <div>
-                <h3 className="text-base font-bold">Dock allocation for Gate Entry</h3>
-                <p className="text-xs text-muted-foreground mt-1">Allocate an available dock to an approved gate entry. Gate Security is notified on allocation and release.</p>
-              </div>
-              <Button size="sm" variant="outline" onClick={() => navigate({ to: "/dock-management" })}>Manage docks</Button>
-              {dockRequests.length > 0 && (
-                <div className="space-y-2">
-                  {dockRequests.map((request) => (
-                    <div key={request.id} className="flex flex-wrap items-center gap-2 rounded-lg border p-3">
-                      <div className="min-w-48 flex-1 text-xs">
-                        <strong>{request.vehicle_number}</strong> · {request.existing_gate_pass_id}
-                      </div>
-                      <select className="h-9 rounded-md border bg-background px-2 text-xs" value={dockChoices[request.id] || ""} onChange={(event) => setDockChoices((current) => ({ ...current, [request.id]: event.target.value }))}>
-                        <option value="">Select available dock</option>
-                        {docks.filter((dock) => dock.status === "AVAILABLE").map((dock) => <option key={dock.id} value={dock.id}>{dock.dock_code} · {dock.dock_name}</option>)}
-                      </select>
-                      <select className="h-9 rounded-md border bg-background px-2 text-xs" value={dockStoreChoices[request.id] || ""} onChange={(event) => setDockStoreChoices((current) => ({ ...current, [request.id]: event.target.value }))}>
-                        <option value="">Select warehouse</option>
-                        {stores.filter((store) => (store.status || "").toUpperCase() === "ACTIVE").map((store) => <option key={store.id} value={store.id}>{store.store_name} · {store.store_code}</option>)}
-                      </select>
-                      <Button size="sm" disabled={isSubmitting || !stores.length} onClick={() => void handleAllocateDockFromLocations(request.id)}>Allocate dock</Button>
-                    </div>
-                  ))}
+            {false && (
+              <Card className="p-5 space-y-4">
+                <div>
+                  <h3 className="text-base font-bold">Dock allocation for Gate Entry</h3>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Allocate an available dock to an approved gate entry. Gate Security is notified
+                    on allocation and release.
+                  </p>
                 </div>
-              )}
-              <div className="space-y-2">
-                {docks.filter((dock) => ["OCCUPIED", "RESERVED"].includes(dock.status)).map((dock) => (
-                  <div key={dock.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-xs">
-                    <span><strong>{dock.dock_code}</strong>{dock.current_allocation?.vehicle_number ? ` · ${dock.current_allocation.vehicle_number}` : ""} · {dock.status}</span>
-                    <Button size="sm" variant="outline" disabled={isSubmitting || !dock.current_allocation?.id} onClick={() => void handleReleaseDockFromLocations(dock)}>Release dock</Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => navigate({ to: "/dock-management" })}
+                >
+                  Manage docks
+                </Button>
+                {dockRequests.length > 0 && (
+                  <div className="space-y-2">
+                    {dockRequests.map((request) => (
+                      <div
+                        key={request.id}
+                        className="flex flex-wrap items-center gap-2 rounded-lg border p-3"
+                      >
+                        <div className="min-w-48 flex-1 text-xs">
+                          <strong>{request.vehicle_number}</strong> ·{" "}
+                          {request.existing_gate_pass_id}
+                        </div>
+                        <select
+                          className="h-9 rounded-md border bg-background px-2 text-xs"
+                          value={dockChoices[request.id] || ""}
+                          onChange={(event) =>
+                            setDockChoices((current) => ({
+                              ...current,
+                              [request.id]: event.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">Select available dock</option>
+                          {docks
+                            .filter((dock) => dock.status === "AVAILABLE")
+                            .map((dock) => (
+                              <option key={dock.id} value={dock.id}>
+                                {dock.dock_code} · {dock.dock_name}
+                              </option>
+                            ))}
+                        </select>
+                        <select
+                          className="h-9 rounded-md border bg-background px-2 text-xs"
+                          value={dockStoreChoices[request.id] || ""}
+                          onChange={(event) =>
+                            setDockStoreChoices((current) => ({
+                              ...current,
+                              [request.id]: event.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">Select warehouse</option>
+                          {stores
+                            .filter((store) => (store.status || "").toUpperCase() === "ACTIVE")
+                            .map((store) => (
+                              <option key={store.id} value={store.id}>
+                                {store.store_name} · {store.store_code}
+                              </option>
+                            ))}
+                        </select>
+                        <Button
+                          size="sm"
+                          disabled={isSubmitting || !stores.length}
+                          onClick={() => void handleAllocateDockFromLocations(request.id)}
+                        >
+                          Allocate dock
+                        </Button>
+                      </div>
+                    ))}
                   </div>
-                ))}
-                {!dockRequests.length && !docks.some((dock) => ["OCCUPIED", "RESERVED"].includes(dock.status)) && <p className="text-xs text-muted-foreground">No pending gate entries or active dock allocations.</p>}
-              </div>
-            </Card>}
+                )}
+                <div className="space-y-2">
+                  {docks
+                    .filter((dock) => ["OCCUPIED", "RESERVED"].includes(dock.status))
+                    .map((dock) => (
+                      <div
+                        key={dock.id}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-xs"
+                      >
+                        <span>
+                          <strong>{dock.dock_code}</strong>
+                          {dock.current_allocation?.vehicle_number
+                            ? ` · ${dock.current_allocation.vehicle_number}`
+                            : ""}{" "}
+                          · {dock.status}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={isSubmitting || !dock.current_allocation?.id}
+                          onClick={() => void handleReleaseDockFromLocations(dock)}
+                        >
+                          Release dock
+                        </Button>
+                      </div>
+                    ))}
+                  {!dockRequests.length &&
+                    !docks.some((dock) => ["OCCUPIED", "RESERVED"].includes(dock.status)) && (
+                      <p className="text-xs text-muted-foreground">
+                        No pending gate entries or active dock allocations.
+                      </p>
+                    )}
+                </div>
+              </Card>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Card className="p-4">
+                <p className="text-[11px] font-bold uppercase text-slate-500">Warehouses</p>
+                <p className="mt-1 text-xl font-black text-slate-900">{stores.length}</p>
+                <p className="text-xs text-slate-500">
+                  {stores.length
+                    ? "Warehouse master records loaded."
+                    : "No warehouse records found in the master."}
+                </p>
+              </Card>
+              <Card className="p-4">
+                <p className="text-[11px] font-bold uppercase text-slate-500">Zones</p>
+                <p className="mt-1 text-xl font-black text-slate-900">{zones.length}</p>
+                <p className="text-xs text-slate-500">
+                  {zones.length
+                    ? "Zones loaded from the selected warehouses."
+                    : "No zones configured for the loaded warehouses."}
+                </p>
+              </Card>
+            </div>
 
             {/* Bins List Table */}
             <Card className="p-5 overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase">
-                    <th className="py-2.5 px-3">Bin Code</th>
+                    <th className="py-2.5 px-3">Location Code</th>
                     <th className="py-2.5 px-3">Rack</th>
                     <th className="py-2.5 px-3">Shelf / Position</th>
                     <th className="py-2.5 px-3">Status</th>
@@ -958,7 +1925,11 @@ function SimpleWarehouseModule() {
                   {allFlattenedBins.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="text-center py-6 text-slate-500">
-                        No storage bins configured in database. Click "Add Bin" above to create a location.
+                        {stores.length === 0
+                          ? "No warehouses configured in the Warehouse Master."
+                          : zones.length === 0
+                            ? "Warehouses exist, but no zones are configured."
+                            : 'Warehouses and zones exist, but no storage bins are configured. Click "Add Bin" above to create a location.'}
                       </td>
                     </tr>
                   ) : (
@@ -997,55 +1968,234 @@ function SimpleWarehouseModule() {
       {/* MODALS */}
       {/* ========================================================================= */}
 
-      <Dialog open={Boolean(pickupToConfirm)} onOpenChange={(open) => {
-        if (!open && !isSubmitting) {
-          setPickupToConfirm(null);
-          setPickupConfirmation({ material_scan: "", zone_scan: "", quantity: "" });
-        }
-      }}>
+      <Dialog
+        open={Boolean(pickupToConfirm)}
+        onOpenChange={(open) => {
+          if (!open && !isSubmitting) {
+            setPickupToConfirm(null);
+            setPickupConfirmation({ material_scan: "", zone_scan: "", quantity: "" });
+          }
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Confirm physical pick</DialogTitle>
+            <DialogTitle>
+              {pickupToConfirm?.status === "COMPLETED"
+                ? "Picking Task Details"
+                : "Confirm physical pick"}
+            </DialogTitle>
             <DialogDescription>
-              Enter the scanned material and storage location codes and the quantity actually picked. Stock updates only after the server validates them.
+              {pickupToConfirm?.status === "COMPLETED"
+                ? "Read-only audit summary for the completed warehouse picking operation."
+                : "Enter the scanned material and storage location codes and the quantity actually picked. Stock updates only after the server validates them."}
             </DialogDescription>
           </DialogHeader>
           {pickupToConfirm && (
             <form onSubmit={handleCompletePickup} className="space-y-4">
               <p className="text-xs text-muted-foreground">
-                Task {pickupToConfirm.task_number || pickupToConfirm.id} · {pickupToConfirm.material_name || pickupToConfirm.material_code}
+                Task {pickupToConfirm.task_number || pickupToConfirm.id} ·{" "}
+                {pickupToConfirm.material_name || pickupToConfirm.material_code}
               </p>
-              <div className="space-y-2">
-                <label className="text-xs font-semibold" htmlFor="pickup-material-scan">Material code / QR scan</label>
-                <Input id="pickup-material-scan" required value={pickupConfirmation.material_scan} onChange={(event) => setPickupConfirmation((current) => ({ ...current, material_scan: event.target.value }))} />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-semibold" htmlFor="pickup-zone-scan">Zone or bin code / QR scan</label>
-                <Input id="pickup-zone-scan" required value={pickupConfirmation.zone_scan} onChange={(event) => setPickupConfirmation((current) => ({ ...current, zone_scan: event.target.value }))} />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-semibold" htmlFor="pickup-quantity">Quantity picked {pickupToConfirm.uom ? `(${pickupToConfirm.uom})` : ""}</label>
-                <Input id="pickup-quantity" type="number" min="0.0001" step="0.0001" required value={pickupConfirmation.quantity} onChange={(event) => setPickupConfirmation((current) => ({ ...current, quantity: event.target.value }))} />
-                {pickupToConfirm.requested_quantity != null && <p className="text-xs text-muted-foreground">Requested: {pickupToConfirm.requested_quantity} {pickupToConfirm.uom || ""}</p>}
-              </div>
+              {pickupToConfirm.status === "COMPLETED" && (
+                <div className="space-y-1 rounded-md border bg-muted/30 p-3 text-xs">
+                  <p>
+                    <strong>Material:</strong>{" "}
+                    {pickupToConfirm.material_name || pickupToConfirm.material_code} (
+                    {pickupToConfirm.material_code})
+                  </p>
+                  <p>
+                    <strong>Batch:</strong> {pickupToConfirm.batch_number || "Not recorded"}
+                  </p>
+                  <p>
+                    <strong>Material QR:</strong>{" "}
+                    {pickupToConfirm.confirmation?.material_qr || "Not recorded"}
+                  </p>
+                  <p>
+                    <strong>Rack QR:</strong>{" "}
+                    {pickupToConfirm.confirmation?.rack_qr ||
+                      pickupToConfirm.pick_location ||
+                      "Not recorded"}
+                  </p>
+                  <p>
+                    <strong>Picked quantity:</strong>{" "}
+                    {pickupToConfirm.picked_quantity ?? pickupToConfirm.quantity ?? 0}{" "}
+                    {pickupToConfirm.uom || ""}
+                  </p>
+                  <p>
+                    <strong>Confirmed by:</strong>{" "}
+                    {pickupToConfirm.confirmation?.confirmed_by || "Not recorded"}
+                  </p>
+                  <p>
+                    <strong>Completed:</strong>{" "}
+                    {pickupToConfirm.confirmation?.confirmed_at
+                      ? new Date(pickupToConfirm.confirmation.confirmed_at).toLocaleString()
+                      : "Not recorded"}
+                  </p>
+                </div>
+              )}
+              {pickupToConfirm.status !== "COMPLETED" && (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold" htmlFor="pickup-material-scan">
+                      Material code / QR scan
+                    </label>
+                    <Input
+                      id="pickup-material-scan"
+                      required
+                      value={pickupConfirmation.material_scan}
+                      onChange={(event) =>
+                        setPickupConfirmation((current) => ({
+                          ...current,
+                          material_scan: event.target.value,
+                        }))
+                      }
+                    />
+                    <div className="flex flex-wrap items-center gap-3 text-xs">
+                      <label className="cursor-pointer font-semibold text-primary underline">
+                        Upload QR
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg"
+                          className="hidden"
+                          onChange={(event) =>
+                            event.target.files?.[0] &&
+                            decodePickupQrUpload(event.target.files[0], "material")
+                          }
+                        />
+                      </label>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-1.5 text-xs"
+                        onClick={() => void downloadQrValue(pickupMaterialQrValue, "Material QR")}
+                      >
+                        Download QR
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold" htmlFor="pickup-zone-scan">
+                      Zone or bin code / QR scan
+                    </label>
+                    <Input
+                      id="pickup-zone-scan"
+                      required
+                      value={pickupConfirmation.zone_scan}
+                      onChange={(event) =>
+                        setPickupConfirmation((current) => ({
+                          ...current,
+                          zone_scan: event.target.value,
+                        }))
+                      }
+                    />
+                    <div className="flex flex-wrap items-center gap-3 text-xs">
+                      <label className="cursor-pointer font-semibold text-primary underline">
+                        Upload QR
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg"
+                          className="hidden"
+                          onChange={(event) =>
+                            event.target.files?.[0] &&
+                            decodePickupQrUpload(event.target.files[0], "rack")
+                          }
+                        />
+                      </label>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-1.5 text-xs"
+                        onClick={() => void downloadQrValue(pickupRackQrValue, "Rack QR")}
+                      >
+                        Download QR
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold" htmlFor="pickup-quantity">
+                      Quantity picked {pickupToConfirm.uom ? `(${pickupToConfirm.uom})` : ""}
+                    </label>
+                    <Input
+                      id="pickup-quantity"
+                      type="number"
+                      min="0.0001"
+                      step="0.0001"
+                      required
+                      value={pickupConfirmation.quantity}
+                      onChange={(event) =>
+                        setPickupConfirmation((current) => ({
+                          ...current,
+                          quantity: event.target.value,
+                        }))
+                      }
+                    />
+                    {pickupToConfirm.requested_quantity != null && (
+                      <p className="text-xs text-muted-foreground">
+                        Requested: {pickupToConfirm.requested_quantity} {pickupToConfirm.uom || ""}{" "}
+                        · Remaining:{" "}
+                        {Math.max(
+                          0,
+                          Number(pickupToConfirm.requested_quantity) -
+                            Number(
+                              pickupToConfirm.picked_quantity ||
+                                (pickupToConfirm.status === "COMPLETED"
+                                  ? pickupToConfirm.requested_quantity
+                                  : 0),
+                            ),
+                        )}{" "}
+                        {pickupToConfirm.uom || ""}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Source rack: {pickupToConfirm.pick_location || "Not assigned"}
+                    </p>
+                    {pickupToConfirm.batch_number && (
+                      <p className="text-xs text-muted-foreground">
+                        Material batch: {pickupToConfirm.batch_number}
+                      </p>
+                    )}
+                    {pickupToConfirm.confirmation?.confirmed && (
+                      <p className="text-xs text-emerald-700">
+                        Confirmed by{" "}
+                        {pickupToConfirm.confirmation.confirmed_by || "Warehouse Operator"} on{" "}
+                        {new Date(pickupToConfirm.confirmation.confirmed_at).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setPickupToConfirm(null)}>Cancel</Button>
-                <Button type="submit" disabled={isSubmitting || !pickupConfirmation.material_scan.trim() || !pickupConfirmation.zone_scan.trim() || Number(pickupConfirmation.quantity) <= 0}>
-                  {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirm pick"}
+                <Button type="button" variant="outline" onClick={() => setPickupToConfirm(null)}>
+                  {pickupToConfirm.status === "COMPLETED" ? "Close" : "Cancel"}
                 </Button>
+                {pickupToConfirm.status !== "COMPLETED" && (
+                  <Button
+                    type="submit"
+                    disabled={
+                      isSubmitting ||
+                      !pickupConfirmation.material_scan.trim() ||
+                      !pickupConfirmation.zone_scan.trim() ||
+                      Number(pickupConfirmation.quantity) <= 0
+                    }
+                  >
+                    {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirm pick"}
+                  </Button>
+                )}
               </DialogFooter>
             </form>
           )}
         </DialogContent>
       </Dialog>
 
-      {/* 1. Assign Rack Modal */}
+      {/* 1. Assign Storage Location Modal */}
       <Dialog open={!!assignPutawayTask} onOpenChange={() => setAssignPutawayTask(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Assign Rack</DialogTitle>
+            <DialogTitle>Assign Storage Location</DialogTitle>
             <DialogDescription>
-              Select destination bin for Putaway Task {assignPutawayTask?.grn_number}
+              Select destination rack for Putaway Task {assignPutawayTask?.grn_number}
             </DialogDescription>
           </DialogHeader>
 
@@ -1056,28 +2206,104 @@ function SimpleWarehouseModule() {
                   {assignPutawayTask.material_name || "-"}
                 </div>
                 <div className="text-slate-500">
-                  Quantity: {assignPutawayTask.quantity ?? "—"} {assignPutawayTask.uom || ""} | Batch: {assignPutawayTask.batch_number || "—"}
+                  Quantity: {assignPutawayTask.quantity ?? "—"} {assignPutawayTask.uom || ""} |
+                  Batch: {assignPutawayTask.batch_number || "—"}
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="font-semibold text-slate-700 dark:text-slate-300">Single Storage Location Selector</label>
-                {allFlattenedBins.length === 0 ? (
-                  <p className="text-xs text-rose-500">No bins available in database. Create a bin in Locations tab first.</p>
-                ) : (
-                  <Select value={selectedLocationId} onValueChange={setSelectedLocationId}>
-                    <SelectTrigger className="w-full text-xs">
-                      <SelectValue placeholder="Search location (ZONE / RACK / BIN)..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {allFlattenedBins.map((loc) => (
-                        <SelectItem key={loc.id} value={loc.id}>
-                          {loc.label}
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Select
+                  value={assignStoreId}
+                  onValueChange={(value) => {
+                    setAssignStoreId(value);
+                    setAssignZoneId("");
+                    setSelectedLocationId("");
+                  }}
+                >
+                  <SelectTrigger className="text-xs">
+                    <SelectValue placeholder="Select warehouse" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {stores
+                      .filter((s) => !s.status || String(s.status).toUpperCase() === "ACTIVE")
+                      .map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.store_code} - {s.store_name}
                         </SelectItem>
                       ))}
-                    </SelectContent>
-                  </Select>
-                )}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={assignZoneId}
+                  onValueChange={(value) => {
+                    setAssignZoneId(value);
+                    setSelectedLocationId("");
+                  }}
+                  disabled={!assignStoreId}
+                >
+                  <SelectTrigger className="text-xs">
+                    <SelectValue placeholder="Select zone" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {zones
+                      .filter(
+                        (z) =>
+                          z.store_id === assignStoreId &&
+                          (!z.status || String(z.status).toUpperCase() === "ACTIVE"),
+                      )
+                      .map((z) => (
+                        <SelectItem key={z.id} value={z.id}>
+                          {z.zone_code || z.zone_name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={selectedLocationId}
+                  onValueChange={setSelectedLocationId}
+                  disabled={!assignZoneId}
+                >
+                  <SelectTrigger className="text-xs">
+                    <SelectValue placeholder="Select active rack" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allFlattenedBins
+                      .filter(
+                        (loc) =>
+                          loc.store_id === assignStoreId &&
+                          loc.zone_id === assignZoneId &&
+                          (!loc.status ||
+                            ["ACTIVE", "AVAILABLE"].includes(String(loc.status).toUpperCase())),
+                      )
+                      .map((loc) => (
+                        <SelectItem key={loc.id} value={loc.id}>
+                          {loc.rack || loc.bin_code} ({loc.bin_code})
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="font-semibold">
+                  Assign Quantity ({assignPutawayTask.uom || "PCS"})
+                </label>
+                <Input
+                  type="number"
+                  min="0.0001"
+                  step="0.0001"
+                  max={assignPutawayTask.quantity}
+                  value={assignQuantity}
+                  onChange={(event) => setAssignQuantity(event.target.value)}
+                />
+                <p className="text-xs text-slate-500">
+                  Selected batch: {assignPutawayTask.quantity ?? 0} {assignPutawayTask.uom || "PCS"}{" "}
+                  · Remaining:{" "}
+                  {Math.max(
+                    0,
+                    Number(assignPutawayTask.quantity || 0) - Number(assignQuantity || 0),
+                  )}{" "}
+                  {assignPutawayTask.uom || "PCS"}
+                </p>
               </div>
             </div>
           )}
@@ -1086,55 +2312,285 @@ function SimpleWarehouseModule() {
             <Button variant="outline" onClick={() => setAssignPutawayTask(null)}>
               Cancel
             </Button>
-            <Button onClick={handleConfirmAssignPutaway} disabled={isSubmitting || allFlattenedBins.length === 0} className="bg-indigo-600 text-white">
-              ASSIGN
+            <Button
+              onClick={handleConfirmAssignPutaway}
+              disabled={
+                isSubmitting ||
+                !assignStoreId ||
+                !assignZoneId ||
+                !selectedLocationId ||
+                !Number.isFinite(Number(assignQuantity)) ||
+                Number(assignQuantity) <= 0 ||
+                Number(assignQuantity) > Number(assignPutawayTask?.quantity || 0)
+              }
+              className="bg-indigo-600 text-white"
+            >
+              ASSIGN RACK
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!putawayToConfirm} onOpenChange={(open) => { if (!open) setPutawayToConfirm(null); }}>
+      {/* 1b. Scan and confirm physical rack putaway */}
+      <Dialog open={!!scanPutawayTask} onOpenChange={() => setScanPutawayTask(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Scan and Confirm Putaway</DialogTitle>
+            <DialogTitle>Scan Material & Rack</DialogTitle>
             <DialogDescription>
-              Scan the material label and assigned rack or bin label. Inventory becomes available after confirmation.
+              Scan the existing material QR first, then scan the assigned rack QR.
             </DialogDescription>
           </DialogHeader>
-          {putawayToConfirm && (
-            <form className="space-y-4" onSubmit={handleConfirmPutaway}>
-              <div className="rounded-lg bg-slate-50 p-3 text-xs dark:bg-slate-900">
-                <div className="font-semibold">{putawayToConfirm.material_name || putawayToConfirm.item_code}</div>
-                <div className="mt-1 text-muted-foreground">Task {putawayToConfirm.task_number} · Remaining {putawayToConfirm.remaining_quantity ?? putawayToConfirm.quantity} {putawayToConfirm.uom || ""}</div>
+          {scanPutawayTask && (
+            <div className="space-y-4 text-xs">
+              <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
+                <div className="font-semibold">
+                  {scanPutawayTask.material_name || scanPutawayTask.item_code}
+                </div>
+                <div className="text-slate-500">
+                  GRN: {scanPutawayTask.grn_number || "-"} · Batch:{" "}
+                  {scanPutawayTask.batch_number || "-"}
+                </div>
+                <div className="mt-1 font-semibold">
+                  Pending: {scanPutawayTask.quantity} {scanPutawayTask.uom || ""}
+                </div>
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold" htmlFor="putaway-material-scan">Material QR</label>
-                <Input id="putaway-material-scan" autoFocus required value={putawayConfirmation.material_scan} onChange={(e) => setPutawayConfirmation((current) => ({ ...current, material_scan: e.target.value }))} placeholder="Scan material label" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold" htmlFor="putaway-location-scan">Rack / Bin QR</label>
-                <Input id="putaway-location-scan" required value={putawayConfirmation.location_scan} onChange={(e) => setPutawayConfirmation((current) => ({ ...current, location_scan: e.target.value }))} placeholder="Scan assigned rack or bin label" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold" htmlFor="putaway-confirm-quantity">Quantity to store</label>
-                <Input id="putaway-confirm-quantity" type="number" min="0.0001" step="0.0001" max={putawayToConfirm.remaining_quantity ?? putawayToConfirm.quantity} required value={putawayConfirmation.quantity} onChange={(e) => setPutawayConfirmation((current) => ({ ...current, quantity: e.target.value }))} />
-              </div>
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setPutawayToConfirm(null)}>Cancel</Button>
-                <Button type="submit" disabled={isSubmitting || !putawayConfirmation.material_scan.trim() || !putawayConfirmation.location_scan.trim() || Number(putawayConfirmation.quantity) <= 0}>
-                  {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirm Putaway"}
+                <label className="font-semibold">Material QR</label>
+                <div className="flex gap-2">
+                  <Input
+                    className="flex-1"
+                    value={putawayScan.materialQr}
+                    placeholder="Scan material QR"
+                    onChange={(e) => {
+                      setMaterialQrVerified(false);
+                      setPutawayScan((s) => ({ ...s, materialQr: e.target.value }));
+                    }}
+                    autoFocus
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCameraField("material")}
+                  >
+                    <Camera className="mr-1 h-4 w-4" />
+                    Scan with Camera
+                  </Button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="cursor-pointer text-xs text-primary underline">
+                    Upload QR Image
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg"
+                      className="hidden"
+                      onChange={(e) =>
+                        e.target.files?.[0] && decodeQrUpload(e.target.files[0], "material")
+                      }
+                    />
+                  </label>
+                  {materialQrVerified && (
+                    <span className="font-semibold text-emerald-600">✓ Verified</span>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2"
+                  disabled={!putawayQrImages.material}
+                  onClick={() =>
+                    putawayQrImages.material &&
+                    setQrPreview({ title: "Material QR", image: putawayQrImages.material })
+                  }
+                >
+                  View QR
                 </Button>
-              </DialogFooter>
-            </form>
+              </div>
+              <div className="space-y-1.5">
+                <label className="font-semibold">Rack QR</label>
+                <div className="flex gap-2">
+                  <Input
+                    className="flex-1"
+                    value={putawayScan.rackQr}
+                    placeholder="Scan rack QR"
+                    onChange={(e) => {
+                      setRackQrVerified(false);
+                      setPutawayScan((s) => ({ ...s, rackQr: e.target.value }));
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCameraField("rack")}
+                  >
+                    <Camera className="mr-1 h-4 w-4" />
+                    Scan with Camera
+                  </Button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="cursor-pointer text-xs text-primary underline">
+                    Upload QR Image
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg"
+                      className="hidden"
+                      onChange={(e) =>
+                        e.target.files?.[0] && decodeQrUpload(e.target.files[0], "rack")
+                      }
+                    />
+                  </label>
+                  {rackQrVerified && (
+                    <span className="font-semibold text-emerald-600">✓ Verified</span>
+                  )}
+                </div>
+                {qrScanError && <p className="text-xs text-rose-600">{qrScanError}</p>}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2"
+                  disabled={!putawayQrImages.rack}
+                  onClick={() =>
+                    putawayQrImages.rack &&
+                    setQrPreview({ title: "Rack QR", image: putawayQrImages.rack })
+                  }
+                >
+                  View QR
+                </Button>
+              </div>
+              <div className="space-y-1.5">
+                <label className="font-semibold">
+                  Stored quantity {scanPutawayTask.uom ? `(${scanPutawayTask.uom})` : ""}
+                </label>
+                <Input
+                  type="number"
+                  min="0.0001"
+                  step="0.0001"
+                  max={scanPutawayTask.quantity}
+                  value={putawayScan.quantity}
+                  onChange={(e) => setPutawayScan((s) => ({ ...s, quantity: e.target.value }))}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setScanPutawayTask(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmPutaway}
+              disabled={isSubmitting || !putawayScanValid}
+              className="bg-emerald-600 text-white"
+            >
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirm Putaway"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!cameraField} onOpenChange={(open) => !open && setCameraField(null)}>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Scan {cameraField === "material" ? "Material" : "Rack"} QR</DialogTitle>
+            <DialogDescription>
+              Allow camera access and hold the QR label inside the frame.
+            </DialogDescription>
+          </DialogHeader>
+          <video ref={cameraVideoRef} className="w-full rounded-xl bg-black" playsInline muted />
+          <canvas ref={cameraCanvasRef} className="hidden" />
+          {cameraError && <p className="text-sm text-rose-600">{cameraError}</p>}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setCameraField(null)}>
+              Use Manual Entry
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!qrPreview} onOpenChange={(open) => !open && setQrPreview(null)}>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-xs">
+          <DialogHeader>
+            <DialogTitle>{qrPreview?.title}</DialogTitle>
+          </DialogHeader>
+          {qrPreview?.image && (
+            <>
+              <img
+                src={qrPreview.image}
+                alt={qrPreview.title}
+                className="mx-auto h-56 w-56 rounded-lg border bg-white p-3"
+              />
+              <a
+                href={qrPreview.image}
+                download={`${qrPreview.title.replaceAll(" ", "-").toLowerCase()}.png`}
+                className="mx-auto block text-center text-sm font-semibold text-primary underline"
+              >
+                Download QR Image
+              </a>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!selectedPutawayGroup} onOpenChange={() => setSelectedPutawayGroup(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Putaway Details</DialogTitle>
+            <DialogDescription>{selectedPutawayGroup?.grn_number || "GRN"}</DialogDescription>
+          </DialogHeader>
+          {selectedPutawayGroup && (
+            <div className="space-y-4 text-sm">
+              <div className="grid grid-cols-2 gap-3 rounded-xl border bg-muted/20 p-4 sm:grid-cols-4">
+                <div>
+                  <span className="text-xs text-muted-foreground">GRN Number</span>
+                  <p className="font-mono font-bold">{selectedPutawayGroup.grn_number || ""}</p>
+                </div>
+                <div>
+                  <span className="text-xs text-muted-foreground">Materials</span>
+                  <p className="font-bold">{selectedPutawayGroup.material_count}</p>
+                </div>
+                <div>
+                  <span className="text-xs text-muted-foreground">Batches</span>
+                  <p className="font-bold">{selectedPutawayGroup.batch_count}</p>
+                </div>
+                <div>
+                  <span className="text-xs text-muted-foreground">Total Quantity</span>
+                  <p className="font-bold">
+                    {selectedPutawayGroup.quantity} {selectedPutawayGroup.uom}
+                  </p>
+                </div>
+              </div>
+              <div className="max-h-64 overflow-auto rounded-xl border">
+                {selectedPutawayGroup.tasks.map((task: any) => (
+                  <div key={task.id} className="grid grid-cols-4 gap-2 border-b p-3 last:border-0">
+                    <span className="font-medium">
+                      {task.material_name || task.item_code || "—"}
+                    </span>
+                    <span className="font-mono text-muted-foreground">
+                      {task.batch_number || ""}
+                    </span>
+                    <span>
+                      {task.quantity ?? "—"} {task.uom || ""}
+                    </span>
+                    <span className="text-right">{task.status || "—"}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </DialogContent>
       </Dialog>
 
       {/* 2. Inventory Detail Modal */}
       <Dialog open={!!selectedInventory} onOpenChange={() => setSelectedInventory(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{selectedInventory?.material_name || selectedInventory?.material || "Material Details"}</DialogTitle>
+            <DialogTitle>
+              {selectedInventory?.material_name ||
+                selectedInventory?.material ||
+                "Material Details"}
+            </DialogTitle>
           </DialogHeader>
 
           {selectedInventory && (
@@ -1142,35 +2598,138 @@ function SimpleWarehouseModule() {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <span className="text-slate-500">Material Code:</span>
-                  <div className="font-mono font-semibold">{selectedInventory.material_code || "-"}</div>
+                  <div className="font-mono font-semibold">
+                    {selectedInventory.material_code || "-"}
+                  </div>
                 </div>
                 <div>
                   <span className="text-slate-500">Batch:</span>
-                  <div className="font-mono font-semibold">{selectedInventory.batch_number || selectedInventory.batch || "-"}</div>
-                </div>
-              </div>
-
-              <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-2">
-                <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">Stock</div>
-                <div className="flex justify-between font-medium">
-                  <span>Total Physical Stock:</span>
-                  <span className="font-bold">{selectedInventory.total_quantity ?? selectedInventory.on_hand_quantity ?? "—"} {selectedInventory.uom || ""}</span>
-                </div>
-                <div className="flex justify-between font-medium text-emerald-600">
-                  <span>Available Stock:</span>
-                  <span className="font-bold">{selectedInventory.available ?? selectedInventory.available_quantity ?? "—"} {selectedInventory.uom || ""}</span>
+                  <div className="font-mono font-semibold">
+                    {selectedInventory.batch_details?.length
+                      ? selectedInventory.batch_details.map((b: any) => b.batch_number).join(", ")
+                      : selectedInventory.batch_number || selectedInventory.batch || "-"}
+                  </div>
                 </div>
               </div>
 
               <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-1">
-                <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">Location</div>
+                <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
+                  Storage Location
+                </div>
+                <div className="font-semibold">
+                  {selectedInventory.warehouse || selectedInventory.warehouse_id || "-"} →{" "}
+                  {selectedInventory.zone_code || selectedInventory.zone_name || "-"} →{" "}
+                  {selectedInventory.bin_code || selectedInventory.location || "-"}
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-2">
+                <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
+                  Batch-wise Stock
+                </div>
+                {(selectedInventory.batch_details || []).length > 0 ? (
+                  selectedInventory.batch_details.map((batch: any) => (
+                    <div
+                      key={batch.batch_number}
+                      className="flex justify-between border-b last:border-0 pb-1 last:pb-0"
+                    >
+                      <span className="font-mono">{batch.batch_number}</span>
+                      <span className="font-semibold">
+                        {batch.quantity} {batch.uom || selectedInventory.uom || ""}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-slate-500">No batch movement details available.</div>
+                )}
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-2">
+                <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
+                  Stock
+                </div>
+                <div className="flex justify-between font-medium">
+                  <span>Total Physical Stock:</span>
+                  <span className="font-bold">
+                    {selectedInventory.total_quantity ?? selectedInventory.on_hand_quantity ?? "—"}{" "}
+                    {selectedInventory.uom || ""}
+                  </span>
+                </div>
+                <div className="flex justify-between font-medium text-emerald-600">
+                  <span>Available Stock:</span>
+                  <span className="font-bold">
+                    {selectedInventory.available ?? selectedInventory.available_quantity ?? "—"}{" "}
+                    {selectedInventory.uom || ""}
+                  </span>
+                </div>
+              </div>
+
+              {selectedInventory.inventory_history && (
+                <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-1">
+                  <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
+                    Inventory History
+                  </div>
+                  <div>
+                    Original GRN:{" "}
+                    <span className="font-semibold">
+                      {selectedInventory.inventory_history.original_grn || "-"}
+                    </span>
+                  </div>
+                  <div>
+                    Batch:{" "}
+                    <span className="font-mono font-semibold">
+                      {selectedInventory.inventory_history.batch_number || "-"}
+                    </span>
+                  </div>
+                  <div>
+                    Previous Rack Location:{" "}
+                    <span className="font-semibold">
+                      {selectedInventory.inventory_history.original_rack || "-"}
+                    </span>
+                  </div>
+                  <div>
+                    Received Quantity:{" "}
+                    <span className="font-semibold">
+                      {selectedInventory.inventory_history.received_quantity}{" "}
+                      {selectedInventory.uom || ""}
+                    </span>
+                  </div>
+                  <div>
+                    Issued to Assembly:{" "}
+                    <span className="font-semibold">
+                      {selectedInventory.inventory_history.issued_quantity}{" "}
+                      {selectedInventory.uom || ""}
+                    </span>
+                  </div>
+                  <div>
+                    Remaining Quantity:{" "}
+                    <span className="font-semibold">
+                      {selectedInventory.inventory_history.remaining_quantity}{" "}
+                      {selectedInventory.uom || ""}
+                    </span>
+                  </div>
+                  <div>
+                    Picking Task:{" "}
+                    <span className="font-mono font-semibold">
+                      {selectedInventory.inventory_history.picking_task || "-"}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-1">
+                <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
+                  Location
+                </div>
                 <div className="font-semibold text-slate-800 dark:text-slate-200">
                   {selectedInventory.bin_code || selectedInventory.location || "-"}
                 </div>
               </div>
 
               <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-1">
-                <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">Source</div>
+                <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
+                  Source
+                </div>
                 <div>GRN: {selectedInventory.grn_number || "-"}</div>
                 <div>Supplier: {selectedInventory.supplier_name || "-"}</div>
               </div>
@@ -1187,174 +2746,179 @@ function SimpleWarehouseModule() {
               <QrCode className="h-5 w-5" /> Storage Location & Placed Material Inspector
             </DialogTitle>
             <DialogDescription>
-              Scanned location details and real-time physical stock placed in this bin.
+              Scanned location details and real-time physical stock placed in this location.
             </DialogDescription>
           </DialogHeader>
 
-          {viewBinQrModal && (() => {
-            const bCode = viewBinQrModal.bin_code;
-            const placedItems = inventorySummary.filter((item) => {
-              const itemLoc = (item.bin_code || item.location || "").toLowerCase();
-              return itemLoc.includes(bCode.toLowerCase());
-            });
+          {viewBinQrModal &&
+            (() => {
+              const bCode = viewBinQrModal.bin_code;
+              const locationStore = stores.find(
+                (store) => String(store.id) === String(viewBinQrModal.store_id),
+              );
+              const locationZone = zones.find(
+                (zone) => String(zone.id) === String(viewBinQrModal.zone_id),
+              );
+              const placedItems = inventorySummary.filter((item) => {
+                const itemLoc = (item.bin_code || item.location || "").toLowerCase();
+                return itemLoc.includes(bCode.toLowerCase());
+              });
 
-            const qrCodeVal = viewBinQrModal.qr_identifier;
+              const qrCodeVal = viewBinQrModal.qr_identifier;
 
-            return (
-              <div className="space-y-4 text-xs py-2">
-                <div className="flex flex-col sm:flex-row items-center gap-4 p-4 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-                  <div className="p-3 bg-white rounded-lg border-2 border-indigo-600 shadow-inner flex flex-col items-center">
-                    {binQrImage ? <img src={binQrImage} alt={`QR code for ${viewBinQrModal.bin_code}`} className="h-32 w-32" /> : <p className="h-32 w-32 flex items-center justify-center text-center text-[10px] text-muted-foreground">QR code unavailable for this bin</p>}
-                  </div>
-                  <div className="space-y-1 flex-1 text-center sm:text-left">
-                    <div className="text-[11px] font-bold text-indigo-600 font-mono">{qrCodeVal}</div>
-                    <h4 className="font-extrabold text-base text-slate-900 dark:text-slate-100">{viewBinQrModal.bin_code}</h4>
-                    <p className="text-slate-500 font-medium">
-                      Rack: <span className="font-semibold text-slate-800 dark:text-slate-200">{viewBinQrModal.rack || "—"}</span> | Shelf: <span className="font-semibold text-slate-800 dark:text-slate-200">{viewBinQrModal.position || "—"}</span>
-                    </p>
-                    <Badge className="bg-emerald-500/15 text-emerald-700 text-[10px] font-bold uppercase mt-1">
-                      STATUS: {viewBinQrModal.status || "UNKNOWN"}
-                    </Badge>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                      <Boxes className="h-4 w-4 text-indigo-600" /> Placed Materials in Bin ({placedItems.length})
-                    </h4>
-                    {placedItems.length > 0 ? (
-                      <Badge className="bg-emerald-600 text-white text-[10px] font-bold">
-                        {placedItems.reduce((acc, i) => acc + Number(i.available ?? i.total_quantity ?? 0), 0)} {placedItems[0]?.uom || ""} STORED
+              return (
+                <div className="space-y-4 text-xs py-2">
+                  <div className="flex flex-col sm:flex-row items-center gap-4 p-4 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                    <div className="p-3 bg-white rounded-lg border-2 border-indigo-600 shadow-inner flex flex-col items-center">
+                      {binQrImage ? (
+                        <img
+                          src={binQrImage}
+                          alt={`QR code for ${viewBinQrModal.bin_code}`}
+                          className="h-32 w-32"
+                        />
+                      ) : (
+                        <p className="h-32 w-32 flex items-center justify-center text-center text-[10px] text-muted-foreground">
+                          QR code unavailable for this bin
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-1 flex-1 text-center sm:text-left">
+                      <div className="text-[11px] font-bold text-indigo-600 font-mono">
+                        {qrCodeVal}
+                      </div>
+                      <h4 className="font-extrabold text-base text-slate-900 dark:text-slate-100">
+                        {viewBinQrModal.bin_code}
+                      </h4>
+                      <p className="text-slate-500 font-medium">
+                        Warehouse:{" "}
+                        <span className="font-semibold text-slate-800 dark:text-slate-200">
+                          {locationStore?.store_name || locationStore?.store_code || "—"}
+                        </span>
+                      </p>
+                      <p className="text-slate-500 font-medium">
+                        Zone:{" "}
+                        <span className="font-semibold text-slate-800 dark:text-slate-200">
+                          {locationZone?.zone_name || locationZone?.zone_code || "—"}
+                        </span>
+                      </p>
+                      <p className="text-slate-500 font-medium">
+                        Rack:{" "}
+                        <span className="font-semibold text-slate-800 dark:text-slate-200">
+                          {viewBinQrModal.rack || "—"}
+                        </span>{" "}
+                        | Shelf:{" "}
+                        <span className="font-semibold text-slate-800 dark:text-slate-200">
+                          {viewBinQrModal.position || "—"}
+                        </span>
+                      </p>
+                      <Badge className="bg-emerald-500/15 text-emerald-700 text-[10px] font-bold uppercase mt-1">
+                        STATUS: {viewBinQrModal.status || "UNKNOWN"}
                       </Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-slate-500 text-[10px]">BIN IS EMPTY</Badge>
-                    )}
+                    </div>
                   </div>
 
-                  <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-100 dark:bg-slate-800 text-slate-500 uppercase text-[10px]">
-                        <tr>
-                          <th className="py-2 px-3">Material</th>
-                          <th className="py-2 px-3">Batch</th>
-                          <th className="py-2 px-3">Quantity</th>
-                          <th className="py-2 px-3">Source GRN</th>
-                          <th className="py-2 px-3">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
-                        {placedItems.length === 0 ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <Boxes className="h-4 w-4 text-indigo-600" /> Placed Materials in Location (
+                        {placedItems.length})
+                      </h4>
+                      {placedItems.length > 0 ? (
+                        <Badge className="bg-emerald-600 text-white text-[10px] font-bold">
+                          {placedItems.reduce(
+                            (acc, i) => acc + Number(i.available ?? i.total_quantity ?? 0),
+                            0,
+                          )}{" "}
+                          {placedItems[0]?.uom || ""} STORED
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-slate-500 text-[10px]">
+                          LOCATION IS EMPTY
+                        </Badge>
+                      )}
+                    </div>
+
+                    <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-100 dark:bg-slate-800 text-slate-500 uppercase text-[10px]">
                           <tr>
-                            <td colSpan={5} className="text-center py-6 text-slate-400">
-                              No materials currently placed in this bin location. Ready for Putaway.
-                            </td>
+                            <th className="py-2 px-3">Material</th>
+                            <th className="py-2 px-3">Batch</th>
+                            <th className="py-2 px-3">Quantity</th>
+                            <th className="py-2 px-3">Source GRN</th>
+                            <th className="py-2 px-3">Status</th>
                           </tr>
-                        ) : (
-                          placedItems.map((item, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                              <td className="py-2.5 px-3">
-                                <div className="font-bold text-slate-900 dark:text-slate-100">{item.material_name || item.material}</div>
-                                <div className="font-mono text-[10px] text-slate-400">{item.material_code || "-"}</div>
-                              </td>
-                              <td className="py-2.5 px-3 font-mono text-indigo-600">{item.batch_number || item.batch || "-"}</td>
-                              <td className="py-2.5 px-3 font-bold text-emerald-600">{item.available ?? item.total_quantity ?? 0} {item.uom || ""}</td>
-                              <td className="py-2.5 px-3 font-mono text-slate-500">{item.grn_number || "-"}</td>
-                              <td className="py-2.5 px-3">
-                                <Badge className="text-[9px] font-bold uppercase">{item.status || "UNKNOWN"}</Badge>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
+                          {placedItems.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="text-center py-6 text-slate-400">
+                                No materials currently placed in this location. Ready for Putaway.
                               </td>
                             </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                          ) : (
+                            placedItems.map((item, idx) => (
+                              <tr
+                                key={idx}
+                                className="hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                              >
+                                <td className="py-2.5 px-3">
+                                  <div className="font-bold text-slate-900 dark:text-slate-100">
+                                    {item.material_name || item.material}
+                                  </div>
+                                  <div className="font-mono text-[10px] text-slate-400">
+                                    {item.material_code || "-"}
+                                  </div>
+                                </td>
+                                <td className="py-2.5 px-3 font-mono text-indigo-600">
+                                  {item.batch_number || item.batch || "-"}
+                                </td>
+                                <td className="py-2.5 px-3 font-bold text-emerald-600">
+                                  {item.available ?? item.total_quantity ?? 0} {item.uom || ""}
+                                </td>
+                                <td className="py-2.5 px-3 font-mono text-slate-500">
+                                  {item.grn_number || "-"}
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <Badge className="text-[9px] font-bold uppercase">
+                                    {item.status || "UNKNOWN"}
+                                  </Badge>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })()}
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={bulkRackOpen} onOpenChange={(open) => { if (!open && !isSubmitting) setBulkRackOpen(false); }}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Bulk Create Rack Positions</DialogTitle>
-            <DialogDescription>Choose a persisted warehouse and zone. Each generated bin receives the warehouse’s unique QR identity.</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleCreateBulkRack} className="space-y-4 text-xs">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <label className="font-semibold">Warehouse</label>
-                <Select value={bulkRackForm.store_id} onValueChange={(store_id) => setBulkRackForm((current) => ({ ...current, store_id, zone_id: "" }))}>
-                  <SelectTrigger><SelectValue placeholder="Select warehouse" /></SelectTrigger>
-                  <SelectContent>{stores.map((store) => <SelectItem key={store.id} value={store.id}>{store.store_code} · {store.store_name}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <label className="font-semibold">Zone</label>
-                <Select value={bulkRackForm.zone_id} onValueChange={(zone_id) => setBulkRackForm((current) => ({ ...current, zone_id }))}>
-                  <SelectTrigger><SelectValue placeholder="Select zone" /></SelectTrigger>
-                  <SelectContent>{zones.filter((zone) => zone.store_id === bulkRackForm.store_id).map((zone) => <SelectItem key={zone.id} value={zone.id}>{zone.zone_code} · {zone.zone_name}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <label className="font-semibold">Rack code</label>
-                <Input required maxLength={64} value={bulkRackForm.rack_code} onChange={(e) => setBulkRackForm((current) => ({ ...current, rack_code: e.target.value }))} placeholder="Rack identifier" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="font-semibold">Number of positions</label>
-                <Input required type="number" min="1" max="500" step="1" value={bulkRackForm.count} onChange={(e) => setBulkRackForm((current) => ({ ...current, count: e.target.value }))} placeholder="Enter position count" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="font-semibold">Bin code prefix</label>
-                <Input required maxLength={48} value={bulkRackForm.bin_code_prefix} onChange={(e) => setBulkRackForm((current) => ({ ...current, bin_code_prefix: e.target.value }))} placeholder="Enter bin prefix" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="font-semibold">First bin number</label>
-                <Input required type="number" min="0" value={bulkRackForm.bin_code_start} onChange={(e) => setBulkRackForm((current) => ({ ...current, bin_code_start: e.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <label className="font-semibold">Position prefix</label>
-                <Input required maxLength={32} value={bulkRackForm.position_prefix} onChange={(e) => setBulkRackForm((current) => ({ ...current, position_prefix: e.target.value }))} placeholder="Enter position prefix" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="font-semibold">First position number</label>
-                <Input required type="number" min="0" value={bulkRackForm.position_start} onChange={(e) => setBulkRackForm((current) => ({ ...current, position_start: e.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <label className="font-semibold">Number width</label>
-                <Input required type="number" min="1" max="8" value={bulkRackForm.code_width} onChange={(e) => setBulkRackForm((current) => ({ ...current, code_width: e.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <label className="font-semibold">Position capacity</label>
-                <Input required type="number" min="0.0001" step="0.0001" value={bulkRackForm.capacity} onChange={(e) => setBulkRackForm((current) => ({ ...current, capacity: e.target.value }))} placeholder="Enter capacity" />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setBulkRackOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={isSubmitting || !bulkRackForm.store_id || !bulkRackForm.zone_id}>
-                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create Rack Positions"}
-              </Button>
-            </DialogFooter>
-          </form>
+              );
+            })()}
         </DialogContent>
       </Dialog>
 
       {/* 4. Create Location Entity Modal (Add Warehouse, Add Zone, Add Bin) */}
-      <Dialog open={!!createLocationType} onOpenChange={(open) => !open && setCreateLocationType(null)}>
+      <Dialog
+        open={!!createLocationType}
+        onOpenChange={(open) => !open && setCreateLocationType(null)}
+      >
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Building2 className="h-5 w-5 text-indigo-600" />
               {createLocationType === "store" && "Add New Warehouse / Store"}
               {createLocationType === "zone" && "Add New Storage Zone"}
+              {createLocationType === "rack" && "Bulk Create Racks"}
               {createLocationType === "bin" && "Add Storage Bin (Rack, Shelf & Auto QR)"}
             </DialogTitle>
             <DialogDescription>
-              {createLocationType === "store" && "Create an authoritative warehouse storage unit in database."}
+              {createLocationType === "store" &&
+                "Create an authoritative warehouse storage unit in database."}
               {createLocationType === "zone" && "Define a zone within an existing warehouse."}
-              {createLocationType === "bin" && "Configure a physical bin with Rack, Shelf/Position, and auto-generated QR code."}
+              {createLocationType === "rack" &&
+                "Create sequential racks with unique QR labels in a warehouse zone."}
+              {createLocationType === "bin" &&
+                "Configure one physical bin with Rack, Shelf/Position, and auto-generated QR code."}
             </DialogDescription>
           </DialogHeader>
 
@@ -1362,30 +2926,52 @@ function SimpleWarehouseModule() {
             {createLocationType === "store" && (
               <>
                 <div className="space-y-1">
-                  <label className="font-semibold text-slate-700">Warehouse Code</label>
-                  <Input
-                    required
-                    placeholder="Enter warehouse code"
-                    value={newStoreForm.store_code}
-                    onChange={(e) => setNewStoreForm({ ...newStoreForm, store_code: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
                   <label className="font-semibold text-slate-700">Warehouse Name</label>
                   <Input
                     required
                     placeholder="e.g. Main Raw Material Warehouse 2"
                     value={newStoreForm.store_name}
-                    onChange={(e) => setNewStoreForm({ ...newStoreForm, store_name: e.target.value })}
+                    onChange={(e) =>
+                      setNewStoreForm({ ...newStoreForm, store_name: e.target.value })
+                    }
                   />
                 </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <label className="font-semibold text-slate-700">Warehouse Code</label>
+                    <Input
+                      readOnly
+                      value={newStoreForm.store_code || "Auto-generated on save"}
+                      className="bg-slate-100 font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-semibold text-slate-700">Warehouse Type</label>
+                    <select
+                      value={newStoreForm.store_type}
+                      onChange={(e) =>
+                        setNewStoreForm({ ...newStoreForm, store_type: e.target.value })
+                      }
+                      className="h-10 rounded-md border bg-background px-3"
+                    >
+                      <option value="RAW_MATERIAL">Raw Material</option>
+                      <option value="GENERAL">General</option>
+                      <option value="OTHER">Other</option>
+                    </select>
+                  </div>
+                </div>
                 <div className="space-y-1">
-                  <label className="font-semibold text-slate-700">Description</label>
+                  <label className="font-semibold text-slate-700">Location / Plant</label>
                   <Input
-                    placeholder="Primary storage facility for raw assembly parts"
-                    value={newStoreForm.description}
-                    onChange={(e) => setNewStoreForm({ ...newStoreForm, description: e.target.value })}
+                    placeholder="Existing plant master code"
+                    value={newStoreForm.warehouse_id}
+                    onChange={(e) =>
+                      setNewStoreForm({ ...newStoreForm, warehouse_id: e.target.value })
+                    }
                   />
+                  <p className="text-[10px] text-slate-500">
+                    Active by default. The plant master integration will use this warehouse ID.
+                  </p>
                 </div>
               </>
             )}
@@ -1411,15 +2997,6 @@ function SimpleWarehouseModule() {
                   </Select>
                 </div>
                 <div className="space-y-1">
-                  <label className="font-semibold text-slate-700">Zone Code</label>
-                  <Input
-                    required
-                    placeholder="Enter zone code"
-                    value={newZoneForm.zone_code}
-                    onChange={(e) => setNewZoneForm({ ...newZoneForm, zone_code: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
                   <label className="font-semibold text-slate-700">Zone Name</label>
                   <Input
                     required
@@ -1431,7 +3008,7 @@ function SimpleWarehouseModule() {
               </>
             )}
 
-            {createLocationType === "bin" && (
+            {createLocationType === "rack" && (
               <>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
@@ -1445,7 +3022,7 @@ function SimpleWarehouseModule() {
                       </SelectTrigger>
                       <SelectContent>
                         {stores.map((s) => (
-                          <SelectItem key={s.id} value={s.id}>
+                          <SelectItem key={s.id || s.store_code} value={s.id}>
                             {s.store_code} - {s.store_name}
                           </SelectItem>
                         ))}
@@ -1475,33 +3052,174 @@ function SimpleWarehouseModule() {
 
                 <div className="grid grid-cols-3 gap-2">
                   <div className="space-y-1">
+                    <label className="font-semibold text-slate-700">Rack Prefix</label>
+                    <Input
+                      value={rackGenerator.prefix}
+                      placeholder="RACK-"
+                      onChange={(e) =>
+                        setRackGenerator({ ...rackGenerator, prefix: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-semibold text-slate-700">Starting Number</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={rackGenerator.start}
+                      onChange={(e) =>
+                        setRackGenerator({ ...rackGenerator, start: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-semibold text-slate-700">Number of Racks</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={rackGenerator.count}
+                      onChange={(e) =>
+                        setRackGenerator({ ...rackGenerator, count: e.target.value })
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="rounded-lg border bg-muted/20 p-3 text-xs font-mono">
+                  Preview: {rackGenerator.prefix || "RACK-"}
+                  {String(Number(rackGenerator.start) || 1).padStart(3, "0")} to{" "}
+                  {rackGenerator.prefix || "RACK-"}
+                  {String(
+                    (Number(rackGenerator.start) || 1) +
+                      Math.max(1, Number(rackGenerator.count) || 1) -
+                      1,
+                  ).padStart(3, "0")}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void printRackQrLabels()}
+                  >
+                    <QrCode className="mr-1.5 size-4" /> Print All QR Labels
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => toast.info("Preview uses the generated rack range shown above.")}
+                  >
+                    Preview
+                  </Button>
+                </div>
+                <div className="hidden grid grid-cols-3 gap-2">
+                  <div className="space-y-1">
                     <label className="font-semibold text-slate-700">Rack</label>
                     <Input
-                      required
                       placeholder="Enter rack"
-                      value={newBinForm.rack}
-                      onChange={(e) => setNewBinForm({ ...newBinForm, rack: e.target.value })}
+                      value={newBinRows[0].rack}
+                      onChange={(e) =>
+                        setNewBinRows((rows) =>
+                          rows.map((row, i) => (i === 0 ? { ...row, rack: e.target.value } : row)),
+                        )
+                      }
                     />
                   </div>
                   <div className="space-y-1">
                     <label className="font-semibold text-slate-700">Shelf / Position</label>
                     <Input
-                      required
                       placeholder="Enter shelf or position"
-                      value={newBinForm.position}
-                      onChange={(e) => setNewBinForm({ ...newBinForm, position: e.target.value })}
+                      value={newBinRows[0].position}
+                      onChange={(e) =>
+                        setNewBinRows((rows) =>
+                          rows.map((row, i) =>
+                            i === 0 ? { ...row, position: e.target.value } : row,
+                          ),
+                        )
+                      }
                     />
                   </div>
                   <div className="space-y-1">
                     <label className="font-semibold text-slate-700">Bin Code</label>
                     <Input
-                      required
                       placeholder="Enter bin code"
-                      value={newBinForm.bin_code}
-                      onChange={(e) => setNewBinForm({ ...newBinForm, bin_code: e.target.value })}
+                      value={newBinRows[0].bin_code}
+                      onChange={(e) =>
+                        setNewBinRows((rows) =>
+                          rows.map((row, i) =>
+                            i === 0 ? { ...row, bin_code: e.target.value } : row,
+                          ),
+                        )
+                      }
                     />
                   </div>
                 </div>
+
+                {false &&
+                  newBinRows.length > 1 &&
+                  newBinRows.slice(1).map((row, rowIndex) => {
+                    const index = rowIndex + 1;
+                    return (
+                      <div key={index} className="grid grid-cols-3 gap-2 items-end">
+                        <Input
+                          placeholder="Enter rack"
+                          value={row.rack}
+                          onChange={(e) =>
+                            setNewBinRows((rows) =>
+                              rows.map((item, i) =>
+                                i === index ? { ...item, rack: e.target.value } : item,
+                              ),
+                            )
+                          }
+                        />
+                        <Input
+                          placeholder="Enter shelf or position"
+                          value={row.position}
+                          onChange={(e) =>
+                            setNewBinRows((rows) =>
+                              rows.map((item, i) =>
+                                i === index ? { ...item, position: e.target.value } : item,
+                              ),
+                            )
+                          }
+                        />
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="Enter bin code"
+                            value={row.bin_code}
+                            onChange={(e) =>
+                              setNewBinRows((rows) =>
+                                rows.map((item, i) =>
+                                  i === index ? { ...item, bin_code: e.target.value } : item,
+                                ),
+                              )
+                            }
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() =>
+                              setNewBinRows((rows) => rows.filter((_, i) => i !== index))
+                            }
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                <Button
+                  className="hidden"
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setNewBinRows((rows) => [...rows, { rack: "", position: "", bin_code: "" }])
+                  }
+                >
+                  + Add Rack Row
+                </Button>
 
                 {/* Auto-Generated QR Code Preview */}
                 <div className="p-3 bg-indigo-50/50 dark:bg-indigo-950/30 rounded-lg border border-indigo-100 dark:border-indigo-900 space-y-1.5">
@@ -1509,25 +3227,101 @@ function SimpleWarehouseModule() {
                     <span className="font-bold text-[11px] uppercase tracking-wider text-indigo-700 dark:text-indigo-300 flex items-center gap-1">
                       <QrCode className="h-3.5 w-3.5 text-indigo-600" /> Auto-Generated Bin QR Code
                     </span>
-                    <Badge variant="outline" className="bg-white text-[10px] border-indigo-200 text-indigo-700 font-mono">
+                    <Badge
+                      variant="outline"
+                      className="bg-white text-[10px] border-indigo-200 text-indigo-700 font-mono"
+                    >
                       AUTO-GENERATE
                     </Badge>
                   </div>
                   <div className="font-mono font-bold text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 p-2 rounded border border-indigo-200 text-xs">
-                    {newBinForm.store_id && newBinForm.zone_id && newBinForm.rack && newBinForm.position && newBinForm.bin_code
-                      ? `QR-LOC-${stores.find(s => s.id === newBinForm.store_id)?.store_code}-${zones.find(z => z.id === newBinForm.zone_id)?.zone_code}-${newBinForm.rack}-${newBinForm.position}-${newBinForm.bin_code}`
+                    {newBinForm.store_id &&
+                    newBinForm.zone_id &&
+                    newBinRows[0].rack &&
+                    newBinRows[0].position &&
+                    newBinRows[0].bin_code
+                      ? `QR-LOC-${stores.find((s) => s.id === newBinForm.store_id)?.store_code}-${zones.find((z) => z.id === newBinForm.zone_id)?.zone_code}-${newBinRows[0].rack}-${newBinRows[0].position}-${newBinRows[0].bin_code}`
                       : "Select a warehouse and zone and enter rack, position, and bin code."}
                   </div>
                 </div>
               </>
             )}
 
+            {createLocationType === "bin" && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <Select
+                    value={newBinForm.store_id}
+                    onValueChange={(value) =>
+                      setNewBinForm({ ...newBinForm, store_id: value, zone_id: "" })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Warehouse" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {stores.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.store_code} - {s.store_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={newBinForm.zone_id}
+                    onValueChange={(value) => setNewBinForm({ ...newBinForm, zone_id: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Zone" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {zones
+                        .filter((z) => z.store_id === newBinForm.store_id)
+                        .map((z) => (
+                          <SelectItem key={z.id} value={z.id}>
+                            {z.zone_code} - {z.zone_name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <Input
+                    placeholder="Rack"
+                    value={newBinRows[0].rack}
+                    onChange={(e) => setNewBinRows([{ ...newBinRows[0], rack: e.target.value }])}
+                  />
+                  <Input
+                    placeholder="Shelf / Position"
+                    value={newBinRows[0].position}
+                    onChange={(e) =>
+                      setNewBinRows([{ ...newBinRows[0], position: e.target.value }])
+                    }
+                  />
+                  <Input
+                    placeholder="Bin Code"
+                    value={newBinRows[0].bin_code}
+                    onChange={(e) =>
+                      setNewBinRows([{ ...newBinRows[0], bin_code: e.target.value }])
+                    }
+                  />
+                </div>
+              </div>
+            )}
             <DialogFooter className="pt-2">
               <Button type="button" variant="outline" onClick={() => setCreateLocationType(null)}>
                 Cancel
               </Button>
               <Button type="submit" disabled={isSubmitting} className="bg-indigo-600 text-white">
-                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : `Create ${createLocationType?.toUpperCase()}`}
+                {isSubmitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin mx-auto" />
+                ) : createLocationType === "rack" ? (
+                  "Bulk Create Racks"
+                ) : createLocationType === "bin" ? (
+                  "Create BIN"
+                ) : (
+                  `Create ${createLocationType?.toUpperCase()}`
+                )}
               </Button>
             </DialogFooter>
           </form>

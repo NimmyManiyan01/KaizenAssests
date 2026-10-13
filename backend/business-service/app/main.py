@@ -1,7 +1,7 @@
 """
 FastAPI entrypoint for ams-wms-business-service.
 """
-# Reload triggered for seed-test-data endpoint registration - v5
+# Reload triggered for Notification router, Assembly, and seed-test-data registration
 from __future__ import annotations
 
 import asyncio
@@ -31,12 +31,15 @@ from app.modules.returns.infrastructure.api.router import router as returns_rout
 from app.modules.storage.infrastructure.api.router import router as storage_router
 from app.modules.assembly.infrastructure.api.router import router as assembly_router
 from app.modules.dispatch.infrastructure.api.router import router as dispatch_router
+from app.modules.customer_orders.infrastructure.api.router import router as customer_orders_router
 from app.modules.storage.infrastructure.api.pickup_router import pickup_router
 from app.modules.storage.infrastructure.api.assembly_requisition_router import router as assembly_requisition_router
 from app.modules.storage.infrastructure.api.inventory_router import inventory_router, storage_req_router, v1_inventory_router
 from app.modules.store.infrastructure.api.router import router as store_router, zone_router, bin_router
 from app.modules.quarantine.infrastructure.api.router import router as quarantine_router
-from app.security.auth_router import router as auth_router
+from app.security.router import router as auth_router
+from app.security.auth_router import router as procurement_auth_router
+from app.modules.procurement.infrastructure.api.router import router as procurement_router
 from app.workers.notification_consumer import start_notification_consumer
 from app.workers.outbox_relay import relay_once
 
@@ -71,6 +74,7 @@ async def lifespan(app: FastAPI):
         from app.modules.store.infrastructure.persistence import models as store_models  # noqa: F401
         from app.modules.assembly.infrastructure.persistence import models as assembly_models  # noqa: F401
         from app.modules.dispatch.infrastructure.persistence import models as dispatch_models  # noqa: F401
+        from app.modules.customer_orders.infrastructure.persistence import models as customer_order_models  # noqa: F401
 
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
@@ -1440,10 +1444,19 @@ async def lifespan(app: FastAPI):
                 )
             """)
             await run_ddl("ALTER TABLE grn_batch_qr ADD COLUMN IF NOT EXISTS item_code VARCHAR(64);")
+            await run_ddl("ALTER TABLE grn_batch ADD COLUMN IF NOT EXISTS superseded BOOLEAN NOT NULL DEFAULT FALSE;")
+            await run_ddl("ALTER TABLE grn_batch ADD COLUMN IF NOT EXISTS superseded BOOLEAN NOT NULL DEFAULT FALSE;")
             await run_ddl("ALTER TABLE grn_batch_qr ADD COLUMN IF NOT EXISTS qr_payload TEXT;")
             await run_ddl("ALTER TABLE grn_batch_qr ALTER COLUMN batch_id DROP NOT NULL;")
-            await run_ddl("CREATE UNIQUE INDEX IF NOT EXISTS uq_grn_batch_qr_item_code ON grn_batch_qr (item_code);")
+            await run_ddl("DROP INDEX IF EXISTS uq_grn_batch_qr_item_code;")
+            await run_ddl("ALTER TABLE grn_batch_qr DROP CONSTRAINT IF EXISTS ix_grn_batch_qr_item_code;")
+            await run_ddl("DROP INDEX IF EXISTS ix_grn_batch_qr_item_code;")
+            await run_ddl("CREATE INDEX IF NOT EXISTS ix_grn_batch_qr_item_code ON grn_batch_qr (item_code);")
             await run_ddl("ALTER TABLE grn_line ADD COLUMN IF NOT EXISTS variant_code VARCHAR(128);")
+            await run_ddl("ALTER TABLE grn_line ADD COLUMN IF NOT EXISTS held_quantity NUMERIC(18,4) NOT NULL DEFAULT 0;")
+            await run_ddl("ALTER TABLE grn_line ADD COLUMN IF NOT EXISTS rejected_reason TEXT;")
+            await run_ddl("ALTER TABLE grn_line ADD COLUMN IF NOT EXISTS damage_reason TEXT;")
+            await run_ddl("ALTER TABLE grn_line ADD COLUMN IF NOT EXISTS held_reason TEXT;")
             logger.debug("Ensured GRN module tables exist")
         except Exception as e:
             logger.warning(f"Failed to create GRN module tables: {e}")
@@ -1648,6 +1661,10 @@ def create_app() -> FastAPI:
     app.include_router(damage_claims_router)
     app.include_router(assembly_router)
     app.include_router(dispatch_router)
+    app.include_router(customer_orders_router)
+    app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+    app.include_router(procurement_auth_router)
+    app.include_router(procurement_router)
 
     @app.get("/api/debug-assembly")
     async def debug_assembly():
@@ -1661,7 +1678,6 @@ def create_app() -> FastAPI:
     app.include_router(inventory_router)
     app.include_router(storage_req_router)
     app.include_router(v1_inventory_router)
-    app.include_router(auth_router)
 
     from fastapi.staticfiles import StaticFiles
     import os

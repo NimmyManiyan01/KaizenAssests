@@ -82,6 +82,16 @@ class SQLAlchemyDispatchRepository(DispatchRepository):
             item_model.batch = d_item.batch
             item_model.bin = d_item.bin
             item_model.status = d_item.status
+            item_model.package_number = d_item.package_number
+            item_model.package_type = d_item.package_type
+            item_model.package_count = d_item.package_count
+
+        model.gate_exit_vehicle_verified = order.gate_exit_vehicle_verified
+        model.gate_exit_driver_verified = order.gate_exit_driver_verified
+        model.gate_exit_loaded_goods_verified = order.gate_exit_loaded_goods_verified
+        model.gate_exit_security_officer = order.gate_exit_security_officer
+        model.gate_exit_remarks = order.gate_exit_remarks
+        model.gate_exit_completed_at = order.gate_exit_completed_at
 
         for item_id, item_model in existing_items_map.items():
             if item_id not in incoming_item_ids:
@@ -166,6 +176,9 @@ class SQLAlchemyDispatchRepository(DispatchRepository):
                 batch=im.batch,
                 bin=im.bin,
                 status=im.status,
+                package_number=im.package_number,
+                package_type=im.package_type,
+                package_count=int(im.package_count) if im.package_count is not None else None,
             )
             for im in (model.items or [])
         ]
@@ -200,6 +213,12 @@ class SQLAlchemyDispatchRepository(DispatchRepository):
             route_path=model.route_path,
             route_deviation=model.route_deviation,
             driver_status=model.driver_status,
+            gate_exit_vehicle_verified=model.gate_exit_vehicle_verified,
+            gate_exit_driver_verified=model.gate_exit_driver_verified,
+            gate_exit_loaded_goods_verified=model.gate_exit_loaded_goods_verified,
+            gate_exit_security_officer=model.gate_exit_security_officer,
+            gate_exit_remarks=model.gate_exit_remarks,
+            gate_exit_completed_at=model.gate_exit_completed_at,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -220,6 +239,8 @@ class SQLAlchemyDriverRepository(DriverRepository):
         model.phone = driver.phone
         model.email = driver.email
         model.license_type = driver.license_type
+        model.license_expiry_date = driver.license_expiry_date
+        model.license_verified = driver.license_verified
         model.is_active = driver.is_active
         model.photo_path = driver.photo_path
         model.address = driver.address
@@ -265,6 +286,8 @@ class SQLAlchemyDriverRepository(DriverRepository):
             phone=model.phone,
             email=model.email,
             license_type=model.license_type or "Heavy",
+            license_expiry_date=(model.license_expiry_date.date() if hasattr(model.license_expiry_date, "date") else model.license_expiry_date) if model.license_expiry_date else None,
+            license_verified=bool(model.license_verified),
             is_active=bool(model.is_active),
             photo_path=model.photo_path,
             address=model.address,

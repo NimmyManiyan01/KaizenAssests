@@ -11,7 +11,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select, delete
@@ -77,7 +77,7 @@ bin_router = APIRouter(prefix="/api/v1/bins", tags=["store-bins"])
 def _is_warehouse_or_admin(user: CurrentUser) -> bool:
     """Check if the user has global warehouse/admin privileges."""
     roles = {r.upper() for r in (user.roles or [])}
-    return bool(roles.intersection({"ADMIN", "WAREHOUSE", "WAREHOUSE_MANAGER", "PROCUREMENT", "SUPERUSER"}))
+    return bool(roles.intersection({"ADMIN", "WAREHOUSE", "WAREHOUSE_MANAGER", "PROCUREMENT", "SUPPLIER", "SUPERUSER"}))
 
 
 def _to_store_response(store: StoreModel, zones_count: int = 0, bins_count: int = 0) -> StoreResponse:
@@ -1458,10 +1458,10 @@ async def create_store_zone(
     if not store:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Store '{id_or_code}' not found")
 
-    if not _is_warehouse_or_admin(user):
+    if not await _is_store_authorized(uow.session, store, user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied: Only Warehouse or Admin users can create zones.",
+            detail="Access denied: You are only authorized to create zones in your assigned store.",
         )
 
     store_code = store.store_code
@@ -1843,6 +1843,7 @@ async def create_zone_bin(
     store = await uow.session.get(StoreModel, zone.store_id)
     if not store:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent Store not found")
+    zone_code = zone.zone_code
 
     if not _is_warehouse_or_admin(user):
         raise HTTPException(
@@ -1871,7 +1872,7 @@ async def create_zone_bin(
         allowed_material_category=payload.allowed_material_category.strip() if payload.allowed_material_category else None,
         hazardous_material_permitted=payload.hazardous_material_permitted,
         temperature_requirement=payload.temperature_requirement.strip() if payload.temperature_requirement else None,
-        qr_identifier=f"LOC-{store.store_code}-{zone.zone_code}-{clean_code}",
+        qr_identifier=f"LOC-{store.store_code}-{zone_code}-{clean_code}",
         occupied_quantity=Decimal("0.0"),
         status=payload.status.strip().upper() if payload.status else "AVAILABLE",
         created_at=now,
@@ -1882,13 +1883,14 @@ async def create_zone_bin(
     try:
         await uow.session.flush()
         await uow.commit()
-        logger.info(f"Bin '{new_bin.bin_code}' created under Zone '{zone.zone_code}' by '{user.username}'")
+        await uow.session.refresh(new_bin)
+        logger.info(f"Bin '{new_bin.bin_code}' created under Zone '{zone_code}' by '{user.username}'")
         return _to_bin_response(new_bin)
     except IntegrityError:
         await uow.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Bin with code '{clean_code}' already exists in Zone '{zone.zone_code}'.",
+            detail=f"Bin with code '{clean_code}' already exists in Zone '{zone_code}'.",
         )
 
 
