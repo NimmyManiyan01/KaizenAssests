@@ -18,6 +18,7 @@ import {
   Image as ImageIcon,
   LayoutDashboard,
   Loader2,
+  Camera,
   Mail,
   PackageCheck,
   Plus,
@@ -117,6 +118,7 @@ type BatchEntry = {
   batch_quantity: number;
   qr_id?: string;
   qr_data_url?: string;
+  qr_payload?: string;
 };
 
 type UploadedDocument = {
@@ -349,9 +351,74 @@ function GrnPageWorkflow() {
   const [dockOptions, setDockOptions] = useState<any[]>([]);
   const [loadingContext, setLoadingContext] = useState(false);
   const [busyAction, setBusyAction] = useState(false);
+  const [dockReleasePrompt, setDockReleasePrompt] = useState<string | null>(null);
+  const [dockReleasedAlert, setDockReleasedAlert] = useState(false);
+  const [asnCameraOpen, setAsnCameraOpen] = useState(false);
+  const asnCameraVideoRef = useRef<HTMLVideoElement>(null);
+  const asnCameraStreamRef = useRef<MediaStream | null>(null);
 
   // Page 2 - Line Items State (Loaded dynamically from Real Database PO Context)
   const [materials, setMaterials] = useState<GrnLineItem[]>([]);
+
+  const openAsnDocumentCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      asnCameraStreamRef.current = stream;
+      setAsnCameraOpen(true);
+      requestAnimationFrame(() => {
+        if (asnCameraVideoRef.current) asnCameraVideoRef.current.srcObject = stream;
+      });
+    } catch {
+      toast.error("Unable to open camera", { description: "Allow camera permission and try again." });
+    }
+  };
+
+  const closeAsnDocumentCamera = () => {
+    asnCameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    asnCameraStreamRef.current = null;
+    setAsnCameraOpen(false);
+  };
+
+  const captureAsnDocument = () => {
+    const video = asnCameraVideoRef.current;
+    if (!video) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d")?.drawImage(video, 0, 0);
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const activeGrnId = grnId || localStorage.getItem("active_grn_id");
+      if (!activeGrnId) {
+        toast.error("Save the GRN header before capturing the ASN document.");
+        closeAsnDocumentCamera();
+        return;
+      }
+      try {
+        setBusyAction(true);
+        const file = new File([blob], `asn-document-${Date.now()}.jpg`, { type: "image/jpeg" });
+        const formData = new FormData();
+        formData.append("document_type", "ASN Copy");
+        formData.append("file", file);
+        const saved = await api.uploadGrnDocument(activeGrnId, formData);
+        const newDoc: UploadedDocument = {
+          document_id: saved.document_id || saved.documentId,
+          grn_id: saved.grn_id || saved.grnId || activeGrnId,
+          category: saved.document_type || "ASN Copy",
+          file_name: saved.file_name || file.name,
+          file_path: saved.file_path || saved.filePath || "",
+          file_type: file.type,
+        };
+        setUploadedDocuments((prev) => [...prev.filter((doc) => !doc.category.toLowerCase().includes("asn")), newDoc]);
+        toast.success(`Saved ASN Copy: ${file.name}`);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Unable to save ASN document.");
+      } finally {
+        setBusyAction(false);
+        closeAsnDocumentCamera();
+      }
+    }, "image/jpeg");
+  };
 
   // Page 3 - Damaged Goods & Quality State
   const [damagePhotos, setDamagePhotos] = useState<
@@ -396,6 +463,18 @@ function GrnPageWorkflow() {
     batch: BatchEntry;
     itemCode: string;
   } | null>(null);
+  const [historyQrLabels, setHistoryQrLabels] = useState<Array<{
+    title: string;
+    qrId: string;
+    dataUrl: string;
+    payload: string;
+    materialCode: string;
+    materialName: string;
+    category?: string;
+    quantity?: number | string;
+    uom?: string;
+    grnNumber?: string;
+  }> | null>(null);
   const [showQualityPassModal, setShowQualityPassModal] = useState(false);
   const [showNotifyVendorModal, setShowNotifyVendorModal] = useState(false);
   const [notifyVendorEmail, setNotifyVendorEmail] = useState("");
@@ -600,6 +679,7 @@ function GrnPageWorkflow() {
           dock_number: match.dock_number,
           dock_name: match.dock_name || match.dock_type || match.dock_number,
           status: match.status,
+          allocation_id: match.current_allocation?.id || match.current_allocation?.allocation_request_id,
           is_allocated: true,
         };
       }
@@ -635,6 +715,7 @@ function GrnPageWorkflow() {
         dock_number: matched.dock_number,
         dock_name: matched.dock_name || matched.dock_type || matched.dock_number,
         status: matched.status,
+        allocation_id: matched.current_allocation?.id || matched.current_allocation?.allocation_request_id,
         is_allocated: true,
       };
     }
@@ -2099,6 +2180,9 @@ function GrnPageWorkflow() {
               entry?.batch?.batch_number || entry?.batch_number || draftBatch.batch_number,
               batch_quantity:
               Number(entry?.batch?.batch_quantity ?? entry?.batch_quantity ?? draftBatch.batch_quantity),
+              batch_id: entry?.batch?.batch_id || entry?.batch_id,
+              qr_id: entry?.qr?.qr_id || entry?.qr_id,
+              qr_payload: entry?.qr?.qr_payload || entry?.qr_payload,
             };
           });
           setMaterialBatches((prev) => ({ ...prev, [rowKey]: persistedBatches }));
@@ -2482,24 +2566,45 @@ function GrnPageWorkflow() {
     win.document.close();
   }
 
-  // Print Batch QR Labels for a specific GRN Record
-  async function printGrnRecordBatchLabels(record: any) {
+  // Display the same batch QR labels from the GRN History record.
+  async function viewGrnRecordBatchLabels(record: any) {
     let linesToRender =
       record.lines && record.lines.length > 0
         ? record.lines
         : record.materials && record.materials.length > 0
           ? record.materials
           : [];
-    const targetId = record.grn_id || record.id || record.grn_number || record.grnNumber;
-    if (linesToRender.length === 0 && targetId) {
-      try {
-        const fullDetail = await api.getGrnDetail(targetId);
-        if (fullDetail && (fullDetail.lines || fullDetail.materials)) {
-          linesToRender = fullDetail.lines || fullDetail.materials;
-          record = { ...record, ...fullDetail };
+    const lookupIds = Array.from(
+      new Set(
+        [record.grn_id, record.id, record.grn_number, record.grnNumber]
+          .filter(Boolean)
+          .map(String),
+      ),
+    );
+    const hasBatchData = linesToRender.some(
+      (line: any) => Array.isArray(line?.batches) && line.batches.length > 0,
+    );
+    if ((!linesToRender.length || !hasBatchData) && lookupIds.length > 0) {
+      for (const lookupId of lookupIds) {
+        try {
+          const fullDetail = await api.getGrnDetail(lookupId);
+          if (fullDetail && (fullDetail.lines || fullDetail.materials)) {
+            const detailLines = fullDetail.lines || fullDetail.materials;
+            // Prefer the persisted detail because it contains the exact batch
+            // allocations created on the Batch-wise QR Code Generation page.
+            if (detailLines.some((line: any) => Array.isArray(line?.batches) && line.batches.length > 0)) {
+              linesToRender = detailLines;
+              record = { ...record, ...fullDetail };
+              break;
+            }
+            if (!linesToRender.length) {
+              linesToRender = detailLines;
+              record = { ...record, ...fullDetail };
+            }
+          }
+        } catch {
+          // Try the next identifier (UUID, database id, or GRN number).
         }
-      } catch {
-        // fallback
       }
     }
 
@@ -2513,6 +2618,7 @@ function GrnPageWorkflow() {
       title: string;
       qrId: string;
       dataUrl: string;
+      payload: string;
       materialCode: string;
       materialName: string;
       category?: string;
@@ -2524,14 +2630,16 @@ function GrnPageWorkflow() {
     }> = [];
 
     for (const m of linesToRender) {
-      const itemCode = m.item_code || m.material_code || "ITEM";
-      const matName = m.material_name || itemCode;
+      const itemCode = m.item_code || m.itemCode || m.material_code || m.materialCode || "ITEM";
+      const matName = m.material_name || m.materialName || m.material_description || itemCode;
       const cat = m.material_category || m.category || "Raw Materials";
       const uom = m.uom || "PCS";
       const batches =
         m.batches && m.batches.length > 0
           ? m.batches
-          : [
+          : m.batch_number || m.batchNumber
+            ? [{ batch_number: m.batch_number || m.batchNumber, batch_quantity: m.batch_quantity ?? m.batchQuantity ?? 0 }]
+            : [
               {
                 batch_number: `BATCH-${itemCode}-001`,
                 batch_quantity: m.good_quantity ?? m.received_quantity ?? 0,
@@ -2539,11 +2647,17 @@ function GrnPageWorkflow() {
             ];
 
       for (const b of batches) {
-        const batchNum = b.batch_number || `BATCH-${itemCode}-001`;
+        const savedBatch = b.batch || b;
+        const batchNum =
+          savedBatch.batch_number || savedBatch.batchNumber || savedBatch.batch_no || savedBatch.batchNo ||
+          savedBatch.lot_number || savedBatch.lotNumber ||
+          `BATCH-${itemCode}-001`;
         const batchQty =
-          b.batch_quantity !== undefined
-            ? b.batch_quantity
-            : (m.good_quantity ?? m.received_quantity ?? 0);
+          savedBatch.batch_quantity !== undefined
+            ? savedBatch.batch_quantity
+            : savedBatch.batchQuantity !== undefined
+              ? savedBatch.batchQuantity
+              : (m.good_quantity ?? m.received_quantity ?? 0);
         const qrId = `QR-${grnNum}-${itemCode}-${batchNum}`;
         const payload = [
           `Material Code: ${itemCode}`,
@@ -2574,6 +2688,7 @@ function GrnPageWorkflow() {
           title: batchNum,
           qrId,
           dataUrl,
+          payload,
           materialCode: itemCode,
           materialName: matName,
           category: cat,
@@ -2591,7 +2706,7 @@ function GrnPageWorkflow() {
       return;
     }
 
-    printBulkQrLabels(labelsToPrint);
+    setHistoryQrLabels(labelsToPrint);
   }
 
   // Export GRN Records to CSV File
@@ -3426,20 +3541,11 @@ function GrnPageWorkflow() {
 
   return (
     <AppShell
-      title="Goods Receiving (GRN)"
+      title="GRN Operations Dashboard"
+      subtitle="Manage goods receipts, quality checks, and GRN records"
       actions={
         <>
-            <Button
-              variant="outline"
-              className="rounded-xl border-primary/30 font-semibold"
-              onClick={() => {
-                setManualScanText("");
-                setManualScanInputOpen(true);
-              }}
-            >
-              <QrCode className="size-4" /> Paste Material QR Before Putaway
-            </Button>
-            {activeTab !== "wizard" && (
+            {activeTab === "dashboard" && (
               <>
                 <Button
                   variant={activeTab === "records" ? "default" : "outline"}
@@ -3626,7 +3732,6 @@ function GrnPageWorkflow() {
                           <thead className="bg-muted/50 font-semibold uppercase text-muted-foreground text-[11px] tracking-wider border-b border-border/70">
                             <tr>
                               <th className="px-4 py-3 whitespace-nowrap">GRN Number</th>
-                              <th className="px-4 py-3 whitespace-nowrap">PO Reference</th>
                               <th className="px-4 py-3">Supplier Name</th>
                               <th className="px-4 py-3 whitespace-nowrap">Vehicle</th>
                               <th className="px-4 py-3 whitespace-nowrap">Status</th>
@@ -3650,9 +3755,6 @@ function GrnPageWorkflow() {
                                 >
                                   <td className="px-4 py-3 font-mono font-bold text-primary whitespace-nowrap">
                                     {r.grn_number}
-                                  </td>
-                                  <td className="px-4 py-3 font-mono font-semibold text-foreground whitespace-nowrap">
-                                    {r.po_number}
                                   </td>
                                   <td className="px-4 py-3 font-medium text-foreground">
                                     {r.supplier_name}
@@ -3678,16 +3780,6 @@ function GrnPageWorkflow() {
                                       <Button
                                         size="sm"
                                         variant="outline"
-                                        className="rounded-lg text-xs h-7 font-semibold border-primary/30 text-primary hover:bg-primary-soft shrink-0"
-                                        onClick={() => {
-                                          void printGrnCertificate(r);
-                                        }}
-                                      >
-                                        <Printer className="mr-1 size-3.5 text-primary" /> Print
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
                                         className="rounded-lg text-xs h-7 font-semibold border-rose-300 text-rose-600 hover:bg-rose-50 shrink-0"
                                         onClick={() => void handleDeleteGrn(r)}
                                       >
@@ -3703,7 +3795,7 @@ function GrnPageWorkflow() {
                                 isRecordMatchingStatus(r.status, dashboardStatusFilter),
                             ).length === 0 && (
                               <tr>
-                                <td colSpan={6} className="text-center py-10 text-muted-foreground">
+                                <td colSpan={5} className="text-center py-10 text-muted-foreground">
                                   <FileCheck2 className="mx-auto mb-2 size-6 text-muted-foreground/50" />
                                   <p className="text-xs font-semibold text-foreground">
                                     No{" "}
@@ -3872,15 +3964,6 @@ function GrnPageWorkflow() {
                         ? `No records match "${searchTerm}".`
                         : "Try selecting a different status filter or start a new Goods Receiving entry."}
                     </p>
-                    <Button
-                      className="mt-4 rounded-xl font-bold shadow-glow"
-                      onClick={() => {
-                        setActiveTab("wizard");
-                        setCurrentPage(1);
-                      }}
-                    >
-                      <Plus className="mr-2 size-4" /> Start New GRN
-                    </Button>
                   </div>
                 </div>
               ) : (
@@ -3968,15 +4051,7 @@ function GrnPageWorkflow() {
                                 size="sm"
                                 variant="outline"
                                 className="rounded-xl text-xs font-semibold"
-                                onClick={() => void printGrnCertificate(r)}
-                              >
-                                <Printer className="mr-1.5 size-3.5" /> Official Certificate
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="rounded-xl text-xs font-semibold"
-                                onClick={() => void printGrnRecordBatchLabels(r)}
+                                onClick={() => void viewGrnRecordBatchLabels(r)}
                               >
                                 <QrCode className="mr-1.5 size-3.5 text-primary" /> Batch QR Labels
                               </Button>
@@ -5284,25 +5359,14 @@ function GrnPageWorkflow() {
                   </h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     <>
-                      <b>ASN Copy (Required)</b> must be uploaded and saved. Add optional invoices,
-                      weighment slips, tax documents, or other physical documents using the{" "}
-                      <b>+ Add Document</b> form below.
+                      <b>ASN Copy (Required)</b> must be captured and saved using the camera below.
                     </>
                   </p>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl text-xs font-bold border-primary/40 text-primary hover:bg-primary/5"
-                  onClick={() => setShowAddCustomTypeInput(!showAddCustomTypeInput)}
-                >
-                  <Plus className="mr-1.5 size-3.5" /> Add Custom Category Name
-                </Button>
               </div>
 
               {/* INLINE CUSTOM DOCUMENT CATEGORY CREATION FORM */}
-              {showAddCustomTypeInput && (
+              {false && showAddCustomTypeInput && (
                 <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
                   <span className="text-xs font-bold text-primary block">
                     Create Custom Document Category
@@ -5347,7 +5411,7 @@ function GrnPageWorkflow() {
               )}
 
               {/* + ADD DOCUMENT ACTION FORM */}
-              <div className="rounded-xl border bg-muted/20 p-4 space-y-3">
+              <div className="hidden rounded-xl border bg-muted/20 p-4 space-y-3">
                 <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
                   <Plus className="size-4 text-primary" /> Add Document / Attach File
                 </span>
@@ -5509,7 +5573,7 @@ function GrnPageWorkflow() {
                                   className="rounded-xl text-xs font-bold border-primary/40 text-primary hover:bg-primary/10 h-7"
                                   onClick={() => setViewingDocumentModal(asnDoc)}
                                 >
-                                  <Eye className="mr-1 size-3" /> View Document
+                                  <Eye className="mr-1 size-3" /> View Image
                                 </Button>
                                 <Button
                                   size="sm"
@@ -5526,55 +5590,23 @@ function GrnPageWorkflow() {
                                 </Button>
                               </div>
                             ) : (
-                              <label className="cursor-pointer inline-block">
-                                <span className="inline-flex items-center justify-center rounded-xl bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-xs font-bold shadow-sm">
-                                  <Upload className="mr-1 size-3" /> Attach ASN File *
-                                </span>
-                                <input
-                                  type="file"
-                                  className="hidden"
-                                  onChange={async (e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) {
-                                      const activeGrnId = grnId || localStorage.getItem("active_grn_id");
-                                      if (!activeGrnId) {
-                                        toast.error("Save the GRN header before uploading the ASN document.");
-                                        return;
-                                      }
-                                      try {
-                                        setBusyAction(true);
-                                        const formData = new FormData();
-                                        formData.append("document_type", "ASN Copy");
-                                        formData.append("file", file);
-                                        const saved = await api.uploadGrnDocument(activeGrnId, formData);
-                                        const newDoc: UploadedDocument = {
-                                          document_id: saved.document_id || saved.documentId,
-                                          grn_id: saved.grn_id || saved.grnId || activeGrnId,
-                                          category: saved.document_type || "ASN Copy",
-                                          file_name: saved.file_name || file.name,
-                                          file_path: saved.file_path || saved.filePath || "",
-                                          file_type: file.type,
-                                        };
-                                        setUploadedDocuments((prev) => [
-                                          ...prev.filter(
-                                            (doc) =>
-                                              !(
-                                                doc.category.toLowerCase().includes("asn") &&
-                                                doc.file_name.toLowerCase() === file.name.toLowerCase()
-                                              ),
-                                          ),
-                                          newDoc,
-                                        ]);
-                                        toast.success(`Saved ASN Copy: ${file.name}`);
-                                      } catch (error) {
-                                        toast.error(error instanceof Error ? error.message : "Unable to save ASN document.");
-                                      } finally {
-                                        setBusyAction(false);
-                                      }
-                                    }
-                                  }}
-                                />
-                              </label>
+                              <div>
+                                <Button type="button" className="rounded-xl bg-rose-600 text-xs font-bold hover:bg-rose-700" onClick={() => void openAsnDocumentCamera()}>
+                                  <Camera className="mr-1 size-3" /> Open Camera *
+                                </Button>
+                                <Dialog open={asnCameraOpen} onOpenChange={(open) => { if (!open) closeAsnDocumentCamera(); }}>
+                                  <DialogContent className="max-w-xl rounded-2xl p-5">
+                                    <DialogHeader><DialogTitle className="font-black text-primary">Capture ASN Document</DialogTitle></DialogHeader>
+                                    <div className="space-y-3">
+                                      <video ref={asnCameraVideoRef} autoPlay playsInline className="w-full rounded-xl border bg-black" />
+                                      <div className="flex gap-2">
+                                        <Button type="button" className="flex-1 rounded-xl" onClick={captureAsnDocument}>Capture & Save</Button>
+                                        <Button type="button" variant="outline" className="rounded-xl" onClick={closeAsnDocumentCamera}>Close</Button>
+                                      </div>
+                                    </div>
+                                  </DialogContent>
+                                </Dialog>
+                              </div>
                             )}
                           </td>
                         </tr>
@@ -5625,7 +5657,7 @@ function GrnPageWorkflow() {
                                 className="rounded-xl text-xs font-bold border-primary/40 text-primary hover:bg-primary/10 h-7"
                                 onClick={() => setViewingDocumentModal(optDoc)}
                               >
-                                <Eye className="mr-1 size-3" /> View Document
+                                <Eye className="mr-1 size-3" /> View Image
                               </Button>
                               <Button
                                 size="sm"
@@ -5677,7 +5709,7 @@ function GrnPageWorkflow() {
                 </h3>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-3 bg-muted/20 p-4 rounded-xl border">
+              <div className="hidden flex flex-wrap items-center justify-between gap-3 bg-muted/20 p-4 rounded-xl border">
                 <div className="flex-1 min-w-[280px]">
                   <label className="text-xs font-bold text-foreground mb-1 block">
                     Filter Material / View Option
@@ -5765,15 +5797,6 @@ function GrnPageWorkflow() {
                             </p>
                           </div>
 
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="rounded-xl text-xs font-bold"
-                            onClick={() => printAllPoQrLabels(mat.item_code)}
-                          >
-                            <Printer className="mr-1.5 size-3.5" /> Print {mat.material_name} Labels
-                            ({bList.length})
-                          </Button>
                         </div>
 
                         {bList.length === 0 ? (
@@ -5803,32 +5826,14 @@ function GrnPageWorkflow() {
                                     </h4>
                                   </div>
 
-                                  <div
-                                    className="relative group/qr cursor-pointer my-2"
-                                    onClick={() =>
-                                      setEnlargedQr({
-                                        title: b.batch_number,
-                                        qr_id: qrInfo.qr_id,
-                                        data_url: qrInfo.data_url,
-                                        payload:
-                                          qrInfo.payload ||
-                                          buildMaterialQrPayload(mat.item_code, b, mat),
-                                        batch: b,
-                                        itemCode: mat.item_code,
-                                      })
-                                    }
-                                  >
+                                  <div className="relative my-2">
                                     {qrInfo.data_url ? (
-                                      <div className="relative inline-block p-2 bg-white rounded-2xl border border-gray-200 shadow-sm transition-transform group-hover/qr:scale-105">
+                                      <div className="relative inline-block rounded-2xl border border-gray-200 bg-white p-2 shadow-sm">
                                         <img
                                           src={qrInfo.data_url}
                                           alt="Material QR Code"
                                           className="size-48 mx-auto"
                                         />
-                                        <div className="absolute inset-0 bg-black/70 opacity-0 group-hover/qr:opacity-100 transition-opacity rounded-2xl flex flex-col items-center justify-center text-white text-xs font-bold gap-1 p-2">
-                                          <Eye className="size-7 text-emerald-400" />
-                                          <span>Click to Enlarge / Scan</span>
-                                        </div>
                                       </div>
                                     ) : (
                                       <div className="grid size-48 place-items-center bg-gray-100 mx-auto rounded-2xl border border-dashed border-gray-300">
@@ -5857,40 +5862,20 @@ function GrnPageWorkflow() {
                                     </p>
                                   </div>
 
-                                  <div className="grid grid-cols-2 gap-2 pt-1">
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="w-full rounded-xl text-xs font-bold"
-                                      onClick={() =>
-                                        setEnlargedQr({
-                                          title: b.batch_number,
-                                          qr_id: qrInfo.qr_id,
-                                          data_url: qrInfo.data_url,
-                                          payload:
-                                            qrInfo.payload ||
-                                            buildMaterialQrPayload(mat.item_code, b, mat),
-                                          batch: b,
-                                          itemCode: mat.item_code,
-                                        })
-                                      }
-                                    >
-                                      <Eye className="mr-1 size-3 text-primary" /> Scan / Preview
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      className="w-full rounded-xl text-xs font-bold bg-primary text-white hover:bg-primary/90"
-                                      onClick={() =>
-                                        printSingleQrLabel(
-                                          b.batch_number,
-                                          mat.item_code,
-                                          qrInfo.qr_id,
-                                          qrInfo.data_url,
-                                        )
-                                      }
-                                    >
-                                      <Printer className="mr-1 size-3" /> Print Label
-                                    </Button>
+                                  <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-3">
+                                    {qrInfo.data_url ? (
+                                      <a
+                                        href={qrInfo.data_url}
+                                        download={`${b.batch_number}-QR.png`}
+                                        className="inline-flex h-9 w-full items-center justify-center rounded-xl bg-emerald-600 text-xs font-bold text-white hover:bg-emerald-700"
+                                      >
+                                        <Download className="mr-1 size-3" /> Download QR
+                                      </a>
+                                    ) : (
+                                      <Button disabled className="w-full rounded-xl text-xs font-bold">
+                                        <Download className="mr-1 size-3" /> Download QR
+                                      </Button>
+                                    )}
                                   </div>
                                 </Card>
                               );
@@ -6140,6 +6125,12 @@ function GrnPageWorkflow() {
                       }
                       newRecord.status = persistedStatus;
 
+                      // Ask the GRN operator to release the dock after the
+                      // GRN has been successfully posted.
+                      if (allocatedDockInfo?.allocation_id) {
+                        setDockReleasePrompt(String(allocatedDockInfo.allocation_id));
+                      }
+
                       // Update grnRecords state so it appears immediately on Dashboard & Records table
                       setGrnRecords((prev) => [
                         newRecord,
@@ -6186,6 +6177,58 @@ function GrnPageWorkflow() {
             </Card>
           )}
         </div>
+      )}
+
+      {historyQrLabels && (
+        <Dialog open={!!historyQrLabels} onOpenChange={() => setHistoryQrLabels(null)}>
+          <DialogContent className="w-[min(96vw,1100px)] max-w-none rounded-2xl p-0 overflow-hidden">
+            <DialogHeader className="border-b px-5 py-4 text-left">
+              <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+                <QrCode className="size-5 text-primary" /> Batch QR Labels ({historyQrLabels.length})
+              </DialogTitle>
+              <DialogDescription>
+                {historyQrLabels.length} batch QR label{historyQrLabels.length === 1 ? "" : "s"} generated for this GRN. Download any label when needed.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="max-h-[75vh] overflow-y-auto p-5">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {historyQrLabels.map((label) => (
+                  <Card key={label.qrId} className="rounded-2xl border p-4 text-center">
+                    <div className="mb-3 text-left">
+                      <p className="break-all text-sm font-bold text-foreground">{label.title}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {label.materialCode} · {label.materialName}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Quantity: {label.quantity ?? 0} {label.uom || "PCS"}
+                      </p>
+                    </div>
+                    {label.dataUrl ? (
+                      <img
+                        src={label.dataUrl}
+                        alt={`QR code for ${label.title}`}
+                        className="mx-auto aspect-square w-full max-w-[260px] object-contain"
+                      />
+                    ) : (
+                      <div className="flex aspect-square items-center justify-center text-sm text-muted-foreground">
+                        QR unavailable
+                      </div>
+                    )}
+                    {label.dataUrl && (
+                      <a
+                        href={label.dataUrl}
+                        download={`${label.title}-QR.png`}
+                        className="mt-3 inline-flex h-9 items-center justify-center rounded-xl border border-primary/30 px-4 text-sm font-semibold text-primary hover:bg-primary/5"
+                      >
+                        Download QR
+                      </a>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
 
       {/* Enlarged QR Code Scanner Dialog */}
@@ -6841,8 +6884,6 @@ function GrnPageWorkflow() {
                       <th className="p-2.5 text-right">Received Qty</th>
                       <th className="p-2.5 text-right text-emerald-600">Good Qty</th>
                       <th className="p-2.5 text-right text-rose-600">Damaged Qty</th>
-                      <th className="p-2.5 text-right text-rose-600">Rejected Qty</th>
-                      <th className="p-2.5 text-right text-amber-600">Held Qty</th>
                       <th className="p-2.5 text-right font-black">Accounted Qty</th>
                       <th className="p-2.5 text-center">Item Status</th>
                     </tr>
@@ -6862,7 +6903,7 @@ function GrnPageWorkflow() {
                         return (
                           <tr>
                             <td
-                              colSpan={7}
+                              colSpan={6}
                               className="p-4 text-center text-xs text-muted-foreground italic font-sans"
                             >
                               No material line items recorded for this GRN.
@@ -6913,12 +6954,6 @@ function GrnPageWorkflow() {
                             </td>
                             <td className="p-2.5 text-right font-bold text-rose-600">
                               {damQty} {uom}
-                            </td>
-                            <td className="p-2.5 text-right font-black text-indigo-600">
-                              {rejectedQty} {uom}
-                            </td>
-                            <td className="p-2.5 text-right font-bold text-amber-600">
-                              {heldQty} {uom}
                             </td>
                             <td className="p-2.5 text-right font-black text-indigo-600">
                               {accounted} {uom}
@@ -7061,20 +7096,9 @@ function GrnPageWorkflow() {
               open={!!viewingDocumentModal}
               onOpenChange={() => setViewingDocumentModal(null)}
             >
-              <DialogContent className="max-w-4xl rounded-2xl p-6 space-y-5 max-h-[92vh] overflow-y-auto">
-                <DialogHeader className="border-b pb-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-mono font-bold text-primary px-3 py-1 rounded-full bg-primary/10 border border-primary/20 uppercase">
-                      {viewingDocumentModal.category || "ATTACHED DOCUMENT"}
-                    </span>
-                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
-                      <ShieldCheck className="size-3" /> WMS Verified Attachment
-                    </span>
-                  </div>
-                  <DialogTitle className="text-lg font-bold text-foreground mt-2 line-clamp-1">
-                    Document Preview: {viewingDocumentModal.file_name}
-                  </DialogTitle>
-                  <DialogDescription className="text-xs text-muted-foreground">
+              <DialogContent className="max-w-3xl rounded-2xl p-4 space-y-3 max-h-[92vh] overflow-y-auto">
+                <DialogHeader className="hidden">
+                  <DialogDescription className="hidden">
                     Inbound Quality & Regulatory Attachment • PO: {header.po_number || "—"} • GRN:{" "}
                     {header.grn_number || "—"}
                   </DialogDescription>
@@ -7082,15 +7106,12 @@ function GrnPageWorkflow() {
 
                 {/* EMBEDDED PREVIEW OR RICH OFFICIAL DOCUMENT SHEET */}
                 {isImg && viewingDocumentModal.file_path ? (
-                  <div className="rounded-xl border bg-slate-950 p-4 text-slate-100 min-h-[340px] flex flex-col items-center justify-center relative overflow-hidden">
+                  <div className="flex items-center justify-center overflow-hidden rounded-xl bg-background">
                     <img
-                      src={viewingDocumentModal.file_path}
+                      src={resolveMediaUrl(viewingDocumentModal.file_path)}
                       alt={viewingDocumentModal.file_name}
-                      className="max-h-[440px] w-auto mx-auto rounded-lg object-contain border border-slate-800 shadow-2xl"
+                      className="max-h-[76vh] w-auto max-w-full rounded-xl object-contain"
                     />
-                    <p className="text-xs text-slate-400 font-mono mt-3">
-                      High-Resolution Image Attachment Preview
-                    </p>
                   </div>
                 ) : isPdf &&
                   viewingDocumentModal.file_path &&
@@ -7130,12 +7151,6 @@ function GrnPageWorkflow() {
                     {/* METADATA GRID */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono">
                       <div className="rounded-xl border bg-muted/30 p-3 space-y-1.5">
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">PO Reference:</span>
-                          <span className="font-bold text-foreground">
-                            {header.po_number || "N/A"}
-                          </span>
-                        </div>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Supplier Name:</span>
                           <span className="font-bold text-foreground">
@@ -7276,37 +7291,53 @@ function GrnPageWorkflow() {
                     Close Viewer
                   </Button>
 
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      className="rounded-xl text-xs font-bold border-primary/40 text-primary hover:bg-primary/5"
-                      onClick={() => openDocumentInFullWindow(viewingDocumentModal)}
-                    >
-                      <Eye className="mr-1.5 size-3.5" /> Open in Full Window
-                    </Button>
-                    {viewingDocumentModal.file_path &&
-                    viewingDocumentModal.file_path.startsWith("blob:") ? (
-                      <a
-                        href={viewingDocumentModal.file_path}
-                        download={viewingDocumentModal.file_name}
-                        className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground shadow transition-colors hover:bg-primary/90"
-                      >
-                        <Download className="mr-1.5 size-3.5" /> Download File
-                      </a>
-                    ) : (
-                      <Button
-                        className="rounded-xl text-xs font-bold bg-primary text-primary-foreground"
-                        onClick={() => openDocumentInFullWindow(viewingDocumentModal)}
-                      >
-                        <Printer className="mr-1.5 size-3.5" /> Print Document
-                      </Button>
-                    )}
-                  </div>
                 </div>
               </DialogContent>
             </Dialog>
           );
         })()}
+
+      {dockReleasePrompt && (
+        <Dialog open={!!dockReleasePrompt} onOpenChange={(open) => !open && setDockReleasePrompt(null)}>
+          <DialogContent className="max-w-md rounded-2xl p-6">
+            <DialogHeader>
+              <DialogTitle className="font-black text-primary">Release Dock</DialogTitle>
+              <DialogDescription>Goods receiving is complete. Release the occupied dock now.</DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-end gap-2 pt-3">
+              <Button variant="outline" className="rounded-xl" onClick={() => setDockReleasePrompt(null)}>Later</Button>
+              <Button className="rounded-xl" onClick={async () => {
+                try {
+                  setBusyAction(true);
+                  await api.completeDockReceiving(dockReleasePrompt);
+                  await api.releaseDock(dockReleasePrompt);
+                  setDockReleasePrompt(null);
+                  setDockReleasedAlert(true);
+                  window.dispatchEvent(new CustomEvent("notifications:refresh"));
+                } catch (error: any) {
+                  toast.error("Unable to release dock", { description: error?.message || "Try again." });
+                } finally {
+                  setBusyAction(false);
+                }
+              }}>Release Dock</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      <Dialog open={dockReleasedAlert} onOpenChange={setDockReleasedAlert}>
+        <DialogContent className="max-w-md rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="font-black text-emerald-600">Dock Released Successfully</DialogTitle>
+            <DialogDescription>
+              The dock is now available. The next vehicle can enter.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end pt-3">
+            <Button className="rounded-xl" onClick={() => setDockReleasedAlert(false)}>OK</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* 🚪 EXIT GRN ENTRY CONFIRMATION DIALOG */}
       <Dialog open={showExitConfirmModal} onOpenChange={setShowExitConfirmModal}>

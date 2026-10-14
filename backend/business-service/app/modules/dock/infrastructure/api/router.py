@@ -861,9 +861,10 @@ async def release_dock(
 
     user: CurrentUser = await get_current_user(request, credentials)
     roles_upper = {r.upper() for r in (user.roles or [])}
+    is_grn_authorized = bool(roles_upper.intersection({"GRN", "GRN_MANAGER", "RECEIVING", "OPERATIONS", "OPERATIONS_MANAGER"}))
 
     # 2. Reject Warehouse Manager explicitly (Case 3)
-    if "WAREHOUSE_MANAGER" in roles_upper or "WAREHOUSE" in roles_upper:
+    if not is_grn_authorized and ("WAREHOUSE_MANAGER" in roles_upper or "WAREHOUSE" in roles_upper):
         if "STORE_MANAGER" not in roles_upper and "STORE_KEEPER" not in roles_upper:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -872,7 +873,7 @@ async def release_dock(
 
     # 3. Require Store Manager role (Case 4)
     is_store_manager = "STORE_MANAGER" in roles_upper or "STORE_KEEPER" in roles_upper
-    if not is_store_manager:
+    if not is_store_manager and not is_grn_authorized:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Forbidden: Dock release must be performed by the assigned Store Manager.",
@@ -880,7 +881,7 @@ async def release_dock(
 
     # 4. Resolve Store Manager's assigned store(s) (Case 6)
     user_store_ids, user_store_codes = await _get_store_user_context(user, uow)
-    if not user_store_ids and not user_store_codes:
+    if not is_grn_authorized and not user_store_ids and not user_store_codes:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied: Store Manager does not have an assigned store.",
@@ -989,7 +990,7 @@ async def release_dock(
         (dock_store_codes_upper & user_store_codes_upper)
     )
 
-    if not sm_direct_match and not is_store_authorized:
+    if not is_grn_authorized and not sm_direct_match and not is_store_authorized:
         if req.assigned_store_manager_name or req.assigned_store_manager_username:
             target_sm = req.assigned_store_manager_name or req.assigned_store_manager_username
             raise HTTPException(

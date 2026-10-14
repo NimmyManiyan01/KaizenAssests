@@ -567,23 +567,6 @@ async def dispatch_order(
     db: Annotated[AsyncSession, Depends(get_db)],
     _user: CurrentUser = Depends(get_current_user),
 ):
-    if not payload.vehicle_verified or not payload.driver_verified:
-        raise HTTPException(status_code=400, detail="Vehicle and driver verification are required before gate exit")
-    if not payload.loaded_goods_verified:
-        raise HTTPException(status_code=400, detail="Loaded goods verification is required before gate exit")
-    if not payload.vehicle_photo_base64.strip():
-        raise HTTPException(status_code=400, detail="Vehicle photo proof is required before gate exit")
-    try:
-        encoded_photo = payload.vehicle_photo_base64.split(",", 1)[-1]
-        photo_bytes = base64.b64decode(encoded_photo, validate=True)
-    except (ValueError, binascii.Error):
-        raise HTTPException(status_code=400, detail="Vehicle photo proof must be a valid image")
-    if not photo_bytes or not (
-        photo_bytes.startswith(b"\xff\xd8\xff")
-        or photo_bytes.startswith(b"\x89PNG\r\n\x1a\n")
-        or photo_bytes.startswith(b"RIFF")
-    ):
-        raise HTTPException(status_code=400, detail="Vehicle photo proof must be a valid JPG, PNG, or WebP image")
     # A vehicle cannot leave on an outbound dispatch while its previous
     # inbound gate visit is still open (for example, AT_DOCK).
     dispatch_model = await db.scalar(
@@ -591,6 +574,8 @@ async def dispatch_order(
     )
     if not dispatch_model:
         raise HTTPException(status_code=404, detail="Dispatch order not found")
+    if payload.gate_pass_id.strip().upper() != dispatch_model.dispatch_number.strip().upper():
+        raise HTTPException(status_code=422, detail="Gate pass ID does not match this dispatch")
     vehicle = None
     if dispatch_model.vehicle_id:
         vehicle = await db.scalar(

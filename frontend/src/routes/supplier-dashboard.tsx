@@ -1,8 +1,7 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
-  CalendarDays,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
@@ -11,7 +10,6 @@ import {
   FileText,
   Loader2,
   MoreVertical,
-  Plus,
   Search,
   Trash2,
   Truck,
@@ -45,7 +43,6 @@ const statuses: Record<string, string> = {
 };
 
 function SupplierDashboard() {
-  const navigate = useNavigate();
   const [asns, setAsns] = useState<any[]>([]);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<any>(null);
@@ -53,6 +50,7 @@ function SupplierDashboard() {
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isAssignmentOpen, setIsAssignmentOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Modal Form Inputs
@@ -236,15 +234,11 @@ function SupplierDashboard() {
   const submitted = asns.filter(
     (a) => String(a.status || "SUBMITTED").toUpperCase() === "SUBMITTED"
   ).length;
-  const pending = asns.filter((a) =>
-    ["PENDING", "DRAFT"].includes(String(a.status || "").toUpperCase())
-  ).length;
   const vehicles = new Set(asns.map((a) => a.vehicle_number).filter(Boolean)).size;
 
   const metrics = [
     { title: "Total ASNs", value: asns.length, icon: FileText, tone: "bg-sky-50 text-sky-600" },
     { title: "Submitted", value: submitted, icon: Truck, tone: "bg-emerald-50 text-emerald-600" },
-    { title: "Pending", value: pending, icon: CalendarDays, tone: "bg-amber-50 text-amber-600" },
     { title: "Vehicles", value: vehicles, icon: Truck, tone: "bg-purple-50 text-purple-600" },
   ];
 
@@ -284,20 +278,14 @@ function SupplierDashboard() {
             </p>
           </div>
 
-          <Button
-            onClick={() => navigate({ to: "/supplier/asns/new?open=create" as any })}
-            className="rounded-xl font-extrabold shadow-sm bg-sky-600 hover:bg-sky-700 text-white px-4 h-10 text-xs"
-          >
-            <Plus className="mr-1.5 size-4" /> Create ASN
-          </Button>
         </div>
 
         {/* High-Density Metric Cards */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {metrics.map(({ title, value, icon: Icon, tone }) => (
             <div
               key={title}
-              className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs flex items-center justify-between"
+              className="flex min-h-28 items-center justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
             >
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
@@ -506,9 +494,39 @@ function SupplierDashboard() {
           </DialogContent>
         </Dialog>
 
+        {/* TRANSPORT ASSIGNMENT POPUP — matches the Create ASN flow */}
+        <Dialog open={isAssignmentOpen} onOpenChange={setIsAssignmentOpen}>
+          <DialogContent className="max-w-xl rounded-2xl p-6">
+            <DialogHeader>
+              <DialogTitle className="text-lg font-black text-primary">Assign vehicle and driver</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-5 text-xs">
+              <p className="text-sm leading-6 text-muted-foreground">Enter the transport details first. The complete ASN form will open after you click Next.</p>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div>
+                  <Label htmlFor="dashboard-assignment-vehicle">Vehicle Number *</Label>
+                  <Input id="dashboard-assignment-vehicle" required placeholder="Enter vehicle number" value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} className={inputClass} />
+                </div>
+                <div>
+                  <Label htmlFor="dashboard-assignment-driver">Driver Name *</Label>
+                  <Input id="dashboard-assignment-driver" required placeholder="Enter driver name" value={driverName} onChange={(e) => setDriverName(e.target.value)} className={inputClass} />
+                </div>
+                <div>
+                  <Label htmlFor="dashboard-assignment-mobile">Driver Contact *</Label>
+                  <Input id="dashboard-assignment-mobile" required placeholder="Enter driver contact" value={driverMobile} onChange={(e) => setDriverMobile(e.target.value)} className={inputClass} />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="outline" className="rounded-xl" onClick={() => setIsAssignmentOpen(false)}>Cancel</Button>
+                <Button type="button" className="rounded-xl px-6" onClick={() => { if (!vehicleNumber || !driverName || !driverMobile.trim()) { toast.error("Vehicle number, driver name and driver contact are required"); return; } setIsAssignmentOpen(false); setIsModalOpen(true); }}>Next</Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         {/* CREATE ASN POPUP MODAL DIALOG */}
         <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-          <DialogContent className="max-w-2xl rounded-2xl bg-card p-6 shadow-2xl">
+          <DialogContent className="max-w-4xl rounded-2xl bg-card p-6 shadow-2xl">
             <DialogHeader>
               <DialogTitle className="font-black text-lg text-primary uppercase border-b pb-2">
                 CREATE ADVANCE SHIPPING NOTICE (ASN)
@@ -542,9 +560,9 @@ function SupplierDashboard() {
                     />
                   </div>
 
-                  <div>
+                  <div className="hidden">
                     <Label htmlFor="dashboard-destination-warehouse" className="text-[10px] font-bold uppercase text-muted-foreground">Destination Warehouse</Label>
-                    <select id="dashboard-destination-warehouse" required value={destinationWarehouseId} onChange={(e) => { const w = warehouses.find((item) => String(item.id) === e.target.value); setDestinationWarehouseId(e.target.value); setDestinationWarehouse(w?.store_name || w?.name || w?.store_code || ""); }} className={`${inputClass} w-full px-3`}><option value="">Select warehouse</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.store_name || w.name} ({w.store_code})</option>)}</select>{!warehouses.length && <p className="mt-1 text-[10px] font-semibold text-amber-600">No active warehouses exist in the Warehouse Master.</p>}
+                    <select id="dashboard-destination-warehouse" value={destinationWarehouseId} onChange={(e) => { const w = warehouses.find((item) => String(item.id) === e.target.value); setDestinationWarehouseId(e.target.value); setDestinationWarehouse(w?.store_name || w?.name || w?.store_code || ""); }} className={`${inputClass} w-full px-3`}><option value="">Select warehouse</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.store_name || w.name} ({w.store_code})</option>)}</select>{!warehouses.length && <p className="mt-1 text-[10px] font-semibold text-amber-600">No active warehouses exist in the Warehouse Master.</p>}
                   </div>
 
 
@@ -566,7 +584,7 @@ function SupplierDashboard() {
               </div>
 
               {/* VEHICLE & DRIVER DETAILS */}
-              <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
+              <div className="hidden rounded-xl border bg-muted/30 p-4 space-y-3">
                 <h3 className="text-xs font-black uppercase tracking-wider text-primary">
                   2. VEHICLE & DRIVER DETAILS
                 </h3>
@@ -607,7 +625,7 @@ function SupplierDashboard() {
               <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
                 <div className="flex justify-between items-center flex-wrap gap-2">
                   <h3 className="text-xs font-black uppercase tracking-wider text-primary">
-                    3. SHIPPED MATERIALS & QUANTITIES
+                    2. SHIPPED MATERIALS & QUANTITIES
                   </h3>
                   <div className="flex items-center gap-2">
                     <div className="flex gap-2"><Input placeholder="Search material name or code" value={materialSearch} onChange={(e) => setMaterialSearch(e.target.value)} className="h-8 w-56 text-[11px]" /><Button type="button" variant="outline" size="sm" className="h-8" onClick={() => setLines((rows) => [...rows, { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" }])}>+ Add Row</Button></div>{materialsLoading && <span className="text-[11px] text-muted-foreground">Loading materials…</span>}{materialsError && <span className="text-[11px] text-red-600">{materialsError}</span>}{!materialsLoading && !materialsError && materialCatalog.length === 0 && <span className="text-[11px] text-amber-600">No active materials found.</span>}

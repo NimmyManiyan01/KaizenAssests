@@ -1509,7 +1509,23 @@ async def complete_assembly_picking_task(
         if not items or payload.quantity > requested:
             raise HTTPException(status_code=422, detail=f"Picked quantity cannot exceed requested quantity ({requested}).")
         material_scan = payload.material_scan.strip()
-        if not any(str(item.get("material_code") or "").upper() in material_scan.upper() for item in items):
+        # Completed-GRN QR labels contain a human-readable multi-line payload
+        # ("Material Code: ..."), while older labels use QR-/JSON formats.
+        # Normalize that payload before matching the task item.
+        material_scan_upper = material_scan.upper()
+        material_payload_fields: dict[str, str] = {}
+        for line in material_scan.splitlines():
+            key, separator, value = line.partition(":")
+            if separator:
+                material_payload_fields[key.strip().lower().replace(" ", "_")] = value.strip()
+        scanned_material_code = (
+            material_payload_fields.get("material_code")
+            or material_payload_fields.get("item_code")
+            or ""
+        ).strip()
+        if scanned_material_code:
+            material_scan_upper = scanned_material_code.upper()
+        if not any(str(item.get("material_code") or "").upper() in material_scan_upper for item in items):
             raise HTTPException(status_code=422, detail="Material QR does not match this Assembly picking task.")
         matched_item = next(
             item for item in items
@@ -1530,7 +1546,17 @@ async def complete_assembly_picking_task(
             InventoryLocationBalanceModel.available_quantity >= payload.quantity,
         ]
         if zone_scan:
-            location_filters.append(func.upper(StorageLocationModel.location_code) == zone_scan.upper())
+            # BIN QR values are normally the persisted location code. Accept
+            # common prefixed forms as well, but never treat a material QR as
+            # a location scan.
+            if "MATERIAL CODE:" in zone_scan.upper() or "MATERIAL NAME:" in zone_scan.upper():
+                raise HTTPException(status_code=422, detail="Scan the BIN/location QR in the second field, not the material QR.")
+            location_filters.append(
+                or_(
+                    func.upper(StorageLocationModel.location_code) == zone_scan.upper(),
+                    func.upper(StorageLocationModel.location_code) == f"LOC-{zone_scan.upper()}",
+                )
+            )
         else:
             location_filters.append(InventoryLocationBalanceModel.warehouse_id == (task.warehouse_id or "WH-01"))
         location_res = await uow.session.execute(
@@ -1549,8 +1575,16 @@ async def complete_assembly_picking_task(
             .with_for_update()
         )
         stock = stock_res.scalars().first()
+        # Location balances are authoritative after putaway. Older putaway
+        # records may have the correct quantity in the BIN but a stale zero in
+        # the aggregate material stock row, so reconcile it before picking.
+        location_available = location_balance.available_quantity
+        if stock and stock.available_quantity < location_available:
+            stock.available_quantity = location_available
+        if stock and stock.on_hand_quantity < location_available:
+            stock.on_hand_quantity = location_available
         if not stock or stock.available_quantity < payload.quantity or stock.on_hand_quantity < payload.quantity:
-            available = stock.available_quantity if stock else Decimal("0")
+            available = stock.available_quantity if stock else location_available
             raise HTTPException(status_code=409, detail=f"Insufficient aggregate inventory for {material_code}: {available} available.")
         location_balance.available_quantity -= payload.quantity
         location_balance.quantity = max(Decimal("0"), location_balance.quantity - payload.quantity)

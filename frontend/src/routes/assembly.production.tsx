@@ -31,7 +31,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -109,10 +108,6 @@ function AssemblyProductionPage() {
   // Complete Production Modal State
   const [completeOrder, setCompleteOrder] = useState<AssemblyProductionOrder | null>(null);
   const [producedQuantity, setProducedQuantity] = useState<number>(0);
-  const [productionNotes, setProductionNotes] = useState<string>("");
-  const [wastageQuantity, setWastageQuantity] = useState<number>(0);
-  const [wastageMaterialCode, setWastageMaterialCode] = useState<string>("");
-  const [wastageReason, setWastageReason] = useState<string>("");
   const [completing, setCompleting] = useState(false);
 
   // Start Production Confirmation State
@@ -176,10 +171,6 @@ function AssemblyProductionPage() {
       setCompleting(true);
       const res = await api.completeAssemblyProduction(completeOrder.id, {
         produced_quantity: Number(producedQuantity),
-        notes: productionNotes.trim() || undefined,
-        wastage_quantity: Number(wastageQuantity) || 0,
-        wastage_material_code: wastageMaterialCode.trim() || undefined,
-        wastage_reason: wastageReason.trim() || undefined,
       });
       toast.success(res.message || `Production completed for ${completeOrder.order_number}`);
       setCompleteOrder(null);
@@ -770,21 +761,6 @@ function AssemblyProductionPage() {
                       {completeOrder.target_quantity} {completeOrder.uom}
                     </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Assigned Line:</span>
-                    <span className="text-foreground font-medium">
-                      {completeOrder.assigned_line || "Line 1"}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground">Material Wastage (Optional)</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Input type="number" min={0} step="any" value={wastageQuantity} onChange={(e) => setWastageQuantity(Number(e.target.value))} placeholder="Quantity" className="h-9 text-xs rounded-xl" />
-                    <Input value={wastageMaterialCode} onChange={(e) => setWastageMaterialCode(e.target.value)} placeholder="Material code" className="h-9 text-xs rounded-xl" />
-                  </div>
-                  <Input value={wastageReason} onChange={(e) => setWastageReason(e.target.value)} placeholder="Wastage / exception reason" className="h-9 text-xs rounded-xl" />
                 </div>
 
                 <div className="space-y-1.5">
@@ -804,18 +780,6 @@ function AssemblyProductionPage() {
                   </p>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground">
-                    Production Notes / Serial Range (Optional)
-                  </label>
-                  <Textarea
-                    placeholder="e.g. Assembled per SOP-04 Rev 2. Serial batch SN-2026-001 through 010 verified."
-                    value={productionNotes}
-                    onChange={(e) => setProductionNotes(e.target.value)}
-                    rows={3}
-                    className="text-xs resize-none rounded-xl"
-                  />
-                </div>
               </div>
             )}
 

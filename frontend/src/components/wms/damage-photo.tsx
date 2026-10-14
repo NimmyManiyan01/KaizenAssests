@@ -335,26 +335,6 @@ function PhotoEditor({ lineId, damagedQuantity, reason, onSuccess, initialPrevie
             className="min-w-[260px] space-y-3"
             aria-busy={uploading}
         >
-            <label className="block text-xs font-semibold">
-                Upload Photo
-
-                <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    disabled={uploading || cameraOpen || capturing}
-                    className="mt-1 block w-full text-xs"
-                    onChange={(event) => {
-                        const selected = event.currentTarget.files?.[0];
-
-                        if (selected) {
-                            choose(selected);
-                        }
-
-                        event.currentTarget.value = "";
-                    }}
-                />
-            </label>
-
             {!cameraOpen && (
                 <Button
                     type="button"
@@ -476,10 +456,6 @@ function PhotoEditor({ lineId, damagedQuantity, reason, onSuccess, initialPrevie
                 </p>
             )}
 
-            <p className="text-xs text-muted-foreground">
-                JPG, PNG or WebP, up to 5 MB. Wait for Photo Saved
-                before leaving this page.
-            </p>
         </div>
     );
 }

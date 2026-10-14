@@ -32,7 +32,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -98,7 +97,6 @@ function AssemblyQualityPage() {
   const [failedQty, setFailedQty] = useState<number>(0);
   const [reworkQty, setReworkQty] = useState<number>(0);
   const [heldQty, setHeldQty] = useState<number>(0);
-  const [notes, setNotes] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
 
   const fetchInspections = async (isManual = false) => {
@@ -128,7 +126,6 @@ function AssemblyQualityPage() {
     setFailedQty(0);
     setReworkQty(0);
     setHeldQty(0);
-    setNotes("Physical dimensions verified. Functional testing completed with no defects.");
   };
 
   const totalInspected = Number(passedQty) + Number(failedQty) + Number(reworkQty) + Number(heldQty);
@@ -154,7 +151,6 @@ function AssemblyQualityPage() {
         failed_quantity: Number(failedQty),
         rework_quantity: Number(reworkQty),
         held_quantity: Number(heldQty),
-        notes: notes.trim() || undefined,
       });
 
       toast.success(res.message || `Quality inspection completed for ${inspectItem.order_number}`);
@@ -773,18 +769,6 @@ function AssemblyQualityPage() {
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground">
-                    Inspection Remarks & QC Findings
-                  </label>
-                  <Textarea
-                    placeholder="Enter dimensional check results, electrical test parameters, or rework reasons..."
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    rows={3}
-                    className="text-xs resize-none rounded-xl"
-                  />
-                </div>
               </div>
             )}
 

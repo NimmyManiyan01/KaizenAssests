@@ -95,14 +95,14 @@ function SimpleWarehouseModule() {
   const [selectedPutawayGroup, setSelectedPutawayGroup] = useState<any>(null);
   const [assignPutawayTask, setAssignPutawayTask] = useState<any>(null);
   const [scanPutawayTask, setScanPutawayTask] = useState<any>(null);
-  const [putawayScan, setPutawayScan] = useState({ materialQr: "", rackQr: "", quantity: "" });
-  const [putawayQrImages, setPutawayQrImages] = useState({ material: "", rack: "" });
+  const [putawayScan, setPutawayScan] = useState({ materialQr: "", binQr: "", quantity: "" });
+  const [putawayQrImages, setPutawayQrImages] = useState({ material: "", bin: "" });
   const [qrPreview, setQrPreview] = useState<{ title: string; image: string } | null>(null);
   const [putawayScanValid, setPutawayScanValid] = useState(false);
   const [materialQrVerified, setMaterialQrVerified] = useState(false);
-  const [rackQrVerified, setRackQrVerified] = useState(false);
+  const [binQrVerified, setBinQrVerified] = useState(false);
   const [qrScanError, setQrScanError] = useState("");
-  const [cameraField, setCameraField] = useState<"material" | "rack" | null>(null);
+  const [cameraField, setCameraField] = useState<"material" | "bin" | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
   const cameraCanvasRef = useRef<HTMLCanvasElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
@@ -190,7 +190,7 @@ function SimpleWarehouseModule() {
       if (result?.data) {
         setPutawayScan((current) => ({
           ...current,
-          [cameraField === "material" ? "materialQr" : "rackQr"]: result.data,
+          [cameraField === "material" ? "materialQr" : "binQr"]: result.data,
         }));
         setCameraField(null);
       }
@@ -348,7 +348,41 @@ function SimpleWarehouseModule() {
           location: "-",
           is_catalog_item: true,
         }));
-      setInventorySummary([...stockRows, ...catalogRows]);
+      const rowsToRefresh = [...stockRows, ...catalogRows];
+      const refreshedStockRows = await Promise.all(
+        rowsToRefresh.map(async (row: any) => {
+          const code = row.material_code || row.code;
+          if (!code) return row;
+          try {
+            const detail = await api.getMaterialInventoryDetail(String(code));
+            const summary = detail?.summary || {};
+            const firstLocation = Array.isArray(detail?.locations) ? detail.locations[0] : null;
+            const movementBatches = (Array.isArray(detail?.movements) ? detail.movements : [])
+              .filter((movement: any) => movement.movement_type === "PUTAWAY" && movement.batch_lot)
+              .map((movement: any) => ({
+                batch_number: movement.batch_lot,
+                quantity: movement.quantity,
+                uom: movement.uom || summary.uom,
+              }));
+            return {
+              ...row,
+              available: summary.available_stock ?? row.available,
+              available_quantity: summary.available_stock ?? row.available_quantity,
+              total_quantity: summary.total_stock ?? row.total_quantity,
+              on_hand_quantity: summary.total_stock ?? row.on_hand_quantity,
+              batch_details: movementBatches.length ? movementBatches : row.batch_details,
+              batch_number: movementBatches.map((b: any) => b.batch_number).join(", ") || row.batch_number,
+              location: firstLocation?.bin_code || firstLocation?.location_code || row.location,
+              location_code: firstLocation?.location_code || row.location_code,
+              bin_code: firstLocation?.bin_code || row.bin_code,
+              uom: summary.uom || row.uom,
+            };
+          } catch {
+            return row;
+          }
+        }),
+      );
+      setInventorySummary(refreshedStockRows);
       const assemblyPickingTasks = (
         Array.isArray(assemblyPickingTasksRes) ? assemblyPickingTasksRes : []
       ).flatMap((task: any) =>
@@ -494,10 +528,10 @@ function SimpleWarehouseModule() {
 
   const openPutawayScan = (task: any) => {
     setScanPutawayTask(task);
-    setPutawayScan({ materialQr: "", rackQr: "", quantity: String(task.quantity ?? "") });
+    setPutawayScan({ materialQr: "", binQr: "", quantity: String(task.quantity ?? "") });
     setPutawayScanValid(false);
     setMaterialQrVerified(false);
-    setRackQrVerified(false);
+    setBinQrVerified(false);
     setQrScanError("");
   };
 
@@ -508,12 +542,12 @@ function SimpleWarehouseModule() {
     pickupToConfirm?.material_code ||
     "";
   const pickupRackQrValue =
+    pickupToConfirm?.pick_location ||
     pickupToConfirm?.confirmation?.rack_qr ||
     pickupToConfirm?.rack_qr ||
-    pickupToConfirm?.pick_location ||
     "";
 
-  const decodeQrUpload = (file: File, field: "material" | "rack") => {
+  const decodeQrUpload = (file: File, field: "material" | "bin") => {
     if (!/image\/(png|jpeg|jpg)/i.test(file.type)) {
       setQrScanError("Upload a PNG, JPG, or JPEG QR image.");
       return;
@@ -532,14 +566,14 @@ function SimpleWarehouseModule() {
         const decoded = jsQR(pixels.data, pixels.width, pixels.height);
         if (!decoded?.data) {
           setQrScanError(
-            `No readable ${field === "material" ? "Material" : "Rack"} QR found in the image.`,
+            `No readable ${field === "material" ? "Material" : "BIN"} QR found in the image.`,
           );
           return;
         }
         setQrScanError("");
         setPutawayScan((current) => ({
           ...current,
-          [field === "material" ? "materialQr" : "rackQr"]: decoded.data,
+          [field === "material" ? "materialQr" : "binQr"]: decoded.data,
         }));
       };
       image.onerror = () => setQrScanError("Could not load the uploaded image.");
@@ -599,11 +633,11 @@ function SimpleWarehouseModule() {
     const quantity = Number(putawayScan.quantity);
     setPutawayScanValid(false);
     setMaterialQrVerified(false);
-    setRackQrVerified(false);
+    setBinQrVerified(false);
     if (
       !scanPutawayTask ||
       !putawayScan.materialQr.trim() ||
-      !putawayScan.rackQr.trim() ||
+      !(putawayScan.binQr || "").trim() ||
       !Number.isFinite(quantity) ||
       quantity <= 0 ||
       quantity > Number(scanPutawayTask.quantity || 0)
@@ -611,12 +645,17 @@ function SimpleWarehouseModule() {
       return;
     void Promise.allSettled([
       api.resolveGrnQr(putawayScan.materialQr.trim()),
-      api.resolveBinQr(putawayScan.rackQr.trim(), scanPutawayTask.destination_store_id),
+      api.resolveBinQr((putawayScan.binQr || "").trim(), scanPutawayTask.destination_store_id),
     ])
       .then(([materialResult, rackResult]) => {
-        if (materialResult.status === "rejected")
-          throw new Error("Material QR could not be resolved.");
-        if (rackResult.status === "rejected") throw new Error("Rack QR could not be resolved.");
+        if (materialResult.status === "rejected") {
+          throw new Error(
+            materialResult.reason?.message || "Material QR could not be resolved.",
+          );
+        }
+        if (rackResult.status === "rejected") {
+          throw new Error(rackResult.reason?.message || "BIN QR could not be resolved.");
+        }
         const material = materialResult.value;
         const rack = rackResult.value;
         const materialMatches =
@@ -637,24 +676,24 @@ function SimpleWarehouseModule() {
             ).toUpperCase();
         if (active) {
           setMaterialQrVerified(materialMatches);
-          setRackQrVerified(rackMatches);
+          setBinQrVerified(rackMatches);
           setPutawayScanValid(materialMatches && rackMatches);
           if (!materialMatches && !rackMatches)
-            setQrScanError("Material QR batch and Rack QR do not match this putaway task.");
+            setQrScanError("Material QR batch and BIN QR do not match this putaway task.");
           else if (!materialMatches)
             setQrScanError(
               `Material QR does not match batch ${scanPutawayTask.batch_number || "the assigned batch"}.`,
             );
           else if (!rackMatches)
             setQrScanError(
-              `Rack QR does not match assigned rack ${scanPutawayTask.destination_bin_code || scanPutawayTask.destination_bin || "the assigned rack"}.`,
+              `BIN QR does not match assigned bin ${scanPutawayTask.destination_bin_code || scanPutawayTask.destination_bin || "the assigned bin"}.`,
             );
         }
       })
       .catch((error: any) => {
         if (active) {
           setMaterialQrVerified(false);
-          setRackQrVerified(false);
+          setBinQrVerified(false);
           setPutawayScanValid(false);
           setQrScanError(error?.message || "QR validation failed.");
         }
@@ -662,11 +701,11 @@ function SimpleWarehouseModule() {
     return () => {
       active = false;
     };
-  }, [scanPutawayTask, putawayScan.materialQr, putawayScan.rackQr, putawayScan.quantity]);
+  }, [scanPutawayTask, putawayScan.materialQr, putawayScan.binQr, putawayScan.quantity]);
 
   useEffect(() => {
     if (!scanPutawayTask) {
-      setPutawayQrImages({ material: "", rack: "" });
+      setPutawayQrImages({ material: "", bin: "" });
       return;
     }
     let active = true;
@@ -682,7 +721,7 @@ function SimpleWarehouseModule() {
       scanPutawayTask.barcode_value ||
       "";
     const previewRackQr =
-      putawayScan.rackQr.trim() ||
+      (putawayScan.binQr || "").trim() ||
       assignedBin?.qr_identifier ||
       scanPutawayTask.destination_bin_code ||
       scanPutawayTask.destination_bin ||
@@ -696,26 +735,26 @@ function SimpleWarehouseModule() {
         : Promise.resolve(""),
     ])
       .then(([material, rack]) => {
-        if (active) setPutawayQrImages({ material, rack });
+        if (active) setPutawayQrImages({ material, bin: rack });
       })
       .catch(() => {
-        if (active) setPutawayQrImages({ material: "", rack: "" });
+        if (active) setPutawayQrImages({ material: "", bin: "" });
       });
     return () => {
       active = false;
     };
-  }, [scanPutawayTask, putawayScan.materialQr, putawayScan.rackQr, allFlattenedBins]);
+  }, [scanPutawayTask, putawayScan.materialQr, putawayScan.binQr, allFlattenedBins]);
 
   const handleConfirmPutaway = async () => {
     if (!scanPutawayTask) return;
     const quantity = Number(putawayScan.quantity);
     if (
       !putawayScan.materialQr.trim() ||
-      !putawayScan.rackQr.trim() ||
+      !(putawayScan.binQr || "").trim() ||
       !Number.isFinite(quantity) ||
       quantity <= 0
     ) {
-      toast.error("Scan the material QR and rack QR, then enter a valid quantity.");
+      toast.error("Scan the material QR and BIN QR, then enter a valid quantity.");
       return;
     }
     setIsSubmitting(true);
@@ -731,7 +770,7 @@ function SimpleWarehouseModule() {
         throw new Error("The scanned material does not match this putaway task.");
       }
       const rack = await api.resolveBinQr(
-        putawayScan.rackQr.trim(),
+        (putawayScan.binQr || "").trim(),
         scanPutawayTask.destination_store_id,
       );
       if (
@@ -739,13 +778,13 @@ function SimpleWarehouseModule() {
         rack.bin_id !== scanPutawayTask.destination_bin_id
       ) {
         throw new Error(
-          `Wrong rack. Scan ${scanPutawayTask.destination_bin_code || scanPutawayTask.destination_bin}.`,
+          `Wrong BIN. Scan ${scanPutawayTask.destination_bin_code || scanPutawayTask.destination_bin}.`,
         );
       }
       await api.executePutaway({
         task_id: scanPutawayTask.id,
         grn_qr_code: putawayScan.materialQr.trim(),
-        bin_qr_code: putawayScan.rackQr.trim(),
+        bin_qr_code: (putawayScan.binQr || "").trim(),
         quantity,
       });
       toast.success("Putaway confirmed and inventory updated.");
@@ -1065,6 +1104,16 @@ function SimpleWarehouseModule() {
     });
   }, [inventorySummary, invSearch, invWarehouseFilter, invStatusFilter]);
 
+  const getInventoryDisplayQuantity = (item: any) => {
+    const batches = Array.isArray(item.batch_details) ? item.batch_details : [];
+    const batchTotal = batches.reduce((sum: number, batch: any) => sum + Number(batch.quantity || 0), 0);
+    const summaryQuantity = item.available_to_pick_quantity ?? item.available ?? item.available_quantity ?? item.total_quantity;
+    return Number(summaryQuantity || 0) === 0 && batchTotal > 0 ? batchTotal : summaryQuantity ?? "—";
+  };
+
+  const getInventoryDisplayLocation = (item: any) =>
+    item.location_code || item.bin_code || item.location || item.batch_details?.[0]?.location || "—";
+
   const [agingAlertDays, setAgingAlertDays] = useState(15);
   const agingRows = useMemo(() => {
     const now = Date.now();
@@ -1117,7 +1166,7 @@ function SimpleWarehouseModule() {
         group.batches.add(task.batch_number || task.batchNumber);
       if (task.material_name || task.item_code)
         group.materials.add(task.material_name || task.item_code);
-      group.quantity += Number(task.quantity || task.received_quantity || 0);
+      group.quantity += Number(task.stored_quantity ?? task.quantity ?? task.received_quantity ?? 0);
       if (task.status !== "COMPLETED" && task.status !== "STORED") group.status = task.status;
       groups.set(key, group);
     }
@@ -1128,7 +1177,7 @@ function SimpleWarehouseModule() {
       material_names: Array.from(group.materials),
       batch_details: group.tasks.map((task: any) => ({
         batch_number: task.batch_number || task.batchNumber || "-",
-        quantity: task.quantity ?? task.received_quantity ?? 0,
+        quantity: task.stored_quantity ?? task.quantity ?? task.received_quantity ?? 0,
         uom: task.uom || "PCS",
       })),
       status: group.tasks.every((task: any) =>
@@ -1195,12 +1244,18 @@ function SimpleWarehouseModule() {
     <AppShell activeItem="/inventory">
       <div className="space-y-6 pb-12">
         {/* Header Title Bar */}
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-400">
+              Warehouse Operations
+            </p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <Boxes className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
-              Warehouse Control Center
+              Warehouse Dashboard
             </h1>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              Monitor inventory, putaway, material requests, and picking activity.
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -1279,7 +1334,7 @@ function SimpleWarehouseModule() {
           <TabsContent value="dashboard" className="space-y-6 mt-6">
             {/* Top Metric Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card className="p-4 border-l-4 border-l-emerald-500 shadow-sm">
+              <Card className="rounded-2xl border-l-4 border-l-emerald-500 p-5 shadow-sm transition-shadow hover:shadow-md">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                     Available Inventory
@@ -1292,7 +1347,7 @@ function SimpleWarehouseModule() {
                 <p className="text-xs text-slate-500 mt-1">Ready for Assembly</p>
               </Card>
 
-              <Card className="p-4 border-l-4 border-l-amber-500 shadow-sm">
+              <Card className="rounded-2xl border-l-4 border-l-amber-500 p-5 shadow-sm transition-shadow hover:shadow-md">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                     Putaway Pending
@@ -1305,7 +1360,7 @@ function SimpleWarehouseModule() {
                 <p className="text-xs text-slate-500 mt-1">From Posted GRNs</p>
               </Card>
 
-              <Card className="p-4 border-l-4 border-l-blue-500 shadow-sm">
+              <Card className="rounded-2xl border-l-4 border-l-blue-500 p-5 shadow-sm transition-shadow hover:shadow-md">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                     Material Requests
@@ -1318,7 +1373,7 @@ function SimpleWarehouseModule() {
                 <p className="text-xs text-slate-500 mt-1">Awaiting Warehouse Approval</p>
               </Card>
 
-              <Card className="p-4 border-l-4 border-l-indigo-500 shadow-sm">
+              <Card className="rounded-2xl border-l-4 border-l-indigo-500 p-5 shadow-sm transition-shadow hover:shadow-md">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                     Picking Queue
@@ -1361,8 +1416,8 @@ function SimpleWarehouseModule() {
                       </td>
                     </tr>
                   ) : (
-                    groupedPutawayTasks.map((t) => (
-                      <tr key={t.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
+                    groupedPutawayTasks.map((t, index) => (
+                      <tr key={t.id || t.key || `${t.grn_number || "putaway"}-${index}`} className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
                         <td className="py-3 px-3 font-semibold text-indigo-600">
                           {t.grn_number || t.key}
                         </td>
@@ -1529,18 +1584,15 @@ function SimpleWarehouseModule() {
                             {item.material_name || item.material}
                           </td>
                           <td className="py-3 px-3 font-mono text-slate-500">
-                            {item.batch_number || item.batch || "-"}
+                            {item.batch_number || item.batch || item.batch_details?.map((b: any) => b.batch_number).join(", ") || "-"}
                           </td>
                           <td className="py-3 px-3 font-bold text-emerald-600">
-                            Available: {item.available_to_pick_quantity ?? item.available ??
-                              item.available_quantity ??
-                              item.total_quantity ??
-                              "—"}{" "}
+                            Available: {getInventoryDisplayQuantity(item)}{" "}
                             {item.uom || ""}
                           </td>
                           <td className="py-3 px-3">
                             <Badge variant="outline" className="text-[10px] font-mono">
-                              {item.location_code || item.bin_code || item.location || "—"}
+                              {getInventoryDisplayLocation(item)}
                             </Badge>
                           </td>
                           <td className="py-3 px-3 text-right">
@@ -1552,13 +1604,60 @@ function SimpleWarehouseModule() {
                                 void api
                                   .getMaterialInventoryDetail(String(item.material_code || ""))
                                   .then((detail: any) => {
+                                    const firstLocation = Array.isArray(detail?.locations)
+                                      ? detail.locations[0]
+                                      : null;
+                                    const putawayMovements = (Array.isArray(detail?.movements)
+                                      ? detail.movements
+                                      : []
+                                    ).filter((movement: any) => movement.movement_type === "PUTAWAY");
+                                    const movementBatches = putawayMovements
+                                      .filter((movement: any) => movement.batch_lot)
+                                      .map((movement: any) => ({
+                                        batch_number: movement.batch_lot,
+                                        quantity: movement.quantity,
+                                        uom: movement.uom || detail?.summary?.uom,
+                                      }));
+                                    const refreshedRow = {
+                                      batch_details: movementBatches,
+                                      batch_number: movementBatches.map((b: any) => b.batch_number).join(", "),
+                                      available: detail?.summary?.available_stock,
+                                      available_quantity: detail?.summary?.available_stock,
+                                      total_quantity: detail?.summary?.total_stock,
+                                      on_hand_quantity: detail?.summary?.total_stock,
+                                      location_code: firstLocation?.location_code,
+                                      bin_code: firstLocation?.bin_code || putawayMovements[0]?.to_location,
+                                      location: firstLocation?.bin_code || firstLocation?.location_code || putawayMovements[0]?.to_location,
+                                      uom: detail?.summary?.uom,
+                                    };
+                                    setInventorySummary((rows: any[]) =>
+                                      rows.map((row: any) =>
+                                        String(row.material_code || "").toUpperCase() ===
+                                        String(item.material_code || "").toUpperCase()
+                                          ? { ...row, ...refreshedRow }
+                                          : row,
+                                      ),
+                                    );
                                     setSelectedInventory((current: any) =>
                                       current
                                         ? {
                                             ...current,
                                             inventory_history: detail?.inventory_history,
-                                            detail_batches: detail?.batches,
+                                            batch_details: movementBatches.length
+                                              ? movementBatches
+                                              : detail?.batches || [],
                                             detail_movements: detail?.movements,
+                                            warehouse: firstLocation?.store_name || detail?.warehouse,
+                                            zone_code: firstLocation?.zone_code,
+                                            bin_code:
+                                              firstLocation?.bin_code || putawayMovements[0]?.to_location,
+                                            location:
+                                              firstLocation?.location_code || putawayMovements[0]?.to_location,
+                                            total_quantity:
+                                              detail?.summary?.total_stock ?? current.total_quantity,
+                                            available:
+                                              detail?.summary?.available_stock ?? current.available,
+                                            uom: detail?.summary?.uom || firstLocation?.uom || current.uom,
                                           }
                                         : current,
                                     );
@@ -1789,14 +1888,6 @@ function SimpleWarehouseModule() {
                   className="gap-1 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold shadow-sm"
                 >
                   <Plus className="h-3.5 w-3.5" /> Add Bin
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setCreateLocationType("rack")}
-                  className="gap-1 text-xs"
-                >
-                  <Plus className="h-3.5 w-3.5 text-indigo-600" /> Add Rack
                 </Button>
               </div>
             </div>
@@ -2101,7 +2192,7 @@ function SimpleWarehouseModule() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-semibold" htmlFor="pickup-zone-scan">
-                      Zone or bin code / QR scan
+                      BIN / location code / QR scan
                     </label>
                     <Input
                       id="pickup-zone-scan"
@@ -2132,7 +2223,7 @@ function SimpleWarehouseModule() {
                         variant="ghost"
                         size="sm"
                         className="h-6 px-1.5 text-xs"
-                        onClick={() => void downloadQrValue(pickupRackQrValue, "Rack QR")}
+                        onClick={() => void downloadQrValue(pickupRackQrValue, "BIN QR")}
                       >
                         Download QR
                       </Button>
@@ -2356,13 +2447,13 @@ function SimpleWarehouseModule() {
         </DialogContent>
       </Dialog>
 
-      {/* 1b. Scan and confirm physical rack putaway */}
+      {/* 1b. Scan and confirm physical BIN putaway */}
       <Dialog open={!!scanPutawayTask} onOpenChange={() => setScanPutawayTask(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Scan Material & Rack</DialogTitle>
+            <DialogTitle>Scan Material & BIN</DialogTitle>
             <DialogDescription>
-              Scan the existing material QR first, then scan the assigned rack QR.
+              Scan the existing material QR first, then scan the assigned BIN QR.
             </DialogDescription>
           </DialogHeader>
           {scanPutawayTask && (
@@ -2418,37 +2509,24 @@ function SimpleWarehouseModule() {
                     <span className="font-semibold text-emerald-600">✓ Verified</span>
                   )}
                 </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2"
-                  disabled={!putawayQrImages.material}
-                  onClick={() =>
-                    putawayQrImages.material &&
-                    setQrPreview({ title: "Material QR", image: putawayQrImages.material })
-                  }
-                >
-                  View QR
-                </Button>
               </div>
               <div className="space-y-1.5">
-                <label className="font-semibold">Rack QR</label>
+                <label className="font-semibold">BIN QR</label>
                 <div className="flex gap-2">
                   <Input
                     className="flex-1"
-                    value={putawayScan.rackQr}
-                    placeholder="Scan rack QR"
+                    value={putawayScan.binQr}
+                    placeholder="Scan BIN QR"
                     onChange={(e) => {
-                      setRackQrVerified(false);
-                      setPutawayScan((s) => ({ ...s, rackQr: e.target.value }));
+                      setBinQrVerified(false);
+                      setPutawayScan((s) => ({ ...s, binQr: e.target.value }));
                     }}
                   />
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => setCameraField("rack")}
+                    onClick={() => setCameraField("bin")}
                   >
                     <Camera className="mr-1 h-4 w-4" />
                     Scan with Camera
@@ -2462,11 +2540,11 @@ function SimpleWarehouseModule() {
                       accept="image/png,image/jpeg,image/jpg"
                       className="hidden"
                       onChange={(e) =>
-                        e.target.files?.[0] && decodeQrUpload(e.target.files[0], "rack")
+                        e.target.files?.[0] && decodeQrUpload(e.target.files[0], "bin")
                       }
                     />
                   </label>
-                  {rackQrVerified && (
+                  {binQrVerified && (
                     <span className="font-semibold text-emerald-600">✓ Verified</span>
                   )}
                 </div>
@@ -2476,10 +2554,10 @@ function SimpleWarehouseModule() {
                   variant="ghost"
                   size="sm"
                   className="h-7 px-2"
-                  disabled={!putawayQrImages.rack}
+                  disabled={!putawayQrImages.bin}
                   onClick={() =>
-                    putawayQrImages.rack &&
-                    setQrPreview({ title: "Rack QR", image: putawayQrImages.rack })
+                    putawayQrImages.bin &&
+                    setQrPreview({ title: "BIN QR", image: putawayQrImages.bin })
                   }
                 >
                   View QR
@@ -2518,7 +2596,7 @@ function SimpleWarehouseModule() {
       <Dialog open={!!cameraField} onOpenChange={(open) => !open && setCameraField(null)}>
         <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
           <DialogHeader>
-            <DialogTitle>Scan {cameraField === "material" ? "Material" : "Rack"} QR</DialogTitle>
+            <DialogTitle>Scan {cameraField === "material" ? "Material" : "BIN"} QR</DialogTitle>
             <DialogDescription>
               Allow camera access and hold the QR label inside the frame.
             </DialogDescription>
@@ -2751,13 +2829,6 @@ function SimpleWarehouseModule() {
                 </div>
               </div>
 
-              <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-1">
-                <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
-                  Source
-                </div>
-                <div>GRN: {selectedInventory.grn_number || "-"}</div>
-                <div>Supplier: {selectedInventory.supplier_name || "-"}</div>
-              </div>
             </div>
           )}
         </DialogContent>
@@ -3234,18 +3305,6 @@ function SimpleWarehouseModule() {
                       </div>
                     );
                   })}
-                <Button
-                  className="hidden"
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setNewBinRows((rows) => [...rows, { rack: "", position: "", bin_code: "" }])
-                  }
-                >
-                  + Add Rack Row
-                </Button>
-
                 {/* Auto-Generated QR Code Preview */}
                 <div className="p-3 bg-indigo-50/50 dark:bg-indigo-950/30 rounded-lg border border-indigo-100 dark:border-indigo-900 space-y-1.5">
                   <div className="flex items-center justify-between">

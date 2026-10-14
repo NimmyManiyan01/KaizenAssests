@@ -172,6 +172,20 @@ export function getDefaultRouteForUser(user = getUserInfo()): string {
   const roles = user?.roles || [];
   const username = (user?.username || "").toLowerCase();
 
+  // GRN users may also carry warehouse permissions, but their landing page
+  // must remain the GRN operations dashboard.
+  if (
+    roles.includes("GRN") ||
+    roles.includes("GRN_MANAGER") ||
+    roles.includes("OPERATIONS_MANAGER") ||
+    roles.includes("OPERATIONS") ||
+    roles.includes("RECEIVING") ||
+    username === "grn" ||
+    username.includes("grn")
+  ) {
+    return "/grn?tab=dashboard";
+  }
+
   if (
     roles.includes("WAREHOUSE") ||
     roles.includes("WAREHOUSE_MANAGER") ||
@@ -187,17 +201,6 @@ export function getDefaultRouteForUser(user = getUserInfo()): string {
   if (roles.includes("DISPATCH") || roles.includes("DISPATCH_MANAGER") || user?.username?.toLowerCase() === "dispatch") return "/dispatch";
   if (roles.includes("STORE_MANAGER") || roles.includes("STORE_KEEPER"))
     return "/my-store";
-  if (
-    roles.includes("GRN") ||
-    roles.includes("GRN_MANAGER") ||
-    roles.includes("OPERATIONS_MANAGER") ||
-    roles.includes("OPERATIONS") ||
-    roles.includes("RECEIVING") ||
-    user?.username?.toLowerCase() === "grn" ||
-    user?.username?.toLowerCase()?.includes("grn")
-  ) {
-    return "/grn";
-  }
   if (
     roles.includes("DISPATCH") ||
     roles.includes("DISPATCH_MANAGER") ||

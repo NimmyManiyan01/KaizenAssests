@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { Truck, Inbox, Loader2, FileText, AlertTriangle, Camera, X, Eye, ExternalLink, QrCode, CheckCircle2, PackageCheck, Layers, History } from "lucide-react";
+import { Truck, Inbox, Loader2, FileText, AlertTriangle, Camera, X, Eye, ExternalLink, QrCode, CheckCircle2, PackageCheck, History } from "lucide-react";
 import { AppShell, DockAllocationNotificationCard } from "@/components/wms/app-shell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -579,6 +579,7 @@ function Notifications() {
               n.notification_type === "GRN_DAMAGE_RECORDED";
 
             const payloadData = extractGrnPayload(n);
+            const isGrnAlert = /dock is empty|dock released|receiving completed|grn/i.test(`${n.title || ""} ${n.message || ""}`);
             const totals = payloadData?.totals;
             const hasTotals = totals && totals.ordered_qty > 0;
             const notificationDate = n.created_at || n.createdAt || payloadData?.receiptDate;
@@ -638,10 +639,13 @@ function Notifications() {
                         {(() => {
                           const titleUpper = String(n.title || "").toUpperCase();
                           const msgUpper = String(n.message || "").toUpperCase();
-                          let badgeText = "PROCUREMENT ALERT";
+                          let badgeText = "GRN ALERT";
                           let badgeColor = "bg-slate-100 text-slate-800 border-slate-300";
 
-                          if (isDamage || titleUpper.includes("DAMAGE") || msgUpper.includes("DAMAGE")) {
+                          if (isGrnAlert) {
+                            badgeText = "GRN ALERT";
+                            badgeColor = "bg-blue-100 text-blue-800 border-blue-300";
+                          } else if (isDamage || titleUpper.includes("DAMAGE") || msgUpper.includes("DAMAGE")) {
                             badgeText = "DAMAGE & REPLACEMENT REQUIRED";
                             badgeColor = "bg-rose-100 text-rose-800 border-rose-300";
                           } else if (titleUpper.includes("GATE OUT") || titleUpper.includes("GATE EXIT")) {
@@ -720,7 +724,7 @@ function Notifications() {
                           GRN: {payloadData.grnNumber}
                         </span>
                       )}
-                      {payloadData?.supplierName && (
+                      {!isGrnAlert && payloadData?.supplierName && (
                         <span className="px-2.5 py-0.5 rounded-md bg-muted font-bold text-foreground">
                           Supplier: {payloadData.supplierName}
                         </span>
@@ -779,23 +783,6 @@ function Notifications() {
                       </p>
                     )}
 
-                    {/* CARD FOOTER ACTION LINKS */}
-                    <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-border/40">
-                      <Button
-                        size="sm"
-                        variant={isDamage ? "default" : "outline"}
-                        className={cn(
-                          "rounded-xl text-xs font-bold h-8 px-4",
-                          isDamage && "bg-rose-600 hover:bg-rose-700 text-white shadow-sm",
-                        )}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenNotificationDetails(n);
-                        }}
-                      >
-                        <Layers className="mr-1.5 size-3.5" /> View Breakdown & Details
-                      </Button>
-                    </div>
                   </div>
                 </div>
               </Card>

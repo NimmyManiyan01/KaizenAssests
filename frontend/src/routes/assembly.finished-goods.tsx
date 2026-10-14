@@ -148,16 +148,12 @@ function AssemblyFinishedGoodsPage() {
     printWindow.document.close();
   };
 
-  const handleVerifyLabel = async () => {
-    if (!selectedFg?.qr_code) return;
-    try {
-      await api.verifyAssemblyFinishedGoodsQr(selectedFg.id, selectedFg.qr_code);
-      toast.success(`Label verified for ${selectedFg.batch_number || selectedFg.serial_number}`);
-      await fetchItems(true);
-      setSelectedFg(await api.getAssemblyFinishedGoodsDetail(selectedFg.id));
-    } catch (err: any) {
-      toast.error(err.message || "QR verification failed");
-    }
+  const handleDownloadLabel = () => {
+    if (!qrDataUrl || !selectedFg) return;
+    const link = document.createElement("a");
+    link.href = qrDataUrl;
+    link.download = `${selectedFg.batch_number || selectedFg.serial_number || "finished-good"}-qr.png`;
+    link.click();
   };
 
   // Quick stats
@@ -651,19 +647,12 @@ function AssemblyFinishedGoodsPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleVerifyLabel}
+                onClick={handleDownloadLabel}
+                disabled={!qrDataUrl}
                 className="rounded-xl gap-2 font-semibold"
               >
-                <QrCode className="size-3.5" />
-                Verify Label
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-xl"
-                onClick={() => setSelectedFg(null)}
-              >
-                Close
+                <Download className="size-3.5" />
+                Download QR
               </Button>
               <Button
                 size="sm"

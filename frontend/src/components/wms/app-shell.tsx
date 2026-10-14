@@ -178,8 +178,6 @@ const qualityNav = [
 
 const warehouseNav = [
   { label: "Dashboard", to: "/inventory?tab=dashboard", icon: LayoutDashboard },
-  { label: "ASN Arrivals", to: "/vehicle-queue", icon: Truck },
-  { label: "GRN", to: "/grn", icon: ClipboardList },
   { label: "Putaway", to: "/inventory?tab=putaway", icon: PackageCheck },
   { label: "Inventory", to: "/inventory?tab=inventory", icon: Boxes },
   { label: "Assembly Requisitions", to: "/warehouse/assembly-requisitions", icon: ClipboardList },
@@ -191,7 +189,6 @@ const warehouseNav = [
 const supplierNav = [
   { label: "Dashboard", to: "/supplier-dashboard", icon: LayoutDashboard },
   { label: "Create ASN", to: "/supplier/asns/new?open=create", icon: Truck },
-  { label: "Dispatch", to: "/supplier/dispatch", icon: Truck },
   { label: "FG Dispatch Requests", to: "/supplier/dispatch", icon: PackageCheck },
   { label: "Damage Returns", to: "/damage-claims", icon: ShieldAlert },
 ];
@@ -221,13 +218,10 @@ const financeNav = [
 const gateSecurityNav = [
   { label: "Dashboard", to: "/gate-dashboard", icon: LayoutDashboard },
   { label: "New Gate Entry", to: "/vehicle-queue?action=new", icon: PlusCircle },
-  { label: "Active Gate Entries", to: "/vehicle-queue", icon: Truck },
-  { label: "Gate Passes", to: "/vehicle-queue?tab=passes", icon: QrCode },
   { label: "Vehicle Exit", to: "/vehicle-exit", icon: LogOut },
   { label: "FG Pickup Gate Entry", to: "/gate/finished-goods-pickup", icon: QrCode },
   { label: "FG Pickup Gate Exit", to: "/gate/finished-goods-pickup-exit", icon: LogOut },
   { label: "Entry & Exit History", to: "/vehicle-queue?tab=history", icon: ClipboardList },
-  { label: "Notifications", to: "/notifications", icon: Bell },
 ];
 
 const adminNav = [
@@ -927,7 +921,7 @@ export function AppShell({
 
         {notificationAlert && (
           <div className="fixed right-5 top-20 z-[80] w-[min(380px,calc(100vw-2rem))] rounded-xl border border-primary/20 bg-card p-4 shadow-xl">
-            <div className="flex items-start gap-3"><Bell className="mt-0.5 size-5 text-primary" /><div className="min-w-0 flex-1"><p className="text-sm font-bold">New notification</p><p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{notificationAlert.title || notificationAlert.message || notificationAlert.body || "You have a new notification."}</p></div><button type="button" aria-label="Dismiss notification" onClick={() => setNotificationAlert(null)} className="text-muted-foreground hover:text-foreground">×</button></div>
+            <div className="flex items-start gap-3"><Bell className="mt-0.5 size-5 text-primary" /><div className="min-w-0 flex-1"><p className="text-sm font-bold">{notificationAlert.title || "GRN Alert"}</p><p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{notificationAlert.message || notificationAlert.body || "The dock is available. The next vehicle can enter."}</p></div><button type="button" aria-label="Dismiss notification" onClick={() => setNotificationAlert(null)} className="text-muted-foreground hover:text-foreground">×</button></div>
           </div>
         )}
         <main className="page-enter flex-1 px-4 py-6 lg:px-7">

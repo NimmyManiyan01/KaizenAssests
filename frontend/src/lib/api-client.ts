@@ -3,7 +3,6 @@
  * Links frontend components to the backend python business-service (port 8000)
  * and Java auth-service (port 8080).
  */
-import QRCode from "qrcode";
 
 export const BUSINESS_API_URL =
   (typeof import.meta !== "undefined" &&
@@ -437,6 +436,12 @@ export const api = {
       },
     );
   },
+  async completeDockReceiving(id: string): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/warehouse/dock-allocations/${encodeURIComponent(id)}/complete`,
+      { method: "POST" },
+    );
+  },
   async releaseDockAssignment(allocationRequestId: string): Promise<any> {
     return this.releaseDock(allocationRequestId);
   },
@@ -738,9 +743,11 @@ export const api = {
     });
   },
 
-  async markInboundVehicleExited(gateEntryId: string): Promise<any> {
+  async markInboundVehicleExited(gateEntryId: string, gatePassId: string): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/gate-entries/${gateEntryId}/vehicle-exited`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gate_pass_id: gatePassId }),
     });
   },
 
@@ -807,6 +814,7 @@ export const api = {
   async confirmOutboundGateExit(
     dispatchId: string,
     payload: {
+      gate_pass_id: string;
       vehicle_verified: boolean;
       driver_verified: boolean;
       loaded_goods_verified: boolean;
@@ -911,7 +919,7 @@ export const api = {
     return request<any>(`${BUSINESS_API_URL}/api/gate-entries/${id}`);
   },
 
-  async downloadGatePass(id: string, gateEntryNumber?: string): Promise<void> {
+  async downloadGatePass(id: string, _gateEntryNumber?: string): Promise<void> {
     // Open synchronously from the click handler so browser pop-up protection
     // does not prevent the printable pass from appearing after the fetch.
     const passWindow = window.open("", "gate-pass", "width=520,height=760");
@@ -938,42 +946,6 @@ export const api = {
       }
 
       let passHtml = await response.text();
-
-      // Generate QR Code to embed in the pass for digital verification at internal checkpoints
-      try {
-        const qrData = gateEntryNumber || id;
-        const qrDataUrl = await QRCode.toDataURL(qrData, {
-          width: 160,
-          margin: 1,
-          color: {
-            dark: "#000000",
-            light: "#ffffff",
-          },
-        });
-
-        const qrHtml = `
-          <div style="display: flex; flex-direction: column; align-items: center;" class="qr-container">
-            <img src="${qrDataUrl}" style="width: 140px; height: 140px; border: 1px solid #eee; padding: 8px; border-radius: 12px; background: #fff;" alt="Pass QR Code" />
-          </div>
-        `;
-
-        // Replace the placeholder entirely if it exists
-        if (passHtml.includes('<div class="pass-number">')) {
-          // Find the end of the div and replace its contents or the whole div
-          // For simplicity with string replacement, we'll just target the placeholder text if found
-          const placeholderText = "(Auto-generated)";
-          if (passHtml.includes(placeholderText)) {
-            passHtml = passHtml.replace(/<div class="pass-number">[\s\S]*?<\/div>/, qrHtml);
-          } else {
-            passHtml = passHtml.replace(
-              '<div class="pass-number">',
-              `${qrHtml}<div class="pass-number">`,
-            );
-          }
-        }
-      } catch (qrErr) {
-        console.error("QR generation failed", qrErr);
-      }
 
       passWindow.document.open();
       passWindow.document.write(passHtml);
@@ -1559,20 +1531,11 @@ export const api = {
   },
 
   async createMaterialComponent(name: string, uom: string = "PCS"): Promise<any> {
-    try {
-      return await request<any>(`${BUSINESS_API_URL}/api/gate/materials`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, uom }),
-      });
-    } catch {
-      return {
-        code: `MAT-${name.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-4)}`,
-        name,
-        category: "General Components",
-        uom,
-      };
-    }
+    return request<any>(`${BUSINESS_API_URL}/api/gate/materials`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, uom }),
+    });
   },
 
   async getNextMaterialRequestNumber(): Promise<{

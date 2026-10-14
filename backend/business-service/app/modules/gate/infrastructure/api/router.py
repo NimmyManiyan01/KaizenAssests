@@ -18,7 +18,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import selectinload
 
@@ -28,7 +28,7 @@ from app.database.session import UnitOfWork, get_uow
 from app.modules.gate.adapters.mock_adapters import InMemoryGateEntryRepository
 from app.modules.gate.infrastructure.persistence.models import DamagePhotoModel, DamageReportModel, DockAssignmentModel, DockModel, GateEntryAuditLogModel, GateEntryModel, GateExitModel, ReceivingLineModel, SupplierDamageClaimModel, VehicleExitApprovalModel, FinishedGoodsPickupGateVisitModel
 from app.modules.assembly.infrastructure.persistence.models import AssemblyFinishedGoodsAllocationModel, AssemblyFinishedGoodsModel
-from app.common.persistence.models import AsnLineModel, PurchaseOrderModel, AsnModel, MaterialStockModel, NotificationModel, SupplierContactModel, SupplierModel, SupplierUserModel, FinishedGoodsRequestModel
+from app.common.persistence.models import AsnLineModel, PurchaseOrderModel, AsnModel, MaterialModel, MaterialStockModel, NotificationModel, SupplierContactModel, SupplierModel, SupplierUserModel, FinishedGoodsRequestModel
 from app.modules.receiving.infrastructure.persistence.models import GrnDamageEvidenceModel, GrnLineModel, GrnModel, InventoryReceiptPostingModel
 from app.modules.receiving.domain.events import GrnPostedEvent, PostedInventoryLine
 from app.events.outbox_repository import to_outbox_row
@@ -266,35 +266,27 @@ async def add_material_component(
     if not mat_name:
         raise HTTPException(status_code=400, detail="Material name is required.")
 
-    code_prefix = re.sub(r"[^A-Z0-9]", "", mat_name.upper())[:6] or "MAT"
-    mat_code = f"MAT-{code_prefix}-{uuid.uuid4().hex[:4].upper()}"
     uom = str(payload.get("uom") or "PCS").upper()
     category = str(payload.get("category") or "General Components")
+    existing_result = await uow.session.execute(
+        select(MaterialModel).where(func.lower(MaterialModel.material_name) == mat_name.lower())
+    )
+    existing = existing_result.scalar_one_or_none()
+    if existing:
+        return {"id": str(existing.id), "code": existing.material_code, "name": existing.material_name, "category": existing.category, "uom": existing.base_uom, "status": existing.status}
 
-    new_mat = {"code": mat_code, "name": mat_name, "category": category, "uom": uom}
-    _custom_materials_store.append(new_mat)
-
-    try:
-        from app.common.persistence.models import MaterialModel
-        existing = await uow.session.execute(
-            select(MaterialModel).where(MaterialModel.material_name.ilike(mat_name))
-        )
-        if not existing.scalar_one_or_none():
-            uow.session.add(
-                MaterialModel(
-                    id=uuid.uuid4(),
-                    material_code=mat_code,
-                    material_name=mat_name,
-                    category=category,
-                    base_uom=uom,
-                    status="Active",
-                )
-            )
-            await uow.session.commit()
-    except Exception as e:
-        logging.warning("Could not persist new material to DB table: %s", e)
-
-    return new_mat
+    code_prefix = re.sub(r"[^A-Z0-9]", "", mat_name.upper())[:6] or "MAT"
+    material = MaterialModel(
+        id=uuid.uuid4(),
+        material_code=f"MAT-{code_prefix}-{uuid.uuid4().hex[:4].upper()}",
+        material_name=mat_name,
+        category=category,
+        base_uom=uom,
+        status="Active",
+    )
+    uow.session.add(material)
+    await uow.session.commit()
+    return {"id": str(material.id), "code": material.material_code, "name": material.material_name, "category": material.category, "uom": material.base_uom, "status": material.status}
 
 
 @preview_router.get("/asns/next-number")
@@ -1763,6 +1755,7 @@ async def list_inbound_arrivals(
             "driver_name": (asn.driver_name if asn else None) or gate_entry.driver_name,
             "driver_contact": asn.driver_contact if asn else None,
             "truck_photo_base64": base64.b64encode(gate_entry.vehicle_photo_data).decode("ascii") if gate_entry.vehicle_photo_data else None,
+            "document_image_base64": base64.b64encode(gate_entry.po_document_data).decode("ascii") if gate_entry.po_document_data else None,
             "arrival_time": gate_entry.created_at.isoformat(),
             "facility_entry_at": gate_entry.facility_entry_at.isoformat() if gate_entry.facility_entry_at else None,
             "expected_arrival_at": asn.expected_arrival_at.isoformat() if asn and asn.expected_arrival_at else None,
@@ -3967,9 +3960,14 @@ async def approve_gate_entry_by_qr(
 
 
 
+class InboundVehicleExitPayload(BaseModel):
+    gate_pass_id: str = Field(..., min_length=1, max_length=64)
+
+
 @router.post("/{entry_id}/vehicle-exited", response_model=GateEntryResponse)
 async def mark_inbound_vehicle_exited(
     entry_id: str,
+    payload: InboundVehicleExitPayload,
     user: CurrentUser = Depends(require_permission("gate:write")),
     uow: UnitOfWork = Depends(get_uow),
 ) -> GateEntryResponse:
@@ -3983,6 +3981,10 @@ async def mark_inbound_vehicle_exited(
 
     if model is None:
         raise NotFoundException(f"Gate entry with ID '{entry_id}' not found")
+
+    expected_gate_pass = (model.gate_entry_number or "").strip().upper()
+    if payload.gate_pass_id.strip().upper() != expected_gate_pass:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Gate pass ID does not match this gate entry")
 
     current_status = (model.status or "").upper().strip()
     if current_status == "VEHICLE_EXITED" or model.exited_at is not None:

@@ -896,7 +896,10 @@ class DockAllocationService:
         ).scalar_one_or_none()
         if not req:
             raise HTTPException(status_code=404, detail="Request not found")
-        if req.status != "OCCUPIED":
+        # A vehicle can reach the dock through either the legacy OCCUPIED
+        # state or the gate workflow's AT_DOCK state. Both mean receiving is
+        # ready to be completed.
+        if req.status not in {"OCCUPIED", "AT_DOCK"}:
             raise HTTPException(status_code=409, detail=f"Receiving cannot complete while allocation is {req.status}")
 
         previous_status = req.status
@@ -1009,7 +1012,7 @@ class DockAllocationService:
         session.add(
             NotificationModel(
                 user_role="GATE_SECURITY",
-                title="Dock is empty",
+                title="GRN Alert: Dock Released",
                 message=f"Dock {dock_code} is now available after vehicle {req.vehicle_number} left. Another vehicle can enter.",
                 link=f"/vehicle-queue?gateEntry={req.existing_gate_pass_id}",
                 notification_type="GATE_DOCK_RELEASED",

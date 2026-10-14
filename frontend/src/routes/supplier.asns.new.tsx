@@ -1,7 +1,7 @@
 import { createFileRoute, useSearch } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, Download, FileText, Loader2, Plus, Search, Trash2 } from "lucide-react";
+import { CheckCircle2, Eye, FileText, Loader2, Plus, Search, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,8 @@ interface AsnRecord {
   vehicle_number: string;
   driver_name: string;
   driver_contact: string;
+  delivery_date?: string;
+  expected_arrival_date?: string;
   expected_arrival_at?: string;
   status: string;
   created_at: string;
@@ -45,10 +47,13 @@ function NewAsnPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAssignmentOpen, setIsAssignmentOpen] = useState(false);
   const [isMaterialPopupOpen, setIsMaterialPopupOpen] = useState(false);
+  const [customMaterialRowIndex, setCustomMaterialRowIndex] = useState<number | null>(null);
   const [customMaterialName, setCustomMaterialName] = useState("");
   const [manualVehicle, setManualVehicle] = useState(false);
   const [manualDriver, setManualDriver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [creatingMaterial, setCreatingMaterial] = useState(false);
+  const [selectedAsn, setSelectedAsn] = useState<AsnRecord | null>(null);
 
   // Modal Form Inputs
   const [asnNumber, setAsnNumber] = useState("");
@@ -158,6 +163,8 @@ function NewAsnPage() {
           vehicle_number: a.vehicle_number || "KA 01 AB 4582",
           driver_name: a.driver_name || "Suresh Gowda",
           driver_contact: a.driver_contact || "+91 98450 12345",
+          // Preserve the persisted value returned by the API across reloads/sessions.
+          expected_arrival_at: a.expected_arrival_at || undefined,
           status: a.status || "SUBMITTED",
           created_at: a.created_at || new Date().toISOString(),
           lines: a.lines || [
@@ -174,8 +181,11 @@ function NewAsnPage() {
   };
 
   const handleOpenCreateModal = async () => {
-    const next = await api.getNextAsnNumber();
-    setAsnNumber(next.asnNumber);
+    // Open the first dialog immediately; loading the next ASN number should
+    // never make the user wait before seeing the popup.
+    setIsAssignmentOpen(true);
+    const next = await api.getNextAsnNumber().catch(() => null);
+    if (next?.asnNumber) setAsnNumber(next.asnNumber);
     setExpectedArrivalDate("");
     setSupplierName(supplierCompanyName || currentUser?.full_name || currentUser?.username || "");
     setDestinationWarehouse("");
@@ -189,7 +199,6 @@ function NewAsnPage() {
     setLines([
       { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" },
     ]);
-    setIsAssignmentOpen(true);
   };
 
   useEffect(() => {
@@ -210,36 +219,44 @@ function NewAsnPage() {
 
   const handleAddNewCustomMaterial = async () => {
     const compName = customMaterialName.trim();
-    if (!compName) return;
+    if (!compName || creatingMaterial) return;
+    setCreatingMaterial(true);
     try {
       const created = await api.createMaterialComponent(compName.trim(), "PCS");
-      void created;
-      toast.success(`Component '${created.name}' saved to Database ✓`, {
-        description: `Code: ${created.code} · Now available in dropdown`,
+      const refreshedMaterials = await api.getMaterials({ status: "ACTIVE" });
+      const normalizedMaterials = (refreshedMaterials || []).map((material: any) => ({
+        ...material,
+        id: material.id || material.material_id,
+        code: material.code || material.material_code,
+        name: material.name || material.material_name,
+        uom: material.uom || material.base_uom || material.unit_of_measure,
+      }));
+      const createdId = String(created.id || created.material_id || "");
+      const selectedMaterial = normalizedMaterials.find((material: any) => String(material.id) === createdId)
+        || normalizedMaterials.find((material: any) => String(material.code) === String(created.code || created.material_code));
+      if (!selectedMaterial?.id || !selectedMaterial.uom) {
+        throw new Error("Material was created, but its canonical Material Master record or UOM could not be loaded.");
+      }
+      setMaterialCatalog(normalizedMaterials);
+      const createdMaterial = {
+        material_id: selectedMaterial.id,
+        item_code: selectedMaterial.code,
+        material_name: selectedMaterial.name,
+        shipped_quantity: "1",
+        uom: selectedMaterial.uom,
+      };
+      setLines((prev) => {
+        const targetIndex = customMaterialRowIndex ?? prev.findIndex((line) => !line.material_id && !line.item_code);
+        if (targetIndex < 0) return [...prev, createdMaterial];
+        return prev.map((line, index) => (index === targetIndex ? { ...line, ...createdMaterial } : line));
       });
-      setMaterialCatalog((prev) => [
-        ...prev,
-        {
-          ...created,
-          id: created.id || created.material_id,
-          code: created.code,
-          name: created.name,
-          uom: created.uom || "PCS",
-        },
-      ]);
-      setLines((prev) => [
-        ...prev,
-        {
-          item_code: created.code,
-          material_name: created.name,
-          shipped_quantity: "1",
-          uom: created.uom || "PCS",
-        },
-      ]);
+      toast.success(`Component '${selectedMaterial.name}' saved to Database ✓`, { description: `Code: ${selectedMaterial.code} · UOM: ${selectedMaterial.uom}` });
       setCustomMaterialName("");
       setIsMaterialPopupOpen(false);
-    } catch {
-      toast.error("Failed to save material to database");
+    } catch (error) {
+      toast.error("Failed to save material to database", { description: error instanceof Error ? error.message : "The material was not saved." });
+    } finally {
+      setCreatingMaterial(false);
     }
   };
 
@@ -286,6 +303,10 @@ function NewAsnPage() {
     }
     if (lines.some((line) => Number(line.shipped_quantity) <= 0)) {
       toast.error("Shipped quantity must be greater than zero");
+      return;
+    }
+    if (lines.some((line) => !String(line.uom || "").trim())) {
+      toast.error("UOM is required for every material line");
       return;
     }
 
@@ -342,19 +363,6 @@ function NewAsnPage() {
       setSubmitting(false);
       toast.error("ASN Creation Failed", { description: err?.message || "Could not create ASN." });
     }
-  };
-
-  const handleDownloadAsnPdf = (record: AsnRecord) => {
-    toast.success(`Downloading Official ASN Certificate: ${record.asn_number}`, {
-      description: `Vehicle: ${record.vehicle_number} · Supplier: ${record.supplier_name}`,
-    });
-    // The backend supports lookup by ASN number and this also handles rows
-    // created by older frontend sessions that carried a synthetic id.
-    void api.downloadAsnPdf(record.asn_number || record.id).then(
-      () => toast.success(`Downloaded official ASN certificate: ${record.asn_number}`),
-      (error: any) =>
-        toast.error("ASN PDF download failed", { description: error?.message || "Try again." }),
-    );
   };
 
   const filteredList = asnList.filter((a) => {
@@ -415,7 +423,6 @@ function NewAsnPage() {
                     <th className="px-4 py-3">Vehicle Number</th>
                     <th className="px-4 py-3">Driver Name & Mobile</th>
                     <th className="px-4 py-3">Expected Arrival Date</th>
-                    <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3 text-right"></th>
                   </tr>
                 </thead>
@@ -441,21 +448,15 @@ function NewAsnPage() {
                           asn.expected_arrival_at?.split("T")[0] ||
                           "—"}
                       </td>
-                      <td className="px-4 py-3">
-                        <Badge className="rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
-                          {asn.status}
-                        </Badge>
-                      </td>
                       <td className="px-4 py-3 text-right">
                         <Button
                           size="sm"
                           variant="outline"
-                          className="size-8 rounded-xl border-sky-500/40 text-sky-600 hover:bg-sky-50"
-                          aria-label="Download ASN certificate"
-                          title="Download ASN certificate"
-                          onClick={() => handleDownloadAsnPdf(asn)}
+                          className="rounded-xl border-sky-500/40 text-sky-600 hover:bg-sky-50"
+                          onClick={() => setSelectedAsn(asn)}
                         >
-                          <Download className="size-3.5" />
+                          <Eye className="mr-1.5 size-3.5" />
+                          View Details
                         </Button>
                       </td>
                     </tr>
@@ -465,6 +466,24 @@ function NewAsnPage() {
             </div>
           </CardContent>
         </Card>
+
+        <Dialog open={Boolean(selectedAsn)} onOpenChange={(open) => !open && setSelectedAsn(null)}>
+          <DialogContent className="max-w-lg rounded-2xl p-6">
+            <DialogHeader>
+              <DialogTitle className="text-lg font-black text-primary">ASN Details</DialogTitle>
+            </DialogHeader>
+            {selectedAsn && (
+              <div className="grid grid-cols-2 gap-3 rounded-xl border p-4 text-sm">
+                <div><span className="text-muted-foreground">ASN Number</span><p className="font-mono font-bold">{selectedAsn.asn_number}</p></div>
+                <div><span className="text-muted-foreground">Supplier</span><p className="font-semibold">{selectedAsn.supplier_name}</p></div>
+                <div><span className="text-muted-foreground">Vehicle</span><p className="font-mono font-semibold">{selectedAsn.vehicle_number}</p></div>
+                <div><span className="text-muted-foreground">Driver</span><p className="font-semibold">{selectedAsn.driver_name}</p></div>
+                <div><span className="text-muted-foreground">Driver Contact</span><p className="font-mono">{selectedAsn.driver_contact}</p></div>
+                <div><span className="text-muted-foreground">Expected Arrival</span><p className="font-semibold">{selectedAsn.delivery_date || selectedAsn.expected_arrival_date || selectedAsn.expected_arrival_at?.split("T")[0] || "—"}</p></div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={isAssignmentOpen} onOpenChange={setIsAssignmentOpen}>
           <DialogContent className="max-w-xl rounded-2xl p-6">
@@ -560,7 +579,9 @@ function NewAsnPage() {
                 >
                   Cancel
                 </Button>
-                <Button type="submit">Add Material</Button>
+                <Button type="submit" disabled={creatingMaterial || !customMaterialName.trim()}>
+                  {creatingMaterial ? "Saving…" : "Add Material"}
+                </Button>
               </div>
             </form>
           </DialogContent>
@@ -759,6 +780,7 @@ function NewAsnPage() {
                               value={line.item_id || line.material_id || ""}
                               onChange={(e) => {
                                 if (e.target.value === "__add_custom_material__") {
+                                  setCustomMaterialRowIndex(idx);
                                   setIsMaterialPopupOpen(true);
                                   return;
                                 }

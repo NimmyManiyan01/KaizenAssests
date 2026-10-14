@@ -1940,6 +1940,18 @@ async def get_grn_detail(
                 quality_approved_quantity=line.quality_approved_quantity,
                 balance_quantity=line.balance_quantity,
                 quality_result=line.quality_result,
+                batches=[
+                    GrnBatchResponse(
+                        batch_id=str(batch.id),
+                        grn_line_id=str(batch.grn_line_id),
+                        batch_number=batch.batch_number,
+                        batch_quantity=batch.batch_quantity,
+                        created_by=batch.created_by,
+                        created_at=batch.created_at,
+                    )
+                    for batch in getattr(line, "batches", [])
+                    if not getattr(batch, "superseded", False)
+                ],
                 damage_lots=[
                     GrnDamageLotResponse(
                         damage_lot_id=str(dl.id),

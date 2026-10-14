@@ -136,6 +136,7 @@ function VehicleExit() {
   const [driverVerified, setDriverVerified] = useState(false);
   const [loadedGoodsVerified, setLoadedGoodsVerified] = useState(false);
   const [remarks, setRemarks] = useState("");
+  const [gatePassId, setGatePassId] = useState("");
 
   // Report Mismatch modal state
   const [reportModalOpen, setReportModalOpen] = useState(false);
@@ -243,6 +244,7 @@ function VehicleExit() {
       setDriverVerified(dispatch.gate_exit_driver_verified === true);
       setLoadedGoodsVerified(dispatch.gate_exit_loaded_goods_verified === true);
       setRemarks(dispatch.gate_exit_remarks || "");
+    setGatePassId("");
     }
   }
 
@@ -269,14 +271,8 @@ function VehicleExit() {
   async function handleConfirmExit() {
     if (!selectedDispatch) return;
 
-    if (!vehicleVerified || !driverVerified || !loadedGoodsVerified) {
-      toast.error("Security verification required", {
-        description: "Vehicle, driver, and loaded-goods verification must be confirmed before Gate Exit.",
-      });
-      return;
-    }
-    if (!exitVehiclePhotoPreview) {
-      toast.error("Vehicle photo proof required", { description: "Capture vehicle photo proof before approving Gate Exit." });
+    if (!gatePassId.trim()) {
+      toast.error("Gate pass ID is required");
       return;
     }
 
@@ -286,6 +282,7 @@ function VehicleExit() {
         localStorage.setItem(`gate_exit_proof_${selectedDispatch.id}`, exitVehiclePhotoPreview);
       }
       const res = await api.confirmOutboundGateExit(selectedDispatch.id, {
+        gate_pass_id: gatePassId.trim(),
         vehicle_verified: vehicleVerified,
         driver_verified: driverVerified,
         loaded_goods_verified: loadedGoodsVerified,
@@ -380,8 +377,8 @@ function VehicleExit() {
 
   return (
     <AppShell
-      title="Outbound Vehicle Exit"
-      subtitle="Security verification and gate exit confirmation for outbound vehicles (Warehouse → Customer)"
+      title="Inbound Gate Exit"
+      subtitle="Security confirmation for inbound vehicles after GRN receiving and dock release"
       actions={
         <div className="flex items-center gap-2">
           <Button variant="outline" className="rounded-xl shadow-sm" onClick={() => void loadQueue()}>
@@ -398,9 +395,9 @@ function VehicleExit() {
               <LogOut className="size-5" />
             </span>
             <div>
-              <p className="font-semibold text-foreground">Outbound Finished Goods Gate Exit</p>
+              <p className="font-semibold text-foreground">Inbound Gate Exit</p>
               <p className="text-xs text-muted-foreground">
-                Verify outbound vehicles & drivers physically against dispatch manifest before releasing to customer.
+                Enter the gate pass ID after GRN receiving and dock release to complete vehicle exit.
               </p>
             </div>
           </div>
@@ -441,40 +438,15 @@ function VehicleExit() {
           >
             Awaiting Exit ({awaitingCount})
           </Button>
-          <Button
-            variant={statusFilter === "GATE_EXIT_MISMATCH" ? "destructive" : "outline"}
-            size="sm"
-            className="rounded-xl"
-            onClick={() => setStatusFilter("GATE_EXIT_MISMATCH")}
-          >
-            <AlertOctagon className="mr-1.5 size-3.5" />
-            Mismatch ({mismatchCount})
-          </Button>
-          <Button
-            variant={statusFilter === "GATE_OUT" ? "default" : "outline"}
-            size="sm"
-            className="rounded-xl"
-            onClick={() => setStatusFilter("GATE_OUT")}
-          >
-            Completed Exits ({completedCount})
-          </Button>
-          <Button
-            variant={statusFilter === "ALL" ? "default" : "outline"}
-            size="sm"
-            className="rounded-xl"
-            onClick={() => setStatusFilter("ALL")}
-          >
-            All ({allCount})
-          </Button>
         </div>
       </div>
 
       {/* Queue Listing */}
       <Card className="rounded-2xl border-border/60 shadow-soft">
         <CardHeader>
-          <CardTitle className="text-base">Outbound Dispatches Queue</CardTitle>
+          <CardTitle className="text-base">Inbound Gate Exit Queue</CardTitle>
           <CardDescription>
-            Outbound finished-goods dispatches ready for security verification & gate exit
+            Inbound vehicles ready to exit after GRN receiving and dock release
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -486,9 +458,9 @@ function VehicleExit() {
             <div className="grid min-h-48 place-items-center rounded-xl border border-dashed py-10 text-center">
               <div>
                 <CheckCircle2 className="mx-auto mb-2 size-8 text-success/80" />
-                <p className="font-semibold">No outbound dispatches match your filter</p>
+                <p className="font-semibold">No inbound vehicles are ready for gate exit</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Dispatches appear here when loading is completed and status is set to READY_FOR_GATE_EXIT.
+                  Vehicles appear here after GRN receiving is completed and the dock is released.
                 </p>
               </div>
             </div>
@@ -642,7 +614,7 @@ function VehicleExit() {
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-4 py-2">
+            <div className={selectedDispatch.status === "READY_FOR_GATE_EXIT" ? "hidden" : "space-y-4 py-2"}>
               {/* Read-Only Dispatch Manifest Details */}
               <div className="rounded-xl border border-border/80 bg-muted/20 p-4 text-xs space-y-2.5">
                 <div className="grid grid-cols-2 gap-2">
@@ -1018,6 +990,20 @@ function VehicleExit() {
               )}
             </div>
 
+            {selectedDispatch.status === "READY_FOR_GATE_EXIT" && (
+              <div className="space-y-2 py-3">
+                <Label htmlFor="gate-pass-id">Gate Pass ID</Label>
+                <Input
+                  id="gate-pass-id"
+                  value={gatePassId}
+                  onChange={(event) => setGatePassId(event.target.value)}
+                  placeholder={selectedDispatch.dispatch_number}
+                  className="rounded-xl font-mono"
+                  autoFocus
+                />
+              </div>
+            )}
+
             <DialogFooter className="gap-2">
               <Button variant="outline" className="rounded-xl" onClick={() => setSelectedDispatch(null)}>
                 Close
@@ -1025,7 +1011,7 @@ function VehicleExit() {
               {selectedDispatch.status === "READY_FOR_GATE_EXIT" && (
                 <Button
                   className="rounded-xl shadow-glow"
-                  disabled={!vehicleVerified || !driverVerified || !loadedGoodsVerified || !exitVehiclePhotoPreview || submitting}
+                  disabled={!gatePassId.trim() || submitting}
                   onClick={() => void handleConfirmExit()}
                 >
                   {submitting ? (
