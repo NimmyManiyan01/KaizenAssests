@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Package, Box, RefreshCw, Loader2, CheckCircle2, ScanLine, ArrowRight, Navigation } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/wms/app-shell";
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
 import QRCode from "qrcode";
+import jsQR from "jsqr";
 
 export const Route = createFileRoute("/dispatch-picking-packing")({
   component: DispatchPickingPackingPage,
@@ -26,21 +27,30 @@ function DispatchPickingPackingPage() {
   const [packageCount, setPackageCount] = useState("");
   const [packageWeight, setPackageWeight] = useState("");
   const [packageNumber, setPackageNumber] = useState("");
+  const [finishedGoodsQr, setFinishedGoodsQr] = useState("");
+  const [scanQuantity, setScanQuantity] = useState("");
+  const finishedGoodsQrInputRef = useRef<HTMLInputElement>(null);
 
   // Packing Form State matching wireframe
   const [submitting, setSubmitting] = useState(false);
   const isWorkflowCompleted = ["PACKED", "DISPATCH_READY", "DRIVER_ALLOCATED", "VEHICLE_ALLOCATED", "LOADING", "LOADED", "READY_FOR_GATE_EXIT", "DISPATCHED", "IN_TRANSIT", "DELIVERED", "CLOSED"].includes(String(selectedDispatch?.status || "").toUpperCase());
+  const createPackageNumber = () => `PKG-${new Date().getFullYear()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
+      const supplierRequests = await api.getSupplierFinishedGoodsDispatchRequests();
+      await Promise.all((supplierRequests || []).filter((request: any) => request.status === "ALLOCATED").map((request: any) => api.allocateSupplierFinishedGoodsFifo(request.id).catch(() => null)));
       const res = await api.getDispatches();
       const items = res.items || [];
       setDispatches(items);
       if (items.length > 0 && !selectedDispatchId) {
         setSelectedDispatchId(items[0].id);
         setSelectedDispatch(items[0]);
-        setPackageNumber((items[0].items || []).find((item: any) => item.package_number)?.package_number || "");
+        setPickedQuantities(Object.fromEntries((items[0].items || []).map((item: any) => [item.id, String(item.quantity_picked || item.quantity_reserved || item.quantity_ordered || 0)])));
+        setPackedQuantity(String((items[0].items || []).reduce((sum: number, item: any) => sum + Number(item.quantity_packed || 0), 0) || ""));
+        setPackageCount(String((items[0].items || []).find((item: any) => item.package_count != null)?.package_count || ""));
+        setPackageNumber((items[0].items || []).find((item: any) => item.package_number)?.package_number || createPackageNumber());
         setWorkflowCompleted(["PACKED", "DISPATCH_READY", "DRIVER_ALLOCATED", "VEHICLE_ALLOCATED", "LOADING", "LOADED", "READY_FOR_GATE_EXIT", "DISPATCHED", "IN_TRANSIT", "DELIVERED", "CLOSED"].includes(String(items[0].status || "").toUpperCase()));
       }
     } catch (e) {
@@ -57,10 +67,10 @@ function DispatchPickingPackingPage() {
     const found = dispatches.find(d => d.id === id);
     setSelectedDispatch(found || null);
     setWorkflowCompleted(["PACKED", "DISPATCH_READY", "DRIVER_ALLOCATED", "VEHICLE_ALLOCATED", "LOADING", "LOADED", "READY_FOR_GATE_EXIT", "DISPATCHED", "IN_TRANSIT", "DELIVERED", "CLOSED"].includes(String(found?.status || "").toUpperCase()));
-    setPickedQuantities(Object.fromEntries((found?.items || []).map((item: any) => [item.id, String(item.quantity_picked || 0)])));
+    setPickedQuantities(Object.fromEntries((found?.items || []).map((item: any) => [item.id, String(item.quantity_picked || item.quantity_reserved || item.quantity_ordered || 0)])));
     setPackedQuantity(String((found?.items || []).reduce((sum: number, item: any) => sum + Number(item.quantity_packed || 0), 0) || ""));
     setPackageCount(String((found?.items || []).find((item: any) => item.package_count != null)?.package_count || ""));
-    setPackageNumber((found?.items || []).find((item: any) => item.package_number)?.package_number || "");
+    setPackageNumber((found?.items || []).find((item: any) => item.package_number)?.package_number || createPackageNumber());
   };
 
   const handleDownloadPackageQr = async () => {
@@ -70,6 +80,28 @@ function DispatchPickingPackingPage() {
     link.href = dataUrl;
     link.download = `${packageNumber}.png`;
     link.click();
+  };
+
+  const handleUploadFinishedGoodsQr = (file?: File) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext("2d");
+        if (!context) return toast.error("Could not read uploaded QR image");
+        context.drawImage(image, 0, 0);
+        const result = jsQR(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);
+        if (!result?.data) return toast.error("No QR code found in the uploaded image");
+        setFinishedGoodsQr(result.data);
+        toast.success("Finished-goods QR loaded");
+      };
+      image.src = String(reader.result || "");
+    };
+    reader.readAsDataURL(file);
   };
 
   const productRows = selectedDispatch?.items || [];
@@ -91,10 +123,10 @@ function DispatchPickingPackingPage() {
   };
 
   const handleConfirmPacking = async () => {
-    if (!selectedDispatch || packedTotal !== requiredQuantity || !packageType || Number(packageCount) < 1) return;
+    if (!selectedDispatch || !isPickingConfirmed || packedTotal !== requiredQuantity || !packageType || Number(packageCount) < 1) return;
     setSubmitting(true);
     try {
-      const persistedPackageNumber = packageNumber || `PKG-${new Date().getFullYear()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+      const persistedPackageNumber = packageNumber || createPackageNumber();
       setPackageNumber(persistedPackageNumber);
       if (selectedDispatch.status !== "PACKING_IN_PROGRESS") await api.startDispatchPacking(selectedDispatch.id);
       const updated = await api.packDispatchItems(selectedDispatch.id, productRows.map((item: any) => ({ id: item.id, material_code: item.material_code, quantity_packed: Number(packedQuantity) || Number(item.quantity_picked || 0), package_number: persistedPackageNumber, package_type: packageType, package_count: Number(packageCount), package_weight: Number(packageWeight) || undefined })));
@@ -246,6 +278,11 @@ function DispatchPickingPackingPage() {
                 <ScanLine className="size-4" /> Picking Execution
               </h3>
               <div className="flex flex-wrap items-center gap-3">
+                <Input value={finishedGoodsQr} onChange={(e) => setFinishedGoodsQr(e.target.value)} placeholder="QC-approved batch QR" className="w-56 rounded-xl text-xs font-mono" disabled={isWorkflowCompleted} />
+                <Input type="number" min="0.01" value={scanQuantity} onChange={(e) => setScanQuantity(e.target.value)} placeholder="Qty" className="w-24 rounded-xl text-xs" disabled={isWorkflowCompleted} />
+                <input ref={finishedGoodsQrInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { handleUploadFinishedGoodsQr(e.target.files?.[0]); e.currentTarget.value = ""; }} />
+                <Button type="button" variant="outline" size="sm" className="rounded-xl text-xs" disabled={isWorkflowCompleted} onClick={() => finishedGoodsQrInputRef.current?.click()}>Upload QR</Button>
+                <Button type="button" variant="outline" size="sm" className="rounded-xl text-xs" disabled={!selectedDispatch || !finishedGoodsQr || finishedGoodsQr.trim().toUpperCase().startsWith("PKG-") || !scanQuantity} onClick={async () => { try { const result = await api.scanAllocatedFinishedGoods(selectedDispatch.id, finishedGoodsQr.trim(), Number(scanQuantity)); toast.success(`QR verified: ${result.batch_number}`); setFinishedGoodsQr(""); setScanQuantity(""); } catch (error) { toast.error(error instanceof Error ? error.message : "Finished-goods QR validation failed"); } }}>Verify QR</Button>
                 <span className="text-xs text-muted-foreground">Source: Assembly Storage · {Array.from(new Set(productRows.map((item: any) => item.bin).filter(Boolean))).join(", ") || "Not specified"}</span>
                 {productRows.map((item: any) => <Input key={item.id} type="number" min="0" max={item.quantity_ordered} value={pickedQuantities[item.id] ?? item.quantity_picked ?? ""} onChange={(e) => setPickedQuantities((current) => ({ ...current, [item.id]: e.target.value }))} placeholder={`Pick ${item.quantity_ordered}`} className="w-32 rounded-xl text-xs" disabled={isWorkflowCompleted} />)}
                 <Button type="button" size="sm" className="rounded-xl text-xs" disabled={submitting || isWorkflowCompleted || isPickingConfirmed || pickedTotal !== requiredQuantity} onClick={() => void handleConfirmPicking()}><CheckCircle2 className="size-3.5 mr-1.5" /> Confirm Picking</Button>
@@ -283,7 +320,7 @@ function DispatchPickingPackingPage() {
               </div>
 
               <div className="flex items-center justify-between pt-2">
-                <div className="flex items-center gap-2"><Input type="number" min="0" max={requiredQuantity} value={packedQuantity} onChange={(e) => setPackedQuantity(e.target.value)} placeholder={`Packed quantity (${requiredQuantity})`} className="w-48 rounded-xl text-xs" disabled={isWorkflowCompleted || pickedTotal !== requiredQuantity} /><Button type="button" size="sm" className="rounded-xl text-xs" disabled={submitting || isWorkflowCompleted || pickedTotal !== requiredQuantity || packedTotal !== requiredQuantity || !packageType || Number(packageCount) < 1} onClick={() => void handleConfirmPacking()}><CheckCircle2 className="size-3.5 mr-1.5" /> Confirm Packing</Button></div>
+                <div className="flex items-center gap-2"><Input type="number" min="0" max={requiredQuantity} value={packedQuantity} onChange={(e) => setPackedQuantity(e.target.value)} placeholder={`Packed quantity (${requiredQuantity})`} className="w-48 rounded-xl text-xs" disabled={isWorkflowCompleted || !isPickingConfirmed} /><Button type="button" size="sm" className="rounded-xl text-xs" disabled={submitting || isWorkflowCompleted || !isPickingConfirmed || pickedTotal !== requiredQuantity || packedTotal !== requiredQuantity || !packageType || Number(packageCount) < 1} onClick={() => void handleConfirmPacking()}><CheckCircle2 className="size-3.5 mr-1.5" /> Confirm Packing</Button></div>
                 <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600">
                   {selectedDispatch?.status || "No dispatch selected"}
                 </span>

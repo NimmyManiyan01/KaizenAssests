@@ -32,7 +32,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -46,13 +45,13 @@ import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/assembly/quality")({
   beforeLoad: () => requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER", "QUALITY", "QC"]),
-  head: () => ({ meta: [{ title: "Quality Inspection · KaizenX" }] }),
+  head: () => ({ meta: [{ title: "Quality Inspection · KaizenAssests" }] }),
   component: AssemblyQualityPage,
 });
 
 function getQcStatusBadge(status: string) {
   const s = (status || "").toUpperCase();
-  if (s === "PASSED") {
+  if (s === "PASSED" || s === "QC_APPROVED") {
     return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25">
         <span className="size-1.5 rounded-full bg-emerald-500" />
@@ -60,7 +59,7 @@ function getQcStatusBadge(status: string) {
       </span>
     );
   }
-  if (s === "REWORK") {
+  if (s === "REWORK" || s === "PARTIALLY_APPROVED") {
     return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/25">
         <span className="size-1.5 rounded-full bg-amber-500" />
@@ -68,7 +67,7 @@ function getQcStatusBadge(status: string) {
       </span>
     );
   }
-  if (s === "FAILED") {
+  if (s === "FAILED" || s === "REJECTED") {
     return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/25">
         <span className="size-1.5 rounded-full bg-rose-500" />
@@ -97,7 +96,7 @@ function AssemblyQualityPage() {
   const [passedQty, setPassedQty] = useState<number>(0);
   const [failedQty, setFailedQty] = useState<number>(0);
   const [reworkQty, setReworkQty] = useState<number>(0);
-  const [notes, setNotes] = useState<string>("");
+  const [heldQty, setHeldQty] = useState<number>(0);
   const [submitting, setSubmitting] = useState(false);
 
   const fetchInspections = async (isManual = false) => {
@@ -126,10 +125,10 @@ function AssemblyQualityPage() {
     setPassedQty(item.produced_quantity);
     setFailedQty(0);
     setReworkQty(0);
-    setNotes("Physical dimensions verified. Functional testing completed with no defects.");
+    setHeldQty(0);
   };
 
-  const totalInspected = Number(passedQty) + Number(failedQty) + Number(reworkQty);
+  const totalInspected = Number(passedQty) + Number(failedQty) + Number(reworkQty) + Number(heldQty);
   const expectedProduced = inspectItem ? inspectItem.produced_quantity : 0;
   const isQuantityValid =
     Number(passedQty) >= 0 && Number(failedQty) >= 0 && Number(reworkQty) >= 0 && totalInspected === expectedProduced;
@@ -151,7 +150,7 @@ function AssemblyQualityPage() {
         passed_quantity: Number(passedQty),
         failed_quantity: Number(failedQty),
         rework_quantity: Number(reworkQty),
-        notes: notes.trim() || undefined,
+        held_quantity: Number(heldQty),
       });
 
       toast.success(res.message || `Quality inspection completed for ${inspectItem.order_number}`);
@@ -694,7 +693,7 @@ function AssemblyQualityPage() {
 
                 {/* Quantities breakdown */}
                 <div className="space-y-3">
-                  <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="space-y-1">
                       <label className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                         <CheckCircle2 className="size-3" /> Passed Qty *
@@ -736,6 +735,20 @@ function AssemblyQualityPage() {
                         className="h-9 text-sm font-mono font-bold rounded-xl border-rose-500/30 focus:border-rose-500"
                       />
                     </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-sky-600 dark:text-sky-400 flex items-center gap-1">
+                        <ShieldAlert className="size-3" /> Held Qty
+                      </label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={inspectItem.produced_quantity}
+                        value={heldQty}
+                        onChange={(e) => setHeldQty(Number(e.target.value))}
+                        className="h-9 text-sm font-mono font-bold rounded-xl border-sky-500/30 focus:border-sky-500"
+                      />
+                    </div>
                   </div>
 
                   {/* Validation balance warning */}
@@ -756,18 +769,6 @@ function AssemblyQualityPage() {
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground">
-                    Inspection Remarks & QC Findings
-                  </label>
-                  <Textarea
-                    placeholder="Enter dimensional check results, electrical test parameters, or rework reasons..."
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    rows={3}
-                    className="text-xs resize-none rounded-xl"
-                  />
-                </div>
               </div>
             )}
 

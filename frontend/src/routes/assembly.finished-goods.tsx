@@ -46,13 +46,14 @@ import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/assembly/finished-goods")({
   beforeLoad: () => requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER", "STORE_MANAGER", "QUALITY"]),
-  head: () => ({ meta: [{ title: "Finished Goods · KaizenX" }] }),
+  head: () => ({ meta: [{ title: "Finished Goods · KaizenAssests" }] }),
   component: AssemblyFinishedGoodsPage,
 });
 
 function AssemblyFinishedGoodsPage() {
   const navigate = useNavigate();
   const [items, setItems] = useState<AssemblyFinishedGoodItem[]>([]);
+  const [inventorySummary, setInventorySummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
@@ -71,6 +72,7 @@ function AssemblyFinishedGoodsPage() {
         search: search || undefined,
       });
       setItems(res || []);
+      setInventorySummary(await api.getAssemblyFinishedGoodsInventorySummary());
     } catch (err: any) {
       toast.error("Failed to load Finished Goods: " + (err.message || "Unknown error"));
     } finally {
@@ -146,9 +148,17 @@ function AssemblyFinishedGoodsPage() {
     printWindow.document.close();
   };
 
+  const handleDownloadLabel = () => {
+    if (!qrDataUrl || !selectedFg) return;
+    const link = document.createElement("a");
+    link.href = qrDataUrl;
+    link.download = `${selectedFg.batch_number || selectedFg.serial_number || "finished-good"}-qr.png`;
+    link.click();
+  };
+
   // Quick stats
   const totalBatches = items.length;
-  const totalUnits = items.reduce((acc, curr) => acc + curr.quantity, 0);
+  const totalUnits = inventorySummary?.qc_approved ?? items.reduce((acc, curr) => acc + curr.quantity, 0);
 
   // Filtered list
   const filteredItems = useMemo(() => {
@@ -335,6 +345,20 @@ function AssemblyFinishedGoodsPage() {
         </div>
 
         {/* Workflow Quick Links */}
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2.5 rounded-2xl border border-border/70 bg-card p-3 shadow-2xs">
+          {[
+            ["Total Produced", inventorySummary?.total_produced ?? 0], ["QC Approved", inventorySummary?.qc_approved ?? 0],
+            ["Available", inventorySummary?.available ?? 0], ["Reserved", inventorySummary?.reserved ?? 0],
+            ["Packed", inventorySummary?.packed ?? 0], ["Dispatched", inventorySummary?.dispatched ?? 0],
+            ["Rejected / Held", inventorySummary?.rejected_held ?? 0],
+          ].map(([label, value]) => (
+            <div key={String(label)} className="rounded-xl bg-muted/35 px-3 py-2">
+              <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{label}</div>
+              <div className="mt-1 text-lg font-black tabular-nums text-foreground">{loading ? "..." : value} <span className="text-[10px] font-normal text-muted-foreground">PCS</span></div>
+            </div>
+          ))}
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {workflowShortcuts.map((sc) => {
             const Icon = sc.icon;
@@ -552,7 +576,7 @@ function AssemblyFinishedGoodsPage() {
                 >
                   <div className="border-b-2 border-border pb-2 text-center">
                     <span className="text-[10px] font-black uppercase tracking-widest text-primary">
-                      KaizenX Assembly Execution
+                      KaizenAssests Assembly Execution
                     </span>
                     <h3 className="text-sm font-black text-foreground uppercase tracking-wide mt-0.5">
                       Finished Good Batch Label
@@ -597,7 +621,7 @@ function AssemblyFinishedGoodsPage() {
                     <div className="flex justify-between border-b border-border/40 pb-1">
                       <span className="text-muted-foreground">FG Batch / QR Identity:</span>
                       <span className="font-mono font-bold text-foreground">
-                        {selectedFg.serial_number || "Not recorded"}
+                        {selectedFg.batch_number || selectedFg.serial_number || "Not recorded"}
                       </span>
                     </div>
                     <div className="flex justify-between border-b border-border/40 pb-1">
@@ -623,10 +647,12 @@ function AssemblyFinishedGoodsPage() {
               <Button
                 variant="outline"
                 size="sm"
-                className="rounded-xl"
-                onClick={() => setSelectedFg(null)}
+                onClick={handleDownloadLabel}
+                disabled={!qrDataUrl}
+                className="rounded-xl gap-2 font-semibold"
               >
-                Close
+                <Download className="size-3.5" />
+                Download QR
               </Button>
               <Button
                 size="sm"

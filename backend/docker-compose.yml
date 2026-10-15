@@ -88,7 +88,7 @@ services:
       EMAIL_TIMEOUT_SECONDS: ${EMAIL_TIMEOUT_SECONDS:-8}
       EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
       EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
-      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-KaizenX Procurement}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-KaizenAssests Procurement}
     depends_on:
       auth-service:
         condition: service_started

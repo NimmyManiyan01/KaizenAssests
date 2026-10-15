@@ -7,8 +7,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 import uuid
+from typing import Optional
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, LargeBinary, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, LargeBinary, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -87,6 +88,7 @@ class ReceivingLineModel(Base):
     good_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
     damaged_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
     rejected_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    held_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0"), server_default="0")
     condition_result: Mapped[str | None] = mapped_column(String(32), nullable=True)
     inspection_required: Mapped[bool] = mapped_column(nullable=False, default=False)
     physical_condition_ok: Mapped[bool | None] = mapped_column(nullable=True)
@@ -132,7 +134,9 @@ class SupplierDamageClaimModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     claim_number: Mapped[str] = mapped_column(String(32), nullable=False, unique=True, index=True)
-    damage_report_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("damage_report.id", ondelete="RESTRICT"), nullable=False, unique=True, index=True)
+    damage_report_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("damage_report.id", ondelete="RESTRICT"), nullable=True, unique=True, index=True)
+    source_grn_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("grn.id", ondelete="RESTRICT"), nullable=True, index=True)
+    source_grn_line_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("grn_line.id", ondelete="RESTRICT"), nullable=True, unique=True, index=True)
     supplier_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("supplier.id", ondelete="RESTRICT"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="SUPPLIER_SENT", index=True)
     created_by: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -152,6 +156,7 @@ class ReplacementShipmentModel(Base):
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     shipment_number: Mapped[str] = mapped_column(String(32), nullable=False, unique=True, index=True)
     claim_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("supplier_damage_claim.id", ondelete="RESTRICT"), nullable=False, unique=True, index=True)
+    asn_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("asn.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
     expected_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     vehicle_number: Mapped[str] = mapped_column(String(32), nullable=False)
     expected_arrival: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -280,6 +285,7 @@ class GateEntryModel(Base):
     security_officer_id: Mapped[str] = mapped_column(String(64), nullable=False)
     verified_by_user_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     manual_verification_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    facility_entry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     exited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     exited_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
@@ -293,6 +299,27 @@ class GateEntryModel(Base):
     audit_logs: Mapped[list["GateEntryAuditLogModel"]] = relationship(
         "GateEntryAuditLogModel", back_populates="gate_entry", cascade="all, delete-orphan"
     )
+
+
+class FinishedGoodsPickupGateVisitModel(Base):
+    __tablename__ = "finished_goods_pickup_gate_visit"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    request_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("finished_goods_request.id", ondelete="RESTRICT"), nullable=False, unique=True, index=True)
+    gate_pass_number: Mapped[str] = mapped_column(String(6), nullable=False, unique=True, index=True)
+    supplier_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    vehicle_number: Mapped[str] = mapped_column(String(32), nullable=False)
+    driver_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    driver_contact: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="INSIDE_FACILITY", index=True)
+    arrived_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    entered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    security_officer: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    exited_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    exit_approved_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    documents_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class GateEntryAuditLogModel(Base):

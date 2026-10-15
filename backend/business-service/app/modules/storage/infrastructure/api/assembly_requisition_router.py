@@ -1311,7 +1311,9 @@ async def reserve_assembly_requisition_stock(
                 InventoryLocationBalanceModel.available_quantity > 0,
                 func.lower(StorageLocationModel.warehouse_id) == req.warehouse_id.strip().lower(),
             )
-            .order_by(InventoryLocationBalanceModel.available_quantity.desc())
+            # FIFO: oldest location balance first; availability is a
+            # constraint, not the ordering policy.
+            .order_by(InventoryLocationBalanceModel.updated_at.asc(), StorageLocationModel.location_code.asc())
         )
         loc_rows = (await uow.session.execute(loc_stmt)).all()
         loc_row = loc_rows[0] if loc_rows else None
@@ -1346,6 +1348,7 @@ async def reserve_assembly_requisition_stock(
                 "quantity": float(allocated_qty),
                 "uom": it.uom,
                 "location_code": storage_loc.location_code,
+                "batch": getattr(storage_loc, "last_grn_number", None),
                 "zone_code": storage_loc.zone,
                 "rack": storage_loc.rack,
                 "bin_code": storage_loc.bin,

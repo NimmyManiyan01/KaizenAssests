@@ -83,7 +83,8 @@ function WarehouseAssemblyRequisitionsPage() {
       ) : <div className="space-y-3">{rows.map((request) => {
         const id = String(request.id);
         const status = String(request.status || "").toUpperCase();
-        const canReview = ["PENDING", "SUBMITTED", "PARTIALLY_RESERVED"].includes(status);
+        const approvalRequired = status === "PENDING_WAREHOUSE_APPROVAL";
+        const canReview = approvalRequired || ["PENDING", "SUBMITTED", "PARTIALLY_RESERVED"].includes(status);
         const hasReservation = (request.reservations || []).some((reservation: any) => Number(reservation.reserved_quantity) > 0);
         const selectedStore = storeChoice[id] || request.assigned_store_id || request.suggested_store_id || request.reservations?.find((r: any) => r.store_id)?.store_id || "";
         const isBusy = busyId === id;
@@ -115,7 +116,7 @@ function WarehouseAssemblyRequisitionsPage() {
           {request.availability_message && <p className="text-xs text-muted-foreground">{request.availability_message}</p>}
           <div className="flex flex-wrap items-center gap-2">
             {canReview && <>
-              <Button disabled={isBusy} onClick={() => void runAction(id, () => request.legacy_material_request ? api.approveAssemblyMaterialRequest(id) : api.reserveAssemblyRequisitionStock(id), "Stock approved and request released for picking")}>{isBusy && <Loader2 className="mr-2 size-4 animate-spin" />}Approve &amp; Reserve Stock</Button>
+              <Button disabled={isBusy} onClick={() => void runAction(id, () => request.legacy_material_request || approvalRequired ? api.approveAssemblyMaterialRequest(id) : api.reserveAssemblyRequisitionStock(id), approvalRequired ? "Material request approved" : "Stock approved and request released for picking")}>{isBusy && <Loader2 className="mr-2 size-4 animate-spin" />}{approvalRequired ? "Approve Request" : "Approve &amp; Reserve Stock"}</Button>
               <Button variant="outline" disabled={isBusy} onClick={() => {
                 const reason = window.prompt("Reason for rejecting this requisition:")?.trim();
                 if (reason) void runAction(id, () => api.rejectAssemblyRequisition(id, reason), "Requisition rejected");

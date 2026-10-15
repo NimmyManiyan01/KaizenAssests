@@ -402,6 +402,7 @@ class GrnLineResponse(ApiModel):
 
     balance_quantity: Decimal = Decimal("0")
     quality_result: str | None = None
+    batches: list["GrnBatchResponse"] = Field(default_factory=list)
     damage_lots: list[GrnDamageLotResponse] = Field(default_factory=list)
     damage_evidence: list[DamageEvidenceResponse] = Field(default_factory=list)
 

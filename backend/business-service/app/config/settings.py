@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     database_pool_size: int = 10
     database_max_overflow: int = 20
     database_echo: bool = False
+    startup_schema_compatibility: bool = False
 
     # --- Auth / JWT (validated locally, never call the Java service per-request) ---
     auth_service_base_url: str = Field(default="http://auth-service:8080")
@@ -102,7 +103,7 @@ class Settings(BaseSettings):
     email_timeout_seconds: int = Field(default=8, ge=1, le=60)
     email_host_user: str = Field(default="")
     email_host_password: str = Field(default="")
-    email_from_name: str = Field(default="KaizenX Procurement")
+    email_from_name: str = Field(default="KaizenAssests Procurement")
     procurement_email: str = Field(default="")
 
 

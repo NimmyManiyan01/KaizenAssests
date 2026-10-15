@@ -85,11 +85,18 @@ export function getRequiredRolesForPath(pathname: string): string[] | null {
   if (
     pathname.startsWith("/supplier") ||
     pathname === "/supplier-dashboard" ||
-    pathname === "/submit-quotation"
+    pathname === "/submit-quotation" ||
+    pathname === "/damage-claims"
   )
     return ["SUPPLIER", "PROCUREMENT", "MANAGER", "ADMIN", "SUPERUSER"];
+  if (pathname.startsWith("/gate/finished-goods-pickup"))
+    return ["GATE_SECURITY", "GATE_OPERATOR", "ADMIN", "SUPERUSER"];
+  if (pathname.startsWith("/assembly/quality"))
+    return ["QUALITY", "QC", "ASSEMBLY", "ASSEMBLY_MANAGER", "ADMIN", "SUPERUSER"];
   if (pathname.startsWith("/assembly"))
     return ["ASSEMBLY", "ASSEMBLY_MANAGER", "ADMIN", "SUPERUSER"];
+  if (["/dispatch-picking-packing", "/dispatch-loading"].includes(pathname))
+    return ["ASSEMBLY", "ASSEMBLY_MANAGER", "DISPATCH", "DISPATCH_MANAGER", "ADMIN", "SUPERUSER"];
   // These outbound gate screens use a dispatch-prefixed URL, but are operated
   // from the gate-security sidebar. Keep them ahead of the broader dispatch
   // route match so gate users are not redirected back to their dashboard.
@@ -116,8 +123,7 @@ export function getRequiredRolesForPath(pathname: string): string[] | null {
     pathname === "/dock-master" ||
     pathname === "/inventory" ||
     pathname === "/putaway-tasks" ||
-    pathname === "/reports" ||
-    pathname === "/damage-claims"
+    pathname === "/reports"
   )
     return [
       "WAREHOUSE",
@@ -166,6 +172,20 @@ export function getDefaultRouteForUser(user = getUserInfo()): string {
   const roles = user?.roles || [];
   const username = (user?.username || "").toLowerCase();
 
+  // GRN users may also carry warehouse permissions, but their landing page
+  // must remain the GRN operations dashboard.
+  if (
+    roles.includes("GRN") ||
+    roles.includes("GRN_MANAGER") ||
+    roles.includes("OPERATIONS_MANAGER") ||
+    roles.includes("OPERATIONS") ||
+    roles.includes("RECEIVING") ||
+    username === "grn" ||
+    username.includes("grn")
+  ) {
+    return "/grn?tab=dashboard";
+  }
+
   if (
     roles.includes("WAREHOUSE") ||
     roles.includes("WAREHOUSE_MANAGER") ||
@@ -181,17 +201,6 @@ export function getDefaultRouteForUser(user = getUserInfo()): string {
   if (roles.includes("DISPATCH") || roles.includes("DISPATCH_MANAGER") || user?.username?.toLowerCase() === "dispatch") return "/dispatch";
   if (roles.includes("STORE_MANAGER") || roles.includes("STORE_KEEPER"))
     return "/my-store";
-  if (
-    roles.includes("GRN") ||
-    roles.includes("GRN_MANAGER") ||
-    roles.includes("OPERATIONS_MANAGER") ||
-    roles.includes("OPERATIONS") ||
-    roles.includes("RECEIVING") ||
-    user?.username?.toLowerCase() === "grn" ||
-    user?.username?.toLowerCase()?.includes("grn")
-  ) {
-    return "/grn";
-  }
   if (
     roles.includes("DISPATCH") ||
     roles.includes("DISPATCH_MANAGER") ||

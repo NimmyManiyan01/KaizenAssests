@@ -75,7 +75,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           <View style={tw`w-16 h-12 rounded-2xl bg-cyan-500/20 border border-cyan-500/50 justify-center items-center mb-3`}>
             <Text style={tw`text-sky-400 font-black text-xl tracking-wider`}>KGS</Text>
           </View>
-          <Text style={tw`text-white text-3xl font-black tracking-wide`}>KaizenX Mobile</Text>
+          <Text style={tw`text-white text-3xl font-black tracking-wide`}>KaizenAssests Mobile</Text>
           <Text style={tw`text-cyan-400 text-xs font-bold tracking-widest mt-0.5 uppercase`}>
             Security Gate Management OS
           </Text>
@@ -183,7 +183,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         </View>
 
         <Text style={tw`text-slate-600 text-[11px] text-center mt-7`}>
-          © 2026 Kaizentrix Global Solutions • KaizenX Mobile
+          © 2026 Kaizentrix Global Solutions • KaizenAssests Mobile
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>

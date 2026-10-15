@@ -27,14 +27,17 @@ class DispatchItemResponse(BaseModel):
 
 
 class ScanPackageRequest(BaseModel):
-    qr_code: str = Field(..., min_length=1, max_length=128)
+    # Assembly finished-goods QR labels can contain the full batch payload,
+    # which is longer than a package-number QR.
+    qr_code: str = Field(..., min_length=1, max_length=1024)
 
 
 class ConfirmGateExitRequest(BaseModel):
+    gate_pass_id: str = Field(..., min_length=1, max_length=64)
     vehicle_verified: bool
     driver_verified: bool
     loaded_goods_verified: bool
-    vehicle_photo_base64: str = Field(..., min_length=32)
+    vehicle_photo_base64: str | None = None
     remarks: str | None = None
 
 class DispatchOrderResponse(BaseModel):

@@ -138,9 +138,9 @@ export function GateEntryScannerScreen({
         const granted = await PermissionsAndroid.request(
           PermissionsAndroid.PERMISSIONS.CAMERA,
           {
-            title: 'KaizenX Camera Access Required',
+            title: 'KaizenAssests Camera Access Required',
             message:
-              'KaizenX Gate Scanner needs camera access to scan delivery passes, truck plates, and barcodes.',
+              'KaizenAssests Gate Scanner needs camera access to scan delivery passes, truck plates, and barcodes.',
             buttonNeutral: 'Ask Later',
             buttonNegative: 'Cancel',
             buttonPositive: 'OK',

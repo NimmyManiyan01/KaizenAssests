@@ -28,7 +28,7 @@ import { requireRole } from "@/lib/auth-utils";
 
 export const Route = createFileRoute("/gate-dashboard")({
   beforeLoad: () => requireRole("GATE_SECURITY"),
-  head: () => ({ meta: [{ title: "Gate Security Dashboard · KaizenX" }] }),
+  head: () => ({ meta: [{ title: "Gate Security Dashboard · KaizenAssests" }] }),
   component: GateDashboard,
 });
 
@@ -133,10 +133,11 @@ function GateDashboard() {
   });
 
   const metrics = dashboardData?.stats || dashboardData?.metrics || dashboardData || {};
+  const totalEntries = metrics.totalEntries ?? metrics.totalGateEntries ?? metrics.totalArrivals ?? entries.length;
   const todayEntries = metrics.todayEntries ?? metrics.todaysEntries ?? metrics.totalArrivals ?? entries.length;
   const vehiclesInside = metrics.vehiclesInside ?? Math.max(0, Number(todayEntries) - Number(metrics.vehiclesExited || 0));
   const awaitingDock = metrics.awaitingDock ?? entries.filter((e: any) => String(e.status).toUpperCase() === "AWAITING_DOCK").length;
-  const todayExits = metrics.todayExits ?? entries.filter((e: any) => String(e.status).toUpperCase() === "VEHICLE_EXITED").length;
+  const totalExits = metrics.totalExits ?? metrics.totalGateExits ?? entries.filter((e: any) => String(e.status).toUpperCase() === "VEHICLE_EXITED").length;
 
   const handlePrintPass = (pass: any) => {
     toast.success(`Print job sent for Gate Pass ${pass.gate_entry_no || pass.gate_entry_number || pass.gate_pass_number || pass.id}`, {
@@ -185,9 +186,9 @@ function GateDashboard() {
         {/* FR-01 Metric Cards */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
-            label="Today's Entries"
-            value={String(todayEntries)}
-            delta="Total vehicles registered today"
+            label="Total Entries"
+            value={String(totalEntries)}
+            delta="All gate entries registered"
             icon={Truck}
             tone="primary"
             to="/vehicle-queue"
@@ -209,9 +210,9 @@ function GateDashboard() {
             to="/vehicle-queue?tab=waiting"
           />
           <StatCard
-            label="Today's Exits"
-            value={String(todayExits)}
-            delta="Cleared & exited facility"
+            label="Total Exits"
+            value={String(totalExits)}
+            delta="All vehicles exited facility"
             icon={LogOut}
             tone="teal"
             to="/vehicle-exit"

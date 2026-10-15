@@ -1,7 +1,6 @@
 import { createFileRoute, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import QRCode from "qrcode";
 import {
   AlertTriangle,
   ArrowRight,
@@ -10,13 +9,11 @@ import {
   FileCheck2,
   Loader2,
   PlusCircle,
-  Printer,
   QrCode,
   RefreshCw,
   ShieldCheck,
   Truck,
   Trash2,
-  Warehouse,
   Camera,
 } from "lucide-react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
@@ -26,7 +23,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { api } from "@/lib/api-client";
 
 export const Route = createFileRoute("/vehicle-queue")({
-  head: () => ({ meta: [{ title: "Inbound Arrivals · KaizenX" }] }),
+  head: () => ({ meta: [{ title: "Inbound Arrivals · KaizenAssests" }] }),
   component: InboundArrivals,
 });
 
@@ -40,6 +37,9 @@ type Arrival = {
   vehicle_number: string;
   driver_name: string;
   driver_contact?: string | null;
+  truck_photo_base64?: string | null;
+  vehicle_photo_base64?: string | null;
+  document_image_base64?: string | null;
   arrival_time: string;
   expected_arrival_at?: string | null;
   status: string;
@@ -52,6 +52,7 @@ type Arrival = {
   allocation_request_id?: string | null;
   movement_started_by?: string | null;
   movement_started_at?: string | null;
+  facility_entry_at?: string | null;
   dock_checked_in_by?: string | null;
   dock_arrival_at?: string | null;
   allocation_arrived_at?: string | null;
@@ -92,7 +93,6 @@ function InboundArrivals() {
   );
 
   // FR-02 Section A: Supplier and Shipment Details
-  const [selectedWarehouse, setSelectedWarehouse] = useState("");
   const [selectedSupplier, setSelectedSupplier] = useState("");
   const [selectedAsn, setSelectedAsn] = useState("");
   const [asnRecords, setAsnRecords] = useState<any[]>([]);
@@ -120,6 +120,7 @@ function InboundArrivals() {
   const [uploadedInvoiceFile, setUploadedInvoiceFile] = useState<string | null>(
     "invoice_copy_inv9901.pdf",
   );
+  const [asnDocumentFile, setAsnDocumentFile] = useState<File | null>(null);
   const [uploadedVehiclePhoto, setUploadedVehiclePhoto] = useState<string | null>(
     "truck_front_plate_ka01ab4582.jpg",
   );
@@ -128,9 +129,12 @@ function InboundArrivals() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
+  const [asnCameraOpen, setAsnCameraOpen] = useState(false);
+  const [asnDocumentPreview, setAsnDocumentPreview] = useState<string | null>(null);
+  const asnCameraVideoRef = useRef<HTMLVideoElement>(null);
+  const asnCameraStreamRef = useRef<MediaStream | null>(null);
   const [submittingWebEntry, setSubmittingWebEntry] = useState(false);
   const [generatedGatePass, setGeneratedGatePass] = useState<string | null>(null);
-  const [generatedGatePassQr, setGeneratedGatePassQr] = useState<string | null>(null);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -163,7 +167,6 @@ function InboundArrivals() {
   const applyAsnDetails = (asn: any) => {
     if (!asn) return;
     setSelectedSupplier(asn.supplier_name || asn.supplier_company_name || "");
-    setSelectedWarehouse(asn.destination_warehouse || asn.warehouse_name || "");
     setAutoPoNumber(asn.po_number || "");
     setAutoExpectedDate(asn.expected_arrival_at?.split("T")[0] || asn.delivery_date || "");
     setVehicleNumberInput(asn.vehicle_number || "");
@@ -210,6 +213,42 @@ function InboundArrivals() {
         setUploadedVehiclePhoto(`vehicle-photo-${Date.now()}.jpg`);
       }
       closeVehicleCamera();
+    }, "image/jpeg");
+  };
+
+  const openAsnCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      asnCameraStreamRef.current = stream;
+      setAsnCameraOpen(true);
+      requestAnimationFrame(() => {
+        if (asnCameraVideoRef.current) asnCameraVideoRef.current.srcObject = stream;
+      });
+    } catch {
+      toast.error("Unable to open camera", { description: "Allow camera permission and try again." });
+    }
+  };
+
+  const closeAsnCamera = () => {
+    asnCameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    asnCameraStreamRef.current = null;
+    setAsnCameraOpen(false);
+  };
+
+  const captureAsnDocument = () => {
+    const video = asnCameraVideoRef.current;
+    if (!video) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d")?.drawImage(video, 0, 0);
+    canvas.toBlob((blob) => {
+      if (blob) {
+        if (asnDocumentPreview) URL.revokeObjectURL(asnDocumentPreview);
+        setAsnDocumentFile(new File([blob], `asn-document-${Date.now()}.jpg`, { type: "image/jpeg" }));
+        setAsnDocumentPreview(URL.createObjectURL(blob));
+      }
+      closeAsnCamera();
     }, "image/jpeg");
   };
 
@@ -331,6 +370,8 @@ function InboundArrivals() {
 
   async function approveGateExit(arrival: Arrival) {
     const vehName = arrival.vehicle_number || "this vehicle";
+    const gatePassId = window.prompt(`Enter gate pass ID for ${vehName}:`, arrival.gate_entry_number || "");
+    if (!gatePassId?.trim()) return;
     if (
       !confirm(
         `Confirm gate exit approval for ${vehName}? Confirm that vehicle has completed unloading/receiving and is cleared to leave.`,
@@ -339,7 +380,7 @@ function InboundArrivals() {
       return;
     setAssigning(arrival.id);
     try {
-      const updated = await api.markInboundVehicleExited(arrival.id);
+      const updated = await api.markInboundVehicleExited(arrival.id, gatePassId.trim());
       toast.success(`Gate exit approved for ${vehName}`, {
         description: `Status updated to VEHICLE_EXITED by ${updated.exited_by || "Security"}.`,
       });
@@ -356,17 +397,6 @@ function InboundArrivals() {
       setAssigning(null);
     }
   }
-
-  const printGeneratedGatePass = () => {
-    if (!generatedGatePass || !generatedGatePassQr) return;
-    const printWindow = window.open("", "_blank", "width=500,height=700");
-    if (!printWindow) {
-      toast.error("Allow pop-ups to print the gate pass");
-      return;
-    }
-    printWindow.document.write(`<!doctype html><html><head><title>Gate Pass ${generatedGatePass}</title><style>body{font-family:Arial,sans-serif;text-align:center;padding:32px;color:#172033}img{width:240px;height:240px}.pass{border:1px solid #d9e1ee;border-radius:16px;padding:24px}h1{font-size:22px}p{font-family:monospace;font-size:18px;font-weight:700}</style></head><body><div class="pass"><h1>KAIZENTRIX GATE PASS</h1><img src="${generatedGatePassQr}" alt="Gate pass QR code"/><p>${generatedGatePass}</p><p>ASN: ${selectedAsn || "—"}</p></div><script>window.onload=()=>{window.print();window.close()}</script></body></html>`);
-    printWindow.document.close();
-  };
 
   return (
     <AppShell
@@ -454,6 +484,8 @@ function InboundArrivals() {
               formData.append("asn_reference", selectedAsn);
               formData.append("supplier_name", selectedSupplier);
               formData.append("driver_name", driverNameInput);
+              if (driverMobileInput.trim()) formData.append("driver_contact", driverMobileInput.trim());
+              if (asnDocumentFile) formData.append("po_document", asnDocumentFile, asnDocumentFile.name);
               const asnQuantity = asnMaterials.reduce(
                 (total, line) => total + Number(line.shipped_quantity ?? line.quantity ?? 0),
                 0,
@@ -485,9 +517,6 @@ function InboundArrivals() {
                     throw new Error("Gate entry was created but no persisted gate-pass number was returned.");
                   }
                   setGeneratedGatePass(gatePassId);
-                  void QRCode.toDataURL(gatePassId, { width: 240, margin: 1 })
-                    .then(setGeneratedGatePassQr)
-                    .catch(() => setGeneratedGatePassQr(null));
                   toast.success("Web Gate Entry Registered Successfully ✓", {
                     description: `Gate Pass: ${gatePassId}\nSupplier: ${selectedSupplier}\nASN: ${selectedAsn}`,
                   });
@@ -505,20 +534,6 @@ function InboundArrivals() {
             {/* SECTION A: SUPPLIER AND SHIPMENT DETAILS */}
             <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
               <div className="grid gap-3 sm:grid-cols-2">
-                {/* Warehouse Dropdown */}
-                <div>
-                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
-                    Warehouse *
-                  </label>
-                  <input
-                    type="text"
-                    value={selectedWarehouse}
-                    readOnly
-                    placeholder="Auto-filled from ASN"
-                    className="h-9 w-full rounded-xl border bg-muted/50 px-3 font-semibold text-xs text-primary"
-                  />
-                </div>
-
                 {/* Supplier Searchable Dropdown */}
                 <div>
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
@@ -578,6 +593,28 @@ function InboundArrivals() {
                     value={autoExpectedDate}
                     className="h-9 w-full rounded-xl border bg-muted/50 px-3 font-bold text-xs text-emerald-600 dark:text-emerald-400"
                   />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    ASN Document Photograph / Camera *
+                  </label>
+                  <Button type="button" variant="outline" className="h-9 w-full rounded-xl text-xs" onClick={() => void openAsnCamera()}>
+                    <Camera className="mr-2 size-4" /> Open Camera
+                  </Button>
+                  {asnCameraOpen && (
+                    <div className="mt-2 space-y-2 rounded-xl border bg-background p-2">
+                      <video ref={asnCameraVideoRef} autoPlay playsInline className="w-full rounded-lg" />
+                      <div className="flex gap-2">
+                        <Button type="button" className="h-8 flex-1 text-xs" onClick={captureAsnDocument}>Capture Photograph</Button>
+                        <Button type="button" variant="outline" className="h-8 text-xs" onClick={closeAsnCamera}>Close</Button>
+                      </div>
+                    </div>
+                  )}
+                  {asnDocumentFile && <p className="mt-1 text-[10px] font-bold text-emerald-600">✓ Photograph captured</p>}
+                  {asnDocumentPreview && (
+                    <img src={asnDocumentPreview} alt="Captured ASN document" className="mt-2 h-32 w-full rounded-lg border object-cover" />
+                  )}
                 </div>
 
                 {/* Delivery Type Dropdown */}
@@ -996,7 +1033,6 @@ function InboundArrivals() {
         onOpenChange={(open) => {
           if (!open) {
             setGeneratedGatePass(null);
-            setGeneratedGatePassQr(null);
           }
         }}
       >
@@ -1009,20 +1045,9 @@ function InboundArrivals() {
           <div className="mt-4 rounded-xl border bg-muted/40 p-4 font-mono text-2xl font-black tracking-wider text-primary">
             {generatedGatePass}
           </div>
-          <div className="mt-4 rounded-2xl border-2 border-dashed border-primary/40 bg-muted/20 p-4">
-            {generatedGatePassQr ? (
-              <img src={generatedGatePassQr} alt={`Scannable QR code for ${generatedGatePass}`} className="mx-auto size-48 rounded-lg bg-white p-2" />
-            ) : (
-              <p className="py-20 text-xs text-muted-foreground">Generating QR code...</p>
-            )}
-          </div>
           <div className="mt-5 flex gap-2">
-            <Button className="flex-1 rounded-xl" disabled={!generatedGatePassQr} onClick={printGeneratedGatePass}>
-              <Printer className="mr-2 size-4" /> Print Gate Pass
-            </Button>
-            <Button variant="outline" className="flex-1 rounded-xl" onClick={() => {
+            <Button variant="outline" className="w-full rounded-xl" onClick={() => {
               setGeneratedGatePass(null);
-              setGeneratedGatePassQr(null);
             }}>
               Done
             </Button>
@@ -1192,7 +1217,32 @@ function ArrivalDetails({
           <Detail label="Driver" value={arrival.driver_name} />
           <Detail label="Driver contact" value={arrival.driver_contact} />
           <Detail label="Arrival time" value={new Date(arrival.arrival_time).toLocaleString()} />
+          <Detail label="Facility entry" value={arrival.facility_entry_at ? new Date(arrival.facility_entry_at).toLocaleString() : "Not entered"} />
         </dl>
+        <div className="mt-5 border-t pt-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Vehicle photo</p>
+          {(arrival.truck_photo_base64 || arrival.vehicle_photo_base64) ? (
+            <img
+              src={`data:image/jpeg;base64,${arrival.truck_photo_base64 || arrival.vehicle_photo_base64}`}
+              alt={`Vehicle ${arrival.vehicle_number || "photo"}`}
+              className="max-h-72 w-full rounded-xl border object-contain bg-muted/20 p-2 sm:w-96"
+            />
+          ) : (
+            <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No vehicle photo uploaded.</p>
+          )}
+        </div>
+        <div className="mt-5 border-t pt-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">ASN document photograph</p>
+          {arrival.document_image_base64 ? (
+            <img
+              src={arrival.document_image_base64.startsWith("data:") ? arrival.document_image_base64 : `data:image/jpeg;base64,${arrival.document_image_base64}`}
+              alt={`ASN document for ${arrival.asn_number || "gate entry"}`}
+              className="max-h-72 w-full rounded-xl border object-contain bg-muted/20 p-2 sm:w-96"
+            />
+          ) : (
+            <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No ASN document photograph captured.</p>
+          )}
+        </div>
       </div>
       <div className="grid gap-5 md:grid-cols-2">
         <div>
@@ -1203,7 +1253,7 @@ function ArrivalDetails({
             <dt className="text-muted-foreground">Gate entry</dt>
             <dd className="font-mono">{arrival.gate_entry_number}</dd>
             <dt className="text-muted-foreground">Entry time</dt>
-            <dd>{new Date(arrival.arrival_time).toLocaleString()}</dd>
+            <dd>{arrival.facility_entry_at ? new Date(arrival.facility_entry_at).toLocaleString() : "Not entered"}</dd>
             <dt className="hidden text-muted-foreground">Transporter</dt>
             <dd className="hidden">{arrival.shipment.transporter || "—"}</dd>
             <dt className="hidden text-muted-foreground">Packages</dt>
@@ -1227,7 +1277,12 @@ function ArrivalDetails({
                 : "Not checked in"}
             </dd>
           </dl>
-          {arrival.status === "DOCK_ASSIGNED" && arrival.allocation_request_id && (
+          {arrival.status === "DOCK_ASSIGNED" && (
+            <Button className="mt-4 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700" onClick={onMove} disabled={busy}>
+              <ShieldCheck className="size-4" /> Allow Entry
+            </Button>
+          )}
+          {arrival.assigned_dock_id && (arrival.status === "INSIDE_FACILITY" || arrival.status === "MOVING_TO_DOCK") && (
             <Button className="mt-4 rounded-lg" onClick={onDockCheckIn} disabled={busy}>
               <ShieldCheck className="size-4" /> Confirm Dock Check-In
             </Button>

@@ -36,54 +36,6 @@ const STATUS_OPTIONS = [
   "Delayed"
 ];
 
-// Sales orders are loaded from backend records only. No demo orders are used.
-const SAMPLE_SALES_ORDERS: any[] = [];
-/*
-const LEGACY_SAMPLE_SALES_ORDERS = [
-  {
-    order_number: "SO-2026-00521",
-    customer_name: "ABC Industries",
-    customer_address: "Industrial Suburb, Rajajinagar, Bangalore, KA",
-    destination: "Mysore",
-    warehouse_id: "Bangalore FG Warehouse",
-    dispatch_date: "2026-09-22T09:00",
-    expected_delivery_date: "2026-09-23T18:00",
-    priority: "High",
-    contact_person: "Ramesh Rao",
-    contact_phone: "+91 9812345678",
-    delivery_instructions: "Handle fragile automotive parts with care.",
-    transport_mode: "Vehicle",
-    transport_type: "Full Truckload",
-    transporter: "VRL Logistics",
-    notes: "Priority dispatch for Mysore assembly line.",
-    items: [
-      { material_code: "FG-001", material_name: "Motor 5HP", uom: "PCS", batch: "BATCH-A1", bin: "A-01-05", quantity_ordered: 100, quantity_available: 250, dispatch_qty: 100 },
-      { material_code: "FG-002", material_name: "Pump 2HP", uom: "PCS", batch: "BATCH-B2", bin: "A-02-03", quantity_ordered: 50, quantity_available: 80, dispatch_qty: 50 }
-    ]
-  },
-  {
-    order_number: "SO-2026-00522",
-    customer_name: "XYZ Enterprises Ltd",
-    customer_address: "Whitefield Tech Park, Bangalore, KA",
-    destination: "Chennai",
-    warehouse_id: "Bangalore FG Warehouse",
-    dispatch_date: "2026-09-22T10:30",
-    expected_delivery_date: "2026-09-24T12:00",
-    priority: "Urgent",
-    contact_person: "Suresh Kumar",
-    contact_phone: "+91 9823456789",
-    delivery_instructions: "Express export delivery SLA.",
-    transport_mode: "Vehicle",
-    transport_type: "Container",
-    transporter: "SafeExpress",
-    notes: "Express export shipment SLA.",
-    items: [
-      { material_code: "FG-003", material_name: "Smart Sensor Array Module", uom: "PCS", batch: "BATCH-C3", bin: "B-01-02", quantity_ordered: 500, quantity_available: 2000, dispatch_qty: 500 }
-    ]
-  }
-];
-*/
-
 function dateOnly(value: string | null | undefined): string {
   return value ? String(value).split("T")[0] : "";
 }

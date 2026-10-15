@@ -76,6 +76,7 @@ class CreateGateEntryRequest(ApiModel):
     po_date: Optional[str] = Field(default=None, description="Extracted or input PO date")
     delivery_date: Optional[str] = Field(default=None, description="Extracted or input delivery date")
     driver_name: Optional[str] = Field(default="Driver", description="Driver Name")
+    driver_contact: Optional[str] = Field(default=None, description="Driver contact number")
     document_image_base64: Optional[str] = Field(default=None, description="Base64 encoded PO document image")
     truck_photo_base64: Optional[str] = Field(default=None, description="Base64 encoded captured truck photo")
 
@@ -171,6 +172,7 @@ class MaterialConditionItem(ApiModel):
     good_quantity: float = Field(..., ge=0)
     damaged_quantity: float = Field(default=0, ge=0)
     rejected_quantity: float = Field(default=0, ge=0)
+    held_quantity: float = Field(default=0, ge=0)
     inspection_required: bool = False
     physical_condition_ok: bool
     packaging_ok: bool

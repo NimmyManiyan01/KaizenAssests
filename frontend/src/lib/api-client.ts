@@ -3,7 +3,6 @@
  * Links frontend components to the backend python business-service (port 8000)
  * and Java auth-service (port 8080).
  */
-import QRCode from "qrcode";
 
 export const BUSINESS_API_URL =
   (typeof import.meta !== "undefined" &&
@@ -321,6 +320,12 @@ export const api = {
       body: formData,
     });
   },
+  async createFinishedGoodsPickupGateEntry(payload: { request_number: string; vehicle_number: string; driver_name: string; driver_contact: string }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/gate-entries/finished-goods-pickup`, { method: "POST", body: JSON.stringify(payload) });
+  },
+  async completeFinishedGoodsPickupGateExit(gatePassNumber: string, payload: { vehicle_number: string; driver_name: string; documents_verified: boolean }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/gate-entries/finished-goods-pickup/${encodeURIComponent(gatePassNumber)}/exit`, { method: "POST", body: JSON.stringify(payload) });
+  },
 
   async getDocks(
     statusOrParams?: string | { dock_type?: string; status?: string; direction?: string },
@@ -429,6 +434,12 @@ export const api = {
       {
         method: "POST",
       },
+    );
+  },
+  async completeDockReceiving(id: string): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/warehouse/dock-allocations/${encodeURIComponent(id)}/complete`,
+      { method: "POST" },
     );
   },
   async releaseDockAssignment(allocationRequestId: string): Promise<any> {
@@ -732,9 +743,11 @@ export const api = {
     });
   },
 
-  async markInboundVehicleExited(gateEntryId: string): Promise<any> {
+  async markInboundVehicleExited(gateEntryId: string, gatePassId: string): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/gate-entries/${gateEntryId}/vehicle-exited`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gate_pass_id: gatePassId }),
     });
   },
 
@@ -801,6 +814,7 @@ export const api = {
   async confirmOutboundGateExit(
     dispatchId: string,
     payload: {
+      gate_pass_id: string;
       vehicle_verified: boolean;
       driver_verified: boolean;
       loaded_goods_verified: boolean;
@@ -905,7 +919,7 @@ export const api = {
     return request<any>(`${BUSINESS_API_URL}/api/gate-entries/${id}`);
   },
 
-  async downloadGatePass(id: string, gateEntryNumber?: string): Promise<void> {
+  async downloadGatePass(id: string, _gateEntryNumber?: string): Promise<void> {
     // Open synchronously from the click handler so browser pop-up protection
     // does not prevent the printable pass from appearing after the fetch.
     const passWindow = window.open("", "gate-pass", "width=520,height=760");
@@ -932,42 +946,6 @@ export const api = {
       }
 
       let passHtml = await response.text();
-
-      // Generate QR Code to embed in the pass for digital verification at internal checkpoints
-      try {
-        const qrData = gateEntryNumber || id;
-        const qrDataUrl = await QRCode.toDataURL(qrData, {
-          width: 160,
-          margin: 1,
-          color: {
-            dark: "#000000",
-            light: "#ffffff",
-          },
-        });
-
-        const qrHtml = `
-          <div style="display: flex; flex-direction: column; align-items: center;" class="qr-container">
-            <img src="${qrDataUrl}" style="width: 140px; height: 140px; border: 1px solid #eee; padding: 8px; border-radius: 12px; background: #fff;" alt="Pass QR Code" />
-          </div>
-        `;
-
-        // Replace the placeholder entirely if it exists
-        if (passHtml.includes('<div class="pass-number">')) {
-          // Find the end of the div and replace its contents or the whole div
-          // For simplicity with string replacement, we'll just target the placeholder text if found
-          const placeholderText = "(Auto-generated)";
-          if (passHtml.includes(placeholderText)) {
-            passHtml = passHtml.replace(/<div class="pass-number">[\s\S]*?<\/div>/, qrHtml);
-          } else {
-            passHtml = passHtml.replace(
-              '<div class="pass-number">',
-              `${qrHtml}<div class="pass-number">`,
-            );
-          }
-        }
-      } catch (qrErr) {
-        console.error("QR generation failed", qrErr);
-      }
 
       passWindow.document.open();
       passWindow.document.write(passHtml);
@@ -1465,6 +1443,22 @@ export const api = {
     });
   },
 
+  async downloadAsnPdf(id: string): Promise<void> {
+    const response = await fetch(`${BUSINESS_API_URL}/api/gate/asns/${encodeURIComponent(id)}/pdf`, {
+      headers: getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {},
+    });
+    if (!response.ok) throw new Error("Failed to download ASN PDF");
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${id}.pdf`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  },
+
   async getArrivalNotifications(): Promise<any[]> {
     return this.getNotifications("GATE_SECURITY");
   },
@@ -1537,20 +1531,11 @@ export const api = {
   },
 
   async createMaterialComponent(name: string, uom: string = "PCS"): Promise<any> {
-    try {
-      return await request<any>(`${BUSINESS_API_URL}/api/gate/materials`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, uom }),
-      });
-    } catch {
-      return {
-        code: `MAT-${name.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-4)}`,
-        name,
-        category: "General Components",
-        uom,
-      };
-    }
+    return request<any>(`${BUSINESS_API_URL}/api/gate/materials`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, uom }),
+    });
   },
 
   async getNextMaterialRequestNumber(): Promise<{
@@ -1745,11 +1730,12 @@ export const api = {
   },
 
   subscribeNotifications(role: string, onChange: () => void): () => void {
-    // The business service does not expose the old SSE endpoint. Poll the
-    // canonical notifications resource instead of repeatedly requesting a 404.
-    void role;
-    const timer = window.setInterval(onChange, 30000);
-    return () => window.clearInterval(timer);
+    const wsBase = BUSINESS_API_URL.replace(/^http/, "ws");
+    const socket = new WebSocket(`${wsBase}/api/v1/notifications/ws?role=${encodeURIComponent(role)}`);
+    socket.onmessage = () => onChange();
+    socket.onerror = () => socket.close();
+    const fallback = window.setInterval(onChange, 30000);
+    return () => { window.clearInterval(fallback); socket.close(); };
   },
 
   async markNotificationRead(_id: string): Promise<any> {
@@ -2431,6 +2417,7 @@ export const api = {
     storeId?: string,
     zoneId?: string,
     binId?: string,
+    quantity?: number,
   ): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/storage/putaway-tasks/${encodeURIComponent(taskId)}/location`,
@@ -2442,6 +2429,7 @@ export const api = {
           store_id: storeId || undefined,
           zone_id: zoneId || undefined,
           bin_id: binId || undefined,
+          quantity: quantity || undefined,
         }),
       },
     );
@@ -2509,6 +2497,11 @@ export const api = {
     return request<any>(
       `${BUSINESS_API_URL}/api/storage/putaway-tasks/handling-units/${encodeURIComponent(scanValue)}`,
     );
+  },
+  async verifyHandlingUnitLabel(scanValue: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/storage/putaway-tasks/handling-units/${encodeURIComponent(scanValue)}/verify-label`, {
+      method: "POST",
+    });
   },
   async getStorageLocations(warehouseId?: string): Promise<any[]> {
     const q = warehouseId ? `?warehouse_id=${encodeURIComponent(warehouseId)}` : "";
@@ -3281,11 +3274,16 @@ export const api = {
       },
     );
   },
-  async approveAssemblyMaterialRequest(requestId: string): Promise<any> {
+  async approveAssemblyMaterialRequest(requestId: string, payload?: { approved_items?: Array<{ material_code: string; approved_quantity: number }>; remarks?: string }): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/v1/assembly/material-requests/${encodeURIComponent(requestId)}/approve`,
-      { method: "POST", body: "{}" },
+      { method: "POST", body: JSON.stringify(payload || {}) },
     );
+  },
+  async rejectAssemblyMaterialRequest(requestId: string, reason: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/material-requests/${encodeURIComponent(requestId)}/reject`, {
+      method: "POST", body: JSON.stringify({ reason }),
+    });
   },
   async warehouseIssueMaterials(requestId: string, payload?: { remarks?: string }): Promise<any> {
     return request<any>(
@@ -3299,7 +3297,7 @@ export const api = {
   async confirmAssemblyMaterialReceipt(
     requestId: string,
     payload?: {
-      received_items?: Array<{ material_code: string; received_quantity: number }>;
+      received_items?: Array<{ material_code: string; received_quantity: number; material_scan?: string }>;
       remarks?: string;
     },
   ): Promise<any> {
@@ -3337,7 +3335,7 @@ export const api = {
   },
   async completeAssemblyProduction(
     orderId: string,
-    payload: { produced_quantity: number; notes?: string },
+    payload: { produced_quantity: number; notes?: string; wastage_quantity?: number; wastage_material_code?: string; wastage_reason?: string },
   ): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}/complete-production`,
@@ -3367,6 +3365,7 @@ export const api = {
     passed_quantity: number;
     failed_quantity?: number;
     rework_quantity?: number;
+    held_quantity?: number;
     notes?: string;
   }): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/quality/inspect`, {
@@ -3387,12 +3386,53 @@ export const api = {
       },
     );
   },
+  async getAssemblyFinishedGoodsInventorySummary(): Promise<{
+    total_produced: number;
+    qc_approved: number;
+    available: number;
+    reserved: number;
+    packed: number;
+    dispatched: number;
+    rejected_held: number;
+    fifo_oldest_completion?: string | null;
+    assembly_location: string;
+  }> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/finished-goods/inventory-summary`, { cache: "no-store" });
+  },
+  async createSupplierFinishedGoodsDispatchRequest(payload: {
+    product_code: string; product_name: string; quantity: number; uom?: string;
+    vehicle_number: string; driver_name: string; driver_contact: string;
+    expected_pickup_date: string; remarks?: string;
+  }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/supplier/finished-goods-dispatch-requests`, { method: "POST", body: JSON.stringify(payload) });
+  },
+  async getSupplierFinishedGoodsDispatchRequests(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/supplier/finished-goods-dispatch-requests`, { cache: "no-store" });
+  },
+  async allocateSupplierFinishedGoodsFifo(requestId: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/supplier/finished-goods-dispatch-requests/${encodeURIComponent(requestId)}/allocate-fifo`, { method: "POST", body: JSON.stringify({}) });
+  },
+  async scanAllocatedFinishedGoods(dispatchId: string, qrCode: string, quantity: number): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/dispatch/${encodeURIComponent(dispatchId)}/scan-finished-goods`, { method: "POST", body: JSON.stringify({ qr_code: qrCode, quantity }) });
+  },
   async getAssemblyFinishedGoodsDetail(fgId: string): Promise<AssemblyFinishedGoodDetail> {
     return request<AssemblyFinishedGoodDetail>(
       `${BUSINESS_API_URL}/api/v1/assembly/finished-goods/${encodeURIComponent(fgId)}`,
       {
         cache: "no-store",
       },
+    );
+  },
+  async verifyAssemblyFinishedGoodsQr(fgId: string, qrCode: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/finished-goods/${encodeURIComponent(fgId)}/verify-qr`, {
+      method: "POST",
+      body: JSON.stringify({ qr_code: qrCode }),
+    });
+  },
+  async allocateAssemblyFinishedGoodsFifo(dispatchId: string): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/dispatch/${encodeURIComponent(dispatchId)}/allocate-fifo`,
+      { method: "POST" },
     );
   },
 
@@ -3565,6 +3605,7 @@ export interface AssemblyQualityInspectionItem {
   passed_quantity: number;
   failed_quantity: number;
   rework_quantity: number;
+  held_quantity: number;
   qc_status: string;
   order_status: string;
   inspected_by?: string | null;
@@ -3587,6 +3628,9 @@ export interface AssemblyFinishedGoodItem {
   location_code: string;
   qr_code?: string | null;
   serial_number?: string | null;
+  batch_number?: string | null;
+  qr_verified_at?: string | null;
+  qr_verified_by?: string | null;
   posted_at: string | null;
 }
 
@@ -3602,6 +3646,7 @@ export interface AssemblyFinishedGoodDetail extends AssemblyFinishedGoodItem {
     location: string;
     inspected_by: string;
     date: string | null;
+    qc_status?: string;
   };
 }
 

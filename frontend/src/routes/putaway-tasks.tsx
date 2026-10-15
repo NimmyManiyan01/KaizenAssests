@@ -6,7 +6,7 @@ import { Loader2 } from "lucide-react";
 export const Route = createFileRoute("/putaway-tasks")({
   head: () => ({
     meta: [
-      { title: "Putaway Tasks · KaizenX" },
+      { title: "Putaway Tasks · KaizenAssests" },
       { name: "description", content: "Putaway tasks queue." },
     ],
   }),

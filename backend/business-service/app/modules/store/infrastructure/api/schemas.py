@@ -64,7 +64,7 @@ class BinCreate(BaseModel):
     rack: Optional[str] = Field(None, max_length=64, description="Rack identifier e.g. R01")
     shelf: Optional[str] = Field(None, max_length=64, description="Shelf/Level identifier e.g. S01")
     position: Optional[str] = Field(None, max_length=64, description="Position within the level")
-    storage_type: str = Field(default="GENERAL", max_length=64)
+    storage_type: str = Field(default="RACK", max_length=64, description="RACK, FLOOR, or GENERAL")
     capacity: Decimal = Field(default=Decimal("1000.0"), ge=0, description="Max storage capacity")
     maximum_weight: Optional[Decimal] = Field(None, ge=0)
     maximum_volume: Optional[Decimal] = Field(None, ge=0)
@@ -111,6 +111,7 @@ class BinResponse(BaseModel):
     store_id: str
     zone_id: str
     bin_code: str
+    location_code: Optional[str] = None
     bin_name: str
     rack: Optional[str] = None
     shelf: Optional[str] = None
@@ -135,6 +136,7 @@ class BinResponse(BaseModel):
 class BinQRResponse(BaseModel):
     bin_id: str
     bin_code: str
+    location_code: Optional[str] = None
     bin_name: str
     zone_id: str
     zone_code: str

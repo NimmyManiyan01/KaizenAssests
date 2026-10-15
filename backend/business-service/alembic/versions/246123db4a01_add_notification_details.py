@@ -27,6 +27,12 @@ def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
 
+    # Older deployed databases may contain this legacy table, but the
+    # migration history creates notification_log instead. A fresh database
+    # therefore has no notification table to alter.
+    if not inspector.has_table("notification"):
+        return
+
     notification_cols = {
         column["name"]
         for column in inspector.get_columns("notification")
@@ -41,6 +47,9 @@ def upgrade() -> None:
 def downgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
+
+    if not inspector.has_table("notification"):
+        return
 
     notification_cols = {
         column["name"]

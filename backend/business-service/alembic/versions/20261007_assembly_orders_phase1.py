@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 
 revision: str = "20261007_assembly_orders_phase1"
-down_revision: Union[str, Sequence[str], None] = "20261006_asn_logistics"
+down_revision: Union[str, Sequence[str], None] = "20261006_assembly_schema"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

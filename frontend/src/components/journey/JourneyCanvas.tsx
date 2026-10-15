@@ -87,7 +87,6 @@ export function JourneyCanvas({
   const supplierProgress = clamp(journeyProgress / 0.12, 0, 1);
   const scrollProgress = clamp((journeyProgress - 0.12) / 0.88, 0, 1);
   const [manualTruckOffset, setManualTruckOffset] = useState({ x: 0, z: 0 });
-
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
@@ -115,7 +114,9 @@ export function JourneyCanvas({
   // ─── STAGE PROGRESS CALCULATIONS ───
 
   // Inbound truck: forward approach, apron turn, rear docking, then receiving.
-  let truck1Pos: [number, number, number] = [0.8, 0, 20.5];
+  // Keep the landing-page vehicle visibly separated from the warehouse while
+  // remaining close enough to read as part of the same entrance scene.
+  let truck1Pos: [number, number, number] = [0.8, 0, 16.5];
   let truck1Rot: [number, number, number] = [0, Math.PI, 0];
   let barrier1Open = 0;
   let dockDoorOpen = 0;
@@ -474,7 +475,13 @@ export function JourneyCanvas({
 
           {/* ─── SCENE 2 & 3: DYNAMIC RECEIVED GOODS PALLET ─── */}
           {/* Truck cargo unloads onto the dock, is received by the worker, then collected by forklift. */}
-          <PalletAndCargo position={palletPos} rotation={palletRot} hasCargo={true} boxCount={8} />
+          <PalletAndCargo
+            position={palletPos}
+            rotation={palletRot}
+            hasCargo={true}
+            boxCount={8}
+            showQr={scrollProgress >= 0.22}
+          />
 
           {/* ─── SCENE 3 & 4: STORAGE AISLES & INVENTORY MATRIX ─── */}
           {/* Left Rack Row 1 (Facing Inward into Aisle) */}
@@ -547,22 +554,6 @@ export function JourneyCanvas({
             forkLiftProgress={forkLiftProgress}
           />
 
-          {scrollProgress >= 0.225 && scrollProgress < 0.365 && (
-            <Html
-              position={[palletPos[0], palletPos[1] + 1.8, palletPos[2]]}
-              center
-              distanceFactor={12}
-              zIndexRange={[40, 0]}
-            >
-              <div className="pointer-events-none whitespace-nowrap rounded border border-cyan-400/60 bg-slate-950/90 px-3 py-2 text-center font-mono text-[10px] text-cyan-300">
-                <div>
-                  {palletOnForks ? "TRANSPORTING TO INVENTORY" : "PICKING UP RECEIVED GOODS"}
-                </div>
-                <div className="mt-1 text-slate-300">PLT-77291 / AISLE-04 / RACK-B-08 / BIN B1</div>
-              </div>
-            </Html>
-          )}
-
           {/* Holographic Laser Scanner & Putaway Verification HUD at Rack Bay 1 */}
           {scrollProgress >= 0.365 && (
             <group position={[7.4, 2.5, -68.0]}>
@@ -587,8 +578,8 @@ export function JourneyCanvas({
                 </mesh>
               )}
               {/* In-Scene 3D Floating Putaway Verification Tag */}
-              <Html center distanceFactor={14} zIndexRange={[45, 0]}>
-                <div className="bg-slate-950/90 border border-emerald-500/70 px-2.5 py-1.5 rounded shadow-xl shadow-emerald-500/20 backdrop-blur pointer-events-none whitespace-nowrap text-center">
+              <Html fullscreen zIndexRange={[45, 0]} style={{ pointerEvents: "none" }}>
+                <div className="absolute bottom-6 left-4 max-w-[calc(100vw-2rem)] bg-slate-950/90 border border-emerald-500/70 px-4 py-3 rounded shadow-xl shadow-emerald-500/20 backdrop-blur pointer-events-none text-left sm:bottom-8 sm:left-8">
                   <div className="flex items-center justify-center gap-1.5 font-mono text-[10px] text-emerald-400 font-bold tracking-wider">
                     <span
                       className={`w-2 h-2 rounded-full ${scrollProgress >= 0.39 ? "bg-emerald-400" : "bg-cyan-400 animate-pulse"}`}

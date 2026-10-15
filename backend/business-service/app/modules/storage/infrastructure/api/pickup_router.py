@@ -170,7 +170,8 @@ async def list_pickup_tasks(
             detail="Access denied. Only Warehouse personnel and Store Keepers can access Pickup Tasks.",
         )
 
-    stmt = select(PickupTaskModel).order_by(PickupTaskModel.created_at.desc())
+    # Present oldest approved tasks first so operators naturally follow FIFO.
+    stmt = select(PickupTaskModel).order_by(PickupTaskModel.created_at.asc())
 
     if is_store_user and not is_warehouse_or_admin:
         user_store_id, user_store_code = await _resolve_user_store_context(uow, user)

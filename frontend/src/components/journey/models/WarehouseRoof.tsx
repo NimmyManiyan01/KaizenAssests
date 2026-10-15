@@ -35,7 +35,7 @@ function GableEnd({ z, isFront = true }: { z: number; isFront?: boolean }) {
       {/* Bold Triangular Gable Wall Panel */}
       <mesh castShadow receiveShadow position={[0, 0, -0.6]}>
         <extrudeGeometry args={[gableShape, { depth: 1.2, bevelEnabled: false }]} />
-        <meshStandardMaterial color="#d4dedb" roughness={0.7} metalness={0.15} />
+        <meshStandardMaterial color="#334155" roughness={0.7} metalness={0.15} />
       </mesh>
 
       {/* Left & Right Sloped Fascia Bargeboard Beams */}
@@ -300,7 +300,7 @@ export function WarehouseRoof({ showWalls = true }: WarehouseRoofProps) {
             {/* Upper Light Grey Cladding */}
             <mesh position={[0, 5.85, 0]} castShadow receiveShadow>
               <boxGeometry args={[0.26, 8.3, 245.0]} />
-              <meshStandardMaterial color="#d4dedb" roughness={0.7} metalness={0.15} />
+              <meshStandardMaterial color="#475569" roughness={0.7} metalness={0.15} />
             </mesh>
             {/* Clerestory Daylight Window Ribbon */}
             <mesh position={[0, 8.3, 0]}>
@@ -326,7 +326,7 @@ export function WarehouseRoof({ showWalls = true }: WarehouseRoofProps) {
             {/* Upper Light Grey consultant cladding */}
             <mesh position={[0, 5.85, 0]} castShadow receiveShadow>
               <boxGeometry args={[0.26, 8.3, 245.0]} />
-              <meshStandardMaterial color="#d4dedb" roughness={0.7} metalness={0.15} />
+              <meshStandardMaterial color="#475569" roughness={0.7} metalness={0.15} />
             </mesh>
             {/* Clerestory Daylight Window Ribbon */}
             <mesh position={[0, 8.3, 0]}>

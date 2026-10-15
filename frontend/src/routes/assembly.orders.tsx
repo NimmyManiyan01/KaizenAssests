@@ -61,7 +61,7 @@ export const Route = createFileRoute("/assembly/orders")({
     view: typeof search.view === "string" ? search.view : undefined,
     create: typeof search.create === "string" ? search.create : undefined,
   }),
-  head: () => ({ meta: [{ title: "Assembly Orders · KaizenX" }] }),
+  head: () => ({ meta: [{ title: "Assembly Orders · KaizenAssests" }] }),
   component: AssemblyOrdersPage,
 });
 

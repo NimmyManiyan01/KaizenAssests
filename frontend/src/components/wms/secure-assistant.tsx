@@ -98,8 +98,8 @@ export function SecureAssistant() {
       <button
         type="button"
         suppressHydrationWarning
-        aria-label="Open KaizenX assistant"
-        title="KaizenX Assistant"
+        aria-label="Open KaizenAssests assistant"
+        title="KaizenAssests Assistant"
         onClick={() => setOpen(true)}
         className="fixed bottom-5 right-5 z-40 grid size-12 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105"
       >
@@ -109,7 +109,7 @@ export function SecureAssistant() {
         <div className="fixed inset-0 z-50 bg-black/20" onClick={() => setOpen(false)}>
           <section
             role="dialog"
-            aria-label="KaizenX Assistant"
+            aria-label="KaizenAssests Assistant"
             onClick={(event) => event.stopPropagation()}
             className="absolute bottom-5 right-5 flex h-[min(650px,calc(100vh-40px))] w-[min(420px,calc(100vw-32px))] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
           >
@@ -117,7 +117,7 @@ export function SecureAssistant() {
               <div className="flex items-center gap-2">
                 <Bot className="size-5" />
                 <div>
-                  <p className="text-sm font-bold">KaizenX Assistant</p>
+                  <p className="text-sm font-bold">KaizenAssests Assistant</p>
                   <p className="text-[11px] text-primary-foreground/75">{module.label} workspace</p>
                 </div>
               </div>

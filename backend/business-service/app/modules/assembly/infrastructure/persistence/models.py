@@ -67,6 +67,23 @@ class AssemblyMaterialReservationModel(Base):
     reserved_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
 
 
+class AssemblyMaterialReceiptModel(Base):
+    __tablename__ = "assembly_material_receipt"
+    __table_args__ = (UniqueConstraint("assembly_order_id", "material_code", name="uq_assembly_receipt_order_material"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    assembly_order_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("assembly_order.id", ondelete="RESTRICT"), nullable=False, index=True)
+    material_issue_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("material_issue.id", ondelete="RESTRICT"), nullable=False, index=True)
+    material_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    material_qr: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    issued_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    received_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
+    received_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class AssemblyTeamModel(Base):
     __tablename__ = "assembly_team"
 
@@ -131,6 +148,7 @@ class AssemblyQualityInspectionModel(Base):
     passed_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0"))
     failed_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0"))
     rework_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0"))
+    held_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0"))
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING_INSPECTION")
     inspected_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -178,11 +196,27 @@ class AssemblyFinishedGoodsModel(Base):
     on_hand_after: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     qr_code: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     serial_number: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    batch_number: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, unique=True, index=True)
+    qr_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    qr_verified_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     store_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         GUID, ForeignKey("store.id", ondelete="SET NULL"), nullable=True, index=True
     )
     posted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+
+class AssemblyFinishedGoodsAllocationModel(Base):
+    __tablename__ = "assembly_finished_goods_allocation"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    finished_goods_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("assembly_finished_goods.id", ondelete="RESTRICT"), nullable=False, index=True)
+    dispatch_order_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("dispatch_order.id", ondelete="RESTRICT"), nullable=True, index=True)
+    finished_goods_request_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("finished_goods_request.id", ondelete="RESTRICT"), nullable=True, index=True)
+    dispatch_item_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("dispatch_item.id", ondelete="RESTRICT"), nullable=False, index=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ALLOCATED", index=True)
+    allocated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
 
 
 class BillOfMaterialsModel(Base):

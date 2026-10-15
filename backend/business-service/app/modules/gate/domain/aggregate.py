@@ -195,12 +195,14 @@ class GateEntry(AggregateRoot):
             raise DomainRuleViolationException("Vehicle movement requires an assigned dock")
         if not self.assigned_dock_id:
             raise DomainRuleViolationException("Assigned dock is missing")
-        self.status = GateEntryStatus.MOVING_TO_DOCK
+        # Allow Entry is the security checkpoint.  The vehicle is inside the
+        # facility before the operator confirms it has reached the dock.
+        self.status = GateEntryStatus.INSIDE_FACILITY
         self.updated_at = datetime.now(timezone.utc)
 
     def check_in_at_dock(self) -> None:
-        if self.status != GateEntryStatus.MOVING_TO_DOCK:
-            raise DomainRuleViolationException("Vehicle must be moving to the dock before check-in")
+        if self.status not in (GateEntryStatus.INSIDE_FACILITY, GateEntryStatus.MOVING_TO_DOCK):
+            raise DomainRuleViolationException("Vehicle must be inside the facility before dock check-in")
         if not self.assigned_dock_id:
             raise DomainRuleViolationException("Assigned dock is missing")
         self.status = GateEntryStatus.AT_DOCK

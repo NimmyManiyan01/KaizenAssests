@@ -93,7 +93,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             </Text>
           </View>
           <Text style={tw`text-slate-950 text-3xl font-black tracking-tight`}>
-            KaizenX Mobile
+            KaizenAssests Mobile
           </Text>
           <Text
             style={tw`text-sky-600 text-xs font-bold tracking-widest mt-1 uppercase`}
@@ -236,7 +236,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         </View>
 
         <Text style={tw`text-slate-400 text-[11px] text-center mt-7`}>
-          © 2026 Kaizentrix Global Solutions • KaizenX Mobile
+          © 2026 Kaizentrix Global Solutions • KaizenAssests Mobile
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>

@@ -1,3 +1,37 @@
+import QRCode from "qrcode";
+import { useEffect, useState } from "react";
+import { CanvasTexture, NearestFilter, SRGBColorSpace } from "three";
+
+// These labels belong to the illustrative landing-page pallet, not stock records.
+function BoxQrLabels({ bx, bz }: { bx: number; bz: number }) {
+  const [texture, setTexture] = useState<CanvasTexture | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    let generated: CanvasTexture | undefined;
+    const canvas = document.createElement("canvas");
+    void QRCode.toCanvas(canvas, "DEMO:QR-MAT-DOCK-02-PLT-77291", { width: 256, margin: 4 })
+      .then(() => {
+        if (cancelled) return;
+        generated = new CanvasTexture(canvas);
+        generated.colorSpace = SRGBColorSpace;
+        generated.magFilter = NearestFilter;
+        setTexture(generated);
+      });
+    return () => { cancelled = true; generated?.dispose(); };
+  }, []);
+  if (!texture) return null;
+  return <>
+    <mesh position={[0, 0.05, Math.sign(bz) * 0.272]} rotation={[0, bz > 0 ? 0 : Math.PI, 0]}>
+      <planeGeometry args={[0.26, 0.26]} />
+      <meshBasicMaterial map={texture} toneMapped={false} />
+    </mesh>
+    <mesh position={[Math.sign(bx) * 0.272, 0.05, 0]} rotation={[0, Math.sign(bx) * Math.PI / 2, 0]}>
+      <planeGeometry args={[0.26, 0.26]} />
+      <meshBasicMaterial map={texture} toneMapped={false} />
+    </mesh>
+  </>;
+}
+
 interface PalletAndCargoProps {
   position?: [number, number, number];
   rotation?: [number, number, number];
@@ -5,6 +39,7 @@ interface PalletAndCargoProps {
   hasCargo?: boolean;
   isWrapped?: boolean; // stretch wrap film for dispatch
   boxCount?: number;
+  showQr?: boolean;
 }
 
 export function PalletAndCargo({
@@ -14,6 +49,7 @@ export function PalletAndCargo({
   hasCargo = true,
   isWrapped = false,
   boxCount = 8,
+  showQr = true,
 }: PalletAndCargoProps) {
   return (
     <group position={position} rotation={rotation} scale={scale}>
@@ -52,10 +88,11 @@ export function PalletAndCargo({
                 <meshStandardMaterial color="#b45309" roughness={0.8} />
               </mesh>
               {/* White Barcode Shipping Label */}
-              <mesh position={[0, 0.05, 0.272]}>
+              {!showQr && <mesh position={[0, 0.05, 0.272]}>
                 <planeGeometry args={[0.22, 0.14]} />
                 <meshStandardMaterial color="#f8fafc" roughness={0.3} />
-              </mesh>
+              </mesh>}
+              {showQr && <BoxQrLabels bx={bx} bz={bz} />}
             </group>
           ))}
 
@@ -72,10 +109,11 @@ export function PalletAndCargo({
                   <boxGeometry args={[0.54, 0.58, 0.54]} />
                   <meshStandardMaterial color="#d97706" roughness={0.8} />
                 </mesh>
-                <mesh position={[0, 0.05, 0.272]}>
+                {!showQr && <mesh position={[0, 0.05, 0.272]}>
                   <planeGeometry args={[0.22, 0.14]} />
                   <meshStandardMaterial color="#f8fafc" roughness={0.3} />
-                </mesh>
+                </mesh>}
+                {showQr && <BoxQrLabels bx={bx} bz={bz} />}
               </group>
             ))}
 

@@ -41,7 +41,7 @@ function HomePage() {
   };
 
   const scrollToTop = () => {
-    window.dispatchEvent(new Event("kaizenx:replay-journey"));
+    window.dispatchEvent(new Event("kaizenassests:replay-journey"));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -71,7 +71,7 @@ function HomePage() {
             <div className="flex flex-col">
               <div className="flex items-center gap-1.5">
                 <span className="text-base font-black tracking-wider uppercase bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 dark:from-cyan-300 dark:via-blue-400 dark:to-indigo-300 bg-clip-text text-transparent">
-                  KaizenX
+                  KaizenAssests
                 </span>
               </div>
             </div>
@@ -79,17 +79,10 @@ function HomePage() {
 
           <div className="flex items-center gap-2 sm:gap-3">
             <Button
-              variant="ghost"
               onClick={() => navigate({ to: "/login" })}
-              className={`hidden sm:inline-flex text-xs font-bold ${isDarkMode ? "text-white hover:bg-white/10" : "text-slate-700 hover:bg-slate-100"}`}
+              className="bg-cyan-600 hover:bg-cyan-500 text-white shadow-[0_0_20px_rgba(6,182,212,0.4)] rounded-xl text-xs font-black px-5 py-2.5 tracking-wider uppercase"
             >
-              Sign In
-            </Button>
-            <Button
-              onClick={goToDashboard}
-              className="bg-cyan-600 hover:bg-cyan-500 text-white shadow-[0_0_20px_rgba(6,182,212,0.4)] rounded-xl text-xs font-black px-5 tracking-wider uppercase"
-            >
-              {loggedIn ? "Dashboard" : "Launch App"} <ArrowRight className="size-3.5 ml-1.5" />
+              Sign In <ArrowRight className="size-3.5 ml-1.5" />
             </Button>
           </div>
         </div>
@@ -147,13 +140,6 @@ function HomePage() {
             <div className="pt-6 flex flex-wrap justify-center gap-4">
               <Button
                 size="lg"
-                onClick={goToDashboard}
-                className="bg-cyan-600 hover:bg-cyan-500 text-white font-black rounded-2xl px-8 h-14 shadow-[0_0_25px_rgba(6,182,212,0.5)] text-base tracking-wider uppercase"
-              >
-                Enter WMS Dashboard <ArrowRight className="size-5 ml-2" />
-              </Button>
-              <Button
-                size="lg"
                 variant="outline"
                 onClick={scrollToTop}
                 className={`font-bold rounded-2xl px-8 h-14 text-base ${isDarkMode ? "border-white/20 bg-white/5 text-white hover:bg-white/10" : "border-slate-300 bg-slate-100 text-slate-800 hover:bg-slate-200"}`}
@@ -171,7 +157,7 @@ function HomePage() {
         className={`border-t py-10 text-center text-xs transition-colors duration-300 relative z-10 ${isDarkMode ? "border-white/10 bg-slate-950 text-slate-500" : "border-slate-200 bg-slate-50 text-slate-600"}`}
       >
         <div className="mx-auto max-w-7xl px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p>© 2026 Kaizentrix Global Solutions. KaizenX Enterprise Logistics OS.</p>
+          <p>© 2026 Kaizentrix Global Solutions. KaizenAssests Enterprise Logistics OS.</p>
           <p className="font-mono text-cyan-600 dark:text-cyan-500/60">
             Continuous 3D Logistics Lifecycle • Gate to Exit
           </p>

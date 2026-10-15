@@ -1,5 +1,5 @@
 /**
- * KaizenX Mobile - Gate Entry & Scanner Android Application
+ * KaizenAssests Mobile - Gate Entry & Scanner Android Application
  * Kaizentrix Global Solutions
  */
 
