@@ -45,7 +45,8 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/assembly/finished-goods")({
-  beforeLoad: () => requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER", "STORE_MANAGER", "QUALITY"]),
+  beforeLoad: () =>
+    requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER", "STORE_MANAGER", "QUALITY"]),
   head: () => ({ meta: [{ title: "Finished Goods · KaizenAssests" }] }),
   component: AssemblyFinishedGoodsPage,
 });
@@ -91,7 +92,8 @@ function AssemblyFinishedGoodsPage() {
       const detail = await api.getAssemblyFinishedGoodsDetail(item.id);
       setSelectedFg(detail);
 
-      const qrText = detail.qr_code || `FG|${detail.product_code}|${detail.order_number}|QTY:${detail.quantity}`;
+      const qrText =
+        detail.qr_code || `FG|${detail.product_code}|${detail.order_number}|QTY:${detail.quantity}`;
       const url = await QRCode.toDataURL(qrText, {
         width: 256,
         margin: 1,
@@ -158,7 +160,8 @@ function AssemblyFinishedGoodsPage() {
 
   // Quick stats
   const totalBatches = items.length;
-  const totalUnits = inventorySummary?.qc_approved ?? items.reduce((acc, curr) => acc + curr.quantity, 0);
+  const totalUnits =
+    inventorySummary?.qc_approved ?? items.reduce((acc, curr) => acc + curr.quantity, 0);
 
   // Filtered list
   const filteredItems = useMemo(() => {
@@ -170,7 +173,7 @@ function AssemblyFinishedGoodsPage() {
         fg.product_name?.toLowerCase().includes(q) ||
         fg.product_code?.toLowerCase().includes(q) ||
         fg.serial_number?.toLowerCase().includes(q) ||
-        fg.location_code?.toLowerCase().includes(q)
+        fg.location_code?.toLowerCase().includes(q),
     );
   }, [items, search]);
 
@@ -347,14 +350,22 @@ function AssemblyFinishedGoodsPage() {
         {/* Workflow Quick Links */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2.5 rounded-2xl border border-border/70 bg-card p-3 shadow-2xs">
           {[
-            ["Total Produced", inventorySummary?.total_produced ?? 0], ["QC Approved", inventorySummary?.qc_approved ?? 0],
-            ["Available", inventorySummary?.available ?? 0], ["Reserved", inventorySummary?.reserved ?? 0],
-            ["Packed", inventorySummary?.packed ?? 0], ["Dispatched", inventorySummary?.dispatched ?? 0],
+            ["Total Produced", inventorySummary?.total_produced ?? 0],
+            ["QC Approved", inventorySummary?.qc_approved ?? 0],
+            ["Available", inventorySummary?.available ?? 0],
+            ["Reserved", inventorySummary?.reserved ?? 0],
+            ["Packed", inventorySummary?.packed ?? 0],
+            ["Dispatched", inventorySummary?.dispatched ?? 0],
             ["Rejected / Held", inventorySummary?.rejected_held ?? 0],
           ].map(([label, value]) => (
             <div key={String(label)} className="rounded-xl bg-muted/35 px-3 py-2">
-              <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{label}</div>
-              <div className="mt-1 text-lg font-black tabular-nums text-foreground">{loading ? "..." : value} <span className="text-[10px] font-normal text-muted-foreground">PCS</span></div>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                {label}
+              </div>
+              <div className="mt-1 text-lg font-black tabular-nums text-foreground">
+                {loading ? "..." : value}{" "}
+                <span className="text-[10px] font-normal text-muted-foreground">PCS</span>
+              </div>
             </div>
           ))}
         </div>
@@ -372,10 +383,14 @@ function AssemblyFinishedGoodsPage() {
                   <div
                     className={cn(
                       "grid size-9 shrink-0 place-items-center rounded-lg border",
-                      sc.tone === "blue" && "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",
-                      sc.tone === "amber" && "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20",
-                      sc.tone === "cyan" && "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border-cyan-500/20",
-                      sc.tone === "purple" && "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/20"
+                      sc.tone === "blue" &&
+                        "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",
+                      sc.tone === "amber" &&
+                        "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20",
+                      sc.tone === "cyan" &&
+                        "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border-cyan-500/20",
+                      sc.tone === "purple" &&
+                        "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/20",
                     )}
                   >
                     <Icon className="size-4" />
@@ -440,7 +455,9 @@ function AssemblyFinishedGoodsPage() {
                 <PackageCheck className="size-6 opacity-60" />
               </div>
               <p className="text-sm font-semibold text-foreground">
-                {search ? "No finished goods match your search" : "No Finished Goods in storage yet"}
+                {search
+                  ? "No finished goods match your search"
+                  : "No Finished Goods in storage yet"}
               </p>
               <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
                 {search
@@ -483,7 +500,9 @@ function AssemblyFinishedGoodsPage() {
 
                       {/* Product */}
                       <td className="py-3.5 px-3">
-                        <div className="font-semibold text-foreground text-xs">{fg.product_name}</div>
+                        <div className="font-semibold text-foreground text-xs">
+                          {fg.product_name}
+                        </div>
                         <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
                           {fg.product_code}
                         </div>
@@ -558,7 +577,8 @@ function AssemblyFinishedGoodsPage() {
                 Finished Goods QR Identification Label
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground mt-1">
-                Print the FG batch QR identification label for Assembly storage and customer dispatch.
+                Print the FG batch QR identification label for Assembly storage and customer
+                dispatch.
               </DialogDescription>
             </DialogHeader>
 
@@ -631,7 +651,9 @@ function AssemblyFinishedGoodsPage() {
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Certified:</span>
                       <span className="text-foreground">
-                        {selectedFg.posted_at ? new Date(selectedFg.posted_at).toLocaleDateString() : "Today"}
+                        {selectedFg.posted_at
+                          ? new Date(selectedFg.posted_at).toLocaleDateString()
+                          : "Today"}
                       </span>
                     </div>
                   </div>

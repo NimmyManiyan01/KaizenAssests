@@ -1,4 +1,4 @@
-import { createFileRoute, useSearch } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { CheckCircle2, Eye, FileText, Loader2, Plus, Search, Trash2 } from "lucide-react";
@@ -10,14 +10,37 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api-client";
-import { getUserInfo } from "@/lib/auth-utils";
+import { getUserInfo, requireRole } from "@/lib/auth-utils";
 
 export const Route = createFileRoute("/supplier/asns/new")({
-  beforeLoad: () => {},
+  beforeLoad: () => requireRole(["SUPPLIER", "ADMIN", "SUPERUSER"]),
   component: NewAsnPage,
 });
 
 const inputClass = "mt-1.5 h-10 rounded-xl border-border/80 bg-background text-xs font-semibold";
+
+const normalizeVehicleNumber = (value: string) =>
+  value
+    .toUpperCase()
+    .replace(/[\s-]+/g, "")
+    .trim();
+
+const isValidVehicleNumber = (value: string) => {
+  return value.trim().length > 0 && /^[A-Za-z0-9 ]+$/.test(value);
+};
+
+const normalizeDriverName = (value: string) => value.trim().replace(/\s+/g, " ");
+
+const isValidDriverName = (value: string) => {
+  const normalized = normalizeDriverName(value);
+  return normalized.length >= 2 && normalized.length <= 100 && /^[A-Za-z ]+$/.test(normalized);
+};
+
+const normalizeDriverContact = (value: string) => value.trim().replace(/[\s()-]+/g, "");
+
+const isValidDriverContact = (value: string) => {
+  return /^\d{10}$/.test(value.trim());
+};
 
 interface AsnRecord {
   id: string;
@@ -38,7 +61,8 @@ interface AsnRecord {
 
 const INITIAL_ASNS: AsnRecord[] = [];
 
-function NewAsnPage() {
+export function NewAsnPage() {
+  const navigate = useNavigate();
   const search = useSearch({ strict: false }) as any;
 
   const [asnList, setAsnList] = useState<AsnRecord[]>(INITIAL_ASNS);
@@ -65,6 +89,11 @@ function NewAsnPage() {
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [driverName, setDriverName] = useState("");
   const [driverMobile, setDriverMobile] = useState("");
+  const [transportErrors, setTransportErrors] = useState({
+    vehicle: "",
+    driver: "",
+    contact: "",
+  });
   const [registeredVehicles, setRegisteredVehicles] = useState<any[]>([]);
   const [registeredDrivers, setRegisteredDrivers] = useState<any[]>([]);
   const [lines, setLines] = useState<any[]>([
@@ -101,8 +130,7 @@ function NewAsnPage() {
           supplier?.company_name ||
           supplier?.supplier_name ||
           "";
-        const displaySupplierName = /seeded supplier/i.test(companyName) ? "MTU" : companyName;
-        setSupplierCompanyName(displaySupplierName);
+        setSupplierCompanyName(companyName);
         if (displaySupplierName) setSupplierName(displaySupplierName);
       })
       .catch(() => undefined);
@@ -194,11 +222,18 @@ function NewAsnPage() {
     setVehicleNumber("");
     setDriverName("");
     setDriverMobile("");
+    setTransportErrors({ vehicle: "", driver: "", contact: "" });
     setManualVehicle(false);
     setManualDriver(false);
     setLines([
       { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" },
     ]);
+  };
+
+  const closeCreateFlow = () => {
+    setIsAssignmentOpen(false);
+    setIsModalOpen(false);
+    void navigate({ to: "/supplier/asns" });
   };
 
   useEffect(() => {
@@ -209,10 +244,29 @@ function NewAsnPage() {
 
   const continueToAsnForm = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!vehicleNumber || !driverName || !driverMobile.trim()) {
-      toast.error("Vehicle number, driver name and driver contact are required");
-      return;
-    }
+    const errors = {
+      vehicle: !vehicleNumber.trim()
+        ? "Vehicle number is required."
+        : !isValidVehicleNumber(vehicleNumber)
+          ? "Enter a valid vehicle registration number, for example KA03AB1234."
+          : "",
+      driver: !driverName.trim()
+        ? "Driver name is required."
+        : !isValidDriverName(driverName)
+          ? "Enter a valid driver name."
+          : "",
+      contact: !driverMobile.trim()
+        ? "Driver contact is required."
+        : !isValidDriverContact(driverMobile)
+          ? "Enter a valid driver contact number."
+          : "",
+    };
+    setTransportErrors(errors);
+    if (errors.vehicle || errors.driver || errors.contact) return;
+
+    setVehicleNumber(normalizeVehicleNumber(vehicleNumber));
+    setDriverName(normalizeDriverName(driverName));
+    setDriverMobile(normalizeDriverContact(driverMobile));
     setIsAssignmentOpen(false);
     setIsModalOpen(true);
   };
@@ -232,10 +286,16 @@ function NewAsnPage() {
         uom: material.uom || material.base_uom || material.unit_of_measure,
       }));
       const createdId = String(created.id || created.material_id || "");
-      const selectedMaterial = normalizedMaterials.find((material: any) => String(material.id) === createdId)
-        || normalizedMaterials.find((material: any) => String(material.code) === String(created.code || created.material_code));
+      const selectedMaterial =
+        normalizedMaterials.find((material: any) => String(material.id) === createdId) ||
+        normalizedMaterials.find(
+          (material: any) =>
+            String(material.code) === String(created.code || created.material_code),
+        );
       if (!selectedMaterial?.id || !selectedMaterial.uom) {
-        throw new Error("Material was created, but its canonical Material Master record or UOM could not be loaded.");
+        throw new Error(
+          "Material was created, but its canonical Material Master record or UOM could not be loaded.",
+        );
       }
       setMaterialCatalog(normalizedMaterials);
       const createdMaterial = {
@@ -246,15 +306,22 @@ function NewAsnPage() {
         uom: selectedMaterial.uom,
       };
       setLines((prev) => {
-        const targetIndex = customMaterialRowIndex ?? prev.findIndex((line) => !line.material_id && !line.item_code);
+        const targetIndex =
+          customMaterialRowIndex ?? prev.findIndex((line) => !line.material_id && !line.item_code);
         if (targetIndex < 0) return [...prev, createdMaterial];
-        return prev.map((line, index) => (index === targetIndex ? { ...line, ...createdMaterial } : line));
+        return prev.map((line, index) =>
+          index === targetIndex ? { ...line, ...createdMaterial } : line,
+        );
       });
-      toast.success(`Component '${selectedMaterial.name}' saved to Database ✓`, { description: `Code: ${selectedMaterial.code} · UOM: ${selectedMaterial.uom}` });
+      toast.success(`Component '${selectedMaterial.name}' saved to Database ✓`, {
+        description: `Code: ${selectedMaterial.code} · UOM: ${selectedMaterial.uom}`,
+      });
       setCustomMaterialName("");
       setIsMaterialPopupOpen(false);
     } catch (error) {
-      toast.error("Failed to save material to database", { description: error instanceof Error ? error.message : "The material was not saved." });
+      toast.error("Failed to save material to database", {
+        description: error instanceof Error ? error.message : "The material was not saved.",
+      });
     } finally {
       setCreatingMaterial(false);
     }
@@ -297,12 +364,38 @@ function NewAsnPage() {
       toast.error("Expected Arrival Date is mandatory *");
       return;
     }
-    if (!vehicleNumber.trim() || !driverName.trim() || !driverMobile.trim()) {
+    const today = new Date().toISOString().slice(0, 10);
+    if (expectedArrivalDate < today) {
+      toast.error("Expected arrival date cannot be in the past.");
+      return;
+    }
+    if (
+      !isValidVehicleNumber(vehicleNumber) ||
+      !isValidDriverName(driverName) ||
+      !driverMobile.trim()
+    ) {
+      if (!isValidVehicleNumber(vehicleNumber)) {
+        toast.error("Enter a valid vehicle registration number, for example KA03AB1234");
+        return;
+      }
+      if (!isValidDriverName(driverName)) {
+        toast.error("Enter a valid driver name.");
+        return;
+      }
       toast.error("Please fill in Vehicle Number, Driver Name, and Mobile Number *");
       return;
     }
-    if (lines.some((line) => Number(line.shipped_quantity) <= 0)) {
-      toast.error("Shipped quantity must be greater than zero");
+    const normalizedVehicleNumber = normalizeVehicleNumber(vehicleNumber);
+    const normalizedDriverName = normalizeDriverName(driverName);
+    if (
+      lines.some((line) => {
+        const rawQuantity = String(line.shipped_quantity ?? "").trim();
+        if (!rawQuantity) return true;
+        const quantity = Number(rawQuantity);
+        return !Number.isFinite(quantity) || quantity <= 0;
+      })
+    ) {
+      toast.error("Shipped quantity must be a number greater than zero");
       return;
     }
     if (lines.some((line) => !String(line.uom || "").trim())) {
@@ -319,9 +412,9 @@ function NewAsnPage() {
         destination_warehouse: destinationWarehouse,
         destination_warehouse_id: destinationWarehouseId,
         expected_arrival_at: expectedArrivalDate,
-        vehicle_number: vehicleNumber.toUpperCase().trim(),
-        driver_name: driverName.trim(),
-        driver_contact: driverMobile.trim(),
+        vehicle_number: normalizedVehicleNumber,
+        driver_name: normalizedDriverName,
+        driver_contact: normalizeDriverContact(driverMobile),
         lines: lines.map((l) => ({
           material_id: l.material_id,
           item_code: l.item_code,
@@ -343,8 +436,8 @@ function NewAsnPage() {
         po_number: "",
         supplier_name: supplierName,
         destination_warehouse: destinationWarehouse,
-        vehicle_number: vehicleNumber.toUpperCase().trim(),
-        driver_name: driverName.trim(),
+        vehicle_number: normalizedVehicleNumber,
+        driver_name: normalizedDriverName,
         driver_contact: driverMobile.trim(),
         expected_arrival_at: expectedArrivalDate,
         status: "SUBMITTED",
@@ -355,6 +448,7 @@ function NewAsnPage() {
       setAsnList((prev) => [newRecord, ...prev]);
       setSubmitting(false);
       setIsModalOpen(false);
+      await navigate({ to: "/supplier/asns" });
 
       toast.success(`ASN ${asnNumber} Created Successfully ✓`, {
         description: `Vehicle ${newRecord.vehicle_number} · Driver ${newRecord.driver_name} (${newRecord.driver_contact})\n\nGate Security can now scan or search ${asnNumber}!`,
@@ -405,7 +499,7 @@ function NewAsnPage() {
               </div>
 
               <Button
-                onClick={handleOpenCreateModal}
+                onClick={() => navigate({ to: "/supplier/asns/new", search: { open: "create" } as any })}
                 className="rounded-xl font-bold shadow-md bg-sky-600 hover:bg-sky-700 text-white h-9 px-4 text-xs"
               >
                 <Plus className="mr-1.5 size-4" /> Create ASN
@@ -423,11 +517,12 @@ function NewAsnPage() {
                     <th className="px-4 py-3">Vehicle Number</th>
                     <th className="px-4 py-3">Driver Name & Mobile</th>
                     <th className="px-4 py-3">Expected Arrival Date</th>
-                    <th className="px-4 py-3 text-right"></th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60 font-medium">
-                  {filteredList.map((asn) => (
+                  {filteredList.length ? filteredList.map((asn) => (
                     <tr key={asn.id} className="hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-3 font-mono font-bold text-primary">
                         {asn.asn_number}
@@ -448,6 +543,11 @@ function NewAsnPage() {
                           asn.expected_arrival_at?.split("T")[0] ||
                           "—"}
                       </td>
+                      <td className="px-4 py-3">
+                        <Badge variant="outline" className="font-bold uppercase">
+                          {String(asn.status || "SUBMITTED").replaceAll("_", " ")}
+                        </Badge>
+                      </td>
                       <td className="px-4 py-3 text-right">
                         <Button
                           size="sm"
@@ -456,11 +556,18 @@ function NewAsnPage() {
                           onClick={() => setSelectedAsn(asn)}
                         >
                           <Eye className="mr-1.5 size-3.5" />
-                          View Details
+                          View
                         </Button>
                       </td>
                     </tr>
-                  ))}
+                  )) : (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                        <p className="font-bold text-foreground">No ASNs created yet</p>
+                        <p className="mt-1">Create your first ASN to start an inbound shipment.</p>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -474,18 +581,41 @@ function NewAsnPage() {
             </DialogHeader>
             {selectedAsn && (
               <div className="grid grid-cols-2 gap-3 rounded-xl border p-4 text-sm">
-                <div><span className="text-muted-foreground">ASN Number</span><p className="font-mono font-bold">{selectedAsn.asn_number}</p></div>
-                <div><span className="text-muted-foreground">Supplier</span><p className="font-semibold">{selectedAsn.supplier_name}</p></div>
-                <div><span className="text-muted-foreground">Vehicle</span><p className="font-mono font-semibold">{selectedAsn.vehicle_number}</p></div>
-                <div><span className="text-muted-foreground">Driver</span><p className="font-semibold">{selectedAsn.driver_name}</p></div>
-                <div><span className="text-muted-foreground">Driver Contact</span><p className="font-mono">{selectedAsn.driver_contact}</p></div>
-                <div><span className="text-muted-foreground">Expected Arrival</span><p className="font-semibold">{selectedAsn.delivery_date || selectedAsn.expected_arrival_date || selectedAsn.expected_arrival_at?.split("T")[0] || "—"}</p></div>
+                <div>
+                  <span className="text-muted-foreground">ASN Number</span>
+                  <p className="font-mono font-bold">{selectedAsn.asn_number}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Supplier</span>
+                  <p className="font-semibold">{selectedAsn.supplier_name}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Vehicle</span>
+                  <p className="font-mono font-semibold">{selectedAsn.vehicle_number}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Driver</span>
+                  <p className="font-semibold">{selectedAsn.driver_name}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Driver Contact</span>
+                  <p className="font-mono">{selectedAsn.driver_contact}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Expected Arrival</span>
+                  <p className="font-semibold">
+                    {selectedAsn.delivery_date ||
+                      selectedAsn.expected_arrival_date ||
+                      selectedAsn.expected_arrival_at?.split("T")[0] ||
+                      "—"}
+                  </p>
+                </div>
               </div>
             )}
           </DialogContent>
         </Dialog>
 
-        <Dialog open={isAssignmentOpen} onOpenChange={setIsAssignmentOpen}>
+        <Dialog open={isAssignmentOpen} onOpenChange={(open) => !open ? closeCreateFlow() : setIsAssignmentOpen(true)}>
           <DialogContent className="max-w-xl rounded-2xl p-6">
             <DialogHeader>
               <DialogTitle className="text-lg font-black text-primary">
@@ -494,46 +624,62 @@ function NewAsnPage() {
             </DialogHeader>
             <form onSubmit={continueToAsnForm} className="space-y-5">
               <p className="text-sm text-muted-foreground">
-                Enter the transport details first. The complete ASN form will open after you click
-                Next.
+                Enter the vehicle and driver details for this shipment.
               </p>
               <div className="grid gap-3 sm:grid-cols-3">
                 <div>
                   <Label htmlFor="assignment-vehicle">Vehicle Number *</Label>
                   <Input
                     id="assignment-vehicle"
-                    required
                     placeholder="Enter vehicle number"
                     value={vehicleNumber}
-                    onChange={(e) => setVehicleNumber(e.target.value)}
+                    onChange={(e) => {
+                      setVehicleNumber(e.target.value.replace(/[^A-Za-z0-9 ]/g, ""));
+                      setTransportErrors((current) => ({ ...current, vehicle: "" }));
+                    }}
                     className={inputClass}
                   />
+                  {transportErrors.vehicle && (
+                    <p className="mt-1 text-xs font-medium text-destructive">{transportErrors.vehicle}</p>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="assignment-driver">Driver Name *</Label>
                   <Input
                     id="assignment-driver"
-                    required
                     placeholder="Enter driver name"
                     value={driverName}
-                    onChange={(e) => setDriverName(e.target.value)}
+                    onChange={(e) => {
+                      setDriverName(e.target.value.replace(/[^A-Za-z ]/g, ""));
+                      setTransportErrors((current) => ({ ...current, driver: "" }));
+                    }}
                     className={inputClass}
                   />
+                  {transportErrors.driver && (
+                    <p className="mt-1 text-xs font-medium text-destructive">{transportErrors.driver}</p>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="assignment-contact">Driver Contact *</Label>
                   <Input
                     id="assignment-contact"
-                    required
                     type="tel"
+                    maxLength={10}
+                    placeholder="Enter mobile number"
                     value={driverMobile}
-                    onChange={(e) => setDriverMobile(e.target.value)}
+                    onChange={(e) => {
+                      setDriverMobile(e.target.value.replace(/[^0-9]/g, "").slice(0, 10));
+                      setTransportErrors((current) => ({ ...current, contact: "" }));
+                    }}
                     className={inputClass}
                   />
+                  {transportErrors.contact && (
+                    <p className="mt-1 text-xs font-medium text-destructive">{transportErrors.contact}</p>
+                  )}
                 </div>
               </div>
               <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => setIsAssignmentOpen(false)}>
+                <Button type="button" variant="outline" onClick={closeCreateFlow}>
                   Cancel
                 </Button>
                 <Button type="submit">Next</Button>
@@ -588,7 +734,7 @@ function NewAsnPage() {
         </Dialog>
 
         {/* CREATE ASN POPUP MODAL DIALOG */}
-        <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+        <Dialog open={isModalOpen} onOpenChange={(open) => !open ? closeCreateFlow() : setIsModalOpen(true)}>
           <DialogContent className="max-w-2xl rounded-2xl bg-card p-6 shadow-2xl">
             <DialogHeader>
               <DialogTitle className="font-black text-lg text-primary uppercase border-b pb-2">
@@ -622,9 +768,8 @@ function NewAsnPage() {
                     </Label>
                     <Input
                       id="supplier-name"
-                      required
                       value={supplierName}
-                      onChange={(e) => setSupplierName(e.target.value)}
+                      readOnly
                       className={`${inputClass} bg-muted`}
                     />
                   </div>
@@ -640,6 +785,7 @@ function NewAsnPage() {
                       id="expected-arrival-date"
                       type="date"
                       required
+                      min={new Date().toISOString().slice(0, 10)}
                       value={expectedArrivalDate}
                       onChange={(e) => setExpectedArrivalDate(e.target.value)}
                       className={inputClass}
@@ -765,7 +911,7 @@ function NewAsnPage() {
                   <table className="w-full text-left text-xs">
                     <thead className="bg-muted/40 border-b font-bold uppercase text-muted-foreground">
                       <tr>
-                        <th className="p-2.5">Material Name Component (Select from DB Dropdown)</th>
+                        <th className="p-2.5">Material</th>
                         <th className="p-2.5 text-right">Shipped Qty</th>
                         <th className="p-2.5">UOM</th>
                         <th className="p-2.5 text-center">Action</th>
@@ -874,7 +1020,7 @@ function NewAsnPage() {
                   type="button"
                   variant="outline"
                   className="rounded-xl font-bold"
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={closeCreateFlow}
                 >
                   Cancel
                 </Button>

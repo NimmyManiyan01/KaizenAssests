@@ -24,7 +24,14 @@ import { toast } from "sonner";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { api } from "@/lib/api-client";
 
 export const Route = createFileRoute("/dispatch")({
@@ -133,9 +140,13 @@ function DispatchOverviewPage() {
           {/* Dispatch Queue Table */}
           <Card className="rounded-2xl p-6 shadow-soft border-border/80">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-bold tracking-tight uppercase text-foreground">Dispatch Queue</h3>
+              <h3 className="text-base font-bold tracking-tight uppercase text-foreground">
+                Dispatch Queue
+              </h3>
               <Link to="/dispatch-orders">
-                <Button size="sm" variant="outline" className="rounded-xl text-xs">View All Orders</Button>
+                <Button size="sm" variant="outline" className="rounded-xl text-xs">
+                  View All Orders
+                </Button>
               </Link>
             </div>
             <Table>
@@ -153,20 +164,42 @@ function DispatchOverviewPage() {
                 {dispatches.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
-                      No active dispatches found. Click "Create Dispatch" to start a new outbound shipment.
+                      No active dispatches found. Click "Create Dispatch" to start a new outbound
+                      shipment.
                     </TableCell>
                   </TableRow>
                 ) : (
                   dispatches.map((d) => {
-                    const qty = d.total_qty || d.items?.reduce((acc: number, i: any) => acc + (i.quantity_ordered || i.quantity || 0), 0) || 0;
+                    const qty =
+                      d.total_qty ||
+                      d.items?.reduce(
+                        (acc: number, i: any) => acc + (i.quantity_ordered || i.quantity || 0),
+                        0,
+                      ) ||
+                      0;
                     return (
                       <TableRow key={d.id || d.dispatch_number}>
-                        <TableCell className="font-mono font-bold text-primary">{d.dispatch_number}</TableCell>
+                        <TableCell className="font-mono font-bold text-primary">
+                          {d.dispatch_number}
+                        </TableCell>
                         <TableCell className="font-semibold">{d.customer_name}</TableCell>
-                        <TableCell>{d.product_name || d.items?.[0]?.product_name || d.items?.[0]?.material_name || "-"}</TableCell>
+                        <TableCell>
+                          {d.product_name ||
+                            d.items?.[0]?.product_name ||
+                            d.items?.[0]?.material_name ||
+                            "-"}
+                        </TableCell>
                         <TableCell className="font-mono">{qty}</TableCell>
-                        <TableCell><StatusBadge status={d.status} /></TableCell>
-                        <TableCell className="text-right"><Link to="/dispatch-orders"><Button size="sm" variant="ghost" className="text-xs">View</Button></Link></TableCell>
+                        <TableCell>
+                          <StatusBadge status={d.status} />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Link to="/dispatch-orders">
+                            <Button size="sm" variant="ghost" className="text-xs">
+                              View
+                            </Button>
+                          </Link>
+                        </TableCell>
                       </TableRow>
                     );
                   })
@@ -180,12 +213,24 @@ function DispatchOverviewPage() {
   );
 }
 
-function KpiCard({ title, value, icon: Icon, color }: { title: string; value: number; icon: any; color: string }) {
+function KpiCard({
+  title,
+  value,
+  icon: Icon,
+  color,
+}: {
+  title: string;
+  value: number;
+  icon: any;
+  color: string;
+}) {
   return (
     <Card className="rounded-2xl p-5 shadow-sm border-border/70 bg-card">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{title}</p>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+            {title}
+          </p>
           <h4 className="text-2xl font-black mt-1 text-foreground">{value ?? 0}</h4>
         </div>
         <div className={`grid size-11 place-items-center rounded-2xl ${color}`}>

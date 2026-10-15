@@ -30,7 +30,6 @@ from app.modules.gate.adapters.mock_adapters import (
     MockOcrEngine,
     MockPoRepository,
 )
-from app.modules.gate.application.ocr_pipeline import EnterprisePoOcrEngine
 from app.modules.gate.domain.aggregate import GateEntry, generate_gate_entry_number
 from app.modules.gate.domain.events import GateEntryReadyForReceivingEvent
 from app.modules.gate.domain.services import GateVerificationService
@@ -180,17 +179,6 @@ def test_outbox_event_emitted_on_approval():
     assert event.vehicle_plate == "KA-05-AB-9999"
     assert event.po_number == "PO-1002"
     assert "WAREHOUSE_MANAGER" in event.target_roles
-
-
-def test_po_ocr_pipeline_image_validation():
-    """Test image byte length and format validation."""
-    engine = EnterprisePoOcrEngine()
-
-    # Image too small (< 50 bytes)
-    with pytest.raises(DomainRuleViolationException) as exc1:
-        engine.preprocess_image(b"tiny")
-    assert "too small" in str(exc1.value).lower()
-
 
 
 def test_mark_entry_as_unscheduled_arrival():

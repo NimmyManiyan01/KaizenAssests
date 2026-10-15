@@ -32,6 +32,7 @@ from app.modules.storage.infrastructure.api.router import router as storage_rout
 from app.modules.assembly.infrastructure.api.router import router as assembly_router
 from app.modules.dispatch.infrastructure.api.router import router as dispatch_router
 from app.modules.customer_orders.infrastructure.api.router import router as customer_orders_router
+from app.modules.procurement.infrastructure.api.material_router import router as material_router
 from app.modules.storage.infrastructure.api.pickup_router import pickup_router
 from app.modules.storage.infrastructure.api.assembly_requisition_router import router as assembly_requisition_router
 from app.modules.storage.infrastructure.api.inventory_router import inventory_router, storage_req_router, v1_inventory_router
@@ -39,8 +40,6 @@ from app.modules.store.infrastructure.api.router import router as store_router, 
 from app.modules.quarantine.infrastructure.api.router import router as quarantine_router
 from app.security.router import router as auth_router
 from app.security.auth_router import router as procurement_auth_router
-from app.modules.procurement.infrastructure.api.router import router as procurement_router
-from app.modules.procurement.infrastructure.api.material_router import router as material_router
 from app.workers.notification_consumer import start_notification_consumer
 from app.workers.outbox_relay import relay_once
 
@@ -1587,11 +1586,6 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.debug(f"Notification consumer task failed to start: {exc}")
 
-    try:
-        _consumer_task = asyncio.create_task(start_notification_consumer())
-    except Exception as exc:
-        logger.debug(f"Notification consumer task failed to start: {exc}")
-
     logger.info("business-service started", extra={"extra_fields": {"environment": settings.environment}})
 
     yield
@@ -1666,10 +1660,9 @@ def create_app() -> FastAPI:
     app.include_router(assembly_router)
     app.include_router(dispatch_router)
     app.include_router(customer_orders_router)
+    app.include_router(material_router)
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
     app.include_router(procurement_auth_router)
-    app.include_router(procurement_router)
-    app.include_router(material_router)
 
     @app.get("/api/debug-assembly")
     async def debug_assembly():

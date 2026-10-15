@@ -10,7 +10,7 @@ export function generateProductSKU(name?: string, existingCodes: string[] = []):
   let prefix = "PRD";
 
   if (cleanName) {
-    const words = cleanName.split(/[\s_\-]+/).filter(Boolean);
+    const words = cleanName.split(/[\s_-]+/).filter(Boolean);
     const firstWord = words[0];
     if (words.length >= 2) {
       prefix = words.slice(0, 3).map((w) => (w && w[0] ? w[0].toUpperCase() : "")).join("");

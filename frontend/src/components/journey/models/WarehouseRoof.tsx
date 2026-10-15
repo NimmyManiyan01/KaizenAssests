@@ -190,21 +190,13 @@ export function WarehouseRoof({ showWalls = true }: WarehouseRoofProps) {
       {trussZPositions.map((tz) => (
         <group key={tz} position={[0, 0, tz]}>
           {/* Left Sloped Rafter Beam */}
-          <mesh
-            position={[-11.5, 12.35, 0]}
-            rotation={[0, 0, SLOPE_ANGLE]}
-            castShadow
-          >
+          <mesh position={[-11.5, 12.35, 0]} rotation={[0, 0, SLOPE_ANGLE]} castShadow>
             <boxGeometry args={[23.6, 0.45, 0.45]} />
             <meshStandardMaterial color="#334155" metalness={0.8} roughness={0.3} />
           </mesh>
 
           {/* Right Sloped Rafter Beam */}
-          <mesh
-            position={[11.5, 12.35, 0]}
-            rotation={[0, 0, -SLOPE_ANGLE]}
-            castShadow
-          >
+          <mesh position={[11.5, 12.35, 0]} rotation={[0, 0, -SLOPE_ANGLE]} castShadow>
             <boxGeometry args={[23.6, 0.45, 0.45]} />
             <meshStandardMaterial color="#334155" metalness={0.8} roughness={0.3} />
           </mesh>

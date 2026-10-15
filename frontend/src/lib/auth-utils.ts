@@ -100,21 +100,32 @@ export function getRequiredRolesForPath(pathname: string): string[] | null {
   // These outbound gate screens use a dispatch-prefixed URL, but are operated
   // from the gate-security sidebar. Keep them ahead of the broader dispatch
   // route match so gate users are not redirected back to their dashboard.
-  if (pathname === "/dispatch-gate-exit" || pathname === "/dispatch-gate-out")
-    return ["GATE_SECURITY", "GATE_OPERATOR", "WAREHOUSE", "WAREHOUSE_MANAGER", "ADMIN", "SUPERUSER"];
+  if (pathname === "/dispatch-gate-out")
+    return [
+      "GATE_SECURITY",
+      "GATE_OPERATOR",
+      "WAREHOUSE",
+      "WAREHOUSE_MANAGER",
+      "ADMIN",
+      "SUPERUSER",
+    ];
   if (pathname.startsWith("/dispatch") || pathname.startsWith("/dispatch-"))
     return ["DISPATCH", "DISPATCH_MANAGER", "ADMIN", "SUPERUSER"];
   if (
     pathname === "/gate-dashboard" ||
-    pathname === "/vehicle-exit" ||
-    pathname === "/unscheduled-arrivals"
+    pathname === "/vehicle-exit"
   )
-    return ["GATE_SECURITY", "GATE_OPERATOR", "WAREHOUSE", "WAREHOUSE_MANAGER", "ADMIN", "SUPERUSER"];
+    return [
+      "GATE_SECURITY",
+      "GATE_OPERATOR",
+      "WAREHOUSE",
+      "WAREHOUSE_MANAGER",
+      "ADMIN",
+      "SUPERUSER",
+    ];
   if (pathname === "/grn" || pathname === "/receiving")
     return ["GRN", "GRN_MANAGER", "RECEIVING", "WAREHOUSE", "ADMIN", "SUPERUSER"];
   if (pathname === "/warehouse/stores")
-    return ["WAREHOUSE", "WAREHOUSE_MANAGER", "ADMIN", "SUPERUSER"];
-  if (pathname === "/warehouse/quarantine")
     return ["WAREHOUSE", "WAREHOUSE_MANAGER", "ADMIN", "SUPERUSER"];
   if (
     pathname.startsWith("/warehouse") ||
@@ -133,8 +144,7 @@ export function getRequiredRolesForPath(pathname: string): string[] | null {
       "ADMIN",
       "SUPERUSER",
     ];
-  if (pathname === "/my-store")
-    return ["STORE_MANAGER", "STORE_KEEPER", "ADMIN", "SUPERUSER"];
+  if (pathname === "/my-store") return ["STORE_MANAGER", "STORE_KEEPER", "ADMIN", "SUPERUSER"];
   return null;
 }
 
@@ -193,14 +203,23 @@ export function getDefaultRouteForUser(user = getUserInfo()): string {
   ) {
     return "/warehouse-dashboard";
   }
-  if (roles.includes("MANAGER")) return "/manager-dashboard";
-  if (roles.includes("ADMIN") || roles.includes("SUPERUSER")) return "/admin/users";
+  if (roles.includes("MANAGER")) return "/master-data";
+  if (roles.includes("ADMIN") || roles.includes("SUPERUSER")) return "/master-data";
   if (roles.includes("GATE_SECURITY")) return "/gate-dashboard";
   if (roles.includes("SUPPLIER")) return "/supplier-dashboard";
-  if (roles.includes("ASSEMBLY_MANAGER") || roles.includes("ASSEMBLY") || roles.includes("ASSEMBLY_OPERATOR")) return "/assembly-dashboard";
-  if (roles.includes("DISPATCH") || roles.includes("DISPATCH_MANAGER") || user?.username?.toLowerCase() === "dispatch") return "/dispatch";
-  if (roles.includes("STORE_MANAGER") || roles.includes("STORE_KEEPER"))
-    return "/my-store";
+  if (
+    roles.includes("ASSEMBLY_MANAGER") ||
+    roles.includes("ASSEMBLY") ||
+    roles.includes("ASSEMBLY_OPERATOR")
+  )
+    return "/assembly-dashboard";
+  if (
+    roles.includes("DISPATCH") ||
+    roles.includes("DISPATCH_MANAGER") ||
+    user?.username?.toLowerCase() === "dispatch"
+  )
+    return "/dispatch";
+  if (roles.includes("STORE_MANAGER") || roles.includes("STORE_KEEPER")) return "/my-store";
   if (
     roles.includes("DISPATCH") ||
     roles.includes("DISPATCH_MANAGER") ||

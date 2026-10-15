@@ -1,0 +1,5 @@
+2026/10/15-10:56:16.477 5478 Creating DB D:\KaizenAssests\frontend\.edge-login-preview\Default\EdgeCoupons/coupons_data.db since it was missing.
+2026/10/15-10:56:16.584 5478 Reusing MANIFEST D:\KaizenAssests\frontend\.edge-login-preview\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
+2026/10/15-11:07:51.578 2cb8 Level-0 table #5: started
+2026/10/15-11:07:51.581 2cb8 Level-0 table #5: 683284 bytes OK
+2026/10/15-11:07:51.583 2cb8 Delete type=0 #3

@@ -32,7 +32,8 @@ export function SupplierAsnEnvelope({ progress, asn, ...groupProps }: SupplierAs
   const flapAngle = -open * Math.PI * 0.82;
   const documentY = 0.12 + open * 1.05;
   const documentScale = 0.72 + open * 0.28;
-  const text = (value: unknown) => value === null || value === undefined || value === "" ? "—" : String(value);
+  const text = (value: unknown) =>
+    value === null || value === undefined || value === "" ? "—" : String(value);
 
   return (
     <group
@@ -46,7 +47,14 @@ export function SupplierAsnEnvelope({ progress, asn, ...groupProps }: SupplierAs
         {/* Envelope body and folded front */}
         <mesh castShadow receiveShadow renderOrder={100}>
           <boxGeometry args={[3.2, 0.12, 2.15]} />
-          <meshStandardMaterial color="#f8fafc" emissive="#164e63" emissiveIntensity={0.16} roughness={0.48} metalness={0.06} depthTest={false} />
+          <meshStandardMaterial
+            color="#f8fafc"
+            emissive="#164e63"
+            emissiveIntensity={0.16}
+            roughness={0.48}
+            metalness={0.06}
+            depthTest={false}
+          />
         </mesh>
         <mesh position={[0, 0.08, 0.01]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={101}>
           <planeGeometry args={[2.05, 3.08]} />
@@ -61,18 +69,37 @@ export function SupplierAsnEnvelope({ progress, asn, ...groupProps }: SupplierAs
         </group>
         <mesh position={[0, 0.16, 0]} renderOrder={103}>
           <boxGeometry args={[0.28, 0.035, 0.28]} />
-          <meshStandardMaterial color="#06b6d4" emissive="#22d3ee" emissiveIntensity={0.8} depthTest={false} />
+          <meshStandardMaterial
+            color="#06b6d4"
+            emissive="#22d3ee"
+            emissiveIntensity={0.8}
+            depthTest={false}
+          />
         </mesh>
         {/* ASN document emerges only after the envelope reaches security. */}
         <group position={[0, documentY, 0.12]} scale={documentScale}>
           <mesh visible={open > 0.01} castShadow renderOrder={104}>
             <boxGeometry args={[2.35, 0.035, 1.55]} />
-            <meshStandardMaterial color="#ffffff" emissive="#cffafe" emissiveIntensity={0.25} roughness={0.7} depthTest={false} />
+            <meshStandardMaterial
+              color="#ffffff"
+              emissive="#cffafe"
+              emissiveIntensity={0.25}
+              roughness={0.7}
+              depthTest={false}
+            />
           </mesh>
           {open > 0.08 && (
-            <Html position={[0, 0.04, 0]} rotation={[-Math.PI / 2, 0, 0]} transform distanceFactor={8} zIndexRange={[20, 0]}>
+            <Html
+              position={[0, 0.04, 0]}
+              rotation={[-Math.PI / 2, 0, 0]}
+              transform
+              distanceFactor={8}
+              zIndexRange={[20, 0]}
+            >
               <div className="w-52 rounded-md border border-cyan-400/50 bg-slate-950/95 p-2 text-left font-mono text-[8px] text-white shadow-xl">
-                <div className="mb-1 border-b border-cyan-400/30 pb-1 text-[9px] font-black tracking-widest text-cyan-300">ASN DOCUMENT</div>
+                <div className="mb-1 border-b border-cyan-400/30 pb-1 text-[9px] font-black tracking-widest text-cyan-300">
+                  ASN DOCUMENT
+                </div>
                 <div>ASN: {text(asn?.asn_number)}</div>
                 <div>SUPPLIER: {text(asn?.supplier_name)}</div>
                 <div>PO: {text(asn?.po_number)}</div>
@@ -85,7 +112,11 @@ export function SupplierAsnEnvelope({ progress, asn, ...groupProps }: SupplierAs
         </group>
         <Html position={[0, 1.5, 0]} center distanceFactor={10} zIndexRange={[20, 0]}>
           <div className="pointer-events-none whitespace-nowrap rounded-full border border-cyan-400/40 bg-slate-950/85 px-2 py-1 font-mono text-[9px] font-bold tracking-widest text-cyan-300">
-            {open > 0.04 ? "ASN RECEIVED BY SECURITY" : arrival > 0.2 ? "SECURITY CHECKPOINT" : "ASN SENT"}
+            {open > 0.04
+              ? "ASN RECEIVED BY SECURITY"
+              : arrival > 0.2
+                ? "SECURITY CHECKPOINT"
+                : "ASN SENT"}
           </div>
         </Html>
       </group>

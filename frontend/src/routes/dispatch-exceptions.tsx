@@ -19,15 +19,23 @@ function DispatchExceptionsPage() {
     setLoading(true);
     try {
       const res = await api.getDispatches();
-      setOrders(res.items?.filter((o: any) => ["CANCELLED", "DELAYED", "RETURNED"].includes(o.status)) || res.items || []);
+      setOrders(
+        res.items?.filter((o: any) => ["CANCELLED", "DELAYED", "RETURNED"].includes(o.status)) ||
+          res.items ||
+          [],
+      );
     } catch (e) {
-      toast.error("Failed to load dispatch exceptions", { description: e instanceof Error ? e.message : undefined });
+      toast.error("Failed to load dispatch exceptions", {
+        description: e instanceof Error ? e.message : undefined,
+      });
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { void loadData(); }, [loadData]);
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
   const handleReturn = async (id: string) => {
     try {
@@ -35,7 +43,9 @@ function DispatchExceptionsPage() {
       toast.success("Order return processed successfully");
       void loadData();
     } catch (err) {
-      toast.error("Failed to process return", { description: err instanceof Error ? err.message : undefined });
+      toast.error("Failed to process return", {
+        description: err instanceof Error ? err.message : undefined,
+      });
     }
   };
 
@@ -50,10 +60,14 @@ function DispatchExceptionsPage() {
       }
     >
       {loading ? (
-        <div className="grid h-64 place-items-center"><Loader2 className="size-8 animate-spin text-primary" /></div>
+        <div className="grid h-64 place-items-center">
+          <Loader2 className="size-8 animate-spin text-primary" />
+        </div>
       ) : (
         <Card className="rounded-2xl overflow-hidden">
-          <div className="p-4 border-b font-semibold">Exceptions & Returns Queue ({orders.length})</div>
+          <div className="p-4 border-b font-semibold">
+            Exceptions & Returns Queue ({orders.length})
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="bg-muted/50 text-[10px] uppercase text-muted-foreground">
@@ -67,11 +81,17 @@ function DispatchExceptionsPage() {
               </thead>
               <tbody>
                 {orders.length === 0 ? (
-                  <tr><td colSpan={5} className="text-center py-8 text-muted-foreground">No dispatch exceptions or returns found.</td></tr>
+                  <tr>
+                    <td colSpan={5} className="text-center py-8 text-muted-foreground">
+                      No dispatch exceptions or returns found.
+                    </td>
+                  </tr>
                 ) : (
                   orders.map((order) => (
                     <tr key={order.id} className="border-t">
-                      <td className="px-4 py-3 font-bold">{order.order_number || order.id?.substring(0,8)}</td>
+                      <td className="px-4 py-3 font-bold">
+                        {order.order_number || order.id?.substring(0, 8)}
+                      </td>
                       <td className="px-4 py-3">{order.customer_name}</td>
                       <td className="px-4 py-3 text-muted-foreground">{order.destination}</td>
                       <td className="px-4 py-3">
@@ -80,7 +100,12 @@ function DispatchExceptionsPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <Button size="sm" variant="outline" className="rounded-lg text-xs" onClick={() => void handleReturn(order.id)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="rounded-lg text-xs"
+                          onClick={() => void handleReturn(order.id)}
+                        >
                           <RotateCcw className="size-3.5 mr-1.5" /> Process Return
                         </Button>
                       </td>

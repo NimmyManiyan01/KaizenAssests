@@ -12,10 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.dock.domain.enums import (
     AllocationAction,
-    AllocationPriority,
     AllocationStatus,
     DockStatus,
-    DockType,
 )
 from app.modules.dock.infrastructure.persistence.models import (
     DockAllocationHistoryModel,

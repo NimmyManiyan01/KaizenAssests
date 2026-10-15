@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { isValidIdentifier } from "@/lib/input-validation";
 import {
   Select,
   SelectContent,
@@ -371,7 +372,8 @@ function SimpleWarehouseModule() {
               total_quantity: summary.total_stock ?? row.total_quantity,
               on_hand_quantity: summary.total_stock ?? row.on_hand_quantity,
               batch_details: movementBatches.length ? movementBatches : row.batch_details,
-              batch_number: movementBatches.map((b: any) => b.batch_number).join(", ") || row.batch_number,
+              batch_number:
+                movementBatches.map((b: any) => b.batch_number).join(", ") || row.batch_number,
               location: firstLocation?.bin_code || firstLocation?.location_code || row.location,
               location_code: firstLocation?.location_code || row.location_code,
               bin_code: firstLocation?.bin_code || row.bin_code,
@@ -649,9 +651,7 @@ function SimpleWarehouseModule() {
     ])
       .then(([materialResult, rackResult]) => {
         if (materialResult.status === "rejected") {
-          throw new Error(
-            materialResult.reason?.message || "Material QR could not be resolved.",
-          );
+          throw new Error(materialResult.reason?.message || "Material QR could not be resolved.");
         }
         if (rackResult.status === "rejected") {
           throw new Error(rackResult.reason?.message || "BIN QR could not be resolved.");
@@ -825,17 +825,32 @@ function SimpleWarehouseModule() {
 
   const handlePartialApproveMaterialRequest = async (req: any) => {
     const requestItems = Array.isArray(req.items) ? req.items : [req];
-    const approvedItems = requestItems.map((item: any) => ({
-      material_code: item.material_code,
-      approved_quantity: Math.min(Number(item.required_quantity ?? item.quantity ?? 0), Number(item.available_quantity ?? item.available ?? 0)),
-    })).filter((item: any) => item.approved_quantity > 0);
-    if (!approvedItems.length) { toast.error("No available stock can be approved for this request."); return; }
+    const approvedItems = requestItems
+      .map((item: any) => ({
+        material_code: item.material_code,
+        approved_quantity: Math.min(
+          Number(item.required_quantity ?? item.quantity ?? 0),
+          Number(item.available_quantity ?? item.available ?? 0),
+        ),
+      }))
+      .filter((item: any) => item.approved_quantity > 0);
+    if (!approvedItems.length) {
+      toast.error("No available stock can be approved for this request.");
+      return;
+    }
     setIsSubmitting(true);
     try {
-      await api.approveAssemblyMaterialRequest(req.id || req.request_number, { approved_items: approvedItems, remarks: "Partially approved against current available stock." });
-      toast.success(`Partially approved ${req.request_number || req.id}.`); void fetchData();
-    } catch (err: any) { toast.error(err.message || "Failed to partially approve request"); }
-    finally { setIsSubmitting(false); }
+      await api.approveAssemblyMaterialRequest(req.id || req.request_number, {
+        approved_items: approvedItems,
+        remarks: "Partially approved against current available stock.",
+      });
+      toast.success(`Partially approved ${req.request_number || req.id}.`);
+      void fetchData();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to partially approve request");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleRejectMaterialRequest = async (req: any) => {
@@ -844,9 +859,13 @@ function SimpleWarehouseModule() {
     setIsSubmitting(true);
     try {
       await api.rejectAssemblyMaterialRequest(req.id || req.request_number, reason.trim());
-      toast.success(`Rejected Material Request ${req.request_number || req.id}.`); void fetchData();
-    } catch (err: any) { toast.error(err.message || "Failed to reject request"); }
-    finally { setIsSubmitting(false); }
+      toast.success(`Rejected Material Request ${req.request_number || req.id}.`);
+      void fetchData();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to reject request");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Action: Complete Pickup Task
@@ -914,6 +933,10 @@ function SimpleWarehouseModule() {
           toast.error("Please enter a warehouse name.");
           return;
         }
+        if (storeName.length > 100) {
+          toast.error("Warehouse name must be 100 characters or fewer.");
+          return;
+        }
         const nextCode = await api.getNextStoreCode();
         const generatedStoreCode = nextCode?.suggested_store_code;
         const createdStore = await api.createStore({
@@ -945,6 +968,10 @@ function SimpleWarehouseModule() {
           toast.error("Please enter a zone name.");
           return;
         }
+        if (newZoneForm.zone_name.trim().length > 100) {
+          toast.error("Zone name must be 100 characters or fewer.");
+          return;
+        }
         const nextZone = await api.getNextZoneCode(targetStoreId);
         const generatedZoneCode = nextZone?.suggested_zone_code;
         const createdZone = await api.createZone(targetStoreId, {
@@ -965,6 +992,10 @@ function SimpleWarehouseModule() {
         const selectedZoneObj = zones.find((z) => z.id === targetZoneId);
 
         const prefix = rackGenerator.prefix.trim() || "RACK-";
+        if (!isValidIdentifier(prefix, /^[A-Za-z0-9_-]+$/)) {
+          toast.error("Rack prefix may contain only letters, numbers, underscores, and hyphens.");
+          return;
+        }
         const start = Number(rackGenerator.start);
         const count = Number(rackGenerator.count);
         if (
@@ -977,7 +1008,6 @@ function SimpleWarehouseModule() {
           toast.error("Enter a valid starting number and between 1 and 100 racks.");
           return;
         }
-
         const storeCode = stores.find((s) => s.id === targetStoreId)?.store_code;
         const rackCodes = Array.from(
           { length: count },
@@ -1017,6 +1047,10 @@ function SimpleWarehouseModule() {
           !row.bin_code.trim()
         ) {
           toast.error("Select warehouse, zone, rack, shelf/position, and bin code.");
+          return;
+        }
+        if (!isValidIdentifier(row.rack) || !isValidIdentifier(row.position) || !isValidIdentifier(row.bin_code)) {
+          toast.error("Rack, position, and bin codes may contain only letters, numbers, underscores, and hyphens.");
           return;
         }
         const existingBins = await api.getZoneBins(newBinForm.zone_id);
@@ -1106,27 +1140,65 @@ function SimpleWarehouseModule() {
 
   const getInventoryDisplayQuantity = (item: any) => {
     const batches = Array.isArray(item.batch_details) ? item.batch_details : [];
-    const batchTotal = batches.reduce((sum: number, batch: any) => sum + Number(batch.quantity || 0), 0);
-    const summaryQuantity = item.available_to_pick_quantity ?? item.available ?? item.available_quantity ?? item.total_quantity;
-    return Number(summaryQuantity || 0) === 0 && batchTotal > 0 ? batchTotal : summaryQuantity ?? "—";
+    const batchTotal = batches.reduce(
+      (sum: number, batch: any) => sum + Number(batch.quantity || 0),
+      0,
+    );
+    const summaryQuantity =
+      item.available_to_pick_quantity ??
+      item.available ??
+      item.available_quantity ??
+      item.total_quantity;
+    return Number(summaryQuantity || 0) === 0 && batchTotal > 0
+      ? batchTotal
+      : (summaryQuantity ?? "—");
   };
 
   const getInventoryDisplayLocation = (item: any) =>
-    item.location_code || item.bin_code || item.location || item.batch_details?.[0]?.location || "—";
+    item.location_code ||
+    item.bin_code ||
+    item.location ||
+    item.batch_details?.[0]?.location ||
+    "—";
 
   const [agingAlertDays, setAgingAlertDays] = useState(15);
   const agingRows = useMemo(() => {
     const now = Date.now();
-    return inventorySummary.map((item: any) => {
-      const storedAt = item.putaway_date || item.putaway_completed_at || item.stored_at || item.received_at || item.grn_accepted_at || item.created_at;
-      const storedTime = storedAt ? new Date(storedAt).getTime() : NaN;
-      const ageDays = Number.isFinite(storedTime) ? Math.max(0, Math.floor((now - storedTime) / 86400000)) : null;
-      const qc = String(item.qc_status || item.quality_status || item.status || "").toUpperCase();
-      const expiry = item.expiry_date || item.expiration_date;
-      const expired = Boolean(expiry && new Date(expiry).getTime() < now);
-      const onHold = ["HOLD", "QC_HOLD", "QUARANTINED", "REJECTED", "QUALITY_FAILED"].includes(qc);
-      return { item, storedAt, ageDays, expired, onHold };
-    }).filter((row) => row.ageDays !== null && !row.onHold && !row.expired && Number(row.item.available ?? row.item.available_quantity ?? row.item.on_hand_quantity ?? row.item.total_quantity ?? 0) > 0).sort((a, b) => (a.ageDays! < b.ageDays! ? 1 : -1));
+    return inventorySummary
+      .map((item: any) => {
+        const storedAt =
+          item.putaway_date ||
+          item.putaway_completed_at ||
+          item.stored_at ||
+          item.received_at ||
+          item.grn_accepted_at ||
+          item.created_at;
+        const storedTime = storedAt ? new Date(storedAt).getTime() : NaN;
+        const ageDays = Number.isFinite(storedTime)
+          ? Math.max(0, Math.floor((now - storedTime) / 86400000))
+          : null;
+        const qc = String(item.qc_status || item.quality_status || item.status || "").toUpperCase();
+        const expiry = item.expiry_date || item.expiration_date;
+        const expired = Boolean(expiry && new Date(expiry).getTime() < now);
+        const onHold = ["HOLD", "QC_HOLD", "QUARANTINED", "REJECTED", "QUALITY_FAILED"].includes(
+          qc,
+        );
+        return { item, storedAt, ageDays, expired, onHold };
+      })
+      .filter(
+        (row) =>
+          row.ageDays !== null &&
+          !row.onHold &&
+          !row.expired &&
+          Number(
+            row.item.available ??
+              row.item.available_quantity ??
+              row.item.on_hand_quantity ??
+              row.item.total_quantity ??
+              0,
+          ) > 0,
+      )
+      .sort((a, b) => (a.ageDays! < b.ageDays! ? 1 : -1));
   }, [inventorySummary]);
   const agingAlerts = agingRows.filter((row) => (row.ageDays ?? 0) >= agingAlertDays);
 
@@ -1166,7 +1238,9 @@ function SimpleWarehouseModule() {
         group.batches.add(task.batch_number || task.batchNumber);
       if (task.material_name || task.item_code)
         group.materials.add(task.material_name || task.item_code);
-      group.quantity += Number(task.stored_quantity ?? task.quantity ?? task.received_quantity ?? 0);
+      group.quantity += Number(
+        task.stored_quantity ?? task.quantity ?? task.received_quantity ?? 0,
+      );
       if (task.status !== "COMPLETED" && task.status !== "STORED") group.status = task.status;
       groups.set(key, group);
     }
@@ -1417,7 +1491,10 @@ function SimpleWarehouseModule() {
                     </tr>
                   ) : (
                     groupedPutawayTasks.map((t, index) => (
-                      <tr key={t.id || t.key || `${t.grn_number || "putaway"}-${index}`} className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
+                      <tr
+                        key={t.id || t.key || `${t.grn_number || "putaway"}-${index}`}
+                        className="hover:bg-slate-50 dark:hover:bg-slate-900/50"
+                      >
                         <td className="py-3 px-3 font-semibold text-indigo-600">
                           {t.grn_number || t.key}
                         </td>
@@ -1584,11 +1661,13 @@ function SimpleWarehouseModule() {
                             {item.material_name || item.material}
                           </td>
                           <td className="py-3 px-3 font-mono text-slate-500">
-                            {item.batch_number || item.batch || item.batch_details?.map((b: any) => b.batch_number).join(", ") || "-"}
+                            {item.batch_number ||
+                              item.batch ||
+                              item.batch_details?.map((b: any) => b.batch_number).join(", ") ||
+                              "-"}
                           </td>
                           <td className="py-3 px-3 font-bold text-emerald-600">
-                            Available: {getInventoryDisplayQuantity(item)}{" "}
-                            {item.uom || ""}
+                            Available: {getInventoryDisplayQuantity(item)} {item.uom || ""}
                           </td>
                           <td className="py-3 px-3">
                             <Badge variant="outline" className="text-[10px] font-mono">
@@ -1607,10 +1686,11 @@ function SimpleWarehouseModule() {
                                     const firstLocation = Array.isArray(detail?.locations)
                                       ? detail.locations[0]
                                       : null;
-                                    const putawayMovements = (Array.isArray(detail?.movements)
-                                      ? detail.movements
-                                      : []
-                                    ).filter((movement: any) => movement.movement_type === "PUTAWAY");
+                                    const putawayMovements = (
+                                      Array.isArray(detail?.movements) ? detail.movements : []
+                                    ).filter(
+                                      (movement: any) => movement.movement_type === "PUTAWAY",
+                                    );
                                     const movementBatches = putawayMovements
                                       .filter((movement: any) => movement.batch_lot)
                                       .map((movement: any) => ({
@@ -1620,14 +1700,20 @@ function SimpleWarehouseModule() {
                                       }));
                                     const refreshedRow = {
                                       batch_details: movementBatches,
-                                      batch_number: movementBatches.map((b: any) => b.batch_number).join(", "),
+                                      batch_number: movementBatches
+                                        .map((b: any) => b.batch_number)
+                                        .join(", "),
                                       available: detail?.summary?.available_stock,
                                       available_quantity: detail?.summary?.available_stock,
                                       total_quantity: detail?.summary?.total_stock,
                                       on_hand_quantity: detail?.summary?.total_stock,
                                       location_code: firstLocation?.location_code,
-                                      bin_code: firstLocation?.bin_code || putawayMovements[0]?.to_location,
-                                      location: firstLocation?.bin_code || firstLocation?.location_code || putawayMovements[0]?.to_location,
+                                      bin_code:
+                                        firstLocation?.bin_code || putawayMovements[0]?.to_location,
+                                      location:
+                                        firstLocation?.bin_code ||
+                                        firstLocation?.location_code ||
+                                        putawayMovements[0]?.to_location,
                                       uom: detail?.summary?.uom,
                                     };
                                     setInventorySummary((rows: any[]) =>
@@ -1647,17 +1733,24 @@ function SimpleWarehouseModule() {
                                               ? movementBatches
                                               : detail?.batches || [],
                                             detail_movements: detail?.movements,
-                                            warehouse: firstLocation?.store_name || detail?.warehouse,
+                                            warehouse:
+                                              firstLocation?.store_name || detail?.warehouse,
                                             zone_code: firstLocation?.zone_code,
                                             bin_code:
-                                              firstLocation?.bin_code || putawayMovements[0]?.to_location,
+                                              firstLocation?.bin_code ||
+                                              putawayMovements[0]?.to_location,
                                             location:
-                                              firstLocation?.location_code || putawayMovements[0]?.to_location,
+                                              firstLocation?.location_code ||
+                                              putawayMovements[0]?.to_location,
                                             total_quantity:
-                                              detail?.summary?.total_stock ?? current.total_quantity,
+                                              detail?.summary?.total_stock ??
+                                              current.total_quantity,
                                             available:
                                               detail?.summary?.available_stock ?? current.available,
-                                            uom: detail?.summary?.uom || firstLocation?.uom || current.uom,
+                                            uom:
+                                              detail?.summary?.uom ||
+                                              firstLocation?.uom ||
+                                              current.uom,
                                           }
                                         : current,
                                     );
@@ -1736,11 +1829,33 @@ function SimpleWarehouseModule() {
                           </Badge>
                         </td>
                         <td className="py-3 px-3 text-right">
-                          {(req.status === "PENDING" || req.status === "SUBMITTED" || req.status === "PENDING_WAREHOUSE_APPROVAL") && (
+                          {(req.status === "PENDING" ||
+                            req.status === "SUBMITTED" ||
+                            req.status === "PENDING_WAREHOUSE_APPROVAL") && (
                             <div className="flex justify-end gap-1">
-                              <Button size="sm" onClick={() => handleApproveMaterialRequest(req)} className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white">Approve</Button>
-                              <Button size="sm" variant="outline" onClick={() => handlePartialApproveMaterialRequest(req)} className="h-7 text-xs">Partial</Button>
-                              <Button size="sm" variant="outline" onClick={() => handleRejectMaterialRequest(req)} className="h-7 text-xs text-red-600">Reject</Button>
+                              <Button
+                                size="sm"
+                                onClick={() => handleApproveMaterialRequest(req)}
+                                className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                              >
+                                Approve
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handlePartialApproveMaterialRequest(req)}
+                                className="h-7 text-xs"
+                              >
+                                Partial
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleRejectMaterialRequest(req)}
+                                className="h-7 text-xs text-red-600"
+                              >
+                                Reject
+                              </Button>
                             </div>
                           )}
                         </td>
@@ -1758,10 +1873,85 @@ function SimpleWarehouseModule() {
           <TabsContent value="picking" className="space-y-6 mt-6">
             <Card className="overflow-hidden rounded-2xl border-amber-200 bg-amber-50/40 p-5 dark:border-amber-900/50 dark:bg-amber-950/10">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="flex items-start gap-3"><Clock className="mt-0.5 size-5 text-amber-600" /><div><h3 className="text-sm font-bold uppercase tracking-wider text-amber-900 dark:text-amber-200">Raw Material Aging Reminder</h3><p className="mt-1 text-xs text-amber-800/80 dark:text-amber-200/80">Oldest eligible raw-material batches appear first. QC holds and expired stock are excluded.</p></div></div>
-                <div className="flex items-center gap-1.5"><span className="text-[10px] font-bold uppercase text-muted-foreground">Alert after</span>{[15, 30].map((days) => <Button key={days} size="sm" variant={agingAlertDays === days ? "default" : "outline"} className="h-7 rounded-lg px-2 text-[10px]" onClick={() => setAgingAlertDays(days)}>{days} days</Button>)}</div>
+                <div className="flex items-start gap-3">
+                  <Clock className="mt-0.5 size-5 text-amber-600" />
+                  <div>
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-amber-900 dark:text-amber-200">
+                      Raw Material Aging Reminder
+                    </h3>
+                    <p className="mt-1 text-xs text-amber-800/80 dark:text-amber-200/80">
+                      Oldest eligible raw-material batches appear first. QC holds and expired stock
+                      are excluded.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold uppercase text-muted-foreground">
+                    Alert after
+                  </span>
+                  {[15, 30].map((days) => (
+                    <Button
+                      key={days}
+                      size="sm"
+                      variant={agingAlertDays === days ? "default" : "outline"}
+                      className="h-7 rounded-lg px-2 text-[10px]"
+                      onClick={() => setAgingAlertDays(days)}
+                    >
+                      {days} days
+                    </Button>
+                  ))}
+                </div>
               </div>
-              {agingAlerts.length === 0 ? <p className="mt-4 text-xs text-muted-foreground">No eligible raw-material batches have reached the selected aging threshold.</p> : <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-xs"><thead className="border-b border-amber-200 text-[10px] uppercase text-amber-900/70"><tr><th className="p-2">Material</th><th className="p-2">Batch</th><th className="p-2">Rack</th><th className="p-2">Quantity</th><th className="p-2">Storage date</th><th className="p-2">Age</th></tr></thead><tbody>{agingAlerts.map(({ item, storedAt, ageDays }) => <tr key={`${item.material_code}-${item.batch_number}-${item.bin_code || item.rack || item.location}`} className="border-b border-amber-100"><td className="p-2 font-semibold">{item.material_name || item.material_code || "—"}</td><td className="p-2 font-mono">{item.batch_number || item.batch || "—"}</td><td className="p-2 font-mono">{item.rack || item.rack_code || item.bin_code || item.location || "—"}</td><td className="p-2 font-bold">{item.available ?? item.available_quantity ?? item.on_hand_quantity ?? item.total_quantity ?? "—"} {item.uom || ""}</td><td className="p-2">{storedAt ? new Date(storedAt).toLocaleDateString() : "—"}</td><td className="p-2 font-bold text-amber-700">Stored {ageDays} days</td></tr>)}</tbody></table></div>}
+              {agingAlerts.length === 0 ? (
+                <p className="mt-4 text-xs text-muted-foreground">
+                  No eligible raw-material batches have reached the selected aging threshold.
+                </p>
+              ) : (
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="border-b border-amber-200 text-[10px] uppercase text-amber-900/70">
+                      <tr>
+                        <th className="p-2">Material</th>
+                        <th className="p-2">Batch</th>
+                        <th className="p-2">Rack</th>
+                        <th className="p-2">Quantity</th>
+                        <th className="p-2">Storage date</th>
+                        <th className="p-2">Age</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {agingAlerts.map(({ item, storedAt, ageDays }) => (
+                        <tr
+                          key={`${item.material_code}-${item.batch_number}-${item.bin_code || item.rack || item.location}`}
+                          className="border-b border-amber-100"
+                        >
+                          <td className="p-2 font-semibold">
+                            {item.material_name || item.material_code || "—"}
+                          </td>
+                          <td className="p-2 font-mono">
+                            {item.batch_number || item.batch || "—"}
+                          </td>
+                          <td className="p-2 font-mono">
+                            {item.rack || item.rack_code || item.bin_code || item.location || "—"}
+                          </td>
+                          <td className="p-2 font-bold">
+                            {item.available ??
+                              item.available_quantity ??
+                              item.on_hand_quantity ??
+                              item.total_quantity ??
+                              "—"}{" "}
+                            {item.uom || ""}
+                          </td>
+                          <td className="p-2">
+                            {storedAt ? new Date(storedAt).toLocaleDateString() : "—"}
+                          </td>
+                          <td className="p-2 font-bold text-amber-700">Stored {ageDays} days</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </Card>
             <Card className="p-5 overflow-x-auto">
               <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 uppercase tracking-wider">
@@ -2828,7 +3018,6 @@ function SimpleWarehouseModule() {
                   {selectedInventory.bin_code || selectedInventory.location || "-"}
                 </div>
               </div>
-
             </div>
           )}
         </DialogContent>

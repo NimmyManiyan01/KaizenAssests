@@ -2,10 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
 import { requireRole } from "@/lib/auth-utils";
-import {
-  api,
-  type AssemblyQualityInspectionItem,
-} from "@/lib/api-client";
+import { api, type AssemblyQualityInspectionItem } from "@/lib/api-client";
 import {
   AlertTriangle,
   ArrowRight,
@@ -42,9 +39,11 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { parseNonNegativeNumber } from "@/lib/input-validation";
 
 export const Route = createFileRoute("/assembly/quality")({
-  beforeLoad: () => requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER", "QUALITY", "QC"]),
+  beforeLoad: () =>
+    requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER", "QUALITY", "QC"]),
   head: () => ({ meta: [{ title: "Quality Inspection · KaizenAssests" }] }),
   component: AssemblyQualityPage,
 });
@@ -128,17 +127,29 @@ function AssemblyQualityPage() {
     setHeldQty(0);
   };
 
-  const totalInspected = Number(passedQty) + Number(failedQty) + Number(reworkQty) + Number(heldQty);
+  const parsedPassedQty = parseNonNegativeNumber(passedQty);
+  const parsedFailedQty = parseNonNegativeNumber(failedQty);
+  const parsedReworkQty = parseNonNegativeNumber(reworkQty);
+  const parsedHeldQty = parseNonNegativeNumber(heldQty);
+  const totalInspected =
+    (parsedPassedQty ?? Number.NaN) +
+    (parsedFailedQty ?? Number.NaN) +
+    (parsedReworkQty ?? Number.NaN) +
+    (parsedHeldQty ?? Number.NaN);
   const expectedProduced = inspectItem ? inspectItem.produced_quantity : 0;
   const isQuantityValid =
-    Number(passedQty) >= 0 && Number(failedQty) >= 0 && Number(reworkQty) >= 0 && totalInspected === expectedProduced;
+    parsedPassedQty !== null &&
+    parsedFailedQty !== null &&
+    parsedReworkQty !== null &&
+    parsedHeldQty !== null &&
+    totalInspected === expectedProduced;
 
   const handleInspectSubmit = async () => {
     if (!inspectItem) return;
 
     if (!isQuantityValid) {
       toast.error(
-        `Total inspected quantity (${totalInspected}) must match produced quantity (${expectedProduced}).`
+        `Total inspected quantity (${totalInspected}) must match produced quantity (${expectedProduced}).`,
       );
       return;
     }
@@ -147,10 +158,10 @@ function AssemblyQualityPage() {
       setSubmitting(true);
       const res = await api.performAssemblyQualityInspection({
         order_id: inspectItem.order_id,
-        passed_quantity: Number(passedQty),
-        failed_quantity: Number(failedQty),
-        rework_quantity: Number(reworkQty),
-        held_quantity: Number(heldQty),
+        passed_quantity: parsedPassedQty,
+        failed_quantity: parsedFailedQty,
+        rework_quantity: parsedReworkQty,
+        held_quantity: parsedHeldQty,
       });
 
       toast.success(res.message || `Quality inspection completed for ${inspectItem.order_number}`);
@@ -169,10 +180,11 @@ function AssemblyQualityPage() {
   const passedQc = inspections.filter((i) => i.qc_status === "PASSED").length;
   const reworkQc = inspections.filter((i) => i.qc_status === "REWORK").length;
   const failedQc = inspections.filter((i) => i.qc_status === "FAILED").length;
-  const completedQc = inspections.filter((i) => i.qc_status && i.qc_status !== "PENDING_INSPECTION").length;
+  const completedQc = inspections.filter(
+    (i) => i.qc_status && i.qc_status !== "PENDING_INSPECTION",
+  ).length;
 
-  const passRate =
-    completedQc > 0 ? Math.round((passedQc / completedQc) * 100) : undefined;
+  const passRate = completedQc > 0 ? Math.round((passedQc / completedQc) * 100) : undefined;
 
   // Filtered list
   const filteredInspections = useMemo(() => {
@@ -183,7 +195,7 @@ function AssemblyQualityPage() {
         i.order_number?.toLowerCase().includes(q) ||
         i.product_name?.toLowerCase().includes(q) ||
         i.product_code?.toLowerCase().includes(q) ||
-        i.inspected_by?.toLowerCase().includes(q)
+        i.inspected_by?.toLowerCase().includes(q),
     );
   }, [inspections, search]);
 
@@ -393,10 +405,14 @@ function AssemblyQualityPage() {
                   <div
                     className={cn(
                       "grid size-9 shrink-0 place-items-center rounded-lg border",
-                      sc.tone === "blue" && "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",
-                      sc.tone === "amber" && "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20",
-                      sc.tone === "cyan" && "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border-cyan-500/20",
-                      sc.tone === "emerald" && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                      sc.tone === "blue" &&
+                        "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",
+                      sc.tone === "amber" &&
+                        "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20",
+                      sc.tone === "cyan" &&
+                        "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border-cyan-500/20",
+                      sc.tone === "emerald" &&
+                        "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
                     )}
                   >
                     <Icon className="size-4" />
@@ -425,7 +441,8 @@ function AssemblyQualityPage() {
                   Quality Assurance Work Center
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  Audit assembled batches, record inspection breakdown, and approve for Finished Goods storage
+                  Audit assembled batches, record inspection breakdown, and approve for Finished
+                  Goods storage
                 </p>
               </div>
               <div className="text-xs text-muted-foreground self-start sm:self-auto font-medium">
@@ -452,7 +469,7 @@ function AssemblyQualityPage() {
                       "px-2.5 py-1 text-xs font-semibold rounded-lg transition-all",
                       statusFilter === tab.key
                         ? "bg-card text-foreground shadow-xs border border-border/50"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted",
                     )}
                   >
                     {tab.label}
@@ -557,7 +574,9 @@ function AssemblyQualityPage() {
 
                       {/* Product Details */}
                       <td className="py-3.5 px-3">
-                        <div className="font-semibold text-foreground text-xs">{item.product_name}</div>
+                        <div className="font-semibold text-foreground text-xs">
+                          {item.product_name}
+                        </div>
                         <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
                           {item.product_code}
                         </div>
@@ -576,7 +595,9 @@ function AssemblyQualityPage() {
                       {/* QC Breakdown */}
                       <td className="py-3.5 px-3 whitespace-nowrap">
                         {item.qc_status === "PENDING_INSPECTION" ? (
-                          <span className="text-xs text-muted-foreground italic">Pending inspection</span>
+                          <span className="text-xs text-muted-foreground italic">
+                            Pending inspection
+                          </span>
                         ) : (
                           <div className="flex flex-wrap items-center gap-1.5 text-xs font-mono">
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-500/15 border border-emerald-500/25">
@@ -597,7 +618,9 @@ function AssemblyQualityPage() {
                       </td>
 
                       {/* QC Status */}
-                      <td className="py-3.5 px-3 whitespace-nowrap">{getQcStatusBadge(item.qc_status)}</td>
+                      <td className="py-3.5 px-3 whitespace-nowrap">
+                        {getQcStatusBadge(item.qc_status)}
+                      </td>
 
                       {/* Inspector & Date */}
                       <td className="py-3.5 px-3 whitespace-nowrap">
@@ -608,7 +631,9 @@ function AssemblyQualityPage() {
                               {item.inspected_by}
                             </span>
                             <span className="text-muted-foreground text-[10px] mt-0.5">
-                              {item.inspected_at ? new Date(item.inspected_at).toLocaleDateString() : ""}
+                              {item.inspected_at
+                                ? new Date(item.inspected_at).toLocaleDateString()
+                                : ""}
                             </span>
                           </div>
                         ) : (
@@ -672,7 +697,8 @@ function AssemblyQualityPage() {
                 <span className="font-mono font-semibold text-foreground">
                   {inspectItem?.order_number}
                 </span>
-                . Passed items generate certified Finished Goods stock stored in the Assembly FG Area, ready for customer dispatch.
+                . Passed items generate certified Finished Goods stock stored in the Assembly FG
+                Area, ready for customer dispatch.
               </DialogDescription>
             </DialogHeader>
 
@@ -681,7 +707,9 @@ function AssemblyQualityPage() {
                 <div className="rounded-xl bg-muted/40 p-3.5 text-xs space-y-2 border border-border/60">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Product to Inspect:</span>
-                    <span className="font-semibold text-foreground">{inspectItem.product_name}</span>
+                    <span className="font-semibold text-foreground">
+                      {inspectItem.product_name}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Total Produced Batch:</span>
@@ -693,7 +721,7 @@ function AssemblyQualityPage() {
 
                 {/* Quantities breakdown */}
                 <div className="space-y-3">
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="space-y-1">
                       <label className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                         <CheckCircle2 className="size-3" /> Passed Qty *
@@ -757,7 +785,7 @@ function AssemblyQualityPage() {
                       "p-2.5 rounded-xl text-xs flex items-center justify-between font-medium border",
                       isQuantityValid
                         ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/25"
-                        : "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/25"
+                        : "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/25",
                     )}
                   >
                     <span>
@@ -768,7 +796,6 @@ function AssemblyQualityPage() {
                     </span>
                   </div>
                 </div>
-
               </div>
             )}
 

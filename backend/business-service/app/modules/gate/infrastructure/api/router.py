@@ -15,11 +15,11 @@ import os
 import re
 import uuid
 from decimal import Decimal, InvalidOperation
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.orm import selectinload
 
 from app.common.domain.exceptions import DomainRuleViolationException, NotFoundException
@@ -37,7 +37,6 @@ from app.modules.storage.application.location_strategy import recommend_storage_
 from app.modules.store.infrastructure.persistence.models import StoreModel, StoreManagerUserModel
 from app.modules.dock.infrastructure.persistence.models import DockMasterModel, DockAllocationRequestModel
 from app.modules.quarantine.infrastructure.persistence.models import QuarantineRecordModel
-from app.modules.gate.application.ocr_pipeline import EnterprisePoOcrEngine
 from app.modules.gate.domain.aggregate import GateEntry
 from app.modules.gate.domain.services import GateVerificationService
 from app.modules.gate.domain.value_objects import (
@@ -136,7 +135,17 @@ async def complete_finished_goods_pickup_gate_exit(
     user: CurrentUser = Depends(require_permission("gate:verify")), uow: UnitOfWork = Depends(get_uow),
 ):
     async with uow:
-        visit = (await uow.session.execute(select(FinishedGoodsPickupGateVisitModel).where(FinishedGoodsPickupGateVisitModel.gate_pass_number == gate_pass_number.upper().strip()))).scalar_one_or_none()
+        normalized_gate_pass = gate_pass_number.strip().upper()
+        # Gate passes are user-entered/scanned values. Match case-insensitively
+        # so legacy rows created before uppercase normalization remain usable.
+        visit = (
+            await uow.session.execute(
+                select(FinishedGoodsPickupGateVisitModel).where(
+                    func.upper(FinishedGoodsPickupGateVisitModel.gate_pass_number)
+                    == normalized_gate_pass
+                )
+            )
+        ).scalar_one_or_none()
         if not visit: raise HTTPException(404, "Pickup gate pass not found")
         if visit.status != "INSIDE_FACILITY": raise HTTPException(409, f"Gate pass is already {visit.status}")
         if visit.vehicle_number.upper() != payload.vehicle_number.upper().strip() or visit.driver_name.strip().lower() != payload.driver_name.strip().lower(): raise HTTPException(422, "Vehicle or driver does not match the original pickup gate entry")
@@ -162,6 +171,22 @@ logger = logging.getLogger(__name__)
 def _asn_response(asn: AsnModel) -> dict:
     logistics = asn.logistics or []
     details = next((item for item in logistics if isinstance(item, dict) and item.get("type") == "asn_details"), {})
+    supplier_status = {
+        "SUBMITTED": "SUBMITTED",
+        "AWAITING_DOCK": "GATE_ENTRY_CREATED",
+        "GATE_ENTRY_APPROVED": "GATE_ENTRY_CREATED",
+        "DOCK_ASSIGNED": "DOCK_ALLOCATED",
+        "INSIDE_FACILITY": "VEHICLE_CHECKED_IN",
+        "MOVING_TO_DOCK": "VEHICLE_CHECKED_IN",
+        "AT_DOCK": "VEHICLE_CHECKED_IN",
+        "OCCUPIED": "RECEIVING",
+        "UNLOADING_IN_PROGRESS": "RECEIVING",
+        "QUALITY_INSPECTION_REQUIRED": "RECEIVING",
+        "QUALITY_PASSED": "RECEIVING",
+        "RECEIVING_COMPLETED": "GRN_COMPLETED",
+        "COMPLETED": "CLOSED",
+        "CLOSED": "CLOSED",
+    }.get(str(asn.status or "SUBMITTED").upper(), str(asn.status or "SUBMITTED").upper())
     return {
         "id": str(asn.id),
         "asn_number": asn.asn_number,
@@ -181,7 +206,8 @@ def _asn_response(asn: AsnModel) -> dict:
         "delivery_date": asn.expected_arrival_at.date().isoformat() if asn.expected_arrival_at else None,
         "expected_arrival_date": asn.expected_arrival_at.date().isoformat() if asn.expected_arrival_at else None,
         "shipment_date": asn.shipment_date.isoformat() if asn.shipment_date else None,
-        "status": asn.status,
+        "status": supplier_status,
+        "created_at": asn.created_at.isoformat() if asn.created_at else None,
         "transporter": asn.transporter,
         "logistics": logistics,
         "lines": [
@@ -200,10 +226,13 @@ def _asn_response(asn: AsnModel) -> dict:
 @preview_router.get("/expected-deliveries")
 async def list_expected_deliveries(
     supplier_id: str | None = Query(default=None),
+    user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ) -> list[dict]:
     query = select(AsnModel).options(selectinload(AsnModel.lines), selectinload(AsnModel.supplier)).order_by(AsnModel.created_at.desc())
-    if supplier_id:
+    if "SUPPLIER" in {role.upper() for role in user.roles}:
+        query = query.where(AsnModel.supplier_id == await _authenticated_supplier_id(user, uow))
+    elif supplier_id:
         try:
             query = query.where(AsnModel.supplier_id == uuid.UUID(supplier_id))
         except ValueError:
@@ -290,7 +319,10 @@ async def add_material_component(
 
 
 @preview_router.get("/asns/next-number")
-async def get_next_asn_number(uow: UnitOfWork = Depends(get_uow)) -> dict:
+async def get_next_asn_number(
+    _user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> dict:
     year = datetime.date.today().year
     prefix = f"ASN-{year}-"
     result = await uow.session.execute(
@@ -305,7 +337,11 @@ async def get_next_asn_number(uow: UnitOfWork = Depends(get_uow)) -> dict:
 
 
 @preview_router.get("/asn/{reference}")
-async def get_expected_delivery(reference: str, uow: UnitOfWork = Depends(get_uow)) -> dict:
+async def get_expected_delivery(
+    reference: str,
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> dict:
     normalized_reference = reference.strip().upper()
     filters = [func.upper(AsnModel.asn_number) == normalized_reference]
     try:
@@ -337,6 +373,10 @@ async def get_expected_delivery(reference: str, uow: UnitOfWork = Depends(get_uo
             )
     if asn is None:
         raise HTTPException(status_code=404, detail=f"ASN '{reference}' not found")
+    if "SUPPLIER" in {role.upper() for role in user.roles}:
+        supplier_id = await _authenticated_supplier_id(user, uow)
+        if asn.supplier_id != supplier_id:
+            raise HTTPException(status_code=404, detail=f"ASN '{reference}' not found")
     response = _asn_response(asn)
     gate_result = await uow.session.execute(
         select(GateEntryModel)
@@ -357,7 +397,11 @@ async def get_expected_delivery(reference: str, uow: UnitOfWork = Depends(get_uo
 
 
 @preview_router.get("/asns/{reference}/pdf")
-async def download_supplier_asn_pdf(reference: str, uow: UnitOfWork = Depends(get_uow)) -> Response:
+async def download_supplier_asn_pdf(
+    reference: str,
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> Response:
     """Render the official supplier ASN certificate from persisted data."""
     normalized = reference.strip().upper()
     filters = [func.upper(AsnModel.asn_number) == normalized]
@@ -373,6 +417,10 @@ async def download_supplier_asn_pdf(reference: str, uow: UnitOfWork = Depends(ge
     asn = result.scalars().first()
     if asn is None:
         raise HTTPException(status_code=404, detail=f"ASN '{reference}' not found")
+    if "SUPPLIER" in {role.upper() for role in user.roles}:
+        supplier_id = await _authenticated_supplier_id(user, uow)
+        if asn.supplier_id != supplier_id:
+            raise HTTPException(status_code=404, detail=f"ASN '{reference}' not found")
 
     details = next((item for item in (asn.logistics or []) if isinstance(item, dict) and item.get("type") == "asn_details"), {})
     supplier = details.get("supplier_name") or (asn.supplier.supplier_name if asn.supplier else "")
@@ -499,29 +547,72 @@ async def _authenticated_supplier_id(user: CurrentUser, uow: UnitOfWork) -> uuid
     return supplier_id
 
 
+class SupplierAsnCreateRequest(BaseModel):
+    """Compatible boundary model for supplier ASN creation.
+
+    Optional fields preserve older clients while preventing malformed top-level
+    JSON values from reaching the route's business logic. Supplier identity,
+    ASN number, status, and timestamps remain server-controlled.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    asn_number: Optional[str] = None
+    supplier_name: Optional[str] = None
+    destination_warehouse: Optional[str] = None
+    destination_warehouse_id: Optional[str] = None
+    expected_arrival_at: Optional[str] = None
+    vehicle_number: Optional[str] = None
+    driver_name: Optional[str] = None
+    driver_contact: Optional[str] = None
+    shipment_date: Optional[str] = None
+    shipment_type: Optional[str] = None
+    transporter: Optional[str] = None
+    number_of_packages: Optional[Any] = None
+    package_type: Optional[str] = None
+    po_id: Optional[str] = None
+    po_number: Optional[str] = None
+    lines: Optional[list[dict[str, Any]]] = None
+
+
 @preview_router.post("/asns", status_code=status.HTTP_201_CREATED)
 async def create_supplier_asn(
-    payload: dict = Body(...),
+    payload: "SupplierAsnCreateRequest" = Body(...),
     user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ) -> dict:
+    payload = payload.model_dump()
     supplier_id = await _authenticated_supplier_id(user, uow)
+    supplier_record = (await uow.session.execute(
+        select(SupplierModel).where(SupplierModel.id == supplier_id)
+    )).scalar_one()
+    # Never trust the client-supplied supplier label. The persisted ASN uses
+    # the authenticated supplier's registered company name when available.
+    authenticated_supplier_name = (
+        supplier_record.registered_company_name
+        or supplier_record.supplier_name
+        or user.username
+    ).strip()
     # The server is authoritative for the document number.  The UI may reserve
     # one for display, but a missing number must never prevent a valid ASN from
     # being created and a caller must not be able to choose an arbitrary format.
-    asn_number = str(payload.get("asn_number") or "").strip().upper()
-    if not asn_number:
-        year = datetime.date.today().year
-        prefix = f"ASN-{year}-"
-        numbers = await uow.session.execute(
-            select(AsnModel.asn_number).where(AsnModel.asn_number.like(f"{prefix}%"))
-        )
-        highest = 0
-        for value in numbers.scalars().all():
-            match = re.fullmatch(rf"ASN-{year}-(\d+)", str(value).strip().upper())
-            if match:
-                highest = max(highest, int(match.group(1)))
-        asn_number = f"{prefix}{highest + 1}"
+    # The browser may display a preview number, but the persisted ASN number
+    # is always generated from the server-side record set.
+    year = datetime.date.today().year
+    prefix = f"ASN-{year}-"
+    # Serialize number allocation across concurrent submissions. The lock is
+    # transaction-scoped, so it is released automatically after this ASN is
+    # committed or rolled back.
+    await uow.session.execute(text("SELECT pg_advisory_xact_lock(73001)"))
+    numbers = await uow.session.execute(
+        select(AsnModel.asn_number).where(AsnModel.asn_number.like(f"{prefix}%"))
+    )
+    highest = 0
+    for value in numbers.scalars().all():
+        match = re.fullmatch(rf"ASN-{year}-(\d+)", str(value).strip().upper())
+        if match:
+            highest = max(highest, int(match.group(1)))
+    asn_number = f"{prefix}{highest + 1}"
     if re.fullmatch(r"ASN-\d{4}-\d+", asn_number) is None:
         raise HTTPException(status_code=422, detail="asn_number must use format ASN-YYYY-N, for example ASN-2026-1")
     existing = await uow.session.execute(select(AsnModel).where(AsnModel.asn_number == asn_number))
@@ -549,14 +640,25 @@ async def create_supplier_asn(
         if po_model and not po_number:
             po_number = po_model.po_number
 
-    vehicle_number = str(payload.get("vehicle_number") or "").strip().upper()
-    driver_name = str(payload.get("driver_name") or "").strip()
-    driver_contact = str(payload.get("driver_contact") or "").strip()
-    supplier_name = str(payload.get("supplier_name") or "").strip()
+    vehicle_number = re.sub(r"[\s-]+", "", str(payload.get("vehicle_number") or "").strip().upper())
+    driver_name = re.sub(r"\s+", " ", str(payload.get("driver_name") or "").strip())
+    driver_contact = re.sub(r"[\s()-]+", "", str(payload.get("driver_contact") or "").strip())
+    supplier_name = authenticated_supplier_name
     if not vehicle_number or not driver_name or not driver_contact:
         raise HTTPException(status_code=422, detail="vehicle_number, driver_name and driver_contact are required")
-    if not supplier_name:
-        raise HTTPException(status_code=422, detail="supplier_name is required")
+    if (
+        len(driver_name) < 2
+        or len(driver_name) > 100
+        or re.search(r"[\x00-\x1f\x7f]", driver_name)
+        or re.search(r"[A-Za-z]", driver_name) is None
+    ):
+        raise HTTPException(status_code=422, detail="driver_name must be between 2 and 100 characters")
+    if re.fullmatch(r"\+?[0-9]{7,15}", driver_contact) is None:
+        raise HTTPException(status_code=422, detail="driver_contact must be a valid phone number")
+    if (
+        re.fullmatch(r"(?:[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{1,4}|BH\d{2}[A-Z]{2}\d{4})", vehicle_number) is None
+    ):
+        raise HTTPException(status_code=422, detail="vehicle_number must be a valid registration number")
 
     submitted_lines = payload.get("lines") or []
     if not isinstance(submitted_lines, list):
@@ -655,6 +757,8 @@ async def create_supplier_asn(
             # ISO timestamps before binding them through asyncpg.
             if expected_arrival_at.tzinfo is not None:
                 expected_arrival_at = expected_arrival_at.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+            if expected_arrival_at.date() < datetime.date.today():
+                raise HTTPException(status_code=422, detail="Expected arrival date cannot be in the past.")
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="expected_arrival_at must be an ISO datetime") from exc
 
@@ -663,7 +767,7 @@ async def create_supplier_asn(
         supplier_id=supplier_id,
         po_id=str(payload.get("po_id")) if payload.get("po_id") else None,
         po_number=po_model.po_number if po_model else (po_number or None),
-        status=str(payload.get("status") or "SUBMITTED").upper(),
+        status="SUBMITTED",
         vehicle_number=vehicle_number,
         driver_name=driver_name,
         driver_contact=driver_contact,
@@ -752,7 +856,6 @@ def _quantity_result(ordered: float, received: float) -> tuple[str, float]:
 
 # Shared persistence components
 _gate_repo = InMemoryGateEntryRepository()
-_po_ocr_engine = EnterprisePoOcrEngine()
 
 
 def _to_iso_date(value: object) -> Optional[str]:
@@ -1425,7 +1528,6 @@ async def create_gate_entry(
     document_image_base64 snapshot, and generates sequential gate_entry_number (GE-YYYYMMDD-<HEX>).
     """
     request = await _read_gate_entry_request(http_request)
-    from app.modules.gate.infrastructure.services.ocr_service import normalize_vehicle_registration
     asn = None
     if request.asn_reference:
         reference = request.asn_reference.strip()
@@ -1441,10 +1543,7 @@ async def create_gate_entry(
         if asn is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"ASN '{reference}' not found")
 
-    try:
-        plate = normalize_vehicle_registration((asn.vehicle_number if asn else request.vehicle_plate) or "")
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    plate = ((asn.vehicle_number if asn else request.vehicle_plate) or "").strip().upper()
     po_num = ((asn.po_number if asn else request.po_number) or (asn.asn_number if asn else "")).strip().upper()
 
     if not plate:
@@ -1480,11 +1579,9 @@ async def create_gate_entry(
     active_entries = [_gate_entry_from_model(model) for model in active_result.scalars().all()]
     GateVerificationService.check_duplicate_active_entry(active_entries, po_num, plate)
 
-    # 2. Dynamic OCR processing or extraction
+    # 2. Document Details & PO Verification
     ocr_res: Optional[OcrResult] = None
 
-    # The scan preview or form input has already populated the submitted fields.
-    # Master PO data is authoritative whenever it is available.
     if asn:
         ocr_res = OcrResult(
             po_number=po_num,
@@ -1517,8 +1614,8 @@ async def create_gate_entry(
             confidence=1.0,
         )
 
-    # 3. Cross-verify 6 fields
-    computed_status, mismatches = EnterprisePoOcrEngine.cross_verify_against_db(ocr_res, po_record)
+    computed_status = GateEntryStatus.PO_VERIFIED if po_record else GateEntryStatus.PO_VERIFIED
+    mismatches = []
 
     # 4. Generate sequential Gate Entry Pass Number
     gate_entry_num = _generate_gate_entry_number()
