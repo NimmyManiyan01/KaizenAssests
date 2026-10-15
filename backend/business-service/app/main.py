@@ -76,8 +76,42 @@ async def lifespan(app: FastAPI):
         from app.modules.dispatch.infrastructure.persistence import models as dispatch_models  # noqa: F401
         from app.modules.customer_orders.infrastructure.persistence import models as customer_order_models  # noqa: F401
 
+        def _ensure_sqlite_columns(sync_conn):
+            if sync_conn.dialect.name == "sqlite":
+                for table_name, table in Base.metadata.tables.items():
+                    res = sync_conn.exec_driver_sql(f"PRAGMA table_info({table_name})")
+                    existing_cols = {row[1] for row in res.fetchall()}
+                    if not existing_cols:
+                        continue
+                    for col in table.columns:
+                        if col.name not in existing_cols:
+                            t = str(col.type).upper()
+                            if "INT" in t:
+                                sql_type = "INTEGER"
+                            elif "BOOL" in t:
+                                sql_type = "BOOLEAN"
+                            elif "NUM" in t or "DEC" in t or "FLOAT" in t:
+                                sql_type = "NUMERIC"
+                            elif "DATE" in t or "TIME" in t:
+                                sql_type = "TIMESTAMP"
+                            else:
+                                sql_type = "TEXT"
+                            d_val = None
+                            if col.default is not None and col.default.arg is not None:
+                                if isinstance(col.default.arg, (str, int, float, bool)):
+                                    d_val = f"'{col.default.arg}'" if isinstance(col.default.arg, str) else str(col.default.arg)
+                            elif col.server_default is not None:
+                                raw = str(col.server_default.arg)
+                                d_val = raw if (raw.isdigit() or raw.startswith("'") or raw in ("true", "false", "TRUE", "FALSE")) else f"'{raw}'"
+                            default_clause = f" DEFAULT {d_val}" if d_val else ""
+                            try:
+                                sync_conn.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN {col.name} {sql_type}{default_clause}")
+                            except Exception:
+                                pass
+
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
+            await connection.run_sync(_ensure_sqlite_columns)
         logger.info("Ensured ORM database schema exists")
     except Exception as exc:
         logger.exception("Failed to initialize ORM database schema: %s", exc)
