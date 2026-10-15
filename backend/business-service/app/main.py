@@ -247,6 +247,21 @@ async def lifespan(app: FastAPI):
             except Exception:
                 pass
 
+        # Keep finished-goods pickup gate visits compatible with older databases.
+        # These fields are written when Security completes the pickup exit.
+        for col in [
+            ("exited_at", "TIMESTAMP WITH TIME ZONE"),
+            ("exit_approved_by", "VARCHAR(128)"),
+            ("documents_verified", "BOOLEAN DEFAULT FALSE"),
+        ]:
+            try:
+                await run_ddl(
+                    f"ALTER TABLE finished_goods_pickup_gate_visit "
+                    f"ADD COLUMN IF NOT EXISTS {col[0]} {col[1]}"
+                )
+            except Exception:
+                pass
+
         # Add columns to asn
         for col in [
             ("shipment_date", "DATE DEFAULT CURRENT_DATE"),
@@ -357,7 +372,6 @@ async def lifespan(app: FastAPI):
             ("registered_company_name", "VARCHAR(256)"),
             ("vendor_type", "VARCHAR(64)"),
             ("category", "JSON"),
-            ("created_by", "VARCHAR(64)"),
             ("updated_by", "VARCHAR(64)"),
         ]:
             try:

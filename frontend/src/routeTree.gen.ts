@@ -30,6 +30,7 @@ import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as PutawayTasksRouteImport } from './routes/putaway-tasks'
 import { Route as ReceivingRouteImport } from './routes/receiving'
 import { Route as SupplierDashboardRouteImport } from './routes/supplier-dashboard'
+import { Route as SupplierMaterialsRouteImport } from './routes/supplier-materials'
 import { Route as VehicleExitRouteImport } from './routes/vehicle-exit'
 import { Route as VehicleQueueRouteImport } from './routes/vehicle-queue'
 import { Route as WarehouseDashboardRouteImport } from './routes/warehouse-dashboard'
@@ -155,6 +156,11 @@ const ReceivingRoute = ReceivingRouteImport.update({
 const SupplierDashboardRoute = SupplierDashboardRouteImport.update({
   id: '/supplier-dashboard',
   path: '/supplier-dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SupplierMaterialsRoute = SupplierMaterialsRouteImport.update({
+  id: '/supplier-materials',
+  path: '/supplier-materials',
   getParentRoute: () => rootRouteImport,
 } as any)
 const VehicleExitRoute = VehicleExitRouteImport.update({
@@ -291,6 +297,7 @@ export interface FileRoutesByFullPath {
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
   '/supplier-dashboard': typeof SupplierDashboardRoute
+  '/supplier-materials': typeof SupplierMaterialsRoute
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
@@ -335,6 +342,7 @@ export interface FileRoutesByTo {
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
   '/supplier-dashboard': typeof SupplierDashboardRoute
+  '/supplier-materials': typeof SupplierMaterialsRoute
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
@@ -380,6 +388,7 @@ export interface FileRoutesById {
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
   '/supplier-dashboard': typeof SupplierDashboardRoute
+  '/supplier-materials': typeof SupplierMaterialsRoute
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
@@ -426,6 +435,7 @@ export interface FileRouteTypes {
     | '/putaway-tasks'
     | '/receiving'
     | '/supplier-dashboard'
+    | '/supplier-materials'
     | '/vehicle-exit'
     | '/vehicle-queue'
     | '/warehouse-dashboard'
@@ -470,6 +480,7 @@ export interface FileRouteTypes {
     | '/putaway-tasks'
     | '/receiving'
     | '/supplier-dashboard'
+    | '/supplier-materials'
     | '/vehicle-exit'
     | '/vehicle-queue'
     | '/warehouse-dashboard'
@@ -514,6 +525,7 @@ export interface FileRouteTypes {
     | '/putaway-tasks'
     | '/receiving'
     | '/supplier-dashboard'
+    | '/supplier-materials'
     | '/vehicle-exit'
     | '/vehicle-queue'
     | '/warehouse-dashboard'
@@ -559,6 +571,7 @@ export interface RootRouteChildren {
   PutawayTasksRoute: typeof PutawayTasksRoute
   ReceivingRoute: typeof ReceivingRoute
   SupplierDashboardRoute: typeof SupplierDashboardRoute
+  SupplierMaterialsRoute: typeof SupplierMaterialsRoute
   VehicleExitRoute: typeof VehicleExitRoute
   VehicleQueueRoute: typeof VehicleQueueRoute
   WarehouseDashboardRoute: typeof WarehouseDashboardRoute
@@ -728,6 +741,13 @@ declare module '@tanstack/react-router' {
       path: '/supplier-dashboard'
       fullPath: '/supplier-dashboard'
       preLoaderRoute: typeof SupplierDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/supplier-materials': {
+      id: '/supplier-materials'
+      path: '/supplier-materials'
+      fullPath: '/supplier-materials'
+      preLoaderRoute: typeof SupplierMaterialsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/vehicle-exit': {
@@ -914,6 +934,7 @@ const rootRouteChildren: RootRouteChildren = {
   PutawayTasksRoute: PutawayTasksRoute,
   ReceivingRoute: ReceivingRoute,
   SupplierDashboardRoute: SupplierDashboardRoute,
+  SupplierMaterialsRoute: SupplierMaterialsRoute,
   VehicleExitRoute: VehicleExitRoute,
   VehicleQueueRoute: VehicleQueueRoute,
   WarehouseDashboardRoute: WarehouseDashboardRoute,

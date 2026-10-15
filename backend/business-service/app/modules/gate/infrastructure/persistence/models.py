@@ -304,7 +304,8 @@ class GateEntryModel(Base):
 class FinishedGoodsPickupGateVisitModel(Base):
     __tablename__ = "finished_goods_pickup_gate_visit"
 
-    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    # Existing databases store this primary key as VARCHAR, not UUID.
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
     request_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("finished_goods_request.id", ondelete="RESTRICT"), nullable=False, unique=True, index=True)
     gate_pass_number: Mapped[str] = mapped_column(String(6), nullable=False, unique=True, index=True)
     supplier_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)

@@ -1451,6 +1451,18 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  async cancelAsn(id: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/gate/asns/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+    });
+  },
+
+  async deleteAsn(id: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/gate/asns/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+
   async getArrivalNotifications(): Promise<any[]> {
     return this.getNotifications("GATE_SECURITY");
   },
@@ -1487,8 +1499,8 @@ export const api = {
     }
   },
 
-  async getMaterialComponents(): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/gate/materials`);
+  async getMaterialComponents(status: string = "ACTIVE"): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/gate/materials?status=${encodeURIComponent(status)}`);
     /*
       { code: "MAT-RAD-001", name: "SKID MOUNTED RADIATOR", category: "Heavy Components", uom: "PCS" },
       { code: "MAT-ECP-002", name: "ENGINE CONTROL PANEL", category: "Control Systems", uom: "PCS" },
@@ -1515,12 +1527,24 @@ export const api = {
     ]; */
   },
 
-  async createMaterialComponent(name: string, uom: string = "PCS"): Promise<any> {
+  async createMaterialComponent(name: string, uom: string = "PCS", materialCode?: string, category = "General", description = ""): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/gate/materials`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, uom }),
+      body: JSON.stringify({ name, uom, material_code: materialCode, category, description }),
     });
+  },
+
+  async updateGateMaterial(id: string, data: any): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+  },
+
+  async updateGateMaterialStatus(id: string, status: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+  },
+
+  async deleteGateMaterial(id: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
   async getNextMaterialRequestNumber(): Promise<{

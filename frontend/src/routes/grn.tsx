@@ -191,9 +191,8 @@ const GRN_LOCAL_DRAFT_KEY = "grn_wizard_local_draft";
 
 function generateGrnNumber(): string {
   const now = new Date();
-  const date = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
-  const sequence = `${Date.now()}`.slice(-6);
-  return `GRN-${date}-${sequence}`;
+  const year = now.getFullYear();
+  return `GRN-${year}-001`;
 }
 
 function formatCardDate(dateVal?: string | null): string {
@@ -1203,7 +1202,7 @@ function GrnPageWorkflow() {
     if (newType === "UNEXPECTED_DELIVERY") {
       const generatedGrn =
         header.grn_number ||
-        `GRN-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, "0")}${String(new Date().getDate()).padStart(2, "0")}-${Math.floor(1000 + Math.random() * 9000)}`;
+        generateGrnNumber();
       setHeader((prev) => ({
         ...prev,
         receipt_type: "UNEXPECTED_DELIVERY",
@@ -6258,7 +6257,7 @@ function GrnPageWorkflow() {
 
                       const grnNumber =
                         header.grn_number ||
-                        `GRN-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, "0")}${String(new Date().getDate()).padStart(2, "0")}-${Math.floor(1000 + Math.random() * 9000)}`;
+                        generateGrnNumber();
 
                       const newRecord = {
                         grn_id: grnId || grnNumber,
