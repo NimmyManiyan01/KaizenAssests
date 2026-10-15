@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
+import { isValidDateInput, isValidMobileNumber, isValidPersonName, isValidVehicleNumber, parsePositiveNumber, requiredText, sanitizeMobileNumber, sanitizePersonName, sanitizeVehicleNumber } from "@/lib/input-validation";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/supplier/dispatch")({
@@ -15,8 +16,6 @@ export const Route = createFileRoute("/supplier/dispatch")({
 });
 
 function SupplierDispatchPage() {
-  const now = new Date();
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const [open, setOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [vehicleNumber, setVehicleNumber] = React.useState("");
@@ -24,18 +23,9 @@ function SupplierDispatchPage() {
   const [driverContact, setDriverContact] = React.useState("");
   const [expectedPickupDate, setExpectedPickupDate] = React.useState("");
   const [finishedGoods, setFinishedGoods] = React.useState<
-    Array<{
-      code: string;
-      name: string;
-      quantity: number;
-      uom: string;
-      batch?: string;
-      serial?: string;
-    }>
+    Array<{ code: string; name: string; quantity: number; uom: string }>
   >([]);
   const [goods, setGoods] = React.useState([{ name: "", quantity: "", custom: false }]);
-  const [errors, setErrors] = React.useState<Record<string, string>>({});
-  const firstInvalidRef = React.useRef<HTMLInputElement | HTMLSelectElement | null>(null);
   const [dispatchHistory, setDispatchHistory] = React.useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = React.useState(true);
   const [selectedDispatch, setSelectedDispatch] = React.useState<any | null>(null);
@@ -55,8 +45,6 @@ function SupplierDispatchPage() {
           name: row.product_name || row.product_code,
           quantity: Number(row.quantity),
           uom: row.uom || "PCS",
-          batch: row.batch_number,
-          serial: row.serial_number,
         }))
         .filter(
           (row, index, all) => all.findIndex((candidate) => candidate.code === row.code) === index,
@@ -91,38 +79,41 @@ function SupplierDispatchPage() {
 
   const submitDispatch = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const names = goods
+      .map((item) => requiredText(item.name))
+      .filter((value): value is string => Boolean(value));
+    const firstQuantity = parsePositiveNumber(goods[0]?.quantity);
+    const vehicle = requiredText(vehicleNumber);
+    const driver = requiredText(driverName);
+    const contact = requiredText(driverContact);
+    if (!names.length || firstQuantity === null || !vehicle || !driver || !contact) {
+      toast.error("Enter a finished good, positive quantity, vehicle, driver, and contact");
+      return;
+    }
+    if (!isValidVehicleNumber(vehicle) || !isValidPersonName(driver) || !isValidMobileNumber(contact)) {
+      toast.error("Use letters, numbers and spaces for vehicle, letters and spaces for driver, and exactly 10 digits for contact");
+      return;
+    }
+    if (!isValidDateInput(expectedPickupDate)) {
+      toast.error("Enter a valid expected pickup date");
+      return;
+    }
     const selectedGood = finishedGoods.find(
-      (good) => good.name === goods[0]?.name || good.code === goods[0]?.name,
+      (good) => good.name === names[0] || good.code === names[0],
     );
-    const quantity = Number(goods[0]?.quantity);
-    const nextErrors: Record<string, string> = {};
-    if (!expectedPickupDate || expectedPickupDate < today)
-      nextErrors.pickupDate = "Select today or a future pickup date.";
-    if (!/^[A-Z]{2}\s?\d{1,2}\s?[A-Z]{1,3}\s?\d{4}$/.test(vehicleNumber.trim().toUpperCase()))
-      nextErrors.vehicle = "Enter a valid vehicle number.";
-    if (!/^[A-Za-z][A-Za-z .-]*$/.test(driverName.trim()))
-      nextErrors.driver = "Driver name is required.";
-    if (!/^[6-9]\d{9}$/.test(driverContact))
-      nextErrors.contact = "Enter a valid 10-digit mobile number.";
-    if (!selectedGood) nextErrors.goods = "Select an available finished good.";
-    if (!Number.isInteger(quantity) || quantity <= 0)
-      nextErrors.quantity = "Enter a whole number greater than zero.";
-    else if (selectedGood && quantity > selectedGood.quantity)
-      nextErrors.quantity = `Quantity cannot exceed available stock (${selectedGood.quantity} ${selectedGood.uom}).`;
-    setErrors(nextErrors);
-    if (Object.keys(nextErrors).length) {
-      firstInvalidRef.current?.focus();
+    if (selectedGood && firstQuantity > selectedGood.quantity) {
+      toast.error("Quantity exceeds available finished goods stock");
       return;
     }
     setSubmitting(true);
     try {
       const createdDispatch = await api.createSupplierFinishedGoodsDispatchRequest({
-        product_code: selectedGood.code,
-        product_name: selectedGood.name,
-        quantity,
-        vehicle_number: vehicleNumber.trim().toUpperCase(),
-        driver_name: driverName.trim().replace(/\s+/g, " "),
-        driver_contact: driverContact,
+        product_code: selectedGood?.code || names[0] || "FINISHED-GOOD",
+        product_name: names[0] || "Finished Good",
+        quantity: firstQuantity,
+        vehicle_number: vehicle,
+        driver_name: driver,
+        driver_contact: contact,
         expected_pickup_date: expectedPickupDate,
         /* request metadata is persisted by the supplier request endpoint */
         /* legacy dispatch fields below are intentionally ignored */
@@ -135,11 +126,11 @@ function SupplierDispatchPage() {
         transporter: vehicleNumber,
         notes: `Vehicle: ${vehicleNumber}\nDriver: ${driverName}\nDriver contact: ${driverContact}`,
         items: goods.map((item) => ({
-          material_code: selectedGood.code,
-          material_name: selectedGood.name,
-          quantity_ordered: quantity,
-          quantity_available: selectedGood.quantity,
-          quantity_pending: quantity,
+          material_code: item.name.trim().toUpperCase().replace(/\s+/g, "-") || "FINISHED-GOOD",
+          material_name: item.name.trim(),
+          quantity_ordered: parsePositiveNumber(item.quantity) ?? 0,
+          quantity_available: parsePositiveNumber(item.quantity) ?? 0,
+          quantity_pending: parsePositiveNumber(item.quantity) ?? 0,
           uom: "PCS",
         })),
       } as any);
@@ -162,7 +153,6 @@ function SupplierDispatchPage() {
       setOpen(false);
       setGoods([{ name: "", quantity: "", custom: false }]);
       setExpectedPickupDate("");
-      setErrors({});
       void loadDispatchHistory();
     } catch (error) {
       toast.error("Could not create dispatch", {
@@ -175,7 +165,7 @@ function SupplierDispatchPage() {
 
   return (
     <AppShell
-      title="Finished Goods Dispatch Requests"
+      title="Supplier Dispatch"
       subtitle="Prepare and submit advance shipment notifications for warehouse arrival."
       actions={
         <Button
@@ -271,96 +261,54 @@ function SupplierDispatchPage() {
         <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>Create Dispatch</DialogTitle>
-            <p className="text-sm text-muted-foreground">Dispatch Details</p>
           </DialogHeader>
           <form onSubmit={submitDispatch} className="space-y-5">
-            <section className="space-y-3">
-              <h3 className="font-semibold">Pickup Details</h3>
+            <div>
+              <Label htmlFor="pickup-date">Expected pickup date</Label>
+              <Input
+                id="pickup-date"
+                required
+                type="date"
+                value={expectedPickupDate}
+                onChange={(e) => setExpectedPickupDate(e.target.value)}
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
               <div>
-                <Label htmlFor="pickup-date">Expected pickup date *</Label>
+                <Label htmlFor="vehicle-number">Vehicle number</Label>
                 <Input
-                  ref={firstInvalidRef as React.RefObject<HTMLInputElement>}
-                  id="pickup-date"
-                  aria-invalid={Boolean(errors.pickupDate)}
-                  aria-describedby={errors.pickupDate ? "pickup-date-error" : undefined}
+                  id="vehicle-number"
                   required
-                  type="date"
-                  min={today}
-                  value={expectedPickupDate}
-                  onChange={(e) => {
-                    setExpectedPickupDate(e.target.value);
-                    setErrors((x) => ({ ...x, pickupDate: "" }));
-                  }}
+                  value={vehicleNumber}
+                  onChange={(e) => setVehicleNumber(sanitizeVehicleNumber(e.target.value))}
                 />
-                {errors.pickupDate && (
-                  <p id="pickup-date-error" className="text-sm text-destructive">
-                    {errors.pickupDate}
-                  </p>
-                )}
               </div>
-            </section>
-            <section className="space-y-3">
-              <h3 className="font-semibold">Transport Details</h3>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div>
-                  <Label htmlFor="vehicle-number">Vehicle number *</Label>
-                  <Input
-                    ref={firstInvalidRef as React.RefObject<HTMLInputElement>}
-                    id="vehicle-number"
-                    aria-invalid={Boolean(errors.vehicle)}
-                    placeholder="KA42EH6948"
-                    required
-                    value={vehicleNumber}
-                    onChange={(e) =>
-                      setVehicleNumber(e.target.value.toUpperCase().replace(/[^A-Z0-9 ]/g, ""))
-                    }
-                  />
-                  {errors.vehicle && <p className="text-sm text-destructive">{errors.vehicle}</p>}
-                </div>
-                <div>
-                  <Label htmlFor="driver-name">Driver name *</Label>
-                  <Input
-                    ref={firstInvalidRef as React.RefObject<HTMLInputElement>}
-                    id="driver-name"
-                    aria-invalid={Boolean(errors.driver)}
-                    required
-                    value={driverName}
-                    onChange={(e) => setDriverName(e.target.value.replace(/[^A-Za-z .-]/g, ""))}
-                  />
-                  {errors.driver && <p className="text-sm text-destructive">{errors.driver}</p>}
-                </div>
-                <div>
-                  <Label htmlFor="driver-contact">Driver contact *</Label>
-                  <Input
-                    ref={firstInvalidRef as React.RefObject<HTMLInputElement>}
-                    id="driver-contact"
-                    aria-invalid={Boolean(errors.contact)}
-                    required
-                    type="tel"
-                    maxLength={10}
-                    value={driverContact}
-                    onChange={(e) =>
-                      setDriverContact(e.target.value.replace(/\D/g, "").slice(0, 10))
-                    }
-                  />
-                  {errors.contact && <p className="text-sm text-destructive">{errors.contact}</p>}
-                </div>
+              <div>
+                <Label htmlFor="driver-name">Driver name</Label>
+                <Input
+                  id="driver-name"
+                  required
+                  value={driverName}
+                  onChange={(e) => setDriverName(sanitizePersonName(e.target.value))}
+                />
               </div>
-            </section>
-            <section className="space-y-3">
-              <h3 className="font-semibold">Finished Goods</h3>
-              {!finishedGoods.length && (
-                <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                  <p className="font-medium text-foreground">
-                    No finished goods are available for dispatch.
-                  </p>
-                  <p>Complete assembly receipt and quality approval before creating a dispatch.</p>
-                </div>
-              )}
+              <div>
+                <Label htmlFor="driver-contact">Driver contact</Label>
+                <Input
+                  id="driver-contact"
+                  required
+                  type="tel"
+                  maxLength={10}
+                  value={driverContact}
+                  onChange={(e) => setDriverContact(sanitizeMobileNumber(e.target.value))}
+                />
+              </div>
+            </div>
+            <div className="space-y-3">
+              <h3 className="font-semibold">Finished goods</h3>
               {goods.map((item, index) => (
                 <div className="flex gap-2" key={index}>
                   <select
-                    ref={firstInvalidRef as React.RefObject<HTMLSelectElement>}
                     required
                     className="h-10 w-full min-w-[220px] flex-[2] rounded-md border bg-background px-3 text-sm"
                     value={item.name}
@@ -375,30 +323,26 @@ function SupplierDispatchPage() {
                     <option value="">
                       {finishedGoods.length
                         ? "Select finished good"
-                        : "No finished goods available for dispatch"}
+                        : "No finished goods available in Assembly"}
                     </option>
                     {finishedGoods.map((good) => (
                       <option key={good.code} value={good.name}>
-                        {good.code} — {good.name} ({good.quantity} {good.uom})
-                        {good.batch ? ` · Batch ${good.batch}` : ""}
+                        {good.name} ({good.quantity} {good.uom})
                       </option>
                     ))}
                   </select>
                   <Input
                     required
                     className="min-w-0 flex-1"
-                    min="1"
-                    step="1"
+                    min="0.01"
+                    step="any"
                     type="number"
-                    inputMode="numeric"
-                    placeholder="Dispatch quantity"
+                    placeholder="Quantity"
                     value={item.quantity}
                     onChange={(e) =>
                       setGoods((rows) =>
                         rows.map((row, i) =>
-                          i === index
-                            ? { ...row, quantity: e.target.value.replace(/\D/g, "") }
-                            : row,
+                          i === index ? { ...row, quantity: e.target.value } : row,
                         ),
                       )
                     }
@@ -415,19 +359,13 @@ function SupplierDispatchPage() {
                   )}
                 </div>
               ))}
-            </section>
-            {errors.quantity && <p className="text-sm text-destructive">{errors.quantity}</p>}
+            </div>
             <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setOpen(false)}
-                disabled={submitting}
-              >
+              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={submitting || !finishedGoods.length}>
-                {submitting ? "Creating…" : "Create Dispatch Request"}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Creating…" : "Create Dispatch"}
               </Button>
             </div>
           </form>

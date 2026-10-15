@@ -138,8 +138,18 @@ export function JourneyCamera({
     const supplierWeight = 1 - smoothstep(0.85, 1, supplierProgress);
     const supplier = supplierJourney(supplierProgress);
     const cameraDistance = size.width < 768 ? 24 : 17;
-    desiredPos.lerp(scratch.front.set(supplier.truck.x - 11, 12, supplier.truck.z + cameraDistance), supplierWeight);
-    desiredTarget.lerp(scratch.frontTarget.set((supplier.truck.x + supplier.envelope.x) / 2, 2.4, (supplier.truck.z + supplier.envelope.z) / 2), supplierWeight);
+    desiredPos.lerp(
+      scratch.front.set(supplier.truck.x - 11, 12, supplier.truck.z + cameraDistance),
+      supplierWeight,
+    );
+    desiredTarget.lerp(
+      scratch.frontTarget.set(
+        (supplier.truck.x + supplier.envelope.x) / 2,
+        2.4,
+        (supplier.truck.z + supplier.envelope.z) / 2,
+      ),
+      supplierWeight,
+    );
     scratch.frontTarget.set(0, 4.8, 10);
 
     const pointerSmoothing = 1 - Math.exp(-12 * Math.min(delta, 0.1));

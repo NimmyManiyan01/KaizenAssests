@@ -14,40 +14,26 @@ import { Route as AssemblyDashboardRouteImport } from './routes/assembly-dashboa
 import { Route as CustomerOrdersRouteImport } from './routes/customer-orders'
 import { Route as DamageClaimsRouteImport } from './routes/damage-claims'
 import { Route as DispatchRouteImport } from './routes/dispatch'
-import { Route as DispatchDriversRouteImport } from './routes/dispatch-drivers'
 import { Route as DispatchExceptionsRouteImport } from './routes/dispatch-exceptions'
-import { Route as DispatchGateExitRouteImport } from './routes/dispatch-gate-exit'
 import { Route as DispatchGateOutRouteImport } from './routes/dispatch-gate-out'
 import { Route as DispatchLoadingRouteImport } from './routes/dispatch-loading'
 import { Route as DispatchOrdersRouteImport } from './routes/dispatch-orders'
 import { Route as DispatchPickingPackingRouteImport } from './routes/dispatch-picking-packing'
-import { Route as DispatchPodRouteImport } from './routes/dispatch-pod'
-import { Route as DispatchReportsRouteImport } from './routes/dispatch-reports'
-import { Route as DispatchTransitRouteImport } from './routes/dispatch-transit'
-import { Route as DispatchTransportAllocationRouteImport } from './routes/dispatch-transport-allocation'
-import { Route as DispatchVehiclesRouteImport } from './routes/dispatch-vehicles'
 import { Route as DockManagementRouteImport } from './routes/dock-management'
 import { Route as DockMasterRouteImport } from './routes/dock-master'
 import { Route as GateDashboardRouteImport } from './routes/gate-dashboard'
 import { Route as GrnRouteImport } from './routes/grn'
 import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as LoginRouteImport } from './routes/login'
-import { Route as ManagerDashboardRouteImport } from './routes/manager-dashboard'
-import { Route as MasterDataRouteImport } from './routes/master-data'
 import { Route as MyStoreRouteImport } from './routes/my-store'
-import { Route as NewSupplierRouteImport } from './routes/new-supplier'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as PutawayTasksRouteImport } from './routes/putaway-tasks'
 import { Route as ReceivingRouteImport } from './routes/receiving'
-import { Route as ReportsRouteImport } from './routes/reports'
-import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SupplierDashboardRouteImport } from './routes/supplier-dashboard'
 import { Route as SupplierMaterialsRouteImport } from './routes/supplier-materials'
-import { Route as UnscheduledArrivalsRouteImport } from './routes/unscheduled-arrivals'
 import { Route as VehicleExitRouteImport } from './routes/vehicle-exit'
 import { Route as VehicleQueueRouteImport } from './routes/vehicle-queue'
 import { Route as WarehouseDashboardRouteImport } from './routes/warehouse-dashboard'
-import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as AssemblyDispatchRouteImport } from './routes/assembly.dispatch'
 import { Route as AssemblyFinishedGoodsRouteImport } from './routes/assembly.finished-goods'
 import { Route as AssemblyMaterialRequestsRouteImport } from './routes/assembly.material-requests'
@@ -57,16 +43,13 @@ import { Route as AssemblyQualityRouteImport } from './routes/assembly.quality'
 import { Route as AssemblyRequestsRouteImport } from './routes/assembly.requests'
 import { Route as GateFinishedGoodsPickupRouteImport } from './routes/gate.finished-goods-pickup'
 import { Route as GateFinishedGoodsPickupExitRouteImport } from './routes/gate.finished-goods-pickup-exit'
-import { Route as PoCodeRouteImport } from './routes/po.$code'
-import { Route as QCodeRouteImport } from './routes/q.$code'
+import { Route as SupplierAsnsRouteImport } from './routes/supplier.asns'
 import { Route as SupplierDispatchRouteImport } from './routes/supplier.dispatch'
 import { Route as WarehouseAssemblyRequisitionsRouteImport } from './routes/warehouse.assembly-requisitions'
-import { Route as WarehouseDispatchTrackingRouteImport } from './routes/warehouse.dispatch-tracking'
 import { Route as WarehouseFinishedGoodsRequestsRouteImport } from './routes/warehouse.finished-goods-requests'
 import { Route as WarehouseFinishedGoodsStoreRouteImport } from './routes/warehouse.finished-goods-store'
 import { Route as WarehouseMaterialRequestsRouteImport } from './routes/warehouse.material-requests'
 import { Route as WarehouseMaterialsRouteImport } from './routes/warehouse.materials'
-import { Route as WarehouseQuarantineRouteImport } from './routes/warehouse.quarantine'
 import { Route as WarehouseStoresRouteImport } from './routes/warehouse.stores'
 import { Route as SupplierAsnsNewRouteImport } from './routes/supplier.asns.new'
 
@@ -95,19 +78,9 @@ const DispatchRoute = DispatchRouteImport.update({
   path: '/dispatch',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DispatchDriversRoute = DispatchDriversRouteImport.update({
-  id: '/dispatch-drivers',
-  path: '/dispatch-drivers',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const DispatchExceptionsRoute = DispatchExceptionsRouteImport.update({
   id: '/dispatch-exceptions',
   path: '/dispatch-exceptions',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DispatchGateExitRoute = DispatchGateExitRouteImport.update({
-  id: '/dispatch-gate-exit',
-  path: '/dispatch-gate-exit',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DispatchGateOutRoute = DispatchGateOutRouteImport.update({
@@ -128,32 +101,6 @@ const DispatchOrdersRoute = DispatchOrdersRouteImport.update({
 const DispatchPickingPackingRoute = DispatchPickingPackingRouteImport.update({
   id: '/dispatch-picking-packing',
   path: '/dispatch-picking-packing',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DispatchPodRoute = DispatchPodRouteImport.update({
-  id: '/dispatch-pod',
-  path: '/dispatch-pod',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DispatchReportsRoute = DispatchReportsRouteImport.update({
-  id: '/dispatch-reports',
-  path: '/dispatch-reports',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DispatchTransitRoute = DispatchTransitRouteImport.update({
-  id: '/dispatch-transit',
-  path: '/dispatch-transit',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DispatchTransportAllocationRoute =
-  DispatchTransportAllocationRouteImport.update({
-    id: '/dispatch-transport-allocation',
-    path: '/dispatch-transport-allocation',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const DispatchVehiclesRoute = DispatchVehiclesRouteImport.update({
-  id: '/dispatch-vehicles',
-  path: '/dispatch-vehicles',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DockManagementRoute = DockManagementRouteImport.update({
@@ -186,24 +133,9 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ManagerDashboardRoute = ManagerDashboardRouteImport.update({
-  id: '/manager-dashboard',
-  path: '/manager-dashboard',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MasterDataRoute = MasterDataRouteImport.update({
-  id: '/master-data',
-  path: '/master-data',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const MyStoreRoute = MyStoreRouteImport.update({
   id: '/my-store',
   path: '/my-store',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const NewSupplierRoute = NewSupplierRouteImport.update({
-  id: '/new-supplier',
-  path: '/new-supplier',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NotificationsRoute = NotificationsRouteImport.update({
@@ -221,16 +153,6 @@ const ReceivingRoute = ReceivingRouteImport.update({
   path: '/receiving',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ReportsRoute = ReportsRouteImport.update({
-  id: '/reports',
-  path: '/reports',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const SupplierDashboardRoute = SupplierDashboardRouteImport.update({
   id: '/supplier-dashboard',
   path: '/supplier-dashboard',
@@ -239,11 +161,6 @@ const SupplierDashboardRoute = SupplierDashboardRouteImport.update({
 const SupplierMaterialsRoute = SupplierMaterialsRouteImport.update({
   id: '/supplier-materials',
   path: '/supplier-materials',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const UnscheduledArrivalsRoute = UnscheduledArrivalsRouteImport.update({
-  id: '/unscheduled-arrivals',
-  path: '/unscheduled-arrivals',
   getParentRoute: () => rootRouteImport,
 } as any)
 const VehicleExitRoute = VehicleExitRouteImport.update({
@@ -259,11 +176,6 @@ const VehicleQueueRoute = VehicleQueueRouteImport.update({
 const WarehouseDashboardRoute = WarehouseDashboardRouteImport.update({
   id: '/warehouse-dashboard',
   path: '/warehouse-dashboard',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AdminUsersRoute = AdminUsersRouteImport.update({
-  id: '/admin/users',
-  path: '/admin/users',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AssemblyDispatchRoute = AssemblyDispatchRouteImport.update({
@@ -313,14 +225,9 @@ const GateFinishedGoodsPickupExitRoute =
     path: '/gate/finished-goods-pickup-exit',
     getParentRoute: () => rootRouteImport,
   } as any)
-const PoCodeRoute = PoCodeRouteImport.update({
-  id: '/po/$code',
-  path: '/po/$code',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const QCodeRoute = QCodeRouteImport.update({
-  id: '/q/$code',
-  path: '/q/$code',
+const SupplierAsnsRoute = SupplierAsnsRouteImport.update({
+  id: '/supplier/asns',
+  path: '/supplier/asns',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SupplierDispatchRoute = SupplierDispatchRouteImport.update({
@@ -332,12 +239,6 @@ const WarehouseAssemblyRequisitionsRoute =
   WarehouseAssemblyRequisitionsRouteImport.update({
     id: '/warehouse/assembly-requisitions',
     path: '/warehouse/assembly-requisitions',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const WarehouseDispatchTrackingRoute =
-  WarehouseDispatchTrackingRouteImport.update({
-    id: '/warehouse/dispatch-tracking',
-    path: '/warehouse/dispatch-tracking',
     getParentRoute: () => rootRouteImport,
   } as any)
 const WarehouseFinishedGoodsRequestsRoute =
@@ -363,20 +264,15 @@ const WarehouseMaterialsRoute = WarehouseMaterialsRouteImport.update({
   path: '/warehouse/materials',
   getParentRoute: () => rootRouteImport,
 } as any)
-const WarehouseQuarantineRoute = WarehouseQuarantineRouteImport.update({
-  id: '/warehouse/quarantine',
-  path: '/warehouse/quarantine',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const WarehouseStoresRoute = WarehouseStoresRouteImport.update({
   id: '/warehouse/stores',
   path: '/warehouse/stores',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SupplierAsnsNewRoute = SupplierAsnsNewRouteImport.update({
-  id: '/supplier/asns/new',
-  path: '/supplier/asns/new',
-  getParentRoute: () => rootRouteImport,
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => SupplierAsnsRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -385,40 +281,26 @@ export interface FileRoutesByFullPath {
   '/customer-orders': typeof CustomerOrdersRoute
   '/damage-claims': typeof DamageClaimsRoute
   '/dispatch': typeof DispatchRoute
-  '/dispatch-drivers': typeof DispatchDriversRoute
   '/dispatch-exceptions': typeof DispatchExceptionsRoute
-  '/dispatch-gate-exit': typeof DispatchGateExitRoute
   '/dispatch-gate-out': typeof DispatchGateOutRoute
   '/dispatch-loading': typeof DispatchLoadingRoute
   '/dispatch-orders': typeof DispatchOrdersRoute
   '/dispatch-picking-packing': typeof DispatchPickingPackingRoute
-  '/dispatch-pod': typeof DispatchPodRoute
-  '/dispatch-reports': typeof DispatchReportsRoute
-  '/dispatch-transit': typeof DispatchTransitRoute
-  '/dispatch-transport-allocation': typeof DispatchTransportAllocationRoute
-  '/dispatch-vehicles': typeof DispatchVehiclesRoute
   '/dock-management': typeof DockManagementRoute
   '/dock-master': typeof DockMasterRoute
   '/gate-dashboard': typeof GateDashboardRoute
   '/grn': typeof GrnRoute
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
-  '/manager-dashboard': typeof ManagerDashboardRoute
-  '/master-data': typeof MasterDataRoute
   '/my-store': typeof MyStoreRoute
-  '/new-supplier': typeof NewSupplierRoute
   '/notifications': typeof NotificationsRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
-  '/reports': typeof ReportsRoute
-  '/settings': typeof SettingsRoute
   '/supplier-dashboard': typeof SupplierDashboardRoute
   '/supplier-materials': typeof SupplierMaterialsRoute
-  '/unscheduled-arrivals': typeof UnscheduledArrivalsRoute
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
-  '/admin/users': typeof AdminUsersRoute
   '/assembly/dispatch': typeof AssemblyDispatchRoute
   '/assembly/finished-goods': typeof AssemblyFinishedGoodsRoute
   '/assembly/material-requests': typeof AssemblyMaterialRequestsRoute
@@ -428,16 +310,13 @@ export interface FileRoutesByFullPath {
   '/assembly/requests': typeof AssemblyRequestsRoute
   '/gate/finished-goods-pickup': typeof GateFinishedGoodsPickupRoute
   '/gate/finished-goods-pickup-exit': typeof GateFinishedGoodsPickupExitRoute
-  '/po/$code': typeof PoCodeRoute
-  '/q/$code': typeof QCodeRoute
+  '/supplier/asns': typeof SupplierAsnsRouteWithChildren
   '/supplier/dispatch': typeof SupplierDispatchRoute
   '/warehouse/assembly-requisitions': typeof WarehouseAssemblyRequisitionsRoute
-  '/warehouse/dispatch-tracking': typeof WarehouseDispatchTrackingRoute
   '/warehouse/finished-goods-requests': typeof WarehouseFinishedGoodsRequestsRoute
   '/warehouse/finished-goods-store': typeof WarehouseFinishedGoodsStoreRoute
   '/warehouse/material-requests': typeof WarehouseMaterialRequestsRoute
   '/warehouse/materials': typeof WarehouseMaterialsRoute
-  '/warehouse/quarantine': typeof WarehouseQuarantineRoute
   '/warehouse/stores': typeof WarehouseStoresRoute
   '/supplier/asns/new': typeof SupplierAsnsNewRoute
 }
@@ -447,40 +326,26 @@ export interface FileRoutesByTo {
   '/customer-orders': typeof CustomerOrdersRoute
   '/damage-claims': typeof DamageClaimsRoute
   '/dispatch': typeof DispatchRoute
-  '/dispatch-drivers': typeof DispatchDriversRoute
   '/dispatch-exceptions': typeof DispatchExceptionsRoute
-  '/dispatch-gate-exit': typeof DispatchGateExitRoute
   '/dispatch-gate-out': typeof DispatchGateOutRoute
   '/dispatch-loading': typeof DispatchLoadingRoute
   '/dispatch-orders': typeof DispatchOrdersRoute
   '/dispatch-picking-packing': typeof DispatchPickingPackingRoute
-  '/dispatch-pod': typeof DispatchPodRoute
-  '/dispatch-reports': typeof DispatchReportsRoute
-  '/dispatch-transit': typeof DispatchTransitRoute
-  '/dispatch-transport-allocation': typeof DispatchTransportAllocationRoute
-  '/dispatch-vehicles': typeof DispatchVehiclesRoute
   '/dock-management': typeof DockManagementRoute
   '/dock-master': typeof DockMasterRoute
   '/gate-dashboard': typeof GateDashboardRoute
   '/grn': typeof GrnRoute
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
-  '/manager-dashboard': typeof ManagerDashboardRoute
-  '/master-data': typeof MasterDataRoute
   '/my-store': typeof MyStoreRoute
-  '/new-supplier': typeof NewSupplierRoute
   '/notifications': typeof NotificationsRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
-  '/reports': typeof ReportsRoute
-  '/settings': typeof SettingsRoute
   '/supplier-dashboard': typeof SupplierDashboardRoute
   '/supplier-materials': typeof SupplierMaterialsRoute
-  '/unscheduled-arrivals': typeof UnscheduledArrivalsRoute
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
-  '/admin/users': typeof AdminUsersRoute
   '/assembly/dispatch': typeof AssemblyDispatchRoute
   '/assembly/finished-goods': typeof AssemblyFinishedGoodsRoute
   '/assembly/material-requests': typeof AssemblyMaterialRequestsRoute
@@ -490,16 +355,13 @@ export interface FileRoutesByTo {
   '/assembly/requests': typeof AssemblyRequestsRoute
   '/gate/finished-goods-pickup': typeof GateFinishedGoodsPickupRoute
   '/gate/finished-goods-pickup-exit': typeof GateFinishedGoodsPickupExitRoute
-  '/po/$code': typeof PoCodeRoute
-  '/q/$code': typeof QCodeRoute
+  '/supplier/asns': typeof SupplierAsnsRouteWithChildren
   '/supplier/dispatch': typeof SupplierDispatchRoute
   '/warehouse/assembly-requisitions': typeof WarehouseAssemblyRequisitionsRoute
-  '/warehouse/dispatch-tracking': typeof WarehouseDispatchTrackingRoute
   '/warehouse/finished-goods-requests': typeof WarehouseFinishedGoodsRequestsRoute
   '/warehouse/finished-goods-store': typeof WarehouseFinishedGoodsStoreRoute
   '/warehouse/material-requests': typeof WarehouseMaterialRequestsRoute
   '/warehouse/materials': typeof WarehouseMaterialsRoute
-  '/warehouse/quarantine': typeof WarehouseQuarantineRoute
   '/warehouse/stores': typeof WarehouseStoresRoute
   '/supplier/asns/new': typeof SupplierAsnsNewRoute
 }
@@ -510,40 +372,26 @@ export interface FileRoutesById {
   '/customer-orders': typeof CustomerOrdersRoute
   '/damage-claims': typeof DamageClaimsRoute
   '/dispatch': typeof DispatchRoute
-  '/dispatch-drivers': typeof DispatchDriversRoute
   '/dispatch-exceptions': typeof DispatchExceptionsRoute
-  '/dispatch-gate-exit': typeof DispatchGateExitRoute
   '/dispatch-gate-out': typeof DispatchGateOutRoute
   '/dispatch-loading': typeof DispatchLoadingRoute
   '/dispatch-orders': typeof DispatchOrdersRoute
   '/dispatch-picking-packing': typeof DispatchPickingPackingRoute
-  '/dispatch-pod': typeof DispatchPodRoute
-  '/dispatch-reports': typeof DispatchReportsRoute
-  '/dispatch-transit': typeof DispatchTransitRoute
-  '/dispatch-transport-allocation': typeof DispatchTransportAllocationRoute
-  '/dispatch-vehicles': typeof DispatchVehiclesRoute
   '/dock-management': typeof DockManagementRoute
   '/dock-master': typeof DockMasterRoute
   '/gate-dashboard': typeof GateDashboardRoute
   '/grn': typeof GrnRoute
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
-  '/manager-dashboard': typeof ManagerDashboardRoute
-  '/master-data': typeof MasterDataRoute
   '/my-store': typeof MyStoreRoute
-  '/new-supplier': typeof NewSupplierRoute
   '/notifications': typeof NotificationsRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
-  '/reports': typeof ReportsRoute
-  '/settings': typeof SettingsRoute
   '/supplier-dashboard': typeof SupplierDashboardRoute
   '/supplier-materials': typeof SupplierMaterialsRoute
-  '/unscheduled-arrivals': typeof UnscheduledArrivalsRoute
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
-  '/admin/users': typeof AdminUsersRoute
   '/assembly/dispatch': typeof AssemblyDispatchRoute
   '/assembly/finished-goods': typeof AssemblyFinishedGoodsRoute
   '/assembly/material-requests': typeof AssemblyMaterialRequestsRoute
@@ -553,16 +401,13 @@ export interface FileRoutesById {
   '/assembly/requests': typeof AssemblyRequestsRoute
   '/gate/finished-goods-pickup': typeof GateFinishedGoodsPickupRoute
   '/gate/finished-goods-pickup-exit': typeof GateFinishedGoodsPickupExitRoute
-  '/po/$code': typeof PoCodeRoute
-  '/q/$code': typeof QCodeRoute
+  '/supplier/asns': typeof SupplierAsnsRouteWithChildren
   '/supplier/dispatch': typeof SupplierDispatchRoute
   '/warehouse/assembly-requisitions': typeof WarehouseAssemblyRequisitionsRoute
-  '/warehouse/dispatch-tracking': typeof WarehouseDispatchTrackingRoute
   '/warehouse/finished-goods-requests': typeof WarehouseFinishedGoodsRequestsRoute
   '/warehouse/finished-goods-store': typeof WarehouseFinishedGoodsStoreRoute
   '/warehouse/material-requests': typeof WarehouseMaterialRequestsRoute
   '/warehouse/materials': typeof WarehouseMaterialsRoute
-  '/warehouse/quarantine': typeof WarehouseQuarantineRoute
   '/warehouse/stores': typeof WarehouseStoresRoute
   '/supplier/asns/new': typeof SupplierAsnsNewRoute
 }
@@ -574,40 +419,26 @@ export interface FileRouteTypes {
     | '/customer-orders'
     | '/damage-claims'
     | '/dispatch'
-    | '/dispatch-drivers'
     | '/dispatch-exceptions'
-    | '/dispatch-gate-exit'
     | '/dispatch-gate-out'
     | '/dispatch-loading'
     | '/dispatch-orders'
     | '/dispatch-picking-packing'
-    | '/dispatch-pod'
-    | '/dispatch-reports'
-    | '/dispatch-transit'
-    | '/dispatch-transport-allocation'
-    | '/dispatch-vehicles'
     | '/dock-management'
     | '/dock-master'
     | '/gate-dashboard'
     | '/grn'
     | '/inventory'
     | '/login'
-    | '/manager-dashboard'
-    | '/master-data'
     | '/my-store'
-    | '/new-supplier'
     | '/notifications'
     | '/putaway-tasks'
     | '/receiving'
-    | '/reports'
-    | '/settings'
     | '/supplier-dashboard'
     | '/supplier-materials'
-    | '/unscheduled-arrivals'
     | '/vehicle-exit'
     | '/vehicle-queue'
     | '/warehouse-dashboard'
-    | '/admin/users'
     | '/assembly/dispatch'
     | '/assembly/finished-goods'
     | '/assembly/material-requests'
@@ -617,16 +448,13 @@ export interface FileRouteTypes {
     | '/assembly/requests'
     | '/gate/finished-goods-pickup'
     | '/gate/finished-goods-pickup-exit'
-    | '/po/$code'
-    | '/q/$code'
+    | '/supplier/asns'
     | '/supplier/dispatch'
     | '/warehouse/assembly-requisitions'
-    | '/warehouse/dispatch-tracking'
     | '/warehouse/finished-goods-requests'
     | '/warehouse/finished-goods-store'
     | '/warehouse/material-requests'
     | '/warehouse/materials'
-    | '/warehouse/quarantine'
     | '/warehouse/stores'
     | '/supplier/asns/new'
   fileRoutesByTo: FileRoutesByTo
@@ -636,40 +464,26 @@ export interface FileRouteTypes {
     | '/customer-orders'
     | '/damage-claims'
     | '/dispatch'
-    | '/dispatch-drivers'
     | '/dispatch-exceptions'
-    | '/dispatch-gate-exit'
     | '/dispatch-gate-out'
     | '/dispatch-loading'
     | '/dispatch-orders'
     | '/dispatch-picking-packing'
-    | '/dispatch-pod'
-    | '/dispatch-reports'
-    | '/dispatch-transit'
-    | '/dispatch-transport-allocation'
-    | '/dispatch-vehicles'
     | '/dock-management'
     | '/dock-master'
     | '/gate-dashboard'
     | '/grn'
     | '/inventory'
     | '/login'
-    | '/manager-dashboard'
-    | '/master-data'
     | '/my-store'
-    | '/new-supplier'
     | '/notifications'
     | '/putaway-tasks'
     | '/receiving'
-    | '/reports'
-    | '/settings'
     | '/supplier-dashboard'
     | '/supplier-materials'
-    | '/unscheduled-arrivals'
     | '/vehicle-exit'
     | '/vehicle-queue'
     | '/warehouse-dashboard'
-    | '/admin/users'
     | '/assembly/dispatch'
     | '/assembly/finished-goods'
     | '/assembly/material-requests'
@@ -679,16 +493,13 @@ export interface FileRouteTypes {
     | '/assembly/requests'
     | '/gate/finished-goods-pickup'
     | '/gate/finished-goods-pickup-exit'
-    | '/po/$code'
-    | '/q/$code'
+    | '/supplier/asns'
     | '/supplier/dispatch'
     | '/warehouse/assembly-requisitions'
-    | '/warehouse/dispatch-tracking'
     | '/warehouse/finished-goods-requests'
     | '/warehouse/finished-goods-store'
     | '/warehouse/material-requests'
     | '/warehouse/materials'
-    | '/warehouse/quarantine'
     | '/warehouse/stores'
     | '/supplier/asns/new'
   id:
@@ -698,40 +509,26 @@ export interface FileRouteTypes {
     | '/customer-orders'
     | '/damage-claims'
     | '/dispatch'
-    | '/dispatch-drivers'
     | '/dispatch-exceptions'
-    | '/dispatch-gate-exit'
     | '/dispatch-gate-out'
     | '/dispatch-loading'
     | '/dispatch-orders'
     | '/dispatch-picking-packing'
-    | '/dispatch-pod'
-    | '/dispatch-reports'
-    | '/dispatch-transit'
-    | '/dispatch-transport-allocation'
-    | '/dispatch-vehicles'
     | '/dock-management'
     | '/dock-master'
     | '/gate-dashboard'
     | '/grn'
     | '/inventory'
     | '/login'
-    | '/manager-dashboard'
-    | '/master-data'
     | '/my-store'
-    | '/new-supplier'
     | '/notifications'
     | '/putaway-tasks'
     | '/receiving'
-    | '/reports'
-    | '/settings'
     | '/supplier-dashboard'
     | '/supplier-materials'
-    | '/unscheduled-arrivals'
     | '/vehicle-exit'
     | '/vehicle-queue'
     | '/warehouse-dashboard'
-    | '/admin/users'
     | '/assembly/dispatch'
     | '/assembly/finished-goods'
     | '/assembly/material-requests'
@@ -741,16 +538,13 @@ export interface FileRouteTypes {
     | '/assembly/requests'
     | '/gate/finished-goods-pickup'
     | '/gate/finished-goods-pickup-exit'
-    | '/po/$code'
-    | '/q/$code'
+    | '/supplier/asns'
     | '/supplier/dispatch'
     | '/warehouse/assembly-requisitions'
-    | '/warehouse/dispatch-tracking'
     | '/warehouse/finished-goods-requests'
     | '/warehouse/finished-goods-store'
     | '/warehouse/material-requests'
     | '/warehouse/materials'
-    | '/warehouse/quarantine'
     | '/warehouse/stores'
     | '/supplier/asns/new'
   fileRoutesById: FileRoutesById
@@ -761,40 +555,26 @@ export interface RootRouteChildren {
   CustomerOrdersRoute: typeof CustomerOrdersRoute
   DamageClaimsRoute: typeof DamageClaimsRoute
   DispatchRoute: typeof DispatchRoute
-  DispatchDriversRoute: typeof DispatchDriversRoute
   DispatchExceptionsRoute: typeof DispatchExceptionsRoute
-  DispatchGateExitRoute: typeof DispatchGateExitRoute
   DispatchGateOutRoute: typeof DispatchGateOutRoute
   DispatchLoadingRoute: typeof DispatchLoadingRoute
   DispatchOrdersRoute: typeof DispatchOrdersRoute
   DispatchPickingPackingRoute: typeof DispatchPickingPackingRoute
-  DispatchPodRoute: typeof DispatchPodRoute
-  DispatchReportsRoute: typeof DispatchReportsRoute
-  DispatchTransitRoute: typeof DispatchTransitRoute
-  DispatchTransportAllocationRoute: typeof DispatchTransportAllocationRoute
-  DispatchVehiclesRoute: typeof DispatchVehiclesRoute
   DockManagementRoute: typeof DockManagementRoute
   DockMasterRoute: typeof DockMasterRoute
   GateDashboardRoute: typeof GateDashboardRoute
   GrnRoute: typeof GrnRoute
   InventoryRoute: typeof InventoryRoute
   LoginRoute: typeof LoginRoute
-  ManagerDashboardRoute: typeof ManagerDashboardRoute
-  MasterDataRoute: typeof MasterDataRoute
   MyStoreRoute: typeof MyStoreRoute
-  NewSupplierRoute: typeof NewSupplierRoute
   NotificationsRoute: typeof NotificationsRoute
   PutawayTasksRoute: typeof PutawayTasksRoute
   ReceivingRoute: typeof ReceivingRoute
-  ReportsRoute: typeof ReportsRoute
-  SettingsRoute: typeof SettingsRoute
   SupplierDashboardRoute: typeof SupplierDashboardRoute
   SupplierMaterialsRoute: typeof SupplierMaterialsRoute
-  UnscheduledArrivalsRoute: typeof UnscheduledArrivalsRoute
   VehicleExitRoute: typeof VehicleExitRoute
   VehicleQueueRoute: typeof VehicleQueueRoute
   WarehouseDashboardRoute: typeof WarehouseDashboardRoute
-  AdminUsersRoute: typeof AdminUsersRoute
   AssemblyDispatchRoute: typeof AssemblyDispatchRoute
   AssemblyFinishedGoodsRoute: typeof AssemblyFinishedGoodsRoute
   AssemblyMaterialRequestsRoute: typeof AssemblyMaterialRequestsRoute
@@ -804,18 +584,14 @@ export interface RootRouteChildren {
   AssemblyRequestsRoute: typeof AssemblyRequestsRoute
   GateFinishedGoodsPickupRoute: typeof GateFinishedGoodsPickupRoute
   GateFinishedGoodsPickupExitRoute: typeof GateFinishedGoodsPickupExitRoute
-  PoCodeRoute: typeof PoCodeRoute
-  QCodeRoute: typeof QCodeRoute
+  SupplierAsnsRoute: typeof SupplierAsnsRouteWithChildren
   SupplierDispatchRoute: typeof SupplierDispatchRoute
   WarehouseAssemblyRequisitionsRoute: typeof WarehouseAssemblyRequisitionsRoute
-  WarehouseDispatchTrackingRoute: typeof WarehouseDispatchTrackingRoute
   WarehouseFinishedGoodsRequestsRoute: typeof WarehouseFinishedGoodsRequestsRoute
   WarehouseFinishedGoodsStoreRoute: typeof WarehouseFinishedGoodsStoreRoute
   WarehouseMaterialRequestsRoute: typeof WarehouseMaterialRequestsRoute
   WarehouseMaterialsRoute: typeof WarehouseMaterialsRoute
-  WarehouseQuarantineRoute: typeof WarehouseQuarantineRoute
   WarehouseStoresRoute: typeof WarehouseStoresRoute
-  SupplierAsnsNewRoute: typeof SupplierAsnsNewRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -855,25 +631,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DispatchRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/dispatch-drivers': {
-      id: '/dispatch-drivers'
-      path: '/dispatch-drivers'
-      fullPath: '/dispatch-drivers'
-      preLoaderRoute: typeof DispatchDriversRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/dispatch-exceptions': {
       id: '/dispatch-exceptions'
       path: '/dispatch-exceptions'
       fullPath: '/dispatch-exceptions'
       preLoaderRoute: typeof DispatchExceptionsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dispatch-gate-exit': {
-      id: '/dispatch-gate-exit'
-      path: '/dispatch-gate-exit'
-      fullPath: '/dispatch-gate-exit'
-      preLoaderRoute: typeof DispatchGateExitRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dispatch-gate-out': {
@@ -902,41 +664,6 @@ declare module '@tanstack/react-router' {
       path: '/dispatch-picking-packing'
       fullPath: '/dispatch-picking-packing'
       preLoaderRoute: typeof DispatchPickingPackingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dispatch-pod': {
-      id: '/dispatch-pod'
-      path: '/dispatch-pod'
-      fullPath: '/dispatch-pod'
-      preLoaderRoute: typeof DispatchPodRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dispatch-reports': {
-      id: '/dispatch-reports'
-      path: '/dispatch-reports'
-      fullPath: '/dispatch-reports'
-      preLoaderRoute: typeof DispatchReportsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dispatch-transit': {
-      id: '/dispatch-transit'
-      path: '/dispatch-transit'
-      fullPath: '/dispatch-transit'
-      preLoaderRoute: typeof DispatchTransitRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dispatch-transport-allocation': {
-      id: '/dispatch-transport-allocation'
-      path: '/dispatch-transport-allocation'
-      fullPath: '/dispatch-transport-allocation'
-      preLoaderRoute: typeof DispatchTransportAllocationRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dispatch-vehicles': {
-      id: '/dispatch-vehicles'
-      path: '/dispatch-vehicles'
-      fullPath: '/dispatch-vehicles'
-      preLoaderRoute: typeof DispatchVehiclesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dock-management': {
@@ -981,32 +708,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/manager-dashboard': {
-      id: '/manager-dashboard'
-      path: '/manager-dashboard'
-      fullPath: '/manager-dashboard'
-      preLoaderRoute: typeof ManagerDashboardRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/master-data': {
-      id: '/master-data'
-      path: '/master-data'
-      fullPath: '/master-data'
-      preLoaderRoute: typeof MasterDataRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/my-store': {
       id: '/my-store'
       path: '/my-store'
       fullPath: '/my-store'
       preLoaderRoute: typeof MyStoreRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/new-supplier': {
-      id: '/new-supplier'
-      path: '/new-supplier'
-      fullPath: '/new-supplier'
-      preLoaderRoute: typeof NewSupplierRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/notifications': {
@@ -1030,20 +736,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReceivingRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/reports': {
-      id: '/reports'
-      path: '/reports'
-      fullPath: '/reports'
-      preLoaderRoute: typeof ReportsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/supplier-dashboard': {
       id: '/supplier-dashboard'
       path: '/supplier-dashboard'
@@ -1056,13 +748,6 @@ declare module '@tanstack/react-router' {
       path: '/supplier-materials'
       fullPath: '/supplier-materials'
       preLoaderRoute: typeof SupplierMaterialsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/unscheduled-arrivals': {
-      id: '/unscheduled-arrivals'
-      path: '/unscheduled-arrivals'
-      fullPath: '/unscheduled-arrivals'
-      preLoaderRoute: typeof UnscheduledArrivalsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/vehicle-exit': {
@@ -1084,13 +769,6 @@ declare module '@tanstack/react-router' {
       path: '/warehouse-dashboard'
       fullPath: '/warehouse-dashboard'
       preLoaderRoute: typeof WarehouseDashboardRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/admin/users': {
-      id: '/admin/users'
-      path: '/admin/users'
-      fullPath: '/admin/users'
-      preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/assembly/dispatch': {
@@ -1156,18 +834,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GateFinishedGoodsPickupExitRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/po/$code': {
-      id: '/po/$code'
-      path: '/po/$code'
-      fullPath: '/po/$code'
-      preLoaderRoute: typeof PoCodeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/q/$code': {
-      id: '/q/$code'
-      path: '/q/$code'
-      fullPath: '/q/$code'
-      preLoaderRoute: typeof QCodeRouteImport
+    '/supplier/asns': {
+      id: '/supplier/asns'
+      path: '/supplier/asns'
+      fullPath: '/supplier/asns'
+      preLoaderRoute: typeof SupplierAsnsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/supplier/dispatch': {
@@ -1182,13 +853,6 @@ declare module '@tanstack/react-router' {
       path: '/warehouse/assembly-requisitions'
       fullPath: '/warehouse/assembly-requisitions'
       preLoaderRoute: typeof WarehouseAssemblyRequisitionsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/warehouse/dispatch-tracking': {
-      id: '/warehouse/dispatch-tracking'
-      path: '/warehouse/dispatch-tracking'
-      fullPath: '/warehouse/dispatch-tracking'
-      preLoaderRoute: typeof WarehouseDispatchTrackingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/warehouse/finished-goods-requests': {
@@ -1219,13 +883,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WarehouseMaterialsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/warehouse/quarantine': {
-      id: '/warehouse/quarantine'
-      path: '/warehouse/quarantine'
-      fullPath: '/warehouse/quarantine'
-      preLoaderRoute: typeof WarehouseQuarantineRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/warehouse/stores': {
       id: '/warehouse/stores'
       path: '/warehouse/stores'
@@ -1235,13 +892,25 @@ declare module '@tanstack/react-router' {
     }
     '/supplier/asns/new': {
       id: '/supplier/asns/new'
-      path: '/supplier/asns/new'
+      path: '/new'
       fullPath: '/supplier/asns/new'
       preLoaderRoute: typeof SupplierAsnsNewRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof SupplierAsnsRoute
     }
   }
 }
+
+interface SupplierAsnsRouteChildren {
+  SupplierAsnsNewRoute: typeof SupplierAsnsNewRoute
+}
+
+const SupplierAsnsRouteChildren: SupplierAsnsRouteChildren = {
+  SupplierAsnsNewRoute: SupplierAsnsNewRoute,
+}
+
+const SupplierAsnsRouteWithChildren = SupplierAsnsRoute._addFileChildren(
+  SupplierAsnsRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -1249,40 +918,26 @@ const rootRouteChildren: RootRouteChildren = {
   CustomerOrdersRoute: CustomerOrdersRoute,
   DamageClaimsRoute: DamageClaimsRoute,
   DispatchRoute: DispatchRoute,
-  DispatchDriversRoute: DispatchDriversRoute,
   DispatchExceptionsRoute: DispatchExceptionsRoute,
-  DispatchGateExitRoute: DispatchGateExitRoute,
   DispatchGateOutRoute: DispatchGateOutRoute,
   DispatchLoadingRoute: DispatchLoadingRoute,
   DispatchOrdersRoute: DispatchOrdersRoute,
   DispatchPickingPackingRoute: DispatchPickingPackingRoute,
-  DispatchPodRoute: DispatchPodRoute,
-  DispatchReportsRoute: DispatchReportsRoute,
-  DispatchTransitRoute: DispatchTransitRoute,
-  DispatchTransportAllocationRoute: DispatchTransportAllocationRoute,
-  DispatchVehiclesRoute: DispatchVehiclesRoute,
   DockManagementRoute: DockManagementRoute,
   DockMasterRoute: DockMasterRoute,
   GateDashboardRoute: GateDashboardRoute,
   GrnRoute: GrnRoute,
   InventoryRoute: InventoryRoute,
   LoginRoute: LoginRoute,
-  ManagerDashboardRoute: ManagerDashboardRoute,
-  MasterDataRoute: MasterDataRoute,
   MyStoreRoute: MyStoreRoute,
-  NewSupplierRoute: NewSupplierRoute,
   NotificationsRoute: NotificationsRoute,
   PutawayTasksRoute: PutawayTasksRoute,
   ReceivingRoute: ReceivingRoute,
-  ReportsRoute: ReportsRoute,
-  SettingsRoute: SettingsRoute,
   SupplierDashboardRoute: SupplierDashboardRoute,
   SupplierMaterialsRoute: SupplierMaterialsRoute,
-  UnscheduledArrivalsRoute: UnscheduledArrivalsRoute,
   VehicleExitRoute: VehicleExitRoute,
   VehicleQueueRoute: VehicleQueueRoute,
   WarehouseDashboardRoute: WarehouseDashboardRoute,
-  AdminUsersRoute: AdminUsersRoute,
   AssemblyDispatchRoute: AssemblyDispatchRoute,
   AssemblyFinishedGoodsRoute: AssemblyFinishedGoodsRoute,
   AssemblyMaterialRequestsRoute: AssemblyMaterialRequestsRoute,
@@ -1292,18 +947,14 @@ const rootRouteChildren: RootRouteChildren = {
   AssemblyRequestsRoute: AssemblyRequestsRoute,
   GateFinishedGoodsPickupRoute: GateFinishedGoodsPickupRoute,
   GateFinishedGoodsPickupExitRoute: GateFinishedGoodsPickupExitRoute,
-  PoCodeRoute: PoCodeRoute,
-  QCodeRoute: QCodeRoute,
+  SupplierAsnsRoute: SupplierAsnsRouteWithChildren,
   SupplierDispatchRoute: SupplierDispatchRoute,
   WarehouseAssemblyRequisitionsRoute: WarehouseAssemblyRequisitionsRoute,
-  WarehouseDispatchTrackingRoute: WarehouseDispatchTrackingRoute,
   WarehouseFinishedGoodsRequestsRoute: WarehouseFinishedGoodsRequestsRoute,
   WarehouseFinishedGoodsStoreRoute: WarehouseFinishedGoodsStoreRoute,
   WarehouseMaterialRequestsRoute: WarehouseMaterialRequestsRoute,
   WarehouseMaterialsRoute: WarehouseMaterialsRoute,
-  WarehouseQuarantineRoute: WarehouseQuarantineRoute,
   WarehouseStoresRoute: WarehouseStoresRoute,
-  SupplierAsnsNewRoute: SupplierAsnsNewRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

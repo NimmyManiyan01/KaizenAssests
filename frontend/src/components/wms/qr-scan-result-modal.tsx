@@ -65,12 +65,7 @@ interface QrNotFoundModalProps {
   scannedCode?: string;
 }
 
-export function QRScanResultModal({
-  isOpen,
-  onClose,
-  data,
-  onPrint,
-}: QRScanResultModalProps) {
+export function QRScanResultModal({ isOpen, onClose, data, onPrint }: QRScanResultModalProps) {
   const [copied, setCopied] = useState(false);
 
   if (!data) return null;
@@ -94,9 +89,7 @@ export function QRScanResultModal({
               <div
                 className={cn(
                   "grid size-11 place-items-center rounded-2xl shrink-0",
-                  isDamaged
-                    ? "bg-danger-soft text-destructive"
-                    : "bg-primary-soft text-primary"
+                  isDamaged ? "bg-danger-soft text-destructive" : "bg-primary-soft text-primary",
                 )}
               >
                 <QrCode className="size-5" />
@@ -106,15 +99,13 @@ export function QRScanResultModal({
                   <span className="font-mono text-sm font-black text-primary px-2.5 py-0.5 rounded-lg bg-primary-soft border border-primary/20">
                     {data.qr_id}
                   </span>
-                  <h2 className="text-lg font-bold text-foreground">
-                    {data.material_name}
-                  </h2>
+                  <h2 className="text-lg font-bold text-foreground">{data.material_name}</h2>
                   <span
                     className={cn(
                       "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-bold border",
                       data.stock_status === "AVAILABLE"
                         ? "bg-success-soft text-success border-success/30"
-                        : "bg-danger-soft text-destructive border-destructive/30"
+                        : "bg-danger-soft text-destructive border-destructive/30",
                     )}
                   >
                     {data.stock_status === "AVAILABLE" ? (
@@ -130,9 +121,7 @@ export function QRScanResultModal({
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground flex flex-wrap items-center gap-2">
-                  <span className="font-semibold text-foreground/80">
-                    GRN: {data.grn_number}
-                  </span>
+                  <span className="font-semibold text-foreground/80">GRN: {data.grn_number}</span>
                   <span>·</span>
                   <span>
                     PO: <strong className="font-mono">{data.po_number}</strong>
@@ -152,7 +141,11 @@ export function QRScanResultModal({
                 className="h-8.5 rounded-xl text-xs font-semibold"
                 onClick={handleCopyQrId}
               >
-                {copied ? <Check className="mr-1 size-3.5 text-success" /> : <Copy className="mr-1 size-3.5" />}
+                {copied ? (
+                  <Check className="mr-1 size-3.5 text-success" />
+                ) : (
+                  <Copy className="mr-1 size-3.5" />
+                )}
                 {copied ? "Copied" : "Copy QR ID"}
               </Button>
               {onPrint && (
@@ -162,7 +155,7 @@ export function QRScanResultModal({
                     "h-8.5 rounded-xl font-bold text-xs shadow-glow text-primary-foreground",
                     isDamaged
                       ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      : "bg-primary hover:bg-primary/90"
+                      : "bg-primary hover:bg-primary/90",
                   )}
                   onClick={() => onPrint(data)}
                 >
@@ -183,49 +176,37 @@ export function QRScanResultModal({
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
                   QR / Stock ID
                 </span>
-                <div className="font-mono font-bold text-foreground break-all">
-                  {data.qr_id}
-                </div>
+                <div className="font-mono font-bold text-foreground break-all">{data.qr_id}</div>
               </div>
               <div className="space-y-0.5">
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
                   GRN Number
                 </span>
-                <div className="font-mono font-bold text-foreground">
-                  {data.grn_number}
-                </div>
+                <div className="font-mono font-bold text-foreground">{data.grn_number}</div>
               </div>
               <div className="space-y-0.5">
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
                   PO Reference
                 </span>
-                <div className="font-mono font-bold text-foreground">
-                  {data.po_number}
-                </div>
+                <div className="font-mono font-bold text-foreground">{data.po_number}</div>
               </div>
               <div className="space-y-0.5">
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
                   Receiving Date
                 </span>
-                <div className="font-medium text-foreground">
-                  {data.receipt_date || "—"}
-                </div>
+                <div className="font-medium text-foreground">{data.receipt_date || "—"}</div>
               </div>
               <div className="space-y-0.5">
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
                   Supplier Code
                 </span>
-                <div className="font-mono font-bold text-primary">
-                  {data.supplier_code || "—"}
-                </div>
+                <div className="font-mono font-bold text-primary">{data.supplier_code || "—"}</div>
               </div>
               <div className="space-y-0.5">
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
                   Supplier Name
                 </span>
-                <div className="font-medium text-foreground">
-                  {data.supplier_name}
-                </div>
+                <div className="font-medium text-foreground">{data.supplier_name}</div>
               </div>
               <div className="space-y-0.5">
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
@@ -239,9 +220,7 @@ export function QRScanResultModal({
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
                   Category
                 </span>
-                <div className="font-medium text-foreground">
-                  {data.category || "General"}
-                </div>
+                <div className="font-medium text-foreground">{data.category || "General"}</div>
               </div>
             </div>
           </div>
@@ -265,9 +244,7 @@ export function QRScanResultModal({
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
                   Material Code
                 </span>
-                <div className="font-mono font-bold text-foreground">
-                  {data.material_code}
-                </div>
+                <div className="font-mono font-bold text-foreground">{data.material_code}</div>
               </div>
               <div className="space-y-0.5">
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
@@ -320,9 +297,7 @@ export function QRScanResultModal({
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
                   Base UOM
                 </span>
-                <div className="font-mono font-bold text-foreground">
-                  {data.uom}
-                </div>
+                <div className="font-mono font-bold text-foreground">{data.uom}</div>
               </div>
               <div className="space-y-0.5 sm:col-span-2">
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
@@ -355,9 +330,7 @@ export function QRScanResultModal({
                 </span>
                 <div className="font-mono text-base font-extrabold text-foreground mt-0.5">
                   {data.received_quantity}{" "}
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {data.uom}
-                  </span>
+                  <span className="text-xs font-medium text-muted-foreground">{data.uom}</span>
                 </div>
               </div>
 
@@ -366,10 +339,7 @@ export function QRScanResultModal({
                   Accepted Qty
                 </span>
                 <div className="font-mono text-base font-extrabold text-success mt-0.5">
-                  {data.accepted_quantity}{" "}
-                  <span className="text-xs font-medium">
-                    {data.uom}
-                  </span>
+                  {data.accepted_quantity} <span className="text-xs font-medium">{data.uom}</span>
                 </div>
               </div>
 
@@ -378,17 +348,14 @@ export function QRScanResultModal({
                   "p-3 rounded-xl border",
                   data.damaged_quantity > 0
                     ? "bg-danger-soft border-destructive/30 text-destructive"
-                    : "bg-muted/20 border-border/50 text-muted-foreground"
+                    : "bg-muted/20 border-border/50 text-muted-foreground",
                 )}
               >
                 <span className="text-[10px] font-bold uppercase tracking-wider block">
                   Damaged Qty
                 </span>
                 <div className="font-mono text-base font-extrabold mt-0.5">
-                  {data.damaged_quantity}{" "}
-                  <span className="text-xs font-medium">
-                    {data.uom}
-                  </span>
+                  {data.damaged_quantity} <span className="text-xs font-medium">{data.uom}</span>
                 </div>
               </div>
 
@@ -398,9 +365,7 @@ export function QRScanResultModal({
                 </span>
                 <div className="font-mono text-base font-extrabold text-foreground mt-0.5">
                   {data.rejected_quantity || 0}{" "}
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {data.uom}
-                  </span>
+                  <span className="text-xs font-medium text-muted-foreground">{data.uom}</span>
                 </div>
               </div>
             </div>
@@ -412,7 +377,7 @@ export function QRScanResultModal({
               "rounded-2xl p-4 border text-xs space-y-1.5 shadow-2xs",
               isDamaged
                 ? "bg-danger-soft/40 border-destructive/30 text-destructive"
-                : "bg-primary-soft/40 border-primary/20 text-foreground"
+                : "bg-primary-soft/40 border-primary/20 text-foreground",
             )}
           >
             <div className="font-bold flex items-center gap-1.5 uppercase text-[11px]">
@@ -433,11 +398,7 @@ export function QRScanResultModal({
               <span className="inline-block size-2 rounded-full bg-success animate-pulse" />
               Database Record Verified
             </div>
-            <Button
-              variant="outline"
-              className="rounded-xl px-6 font-semibold"
-              onClick={onClose}
-            >
+            <Button variant="outline" className="rounded-xl px-6 font-semibold" onClick={onClose}>
               Close
             </Button>
           </DialogFooter>
@@ -447,11 +408,7 @@ export function QRScanResultModal({
   );
 }
 
-export function QrNotFoundModal({
-  isOpen,
-  onClose,
-  scannedCode,
-}: QrNotFoundModalProps) {
+export function QrNotFoundModal({ isOpen, onClose, scannedCode }: QrNotFoundModalProps) {
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-md rounded-3xl p-6 text-center space-y-4 shadow-2xl">
@@ -460,9 +417,7 @@ export function QrNotFoundModal({
         </div>
 
         <DialogHeader className="space-y-1 text-center">
-          <DialogTitle className="text-lg font-bold text-foreground">
-            QR Code Not Found
-          </DialogTitle>
+          <DialogTitle className="text-lg font-bold text-foreground">QR Code Not Found</DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground max-w-sm mx-auto">
             This QR code is not registered in the system.
           </DialogDescription>
@@ -474,18 +429,13 @@ export function QrNotFoundModal({
               Scanned Value
             </span>
             <span className="font-mono text-xs font-bold text-destructive break-all">
-              {scannedCode.length > 100
-                ? `${scannedCode.substring(0, 100)}...`
-                : scannedCode}
+              {scannedCode.length > 100 ? `${scannedCode.substring(0, 100)}...` : scannedCode}
             </span>
           </div>
         )}
 
         <DialogFooter className="pt-2">
-          <Button
-            className="w-full rounded-xl font-bold shadow-glow"
-            onClick={onClose}
-          >
+          <Button className="w-full rounded-xl font-bold shadow-glow" onClick={onClose}>
             Close
           </Button>
         </DialogFooter>

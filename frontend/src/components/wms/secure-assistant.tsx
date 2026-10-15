@@ -5,15 +5,6 @@ import { api } from "@/lib/api-client";
 import { getUserInfo } from "@/lib/auth-utils";
 
 const roleModules: Record<string, { label: string; links: { label: string; to: string }[] }> = {
-  PROCUREMENT: {
-    label: "Procurement",
-    links: [
-      { label: "Procurement dashboard", to: "/procurement-dashboard" },
-      { label: "Suppliers", to: "/master-data" },
-      { label: "Purchase orders", to: "/procurement/purchase-orders" },
-      { label: "RFQs", to: "/procurement/rfqs" },
-    ],
-  },
   WAREHOUSE: {
     label: "Warehouse",
     links: [
@@ -43,8 +34,8 @@ const roleModules: Record<string, { label: string; links: { label: string; to: s
   ADMIN: {
     label: "Administration",
     links: [
-      { label: "User management", to: "/admin/users" },
-      { label: "Warehouse dashboard", to: "/warehouse-dashboard" },
+      { label: "Material Master", to: "/master-data?module=materials" },
+      { label: "Settings", to: "/settings" },
     ],
   },
 };

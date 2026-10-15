@@ -21,12 +21,6 @@ rfq_supplier_link = Table(
     Column("supplier_id", GUID, ForeignKey("supplier.id"), primary_key=True),
     extend_existing=True,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import relationship
-
-from app.database.base import Base
-
-
 class SupplierModel(Base):
     __tablename__ = "supplier"
 

@@ -1,22 +1,7 @@
-import { createFileRoute, useSearch } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import {
-  ArrowLeft,
-  Calendar as CalendarIcon,
-  CheckCircle2,
-  Download,
-  Eye,
-  FileText,
-  Loader2,
-  MoreHorizontal,
-  Pencil,
-  Plus,
-  RefreshCw,
-  Search,
-  Trash2,
-  XCircle,
-} from "lucide-react";
+import { CheckCircle2, Eye, FileText, Loader2, Plus, Search, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,48 +9,37 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api-client";
-import { getUserInfo } from "@/lib/auth-utils";
-import type { DateRange } from "react-day-picker";
+import { getUserInfo, requireRole } from "@/lib/auth-utils";
 
 export const Route = createFileRoute("/supplier/asns/new")({
-  beforeLoad: () => {},
+  beforeLoad: () => requireRole(["SUPPLIER", "ADMIN", "SUPERUSER"]),
   component: NewAsnPage,
 });
 
 const inputClass = "mt-1.5 h-10 rounded-xl border-border/80 bg-background text-xs font-semibold";
-const todayDate = () => {
-  const today = new Date();
-  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+const normalizeVehicleNumber = (value: string) =>
+  value
+    .toUpperCase()
+    .replace(/[\s-]+/g, "")
+    .trim();
+
+const isValidVehicleNumber = (value: string) => {
+  return value.trim().length > 0 && /^[A-Za-z0-9 ]+$/.test(value);
 };
-const dateToFilterValue = (date: Date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-const displayFilterDate = (value: string) => {
-  if (!value) return "";
-  return new Date(`${value}T00:00:00`).toLocaleDateString(undefined, {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+
+const normalizeDriverName = (value: string) => value.trim().replace(/\s+/g, " ");
+
+const isValidDriverName = (value: string) => {
+  const normalized = normalizeDriverName(value);
+  return normalized.length >= 2 && normalized.length <= 100 && /^[A-Za-z ]+$/.test(normalized);
+};
+
+const normalizeDriverContact = (value: string) => value.trim().replace(/[\s()-]+/g, "");
+
+const isValidDriverContact = (value: string) => {
+  return /^\d{10}$/.test(value.trim());
 };
 
 interface AsnRecord {
@@ -87,26 +61,15 @@ interface AsnRecord {
 
 const INITIAL_ASNS: AsnRecord[] = [];
 
-function NewAsnPage() {
+export function NewAsnPage() {
+  const navigate = useNavigate();
   const search = useSearch({ strict: false }) as any;
 
   const [asnList, setAsnList] = useState<AsnRecord[]>(INITIAL_ASNS);
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("ALL");
-  const [arrivalFrom, setArrivalFrom] = useState("");
-  const [arrivalTo, setArrivalTo] = useState("");
-  const [arrivalRangeOpen, setArrivalRangeOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAssignmentOpen, setIsAssignmentOpen] = useState(false);
-  const [assignmentSubmitting, setAssignmentSubmitting] = useState(false);
-  const [assignmentTouched, setAssignmentTouched] = useState({
-    vehicle: false,
-    driver: false,
-    contact: false,
-  });
-  const [asnSubmitted, setAsnSubmitted] = useState(false);
   const [isMaterialPopupOpen, setIsMaterialPopupOpen] = useState(false);
   const [customMaterialRowIndex, setCustomMaterialRowIndex] = useState<number | null>(null);
   const [customMaterialName, setCustomMaterialName] = useState("");
@@ -115,7 +78,6 @@ function NewAsnPage() {
   const [submitting, setSubmitting] = useState(false);
   const [creatingMaterial, setCreatingMaterial] = useState(false);
   const [selectedAsn, setSelectedAsn] = useState<AsnRecord | null>(null);
-  const [asnPendingDelete, setAsnPendingDelete] = useState<AsnRecord | null>(null);
 
   // Modal Form Inputs
   const [asnNumber, setAsnNumber] = useState("");
@@ -127,6 +89,11 @@ function NewAsnPage() {
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [driverName, setDriverName] = useState("");
   const [driverMobile, setDriverMobile] = useState("");
+  const [transportErrors, setTransportErrors] = useState({
+    vehicle: "",
+    driver: "",
+    contact: "",
+  });
   const [registeredVehicles, setRegisteredVehicles] = useState<any[]>([]);
   const [registeredDrivers, setRegisteredDrivers] = useState<any[]>([]);
   const [lines, setLines] = useState<any[]>([
@@ -163,8 +130,7 @@ function NewAsnPage() {
           supplier?.company_name ||
           supplier?.supplier_name ||
           "";
-        const displaySupplierName = /seeded supplier/i.test(companyName) ? "MTU" : companyName;
-        setSupplierCompanyName(displaySupplierName);
+        setSupplierCompanyName(companyName);
         if (displaySupplierName) setSupplierName(displaySupplierName);
       })
       .catch(() => undefined);
@@ -210,15 +176,10 @@ function NewAsnPage() {
 
   const loadAsnData = async () => {
     setLoading(true);
-    setLoadError("");
     try {
       const next = await api.getNextAsnNumber();
       setAsnNumber(next.asnNumber);
 
-      // Use the same role-scoped endpoint as the Supplier Dashboard. The
-      // backend applies supplier visibility from the authenticated session;
-      // passing a possibly stale client supplier id can incorrectly return an
-      // empty list while the dashboard still shows the records.
       const remoteAsns = await api.getAsns();
       if (Array.isArray(remoteAsns) && remoteAsns.length > 0) {
         const mapped = remoteAsns.map((a: any) => ({
@@ -241,8 +202,7 @@ function NewAsnPage() {
         setAsnList(mapped);
       }
     } catch {
-      setAsnList([]);
-      setLoadError("Unable to load ASN records.");
+      // fallback to INITIAL_ASNS
     } finally {
       setLoading(false);
     }
@@ -254,7 +214,7 @@ function NewAsnPage() {
     setIsAssignmentOpen(true);
     const next = await api.getNextAsnNumber().catch(() => null);
     if (next?.asnNumber) setAsnNumber(next.asnNumber);
-    setExpectedArrivalDate(todayDate());
+    setExpectedArrivalDate("");
     setSupplierName(supplierCompanyName || currentUser?.full_name || currentUser?.username || "");
     setDestinationWarehouse("");
     setDestinationWarehouseId("");
@@ -262,13 +222,18 @@ function NewAsnPage() {
     setVehicleNumber("");
     setDriverName("");
     setDriverMobile("");
-    setAssignmentTouched({ vehicle: false, driver: false, contact: false });
-    setAssignmentSubmitting(false);
+    setTransportErrors({ vehicle: "", driver: "", contact: "" });
     setManualVehicle(false);
     setManualDriver(false);
     setLines([
       { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" },
     ]);
+  };
+
+  const closeCreateFlow = () => {
+    setIsAssignmentOpen(false);
+    setIsModalOpen(false);
+    void navigate({ to: "/supplier/asns" });
   };
 
   useEffect(() => {
@@ -279,47 +244,31 @@ function NewAsnPage() {
 
   const continueToAsnForm = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (assignmentSubmitting) return;
-    const normalizedVehicle = vehicleNumber.toUpperCase().replace(/\s+/g, "").trim();
-    const vehiclePattern = /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/;
-    const driverPattern = /^[A-Za-z .'-]{2,80}$/;
-    const contactPattern = /^[6-9]\d{9}$/;
-    setAssignmentTouched({ vehicle: true, driver: true, contact: true });
-    if (!normalizedVehicle || !driverName.trim() || !driverMobile.trim()) {
-      toast.error("Vehicle number, driver name and driver contact are required");
-      document
-        .getElementById(
-          !normalizedVehicle
-            ? "assignment-vehicle"
-            : !driverName.trim()
-              ? "assignment-driver"
-              : "assignment-contact",
-        )
-        ?.focus();
-      return;
-    }
-    if (!vehiclePattern.test(normalizedVehicle)) {
-      toast.error("Enter a valid vehicle number.");
-      document.getElementById("assignment-vehicle")?.focus();
-      return;
-    }
-    if (!driverPattern.test(driverName.trim())) {
-      toast.error("Enter a valid driver name.");
-      document.getElementById("assignment-driver")?.focus();
-      return;
-    }
-    if (!contactPattern.test(driverMobile.replace(/[\s-]/g, ""))) {
-      toast.error("Enter a valid 10-digit mobile number.");
-      document.getElementById("assignment-contact")?.focus();
-      return;
-    }
-    setVehicleNumber(normalizedVehicle);
-    setAssignmentSubmitting(true);
-    window.setTimeout(() => {
-      setIsAssignmentOpen(false);
-      setIsModalOpen(true);
-      setAssignmentSubmitting(false);
-    }, 200);
+    const errors = {
+      vehicle: !vehicleNumber.trim()
+        ? "Vehicle number is required."
+        : !isValidVehicleNumber(vehicleNumber)
+          ? "Enter a valid vehicle registration number, for example KA03AB1234."
+          : "",
+      driver: !driverName.trim()
+        ? "Driver name is required."
+        : !isValidDriverName(driverName)
+          ? "Enter a valid driver name."
+          : "",
+      contact: !driverMobile.trim()
+        ? "Driver contact is required."
+        : !isValidDriverContact(driverMobile)
+          ? "Enter a valid driver contact number."
+          : "",
+    };
+    setTransportErrors(errors);
+    if (errors.vehicle || errors.driver || errors.contact) return;
+
+    setVehicleNumber(normalizeVehicleNumber(vehicleNumber));
+    setDriverName(normalizeDriverName(driverName));
+    setDriverMobile(normalizeDriverContact(driverMobile));
+    setIsAssignmentOpen(false);
+    setIsModalOpen(true);
   };
 
   const handleAddNewCustomMaterial = async () => {
@@ -415,16 +364,38 @@ function NewAsnPage() {
       toast.error("Expected Arrival Date is mandatory *");
       return;
     }
-    if (expectedArrivalDate < todayDate()) {
-      toast.error("Expected Arrival Date cannot be before today.");
+    const today = new Date().toISOString().slice(0, 10);
+    if (expectedArrivalDate < today) {
+      toast.error("Expected arrival date cannot be in the past.");
       return;
     }
-    if (!vehicleNumber.trim() || !driverName.trim() || !driverMobile.trim()) {
+    if (
+      !isValidVehicleNumber(vehicleNumber) ||
+      !isValidDriverName(driverName) ||
+      !driverMobile.trim()
+    ) {
+      if (!isValidVehicleNumber(vehicleNumber)) {
+        toast.error("Enter a valid vehicle registration number, for example KA03AB1234");
+        return;
+      }
+      if (!isValidDriverName(driverName)) {
+        toast.error("Enter a valid driver name.");
+        return;
+      }
       toast.error("Please fill in Vehicle Number, Driver Name, and Mobile Number *");
       return;
     }
-    if (lines.some((line) => Number(line.shipped_quantity) <= 0)) {
-      toast.error("Shipped quantity must be greater than zero");
+    const normalizedVehicleNumber = normalizeVehicleNumber(vehicleNumber);
+    const normalizedDriverName = normalizeDriverName(driverName);
+    if (
+      lines.some((line) => {
+        const rawQuantity = String(line.shipped_quantity ?? "").trim();
+        if (!rawQuantity) return true;
+        const quantity = Number(rawQuantity);
+        return !Number.isFinite(quantity) || quantity <= 0;
+      })
+    ) {
+      toast.error("Shipped quantity must be a number greater than zero");
       return;
     }
     if (lines.some((line) => !String(line.uom || "").trim())) {
@@ -441,9 +412,9 @@ function NewAsnPage() {
         destination_warehouse: destinationWarehouse,
         destination_warehouse_id: destinationWarehouseId,
         expected_arrival_at: expectedArrivalDate,
-        vehicle_number: vehicleNumber.toUpperCase().trim(),
-        driver_name: driverName.trim(),
-        driver_contact: driverMobile.trim(),
+        vehicle_number: normalizedVehicleNumber,
+        driver_name: normalizedDriverName,
+        driver_contact: normalizeDriverContact(driverMobile),
         lines: lines.map((l) => ({
           material_id: l.material_id,
           item_code: l.item_code,
@@ -465,8 +436,8 @@ function NewAsnPage() {
         po_number: "",
         supplier_name: supplierName,
         destination_warehouse: destinationWarehouse,
-        vehicle_number: vehicleNumber.toUpperCase().trim(),
-        driver_name: driverName.trim(),
+        vehicle_number: normalizedVehicleNumber,
+        driver_name: normalizedDriverName,
         driver_contact: driverMobile.trim(),
         expected_arrival_at: expectedArrivalDate,
         status: "SUBMITTED",
@@ -476,9 +447,8 @@ function NewAsnPage() {
 
       setAsnList((prev) => [newRecord, ...prev]);
       setSubmitting(false);
-      setAsnSubmitted(true);
       setIsModalOpen(false);
-      setIsAssignmentOpen(false);
+      await navigate({ to: "/supplier/asns" });
 
       toast.success(`ASN ${asnNumber} Created Successfully ✓`, {
         description: `Vehicle ${newRecord.vehicle_number} · Driver ${newRecord.driver_name} (${newRecord.driver_contact})\n\nGate Security can now scan or search ${asnNumber}!`,
@@ -489,96 +459,7 @@ function NewAsnPage() {
     }
   };
 
-  const downloadSelectedAsn = async () => {
-    if (!selectedAsn) return;
-    try {
-      await api.downloadAsnPdf(selectedAsn.asn_number);
-      toast.success("ASN PDF downloaded");
-    } catch (error: any) {
-      toast.error(error?.message || "Unable to download ASN");
-    }
-  };
-
-  const cancelSelectedAsn = async () => {
-    if (!selectedAsn) return;
-    try {
-      const updated = await api.cancelAsn(selectedAsn.asn_number);
-      setAsnList((rows) =>
-        rows.map((row) =>
-          row.asn_number === selectedAsn.asn_number
-            ? { ...row, ...updated, status: "CANCELLED" }
-            : row,
-        ),
-      );
-      setSelectedAsn((current) =>
-        current ? { ...current, ...updated, status: "CANCELLED" } : current,
-      );
-      toast.success(`ASN ${selectedAsn.asn_number} cancelled`);
-    } catch (error: any) {
-      toast.error(error?.message || "Unable to cancel ASN");
-    }
-  };
-
-  const deleteAsnRecord = async (asn: AsnRecord) => {
-    if (!canModifyAsn(asn)) return;
-    setAsnPendingDelete(asn);
-  };
-
-  const confirmDeleteAsn = async () => {
-    const asn = asnPendingDelete;
-    if (!asn) return;
-    setAsnPendingDelete(null);
-    try {
-      await api.deleteAsn(asn.asn_number);
-      setAsnList((rows) => rows.filter((row) => row.asn_number !== asn.asn_number));
-      setSelectedAsn((current) => (current?.asn_number === asn.asn_number ? null : current));
-      toast.success(`ASN ${asn.asn_number} deleted`);
-    } catch (error: any) {
-      toast.error(error?.message || "Unable to delete ASN");
-    }
-  };
-
-  const canModifyAsn = (asn: AsnRecord) => {
-    if (String(asn.status).toUpperCase() === "CANCELLED") return false;
-    const createdAt = new Date(asn.created_at).getTime();
-    return Number.isFinite(createdAt) && Date.now() - createdAt <= 60 * 60 * 1000;
-  };
-
-  const editAsnRecord = (asn: AsnRecord) => {
-    if (!canModifyAsn(asn)) {
-      toast.error("Edit window expired", {
-        description: "ASN edits are allowed only within 1 hour of submission.",
-      });
-      return;
-    }
-    setSelectedAsn(null);
-    setAsnNumber(asn.asn_number);
-    setSupplierName(asn.supplier_name || "");
-    setDestinationWarehouse(asn.destination_warehouse || "");
-    setExpectedArrivalDate(
-      asn.delivery_date ||
-        asn.expected_arrival_date ||
-        asn.expected_arrival_at?.split("T")[0] ||
-        "",
-    );
-    setVehicleNumber(asn.vehicle_number || "");
-    setDriverName(asn.driver_name || "");
-    setDriverMobile(asn.driver_contact || "");
-    setLines(
-      asn.lines?.length
-        ? asn.lines
-        : [{ material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" }],
-    );
-    setIsAssignmentOpen(true);
-  };
-
   const filteredList = asnList.filter((a) => {
-    const arrival =
-      a.delivery_date || a.expected_arrival_date || a.expected_arrival_at?.split("T")[0] || "";
-    if (statusFilter !== "ALL" && String(a.status || "").toUpperCase() !== statusFilter)
-      return false;
-    if (arrivalFrom && arrival < arrivalFrom) return false;
-    if (arrivalTo && arrival > arrivalTo) return false;
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -589,46 +470,23 @@ function NewAsnPage() {
       a.po_number.toLowerCase().includes(q)
     );
   });
-  const clearFilters = () => {
-    setSearchQuery("");
-    setStatusFilter("ALL");
-    setArrivalFrom("");
-    setArrivalTo("");
-    setArrivalRangeOpen(false);
-  };
-  const arrivalRange: DateRange | undefined =
-    arrivalFrom || arrivalTo
-      ? {
-          from: arrivalFrom ? new Date(`${arrivalFrom}T00:00:00`) : undefined,
-          to: arrivalTo ? new Date(`${arrivalTo}T00:00:00`) : undefined,
-        }
-      : undefined;
-  const arrivalRangeLabel =
-    arrivalFrom && arrivalTo
-      ? `${displayFilterDate(arrivalFrom)} – ${displayFilterDate(arrivalTo)}`
-      : arrivalFrom
-        ? `${displayFilterDate(arrivalFrom)} – End date`
-        : arrivalTo
-          ? `Start date – ${displayFilterDate(arrivalTo)}`
-          : "Filter date";
 
   return (
-    <AppShell
-      title="Advance Shipment Notices"
-      subtitle="Create, track and download shipment notices"
-    >
+    <AppShell>
       <div className="space-y-4 w-full pb-10">
         {/* Search & ASN Table Card */}
         <Card className="rounded-2xl border-border/60 shadow-soft">
           <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <CardTitle className="text-base font-bold uppercase tracking-wider">
-                ASN Records
+                GENERATED ADVANCE SHIPPING NOTICES
               </CardTitle>
-              <CardDescription>Manage generated shipment notices</CardDescription>
+              <CardDescription>
+                Search and manage generated ASNs or download official certificates
+              </CardDescription>
             </div>
 
-            <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <div className="relative w-full sm:w-64">
                 <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
                 <input
@@ -639,42 +497,9 @@ function NewAsnPage() {
                   className="h-9 w-full rounded-xl border bg-background pl-9 pr-3 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </div>
-              <Popover open={arrivalRangeOpen} onOpenChange={setArrivalRangeOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-9 min-w-0 justify-start rounded-xl px-2 text-left text-xs font-normal"
-                  >
-                    <CalendarIcon className="mr-2 size-4" />
-                    {arrivalRangeLabel}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent align="end" className="w-auto p-0">
-                  <Calendar
-                    mode="range"
-                    selected={arrivalRange}
-                    onSelect={(range: DateRange | undefined) => {
-                      setArrivalFrom(range?.from ? dateToFilterValue(range.from) : "");
-                      setArrivalTo(range?.to ? dateToFilterValue(range.to) : "");
-                      if (range?.from && range?.to) setArrivalRangeOpen(false);
-                    }}
-                    numberOfMonths={1}
-                    initialFocus
-                  />
-                </PopoverContent>
-              </Popover>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-xl text-xs"
-                onClick={clearFilters}
-              >
-                Clear Filters
-              </Button>
 
               <Button
-                onClick={handleOpenCreateModal}
+                onClick={() => navigate({ to: "/supplier/asns/new", search: { open: "create" } as any })}
                 className="rounded-xl font-bold shadow-md bg-sky-600 hover:bg-sky-700 text-white h-9 px-4 text-xs"
               >
                 <Plus className="mr-1.5 size-4" /> Create ASN
@@ -683,14 +508,6 @@ function NewAsnPage() {
           </CardHeader>
 
           <CardContent className="p-0">
-            {loadError && (
-              <div className="m-4 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
-                <span>{loadError}</span>
-                <Button size="sm" variant="outline" onClick={() => void loadAsnData()}>
-                  <RefreshCw className="mr-2 size-4" /> Retry
-                </Button>
-              </div>
-            )}
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className="border-b bg-muted/40 font-bold uppercase text-muted-foreground">
@@ -701,96 +518,55 @@ function NewAsnPage() {
                     <th className="px-4 py-3">Driver Name & Mobile</th>
                     <th className="px-4 py-3">Expected Arrival Date</th>
                     <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Materials</th>
-                    <th className="w-44 px-4 py-3 text-right">Actions</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60 font-medium">
-                  {loading ? (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
-                        <Loader2 className="mx-auto size-5 animate-spin" /> Loading ASN records…
+                  {filteredList.length ? filteredList.map((asn) => (
+                    <tr key={asn.id} className="hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-3 font-mono font-bold text-primary">
+                        {asn.asn_number}
+                      </td>
+                      <td className="px-4 py-3 font-bold text-foreground">{asn.supplier_name}</td>
+                      <td className="px-4 py-3 font-mono font-bold text-sky-600">
+                        {asn.vehicle_number}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-bold">{asn.driver_name}</span>{" "}
+                        <span className="text-muted-foreground font-mono">
+                          ({asn.driver_contact})
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-bold text-emerald-600">
+                        {asn.delivery_date ||
+                          asn.expected_arrival_date ||
+                          asn.expected_arrival_at?.split("T")[0] ||
+                          "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant="outline" className="font-bold uppercase">
+                          {String(asn.status || "SUBMITTED").replaceAll("_", " ")}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="rounded-xl border-sky-500/40 text-sky-600 hover:bg-sky-50"
+                          onClick={() => setSelectedAsn(asn)}
+                        >
+                          <Eye className="mr-1.5 size-3.5" />
+                          View
+                        </Button>
                       </td>
                     </tr>
-                  ) : !filteredList.length ? (
+                  )) : (
                     <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
-                        {asnList.length
-                          ? "No ASNs match the selected filters."
-                          : "No ASN records found."}
+                      <td colSpan={7} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                        <p className="font-bold text-foreground">No ASNs created yet</p>
+                        <p className="mt-1">Create your first ASN to start an inbound shipment.</p>
                       </td>
                     </tr>
-                  ) : (
-                    filteredList.map((asn) => (
-                      <tr key={asn.id} className="hover:bg-muted/30 transition-colors">
-                        <td className="px-4 py-3 font-mono font-bold text-primary">
-                          {asn.asn_number}
-                        </td>
-                        <td className="px-4 py-3 font-bold text-foreground">{asn.supplier_name}</td>
-                        <td className="px-4 py-3 font-mono font-bold text-sky-600">
-                          {asn.vehicle_number}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="font-bold">{asn.driver_name}</span>{" "}
-                          <span className="text-muted-foreground font-mono">
-                            ({asn.driver_contact})
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 font-bold text-emerald-600">
-                          {asn.delivery_date ||
-                            asn.expected_arrival_date ||
-                            asn.expected_arrival_at?.split("T")[0] ||
-                            "—"}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3">
-                          <span className="inline-flex rounded-full bg-blue-100 px-2.5 py-1 text-[10px] font-bold text-blue-700">
-                            {String(asn.status || "SUBMITTED").replaceAll("_", " ")}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-xs">
-                          {asn.lines?.length || 0} items ·{" "}
-                          {asn.lines?.reduce(
-                            (sum: number, line: any) =>
-                              sum + Number(line.shipped_quantity ?? line.quantity ?? 0),
-                            0,
-                          ) || 0}{" "}
-                          units
-                        </td>
-                        <td className="w-20 px-4 py-3 text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="size-8 rounded-lg"
-                                aria-label={`Actions for ${asn.asn_number}`}
-                              >
-                                <MoreHorizontal className="size-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-40">
-                              <DropdownMenuItem
-                                disabled={!canModifyAsn(asn)}
-                                onSelect={() => editAsnRecord(asn)}
-                              >
-                                <Pencil /> Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onSelect={() => setSelectedAsn(asn)}>
-                                <Eye /> View
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                className="text-rose-600 focus:text-rose-700"
-                                disabled={!canModifyAsn(asn)}
-                                onSelect={() => void deleteAsnRecord(asn)}
-                              >
-                                <Trash2 /> Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </td>
-                      </tr>
-                    ))
                   )}
                 </tbody>
               </table>
@@ -799,7 +575,7 @@ function NewAsnPage() {
         </Card>
 
         <Dialog open={Boolean(selectedAsn)} onOpenChange={(open) => !open && setSelectedAsn(null)}>
-          <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto rounded-2xl p-6">
+          <DialogContent className="max-w-lg rounded-2xl p-6">
             <DialogHeader>
               <DialogTitle className="text-lg font-black text-primary">ASN Details</DialogTitle>
             </DialogHeader>
@@ -826,12 +602,6 @@ function NewAsnPage() {
                   <p className="font-mono">{selectedAsn.driver_contact}</p>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Status</span>
-                  <p className="font-semibold">
-                    {String(selectedAsn.status || "SUBMITTED").replaceAll("_", " ")}
-                  </p>
-                </div>
-                <div>
                   <span className="text-muted-foreground">Expected Arrival</span>
                   <p className="font-semibold">
                     {selectedAsn.delivery_date ||
@@ -840,60 +610,13 @@ function NewAsnPage() {
                       "—"}
                   </p>
                 </div>
-                <div className="col-span-2 border-t pt-3">
-                  <span className="text-muted-foreground">Shipped Materials</span>
-                  {selectedAsn.lines?.length ? (
-                    <div className="mt-2 divide-y">
-                      {selectedAsn.lines.map((line: any, index: number) => (
-                        <div
-                          key={`${line.item_code || line.material_name}-${index}`}
-                          className="flex items-center justify-between gap-3 py-2"
-                        >
-                          <span className="font-semibold">
-                            {line.material_name || line.item_code || "—"}{" "}
-                            <span className="font-mono text-muted-foreground">
-                              ({line.item_code || "—"})
-                            </span>
-                          </span>
-                          <span className="font-bold">
-                            {line.shipped_quantity ?? line.quantity ?? 0} {line.uom || ""}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-muted-foreground">No shipment materials recorded.</p>
-                  )}
-                </div>
-                <div className="col-span-2 flex justify-end gap-2 border-t pt-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void downloadSelectedAsn()}
-                  >
-                    <Download className="mr-2 size-4" /> Download
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    disabled={!canModifyAsn(selectedAsn)}
-                    onClick={() => void deleteAsnRecord(selectedAsn)}
-                  >
-                    <Trash2 className="mr-2 size-4" /> Delete ASN
-                  </Button>
-                </div>
               </div>
             )}
           </DialogContent>
         </Dialog>
 
-        <Dialog
-          open={isAssignmentOpen}
-          onOpenChange={(open) => {
-            if (!assignmentSubmitting) setIsAssignmentOpen(open);
-          }}
-        >
-          <DialogContent className="w-[calc(100%-2rem)] max-w-xl rounded-2xl p-6">
+        <Dialog open={isAssignmentOpen} onOpenChange={(open) => !open ? closeCreateFlow() : setIsAssignmentOpen(true)}>
+          <DialogContent className="max-w-xl rounded-2xl p-6">
             <DialogHeader>
               <DialogTitle className="text-lg font-black text-primary">
                 Assign vehicle and driver
@@ -901,137 +624,109 @@ function NewAsnPage() {
             </DialogHeader>
             <form onSubmit={continueToAsnForm} className="space-y-5">
               <p className="text-sm text-muted-foreground">
-                Enter transport details. The complete ASN form will open after you continue.
+                Enter the vehicle and driver details for this shipment.
               </p>
               <div className="grid gap-3 sm:grid-cols-3">
                 <div>
                   <Label htmlFor="assignment-vehicle">Vehicle Number *</Label>
                   <Input
                     id="assignment-vehicle"
-                    required
                     placeholder="Enter vehicle number"
                     value={vehicleNumber}
-                    onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())}
-                    onBlur={() => {
-                      setVehicleNumber((value) => value.trim());
-                      setAssignmentTouched((value) => ({ ...value, vehicle: true }));
+                    onChange={(e) => {
+                      setVehicleNumber(e.target.value.replace(/[^A-Za-z0-9 ]/g, ""));
+                      setTransportErrors((current) => ({ ...current, vehicle: "" }));
                     }}
-                    onFocus={() => setAssignmentTouched((value) => ({ ...value, vehicle: true }))}
-                    aria-invalid={
-                      assignmentTouched.vehicle &&
-                      !/^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/.test(
-                        vehicleNumber.replace(/\s+/g, "").trim(),
-                      )
-                    }
-                    aria-describedby="assignment-vehicle-error"
-                    pattern="[A-Za-z]{2}[0-9]{1,2}[A-Za-z]{1,3}[0-9]{4}"
-                    maxLength={13}
                     className={inputClass}
                   />
-                  {assignmentTouched.vehicle && !vehicleNumber.trim() && (
-                    <p id="assignment-vehicle-error" className="mt-1 text-xs text-rose-600">
-                      Vehicle number is required.
-                    </p>
+                  {transportErrors.vehicle && (
+                    <p className="mt-1 text-xs font-medium text-destructive">{transportErrors.vehicle}</p>
                   )}
-                  {assignmentTouched.vehicle &&
-                    vehicleNumber.trim() &&
-                    !/^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/.test(
-                      vehicleNumber.replace(/\s+/g, "").trim(),
-                    ) && (
-                      <p id="assignment-vehicle-error" className="mt-1 text-xs text-rose-600">
-                        Enter a valid vehicle number.
-                      </p>
-                    )}
                 </div>
                 <div>
                   <Label htmlFor="assignment-driver">Driver Name *</Label>
                   <Input
                     id="assignment-driver"
-                    required
                     placeholder="Enter driver name"
                     value={driverName}
-                    onChange={(e) => setDriverName(e.target.value)}
-                    onBlur={() => {
-                      setDriverName((value) => value.trim().replace(/\s+/g, " "));
-                      setAssignmentTouched((value) => ({ ...value, driver: true }));
+                    onChange={(e) => {
+                      setDriverName(e.target.value.replace(/[^A-Za-z ]/g, ""));
+                      setTransportErrors((current) => ({ ...current, driver: "" }));
                     }}
-                    onFocus={() => setAssignmentTouched((value) => ({ ...value, driver: true }))}
-                    aria-invalid={
-                      assignmentTouched.driver && !/^[A-Za-z .'-]{2,80}$/.test(driverName.trim())
-                    }
-                    aria-describedby="assignment-driver-error"
-                    pattern="[A-Za-z .'-]{2,80}"
-                    maxLength={80}
                     className={inputClass}
                   />
-                  {assignmentTouched.driver && !driverName.trim() && (
-                    <p id="assignment-driver-error" className="mt-1 text-xs text-rose-600">
-                      Driver name is required.
-                    </p>
+                  {transportErrors.driver && (
+                    <p className="mt-1 text-xs font-medium text-destructive">{transportErrors.driver}</p>
                   )}
-                  {assignmentTouched.driver &&
-                    driverName.trim() &&
-                    !/^[A-Za-z .'-]{2,80}$/.test(driverName.trim()) && (
-                      <p id="assignment-driver-error" className="mt-1 text-xs text-rose-600">
-                        Enter a valid driver name.
-                      </p>
-                    )}
                 </div>
                 <div>
                   <Label htmlFor="assignment-contact">Driver Contact *</Label>
                   <Input
                     id="assignment-contact"
-                    required
                     type="tel"
-                    value={driverMobile}
-                    onChange={(e) =>
-                      setDriverMobile(e.target.value.replace(/\D/g, "").slice(0, 10))
-                    }
-                    onBlur={() => setAssignmentTouched((value) => ({ ...value, contact: true }))}
-                    onFocus={() => setAssignmentTouched((value) => ({ ...value, contact: true }))}
-                    aria-invalid={assignmentTouched.contact && !/^[6-9]\d{9}$/.test(driverMobile)}
-                    aria-describedby="assignment-contact-error"
-                    inputMode="tel"
-                    pattern="[6-9][0-9]{9}"
                     maxLength={10}
+                    placeholder="Enter mobile number"
+                    value={driverMobile}
+                    onChange={(e) => {
+                      setDriverMobile(e.target.value.replace(/[^0-9]/g, "").slice(0, 10));
+                      setTransportErrors((current) => ({ ...current, contact: "" }));
+                    }}
                     className={inputClass}
                   />
-                  {assignmentTouched.contact && !driverMobile && (
-                    <p id="assignment-contact-error" className="mt-1 text-xs text-rose-600">
-                      Driver contact is required.
-                    </p>
+                  {transportErrors.contact && (
+                    <p className="mt-1 text-xs font-medium text-destructive">{transportErrors.contact}</p>
                   )}
-                  {assignmentTouched.contact &&
-                    driverMobile &&
-                    !/^[6-9]\d{9}$/.test(driverMobile) && (
-                      <p id="assignment-contact-error" className="mt-1 text-xs text-rose-600">
-                        Enter a valid 10-digit mobile number.
-                      </p>
-                    )}
                 </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={closeCreateFlow}>
+                  Cancel
+                </Button>
+                <Button type="submit">Next</Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={isMaterialPopupOpen} onOpenChange={setIsMaterialPopupOpen}>
+          <DialogContent className="max-w-sm rounded-2xl p-6">
+            <DialogHeader>
+              <DialogTitle className="text-lg font-black text-primary">
+                Add custom material
+              </DialogTitle>
+            </DialogHeader>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleAddNewCustomMaterial();
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <Label htmlFor="custom-material-name">Material name *</Label>
+                <Input
+                  id="custom-material-name"
+                  autoFocus
+                  required
+                  placeholder="Enter material name"
+                  value={customMaterialName}
+                  onChange={(event) => setCustomMaterialName(event.target.value)}
+                  className={inputClass}
+                />
               </div>
               <div className="flex justify-end gap-2">
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={assignmentSubmitting}
-                  onClick={() => setIsAssignmentOpen(false)}
+                  onClick={() => {
+                    setCustomMaterialName("");
+                    setIsMaterialPopupOpen(false);
+                  }}
                 >
                   Cancel
                 </Button>
-                <Button
-                  type="submit"
-                  disabled={
-                    assignmentSubmitting ||
-                    !/^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/.test(
-                      vehicleNumber.replace(/\s+/g, "").trim(),
-                    ) ||
-                    !/^[A-Za-z .'-]{2,80}$/.test(driverName.trim()) ||
-                    !/^[6-9]\d{9}$/.test(driverMobile)
-                  }
-                >
-                  {assignmentSubmitting && <Loader2 className="mr-2 size-4 animate-spin" />}
-                  Continue to ASN Details
+                <Button type="submit" disabled={creatingMaterial || !customMaterialName.trim()}>
+                  {creatingMaterial ? "Saving…" : "Add Material"}
                 </Button>
               </div>
             </form>
@@ -1039,14 +734,7 @@ function NewAsnPage() {
         </Dialog>
 
         {/* CREATE ASN POPUP MODAL DIALOG */}
-        <Dialog
-          open={isModalOpen}
-          onOpenChange={(open) => {
-            setIsModalOpen(open);
-            if (!open && !asnSubmitted) setIsAssignmentOpen(true);
-            if (!open) setAsnSubmitted(false);
-          }}
-        >
+        <Dialog open={isModalOpen} onOpenChange={(open) => !open ? closeCreateFlow() : setIsModalOpen(true)}>
           <DialogContent className="max-w-2xl rounded-2xl bg-card p-6 shadow-2xl">
             <DialogHeader>
               <DialogTitle className="font-black text-lg text-primary uppercase border-b pb-2">
@@ -1080,9 +768,8 @@ function NewAsnPage() {
                     </Label>
                     <Input
                       id="supplier-name"
-                      required
                       value={supplierName}
-                      onChange={(e) => setSupplierName(e.target.value)}
+                      readOnly
                       className={`${inputClass} bg-muted`}
                     />
                   </div>
@@ -1098,7 +785,7 @@ function NewAsnPage() {
                       id="expected-arrival-date"
                       type="date"
                       required
-                      min={todayDate()}
+                      min={new Date().toISOString().slice(0, 10)}
                       value={expectedArrivalDate}
                       onChange={(e) => setExpectedArrivalDate(e.target.value)}
                       className={inputClass}
@@ -1224,7 +911,7 @@ function NewAsnPage() {
                   <table className="w-full text-left text-xs">
                     <thead className="bg-muted/40 border-b font-bold uppercase text-muted-foreground">
                       <tr>
-                        <th className="p-2.5">Material Name Component (Select from DB Dropdown)</th>
+                        <th className="p-2.5">Material</th>
                         <th className="p-2.5 text-right">Shipped Qty</th>
                         <th className="p-2.5">UOM</th>
                         <th className="p-2.5 text-center">Action</th>
@@ -1238,6 +925,11 @@ function NewAsnPage() {
                               required
                               value={line.item_id || line.material_id || ""}
                               onChange={(e) => {
+                                if (e.target.value === "__add_custom_material__") {
+                                  setCustomMaterialRowIndex(idx);
+                                  setIsMaterialPopupOpen(true);
+                                  return;
+                                }
                                 const material = materialCatalog.find(
                                   (item) => String(item.id) === e.target.value,
                                 );
@@ -1273,27 +965,22 @@ function NewAsnPage() {
                                   {material.name} ({material.code})
                                 </option>
                               ))}
+                              <option value="__add_custom_material__">
+                                ＋ Add custom material
+                              </option>
                             </select>
                           </td>
                           <td className="p-2">
                             <Input
                               required
                               type="number"
-                              min="1"
-                              step="any"
                               placeholder="Enter quantity"
                               value={line.shipped_quantity}
-                              onKeyDown={(e) => {
-                                if (["-", "+", "e", "E"].includes(e.key)) e.preventDefault();
-                              }}
                               onChange={(e) =>
                                 setLines((prev) =>
                                   prev.map((item, i) =>
                                     i === idx
-                                      ? {
-                                          ...item,
-                                          shipped_quantity: e.target.value.replace(/[^0-9.]/g, ""),
-                                        }
+                                      ? { ...item, shipped_quantity: e.target.value }
                                       : item,
                                   ),
                                 )
@@ -1328,61 +1015,31 @@ function NewAsnPage() {
               </div>
 
               {/* SUBMIT ACTIONS */}
-              <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-between">
+              <div className="flex gap-2 justify-end pt-2">
                 <Button
                   type="button"
-                  variant="ghost"
-                  className="rounded-xl font-bold sm:mr-auto"
-                  onClick={() => {
-                    setAsnSubmitted(false);
-                    setIsModalOpen(false);
-                    setIsAssignmentOpen(true);
-                  }}
+                  variant="outline"
+                  className="rounded-xl font-bold"
+                  onClick={closeCreateFlow}
                 >
-                  <ArrowLeft className="mr-2 size-4" /> Back
+                  Cancel
                 </Button>
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-xl font-bold"
-                    onClick={() => setIsModalOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={submitting}
-                    className="rounded-xl font-bold bg-sky-600 hover:bg-sky-700 text-white shadow-md"
-                  >
-                    {submitting ? (
-                      <Loader2 className="mr-2 size-4 animate-spin" />
-                    ) : (
-                      <CheckCircle2 className="mr-2 size-4" />
-                    )}
-                    Submit ASN
-                  </Button>
-                </div>
+                <Button
+                  type="submit"
+                  disabled={submitting}
+                  className="rounded-xl font-bold bg-sky-600 hover:bg-sky-700 text-white shadow-md"
+                >
+                  {submitting ? (
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="mr-2 size-4" />
+                  )}
+                  Submit ASN
+                </Button>
               </div>
             </form>
           </DialogContent>
         </Dialog>
-        <AlertDialog open={Boolean(asnPendingDelete)} onOpenChange={(open) => !open && setAsnPendingDelete(null)}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete ASN?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Delete ASN {asnPendingDelete?.asn_number}? This action cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => void confirmDeleteAsn()}>
-                Delete ASN
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
       </div>
     </AppShell>
   );

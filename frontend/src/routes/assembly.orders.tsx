@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
 import { requireRole } from "@/lib/auth-utils";
+import { isValidDateInput, parsePositiveNumber } from "@/lib/input-validation";
 import {
   api,
   type AssemblyOrder,
@@ -68,28 +69,57 @@ export const Route = createFileRoute("/assembly/orders")({
 function getStatusBadge(status: string) {
   const s = (status || "").toUpperCase();
   if (s === "COMPLETED" || s === "READY_FOR_DISPATCH" || s === "PACKED") {
-    return <Badge className="bg-emerald-500/15 text-emerald-700 border-emerald-500/30 dark:text-emerald-300">{status}</Badge>;
+    return (
+      <Badge className="bg-emerald-500/15 text-emerald-700 border-emerald-500/30 dark:text-emerald-300">
+        {status}
+      </Badge>
+    );
   }
   if (s === "IN_PRODUCTION" || s === "IN-PROGRESS") {
-    return <Badge className="bg-blue-500/15 text-blue-700 border-blue-500/30 dark:text-blue-300">{status}</Badge>;
+    return (
+      <Badge className="bg-blue-500/15 text-blue-700 border-blue-500/30 dark:text-blue-300">
+        {status}
+      </Badge>
+    );
   }
   if (s === "QC_PENDING") {
-    return <Badge className="bg-purple-500/15 text-purple-700 border-purple-500/30 dark:text-purple-300">{status}</Badge>;
+    return (
+      <Badge className="bg-purple-500/15 text-purple-700 border-purple-500/30 dark:text-purple-300">
+        {status}
+      </Badge>
+    );
   }
   if (s === "MATERIAL_PENDING" || s === "PLANNED") {
-    return <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-300">{status}</Badge>;
+    return (
+      <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-300">
+        {status}
+      </Badge>
+    );
   }
   if (s === "REWORK" || s === "QC_FAILED") {
-    return <Badge className="bg-rose-500/15 text-rose-700 border-rose-500/30 dark:text-rose-300">{status}</Badge>;
+    return (
+      <Badge className="bg-rose-500/15 text-rose-700 border-rose-500/30 dark:text-rose-300">
+        {status}
+      </Badge>
+    );
   }
   return <Badge variant="outline">{status || "UNKNOWN"}</Badge>;
 }
 
 function getPriorityBadge(priority: string) {
   const p = (priority || "").toUpperCase();
-  if (p === "URGENT") return <Badge className="bg-red-500/15 text-red-700 border-red-500/30 font-semibold">{priority}</Badge>;
-  if (p === "HIGH") return <Badge className="bg-orange-500/15 text-orange-700 border-orange-500/30">{priority}</Badge>;
-  if (p === "LOW") return <Badge className="bg-slate-500/15 text-slate-700 border-slate-500/30">{priority}</Badge>;
+  if (p === "URGENT")
+    return (
+      <Badge className="bg-red-500/15 text-red-700 border-red-500/30 font-semibold">
+        {priority}
+      </Badge>
+    );
+  if (p === "HIGH")
+    return (
+      <Badge className="bg-orange-500/15 text-orange-700 border-orange-500/30">{priority}</Badge>
+    );
+  if (p === "LOW")
+    return <Badge className="bg-slate-500/15 text-slate-700 border-slate-500/30">{priority}</Badge>;
   return <Badge variant="outline">{priority || "NORMAL"}</Badge>;
 }
 
@@ -126,8 +156,18 @@ function AssemblyOrdersPage() {
     product_code: "",
     description: "",
     components: [
-      { material_code: "PCB-CORE-01", material_name: "Core Control PCB", quantity_per_unit: 1, uom: "PCS" },
-      { material_code: "HSG-ENC-01", material_name: "Enclosure Chassis", quantity_per_unit: 1, uom: "PCS" },
+      {
+        material_code: "PCB-CORE-01",
+        material_name: "Core Control PCB",
+        quantity_per_unit: 1,
+        uom: "PCS",
+      },
+      {
+        material_code: "HSG-ENC-01",
+        material_name: "Enclosure Chassis",
+        quantity_per_unit: 1,
+        uom: "PCS",
+      },
     ],
   });
 
@@ -140,8 +180,18 @@ function AssemblyOrdersPage() {
       product_code: initialSku,
       description: "",
       components: [
-        { material_code: "PCB-CORE-01", material_name: "Core Control PCB", quantity_per_unit: 1, uom: "PCS" },
-        { material_code: "HSG-ENC-01", material_name: "Enclosure Chassis", quantity_per_unit: 1, uom: "PCS" },
+        {
+          material_code: "PCB-CORE-01",
+          material_name: "Core Control PCB",
+          quantity_per_unit: 1,
+          uom: "PCS",
+        },
+        {
+          material_code: "HSG-ENC-01",
+          material_name: "Enclosure Chassis",
+          quantity_per_unit: 1,
+          uom: "PCS",
+        },
       ],
     });
     setIsAddProductOpen(true);
@@ -310,11 +360,11 @@ function AssemblyOrdersPage() {
       toast.error("Please select a product.");
       return;
     }
-    if (formData.target_quantity <= 0) {
+    if (parsePositiveNumber(formData.target_quantity) === null) {
       toast.error("Target quantity must be greater than 0.");
       return;
     }
-    if (!formData.required_date) {
+    if (!isValidDateInput(formData.required_date)) {
       toast.error("Please select a required completion date.");
       return;
     }
@@ -377,8 +427,18 @@ function AssemblyOrdersPage() {
         product_code: "",
         description: "",
         components: [
-          { material_code: "PCB-CORE-01", material_name: "Core Control PCB", quantity_per_unit: 1, uom: "PCS" },
-          { material_code: "HSG-ENC-01", material_name: "Enclosure Chassis", quantity_per_unit: 1, uom: "PCS" },
+          {
+            material_code: "PCB-CORE-01",
+            material_name: "Core Control PCB",
+            quantity_per_unit: 1,
+            uom: "PCS",
+          },
+          {
+            material_code: "HSG-ENC-01",
+            material_name: "Enclosure Chassis",
+            quantity_per_unit: 1,
+            uom: "PCS",
+          },
         ],
       });
     } catch (err: any) {
@@ -427,7 +487,6 @@ function AssemblyOrdersPage() {
       }
     >
       <div className="space-y-6">
-
         {/* Filters Bar */}
         <div className="rounded-xl border border-border bg-card p-4 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
           <div className="relative w-full md:w-80">
@@ -491,13 +550,10 @@ function AssemblyOrdersPage() {
               <Layers className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
               <p className="text-base font-semibold text-foreground">No Assembly Orders found</p>
               <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-                No orders match your current filters. Click below to create your first production order.
+                No orders match your current filters. Click below to create your first production
+                order.
               </p>
-              <Button
-                size="sm"
-                className="mt-4 gap-2"
-                onClick={() => setIsCreateOpen(true)}
-              >
+              <Button size="sm" className="mt-4 gap-2" onClick={() => setIsCreateOpen(true)}>
                 <PlusCircle className="h-4 w-4" />
                 Create Assembly Order
               </Button>
@@ -522,12 +578,12 @@ function AssemblyOrdersPage() {
                   {orders.map((ord) => (
                     <tr
                       key={ord.id}
-                      onClick={() => navigate({ to: "/assembly/orders", search: { view: ord.id } as any })}
+                      onClick={() =>
+                        navigate({ to: "/assembly/orders", search: { view: ord.id } as any })
+                      }
                       className="hover:bg-muted/40 cursor-pointer transition-colors"
                     >
-                      <td className="py-3.5 px-4 font-semibold text-primary">
-                        {ord.order_number}
-                      </td>
+                      <td className="py-3.5 px-4 font-semibold text-primary">{ord.order_number}</td>
                       <td className="py-3.5 px-4">
                         <div className="font-medium text-foreground">{ord.product_name}</div>
                         {ord.product_code && (
@@ -587,18 +643,24 @@ function AssemblyOrdersPage() {
         {/* ========================================================================= */}
         {/* CREATE ASSEMBLY ORDER DIALOG */}
         {/* ========================================================================= */}
-        <Dialog open={isCreateOpen} onOpenChange={(open) => {
-          setIsCreateOpen(open);
-          if (!open && searchParams.create) {
-            navigate({ to: "/assembly/orders", search: { view: searchParams.view } as any });
-          }
-        }}>
+        <Dialog
+          open={isCreateOpen}
+          onOpenChange={(open) => {
+            setIsCreateOpen(open);
+            if (!open && searchParams.create) {
+              navigate({ to: "/assembly/orders", search: { view: searchParams.view } as any });
+            }
+          }}
+        >
           <DialogContent className="sm:max-w-[540px]">
             <form onSubmit={handleCreateOrder}>
               <DialogHeader>
-                <DialogTitle className="text-lg font-bold text-foreground">Create Assembly Order</DialogTitle>
+                <DialogTitle className="text-lg font-bold text-foreground">
+                  Create Assembly Order
+                </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground">
-                  Select a product from the Product Master to load its active BOM and calculate required materials.
+                  Select a product from the Product Master to load its active BOM and calculate
+                  required materials.
                 </DialogDescription>
               </DialogHeader>
 
@@ -607,7 +669,9 @@ function AssemblyOrdersPage() {
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                      <span>Product to Manufacture <span className="text-destructive">*</span></span>
+                      <span>
+                        Product to Manufacture <span className="text-destructive">*</span>
+                      </span>
                       {selectedProduct && (
                         <span className="text-[11px] font-normal text-muted-foreground">
                           (BOM: {selectedProduct.bom_number})
@@ -632,7 +696,9 @@ function AssemblyOrdersPage() {
                       onChange={(e) => setFormData({ ...formData, product_code: e.target.value })}
                       required
                     >
-                      <option value="" disabled>Select a manufacturable product...</option>
+                      <option value="" disabled>
+                        Select a manufacturable product...
+                      </option>
                       {products.map((p) => (
                         <option key={p.id} value={p.product_code}>
                           {p.product_name} ({p.product_code})
@@ -663,7 +729,9 @@ function AssemblyOrdersPage() {
                         min="1"
                         step="1"
                         value={formData.target_quantity}
-                        onChange={(e) => setFormData({ ...formData, target_quantity: Number(e.target.value) })}
+                        onChange={(e) =>
+                          setFormData({ ...formData, target_quantity: Number(e.target.value) })
+                        }
                         required
                         className="h-9 pr-12 text-sm"
                       />
@@ -721,14 +789,18 @@ function AssemblyOrdersPage() {
                 {loadingBOMPreview ? (
                   <div className="rounded-lg border border-border/80 bg-muted/20 p-3 flex items-center justify-center gap-2 text-xs text-muted-foreground">
                     <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                    <span>Calculating required materials from BOM & querying warehouse inventory...</span>
+                    <span>
+                      Calculating required materials from BOM & querying warehouse inventory...
+                    </span>
                   </div>
                 ) : bomPreview ? (
                   <div className="rounded-lg border border-border bg-card p-3 space-y-2">
                     <div className="flex items-center justify-between text-xs">
                       <div className="flex items-center gap-1.5 font-semibold text-foreground">
                         <Boxes className="h-3.5 w-3.5 text-primary" />
-                        <span>BOM Calculation Preview ({bomPreview.items?.length || 0} Components)</span>
+                        <span>
+                          BOM Calculation Preview ({bomPreview.items?.length || 0} Components)
+                        </span>
                       </div>
                       <Badge
                         className={
@@ -852,7 +924,8 @@ function AssemblyOrdersPage() {
                       {getPriorityBadge(selectedOrder.priority)}
                     </div>
                     <DialogDescription className="text-xs text-muted-foreground mt-1">
-                      {selectedOrder.product_name} ({selectedOrder.product_code}) · Line: {selectedOrder.assembly_line || selectedOrder.assigned_line || "Unassigned"}
+                      {selectedOrder.product_name} ({selectedOrder.product_code}) · Line:{" "}
+                      {selectedOrder.assembly_line || selectedOrder.assigned_line || "Unassigned"}
                     </DialogDescription>
                     {!selectedOrder.assigned_operator && (
                       <p className="mt-2 text-xs font-semibold text-amber-700">
@@ -866,7 +939,10 @@ function AssemblyOrdersPage() {
                       Target: {selectedOrder.target_quantity} {selectedOrder.uom}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      Due: {selectedOrder.required_date ? new Date(selectedOrder.required_date).toLocaleDateString() : "—"}
+                      Due:{" "}
+                      {selectedOrder.required_date
+                        ? new Date(selectedOrder.required_date).toLocaleDateString()
+                        : "—"}
                     </div>
                   </div>
                 </div>
@@ -919,30 +995,42 @@ function AssemblyOrdersPage() {
                       </h4>
                       <div className="flex justify-between py-1 border-b border-border/30">
                         <span className="text-muted-foreground">Product Code</span>
-                        <span className="font-medium text-foreground">{selectedOrder.product_code || "—"}</span>
+                        <span className="font-medium text-foreground">
+                          {selectedOrder.product_code || "—"}
+                        </span>
                       </div>
                       <div className="flex justify-between py-1 border-b border-border/30">
                         <span className="text-muted-foreground">Product Name</span>
-                        <span className="font-medium text-foreground">{selectedOrder.product_name}</span>
+                        <span className="font-medium text-foreground">
+                          {selectedOrder.product_name}
+                        </span>
                       </div>
                       <div className="flex justify-between py-1 border-b border-border/30">
                         <span className="text-muted-foreground">BOM Reference</span>
-                        <span className="font-medium font-mono text-foreground">{selectedOrder.bom_number || "Standard BOM"}</span>
+                        <span className="font-medium font-mono text-foreground">
+                          {selectedOrder.bom_number || "Standard BOM"}
+                        </span>
                       </div>
                       <div className="flex justify-between py-1 border-b border-border/30">
                         <span className="text-muted-foreground">Required By Date</span>
                         <span className="font-medium text-foreground">
-                          {selectedOrder.required_date ? new Date(selectedOrder.required_date).toLocaleDateString() : "—"}
+                          {selectedOrder.required_date
+                            ? new Date(selectedOrder.required_date).toLocaleDateString()
+                            : "—"}
                         </span>
                       </div>
                       <div className="flex justify-between py-1 border-b border-border/30">
                         <span className="text-muted-foreground">Created By</span>
-                        <span className="font-medium text-foreground">{selectedOrder.created_by}</span>
+                        <span className="font-medium text-foreground">
+                          {selectedOrder.created_by}
+                        </span>
                       </div>
                       <div className="flex justify-between py-1">
                         <span className="text-muted-foreground">Created At</span>
                         <span className="font-medium text-foreground">
-                          {selectedOrder.created_at ? new Date(selectedOrder.created_at).toLocaleString() : "—"}
+                          {selectedOrder.created_at
+                            ? new Date(selectedOrder.created_at).toLocaleString()
+                            : "—"}
                         </span>
                       </div>
                     </div>
@@ -952,21 +1040,24 @@ function AssemblyOrdersPage() {
                         Order Notes & Instructions
                       </h4>
                       <p className="text-muted-foreground leading-relaxed">
-                        {selectedOrder.notes || "No additional production notes recorded for this order."}
+                        {selectedOrder.notes ||
+                          "No additional production notes recorded for this order."}
                       </p>
 
                       <div className="pt-4 border-t border-border/50">
-                        <span className="text-xs font-semibold text-foreground block mb-2">Order Workflow Status</span>
+                        <span className="text-xs font-semibold text-foreground block mb-2">
+                          Order Workflow Status
+                        </span>
                         <div className="flex items-center gap-2">
                           {getStatusBadge(selectedOrder.status)}
                           <span className="text-xs text-muted-foreground">
                             {selectedOrder.status === "MATERIAL_PENDING"
                               ? "Awaiting Material Requisition approval from Warehouse"
                               : selectedOrder.status === "MATERIAL_READY"
-                              ? "All materials staged. Ready to start production."
-                              : selectedOrder.status === "IN_PRODUCTION"
-                              ? "Production active on line."
-                              : "Order execution in progress."}
+                                ? "All materials staged. Ready to start production."
+                                : selectedOrder.status === "IN_PRODUCTION"
+                                  ? "Production active on line."
+                                  : "Order execution in progress."}
                           </span>
                         </div>
                       </div>
@@ -978,9 +1069,12 @@ function AssemblyOrdersPage() {
                 <TabsContent value="materials" className="mt-4 space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-sm font-semibold text-foreground">Bill of Materials & Warehouse Stock</h3>
+                      <h3 className="text-sm font-semibold text-foreground">
+                        Bill of Materials & Warehouse Stock
+                      </h3>
                       <p className="text-xs text-muted-foreground">
-                        Real-time BOM material requirements cross-referenced with live Warehouse inventory.
+                        Real-time BOM material requirements cross-referenced with live Warehouse
+                        inventory.
                       </p>
                     </div>
                     <Button
@@ -990,7 +1084,9 @@ function AssemblyOrdersPage() {
                       disabled={loadingMaterials}
                       className="gap-2 h-8 text-xs shrink-0"
                     >
-                      <RefreshCw className={`h-3.5 w-3.5 ${loadingMaterials ? "animate-spin" : ""}`} />
+                      <RefreshCw
+                        className={`h-3.5 w-3.5 ${loadingMaterials ? "animate-spin" : ""}`}
+                      />
                       Refresh Stock
                     </Button>
                   </div>
@@ -1001,16 +1097,20 @@ function AssemblyOrdersPage() {
                     const totalComponents = orderMaterials?.total_components ?? items.length;
                     const shortageCount =
                       orderMaterials?.shortage_components ??
-                      items.filter((i: any) => (i.shortage || 0) > 0 || i.status === "SHORTAGE").length;
+                      items.filter((i: any) => (i.shortage || 0) > 0 || i.status === "SHORTAGE")
+                        .length;
                     const availableCount =
-                      orderMaterials?.available_components ?? Math.max(0, totalComponents - shortageCount);
+                      orderMaterials?.available_components ??
+                      Math.max(0, totalComponents - shortageCount);
                     const isAllAvailable = shortageCount === 0 && totalComponents > 0;
 
                     return (
                       <>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                           <div className="rounded-xl border border-border bg-card p-3">
-                            <span className="text-[11px] font-medium text-muted-foreground">Total Components</span>
+                            <span className="text-[11px] font-medium text-muted-foreground">
+                              Total Components
+                            </span>
                             <div className="flex items-center justify-between mt-1">
                               <p className="text-xl font-bold text-foreground">{totalComponents}</p>
                               <Layers className="h-4 w-4 text-muted-foreground/60" />
@@ -1018,7 +1118,9 @@ function AssemblyOrdersPage() {
                           </div>
 
                           <div className="rounded-xl border border-border bg-card p-3">
-                                <span className="text-[11px] font-medium text-muted-foreground">Materials Ready</span>
+                            <span className="text-[11px] font-medium text-muted-foreground">
+                              Materials Ready
+                            </span>
                             <div className="flex items-center justify-between mt-1">
                               <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
                                 {availableCount}
@@ -1028,25 +1130,33 @@ function AssemblyOrdersPage() {
                           </div>
 
                           <div className="rounded-xl border border-border bg-card p-3">
-                            <span className="text-[11px] font-medium text-muted-foreground">Shortage Count</span>
+                            <span className="text-[11px] font-medium text-muted-foreground">
+                              Shortage Count
+                            </span>
                             <div className="flex items-center justify-between mt-1">
                               <p
                                 className={`text-xl font-bold ${
-                                  shortageCount > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"
+                                  shortageCount > 0
+                                    ? "text-rose-600 dark:text-rose-400"
+                                    : "text-muted-foreground"
                                 }`}
                               >
                                 {shortageCount}
                               </p>
                               <AlertTriangle
                                 className={`h-4 w-4 ${
-                                  shortageCount > 0 ? "text-rose-500/80" : "text-muted-foreground/40"
+                                  shortageCount > 0
+                                    ? "text-rose-500/80"
+                                    : "text-muted-foreground/40"
                                 }`}
                               />
                             </div>
                           </div>
 
                           <div className="rounded-xl border border-border bg-card p-3">
-                            <span className="text-[11px] font-medium text-muted-foreground">Warehouse Status</span>
+                            <span className="text-[11px] font-medium text-muted-foreground">
+                              Warehouse Status
+                            </span>
                             <div className="mt-1">
                               {isAllAvailable ? (
                                 <Badge className="bg-emerald-500/15 text-emerald-700 border-emerald-500/30 text-xs font-semibold">
@@ -1071,9 +1181,9 @@ function AssemblyOrdersPage() {
                                 {shortageCount === 1 ? "Component" : "Components"})
                               </p>
                               <p className="text-amber-700 dark:text-amber-300">
-                                One or more BOM items have insufficient warehouse quantity. When material requisition is
-                                created, warehouse can fulfill available inventory while procurement or warehouse restock is
-                                arranged.
+                                One or more BOM items have insufficient warehouse quantity. When
+                                material requisition is created, warehouse can fulfill available
+                                inventory while procurement or warehouse restock is arranged.
                               </p>
                             </div>
                           </div>
@@ -1102,12 +1212,17 @@ function AssemblyOrdersPage() {
                               <tbody className="divide-y divide-border/40">
                                 {items.map((item: any, idx: number) => {
                                   const isShort =
-                                    (item.shortage && item.shortage > 0) || item.status === "SHORTAGE";
+                                    (item.shortage && item.shortage > 0) ||
+                                    item.status === "SHORTAGE";
                                   return (
                                     <tr key={idx} className={isShort ? "bg-amber-500/5" : ""}>
                                       <td className="py-2.5 px-3">
-                                        <div className="font-medium text-foreground">{item.material_code}</div>
-                                        <div className="text-[11px] text-muted-foreground">{item.material_name}</div>
+                                        <div className="font-medium text-foreground">
+                                          {item.material_code}
+                                        </div>
+                                        <div className="text-[11px] text-muted-foreground">
+                                          {item.material_name}
+                                        </div>
                                       </td>
                                       <td className="py-2.5 px-3 text-right text-muted-foreground">
                                         {item.quantity_per_unit} {item.uom}
@@ -1116,7 +1231,8 @@ function AssemblyOrdersPage() {
                                         {item.required_quantity} {item.uom}
                                       </td>
                                       <td className="py-2.5 px-3 text-right font-medium text-foreground">
-                                        {item.available_quantity ?? item.warehouse_stock ?? 0} {item.uom}
+                                        {item.available_quantity ?? item.warehouse_stock ?? 0}{" "}
+                                        {item.uom}
                                       </td>
                                       <td className="py-2.5 px-3 text-right text-muted-foreground">
                                         {item.requested_quantity || 0} {item.uom}
@@ -1130,7 +1246,9 @@ function AssemblyOrdersPage() {
                                             {item.shortage} {item.uom}
                                           </span>
                                         ) : (
-                                          <span className="text-muted-foreground">0 {item.uom}</span>
+                                          <span className="text-muted-foreground">
+                                            0 {item.uom}
+                                          </span>
                                         )}
                                       </td>
                                       <td className="py-2.5 px-3 text-center">
@@ -1160,14 +1278,16 @@ function AssemblyOrdersPage() {
                 <TabsContent value="production" className="mt-4 space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-sm font-semibold text-foreground">Product Work Steps / Routing</h3>
+                      <h3 className="text-sm font-semibold text-foreground">
+                        Product Work Steps / Routing
+                      </h3>
                       <p className="text-xs text-muted-foreground">
                         Standard sequence of operations defined in master routing for this product.
                       </p>
                     </div>
                   </div>
 
-                  {(!selectedOrder.assembly_steps || selectedOrder.assembly_steps.length === 0) ? (
+                  {!selectedOrder.assembly_steps || selectedOrder.assembly_steps.length === 0 ? (
                     <div className="py-12 text-center text-sm text-muted-foreground border border-dashed rounded-xl">
                       No routing operations configured for this product.
                     </div>
@@ -1187,7 +1307,10 @@ function AssemblyOrdersPage() {
                               <h4 className="text-sm font-semibold text-foreground">{step.name}</h4>
                               <div className="flex items-center gap-2">
                                 {step.qc_required && (
-                                  <Badge variant="outline" className="text-[10px] border-purple-500/30 text-purple-600">
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] border-purple-500/30 text-purple-600"
+                                  >
                                     QC Required
                                   </Badge>
                                 )}
@@ -1217,9 +1340,12 @@ function AssemblyOrdersPage() {
                 {/* 4. QUALITY TAB */}
                 <TabsContent value="quality" className="mt-4 space-y-4">
                   <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-                    <h3 className="text-sm font-semibold text-foreground">Final Quality Inspection Status</h3>
+                    <h3 className="text-sm font-semibold text-foreground">
+                      Final Quality Inspection Status
+                    </h3>
                     <p className="text-xs text-muted-foreground">
-                      Final QC occurs after completion of all production operations. Passed quantity directly converts to Finished Goods.
+                      Final QC occurs after completion of all production operations. Passed quantity
+                      directly converts to Finished Goods.
                     </p>
 
                     <div className="grid grid-cols-3 gap-4 pt-2 border-t border-border/50 text-xs">
@@ -1232,7 +1358,10 @@ function AssemblyOrdersPage() {
                       <div>
                         <span className="text-muted-foreground">QC Passed</span>
                         <p className="text-base font-semibold text-emerald-600 mt-0.5">
-                          {selectedOrder.status === "COMPLETED" ? selectedOrder.completed_quantity : 0} {selectedOrder.uom}
+                          {selectedOrder.status === "COMPLETED"
+                            ? selectedOrder.completed_quantity
+                            : 0}{" "}
+                          {selectedOrder.uom}
                         </p>
                       </div>
                       <div>
@@ -1248,19 +1377,26 @@ function AssemblyOrdersPage() {
                 {/* 5. FINISHED GOODS TAB */}
                 <TabsContent value="finished-goods" className="mt-4 space-y-4">
                   <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-                    <h3 className="text-sm font-semibold text-foreground">Finished Goods & Storage Status</h3>
+                    <h3 className="text-sm font-semibold text-foreground">
+                      Finished Goods & Storage Status
+                    </h3>
                     <p className="text-xs text-muted-foreground">
-                      Finished goods stay within the Assembly FG storage area and are ready for dispatch pickup.
+                      Finished goods stay within the Assembly FG storage area and are ready for
+                      dispatch pickup.
                     </p>
 
                     <div className="p-4 rounded-lg bg-muted/40 text-xs space-y-1.5 border border-border/40">
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">Target FG</span>
-                        <span className="font-semibold text-foreground">{selectedOrder.product_name}</span>
+                        <span className="font-semibold text-foreground">
+                          {selectedOrder.product_name}
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">Current Status</span>
-                        <span className="font-semibold text-foreground">{selectedOrder.status}</span>
+                        <span className="font-semibold text-foreground">
+                          {selectedOrder.status}
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">Designated Storage Area</span>
@@ -1281,7 +1417,8 @@ function AssemblyOrdersPage() {
                           <div>
                             <p className="font-medium text-foreground">Assembly Order Created</p>
                             <p className="text-muted-foreground text-[11px]">
-                              Created by {selectedOrder.created_by} on {new Date(selectedOrder.created_at).toLocaleString()}
+                              Created by {selectedOrder.created_by} on{" "}
+                              {new Date(selectedOrder.created_at).toLocaleString()}
                             </p>
                           </div>
                         </div>
@@ -1340,7 +1477,8 @@ function AssemblyOrdersPage() {
                 Add Manufacturable Product & BOM
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground mt-1">
-                Register a new finished good item and define its Bill of Materials components for assembly.
+                Register a new finished good item and define its Bill of Materials components for
+                assembly.
               </DialogDescription>
             </DialogHeader>
 
@@ -1374,7 +1512,10 @@ function AssemblyOrdersPage() {
                       value={newProductData.product_code}
                       onChange={(e) => {
                         setSkuManuallyEdited(true);
-                        setNewProductData({ ...newProductData, product_code: e.target.value.toUpperCase() });
+                        setNewProductData({
+                          ...newProductData,
+                          product_code: e.target.value.toUpperCase(),
+                        });
                       }}
                       required
                       className="h-9 pr-9 text-xs font-mono font-semibold rounded-xl uppercase tracking-wider bg-muted/30 focus:bg-background"
@@ -1394,7 +1535,9 @@ function AssemblyOrdersPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-foreground">Description (Optional)</label>
+                <label className="text-xs font-semibold text-foreground">
+                  Description (Optional)
+                </label>
                 <Input
                   type="text"
                   placeholder="e.g. High-precision IoT environmental sensor controller"
@@ -1440,7 +1583,10 @@ function AssemblyOrdersPage() {
 
                 <div className="max-h-44 overflow-y-auto space-y-2 pr-1 rounded-xl border border-border/60 bg-muted/20 p-2.5">
                   {newProductData.components.map((comp, idx) => (
-                    <div key={idx} className="flex items-center gap-2 bg-card p-2 rounded-lg border border-border/50 text-xs">
+                    <div
+                      key={idx}
+                      className="flex items-center gap-2 bg-card p-2 rounded-lg border border-border/50 text-xs"
+                    >
                       <div className="flex-1 space-y-1">
                         <Input
                           placeholder="Code (e.g. PCB-01)"

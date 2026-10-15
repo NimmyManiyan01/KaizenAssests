@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from decimal import Decimal
 import logging
 import re
@@ -21,7 +21,6 @@ from app.modules.assembly.infrastructure.persistence.models import (
     AssemblyMaterialConsumptionModel,
     AssemblyScrapModel,
     AssemblyQualityInspectionModel,
-    AssemblyRoutingOperationModel,
     AssemblyRoutingRevisionModel,
     BillOfMaterialsItemModel,
     BillOfMaterialsModel,

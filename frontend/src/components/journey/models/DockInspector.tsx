@@ -240,7 +240,6 @@ export function DockInspector({
           </group>
         </group>
       </group>
-
     </group>
   );
 }

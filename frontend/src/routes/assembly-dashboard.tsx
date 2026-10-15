@@ -410,10 +410,14 @@ function AssemblyDashboard() {
                   <div
                     className={cn(
                       "grid size-9 shrink-0 place-items-center rounded-lg border",
-                      sc.tone === "blue" && "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",
-                      sc.tone === "amber" && "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20",
-                      sc.tone === "purple" && "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/20",
-                      sc.tone === "emerald" && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+                      sc.tone === "blue" &&
+                        "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",
+                      sc.tone === "amber" &&
+                        "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20",
+                      sc.tone === "purple" &&
+                        "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/20",
+                      sc.tone === "emerald" &&
+                        "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
                     )}
                   >
                     <Icon className="size-4" />
@@ -467,7 +471,10 @@ function AssemblyDashboard() {
                   <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-xl bg-muted/60 border border-border/60">
                     {[
                       { key: "ALL", label: `All (${data?.active_orders?.length || 0})` },
-                      { key: "MATERIAL_PENDING", label: `Material Pending (${kpis.material_pending})` },
+                      {
+                        key: "MATERIAL_PENDING",
+                        label: `Material Pending (${kpis.material_pending})`,
+                      },
                       { key: "IN_PRODUCTION", label: `In Production (${kpis.in_production})` },
                       { key: "COMPLETED", label: `Completed` },
                     ].map((tab) => (
@@ -478,7 +485,7 @@ function AssemblyDashboard() {
                           "px-2.5 py-1 text-xs font-semibold rounded-lg transition-all",
                           statusFilter === tab.key
                             ? "bg-card text-foreground shadow-xs border border-border/50"
-                            : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted",
                         )}
                       >
                         {tab.label}
@@ -512,7 +519,9 @@ function AssemblyDashboard() {
               {loading ? (
                 <div className="py-16 text-center space-y-3">
                   <RefreshCw className="size-6 animate-spin text-primary mx-auto opacity-70" />
-                  <p className="text-xs text-muted-foreground">Loading active orders from database...</p>
+                  <p className="text-xs text-muted-foreground">
+                    Loading active orders from database...
+                  </p>
                 </div>
               ) : filteredOrders.length === 0 ? (
                 <div className="py-14 text-center">
@@ -606,7 +615,9 @@ function AssemblyDashboard() {
                                 {ord.bom_number && (
                                   <>
                                     <span>•</span>
-                                    <span className="font-mono text-[10px] opacity-80">{ord.bom_number}</span>
+                                    <span className="font-mono text-[10px] opacity-80">
+                                      {ord.bom_number}
+                                    </span>
                                   </>
                                 )}
                               </div>
@@ -646,8 +657,8 @@ function AssemblyDashboard() {
                                       isDone
                                         ? "bg-emerald-500"
                                         : progressVal > 0
-                                        ? "bg-blue-500"
-                                        : "bg-amber-500/70"
+                                          ? "bg-blue-500"
+                                          : "bg-amber-500/70",
                                     )}
                                     style={{ width: `${progressVal}%` }}
                                   />
@@ -704,7 +715,9 @@ function AssemblyDashboard() {
                   </div>
                   <div>
                     <h2 className="text-sm font-bold text-foreground">Needs Attention</h2>
-                    <p className="text-[11px] text-muted-foreground">Actionable bottlenecks & shortages</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Actionable bottlenecks & shortages
+                    </p>
                   </div>
                 </div>
                 {data?.needs_attention && data.needs_attention.length > 0 && (
@@ -727,7 +740,7 @@ function AssemblyDashboard() {
                       "text-[11px] font-semibold px-2 py-0.5 rounded-md border transition-colors",
                       alertsOnlyShortages
                         ? "bg-rose-500/15 text-rose-600 border-rose-500/30"
-                        : "bg-muted text-muted-foreground border-border/60 hover:text-foreground"
+                        : "bg-muted text-muted-foreground border-border/60 hover:text-foreground",
                     )}
                   >
                     {alertsOnlyShortages ? "Showing Shortages" : "Show Shortages Only"}
@@ -738,7 +751,9 @@ function AssemblyDashboard() {
               {/* Alert Items List with Scroll */}
               <div className="mt-3.5 space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
                 {loading ? (
-                  <div className="py-8 text-center text-xs text-muted-foreground">Checking conditions...</div>
+                  <div className="py-8 text-center text-xs text-muted-foreground">
+                    Checking conditions...
+                  </div>
                 ) : filteredAlerts.length === 0 ? (
                   <div className="py-8 text-center">
                     <div className="grid size-10 place-items-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 mx-auto mb-2">
@@ -760,7 +775,7 @@ function AssemblyDashboard() {
                           "rounded-xl border p-3.5 space-y-2 text-xs transition-all",
                           isShortage
                             ? "border-rose-500/30 bg-rose-500/5 hover:border-rose-500/50"
-                            : "border-amber-500/30 bg-amber-500/5 hover:border-amber-500/50"
+                            : "border-amber-500/30 bg-amber-500/5 hover:border-amber-500/50",
                         )}
                       >
                         <div className="flex items-center justify-between">
@@ -772,7 +787,7 @@ function AssemblyDashboard() {
                               "text-[10px] font-bold px-2 py-0.5 rounded-full border",
                               isShortage
                                 ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30"
-                                : "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                                : "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30",
                             )}
                           >
                             {item.type}
@@ -780,10 +795,14 @@ function AssemblyDashboard() {
                         </div>
 
                         {item.item_name && (
-                          <div className="font-semibold text-foreground text-xs">{item.item_name}</div>
+                          <div className="font-semibold text-foreground text-xs">
+                            {item.item_name}
+                          </div>
                         )}
 
-                        {item.required !== undefined && item.available !== undefined && item.shortage !== undefined ? (
+                        {item.required !== undefined &&
+                        item.available !== undefined &&
+                        item.shortage !== undefined ? (
                           <div className="grid grid-cols-3 gap-1 pt-1.5 pb-0.5 text-[11px] border-t border-border/40">
                             <div>
                               <span className="text-muted-foreground">Req:</span>{" "}
@@ -802,7 +821,9 @@ function AssemblyDashboard() {
                             </div>
                           </div>
                         ) : (
-                          <p className="text-[11px] text-muted-foreground leading-relaxed">{item.message}</p>
+                          <p className="text-[11px] text-muted-foreground leading-relaxed">
+                            {item.message}
+                          </p>
                         )}
 
                         {/* Quick Action Button right on the alert card */}
@@ -833,14 +854,18 @@ function AssemblyDashboard() {
                   </div>
                   <div>
                     <h2 className="text-sm font-bold text-foreground">Recent Activity</h2>
-                    <p className="text-[11px] text-muted-foreground">Chronological audit & assembly log</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Chronological audit & assembly log
+                    </p>
                   </div>
                 </div>
               </div>
 
               <div className="mt-4 space-y-3">
                 {loading ? (
-                  <div className="py-6 text-center text-xs text-muted-foreground">Loading activity log...</div>
+                  <div className="py-6 text-center text-xs text-muted-foreground">
+                    Loading activity log...
+                  </div>
                 ) : !data?.recent_activity || data.recent_activity.length === 0 ? (
                   <div className="py-6 text-center text-xs text-muted-foreground">
                     No recent activity recorded yet.
@@ -853,7 +878,9 @@ function AssemblyDashboard() {
                         <div className="absolute -left-[21px] top-1 size-2.5 rounded-full bg-primary border-2 border-card" />
                         <div className="space-y-0.5">
                           <div className="flex items-center justify-between gap-1">
-                            <span className="font-semibold text-foreground text-xs">{act.action}</span>
+                            <span className="font-semibold text-foreground text-xs">
+                              {act.action}
+                            </span>
                             <span className="text-[10px] text-muted-foreground whitespace-nowrap">
                               {formatRelativeTime(act.timestamp)}
                             </span>

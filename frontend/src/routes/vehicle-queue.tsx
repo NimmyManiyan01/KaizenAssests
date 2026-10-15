@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { api } from "@/lib/api-client";
+import { isValidDateInput, isValidMobileNumber, isValidPersonName, isValidVehicleNumber, sanitizeMobileNumber, sanitizePersonName, sanitizeVehicleNumber } from "@/lib/input-validation";
 
 export const Route = createFileRoute("/vehicle-queue")({
   head: () => ({ meta: [{ title: "Inbound Arrivals · KaizenAssests" }] }),
@@ -478,6 +479,22 @@ function InboundArrivals() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              if (!selectedAsn.trim()) {
+                toast.error("ASN number is required");
+                return;
+              }
+              if (!isValidVehicleNumber(vehicleNumberInput) || !isValidPersonName(driverNameInput) || !isValidMobileNumber(driverMobileInput)) {
+                toast.error("Use letters, numbers and spaces for vehicle, letters and spaces for driver, and exactly 10 digits for driver contact");
+                return;
+              }
+              if (!isValidDateInput(invoiceDateInput)) {
+                toast.error("Enter a valid invoice date");
+                return;
+              }
+              if (!asnDocumentFile && !uploadedInvoiceFile) {
+                toast.error("ASN document or supplier invoice is required");
+                return;
+              }
               setSubmittingWebEntry(true);
               const formData = new FormData();
               formData.append("vehicle_number", vehicleNumberInput);
@@ -690,7 +707,7 @@ function InboundArrivals() {
                     type="text"
                     required
                     value={vehicleNumberInput}
-                    onChange={(e) => setVehicleNumberInput(e.target.value.toUpperCase())}
+                    onChange={(e) => setVehicleNumberInput(sanitizeVehicleNumber(e.target.value).toUpperCase())}
                     placeholder="e.g. KA 01 AB 4582"
                     className="h-9 w-full rounded-xl border bg-background px-3 font-mono font-bold text-xs focus:ring-1 focus:ring-primary"
                   />
@@ -722,7 +739,7 @@ function InboundArrivals() {
                     type="text"
                     required
                     value={driverNameInput}
-                    onChange={(e) => setDriverNameInput(e.target.value)}
+                    onChange={(e) => setDriverNameInput(sanitizePersonName(e.target.value))}
                     placeholder="Driver's Full Name"
                     className="h-9 w-full rounded-xl border bg-background px-3 font-semibold text-xs focus:ring-1 focus:ring-primary"
                   />
@@ -735,8 +752,9 @@ function InboundArrivals() {
                   <input
                     type="text"
                     required
+                    maxLength={10}
                     value={driverMobileInput}
-                    onChange={(e) => setDriverMobileInput(e.target.value)}
+                    onChange={(e) => setDriverMobileInput(sanitizeMobileNumber(e.target.value))}
                     placeholder="+91 98450 12345"
                     className="h-9 w-full rounded-xl border bg-background px-3 font-mono text-xs focus:ring-1 focus:ring-primary"
                   />
