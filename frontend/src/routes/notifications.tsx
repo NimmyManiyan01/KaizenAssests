@@ -35,7 +35,7 @@ export const Route = createFileRoute("/notifications")({
   component: Notifications,
 });
 
-export function extractGrnPayload(n: any) {
+function extractGrnPayload(n: any) {
   if (!n) return null;
   let parsedJson: any = null;
   if (n.payload_json || n.payloadJson) {
@@ -346,11 +346,7 @@ function Notifications() {
     const username = String(parsedUser?.username || "").toLowerCase();
     const role = roles.includes("SUPPLIER")
       ? "SUPPLIER"
-      : roles.includes("FINANCE")
-        ? "FINANCE"
-        : roles.includes("PROCUREMENT")
-          ? "PROCUREMENT"
-          : roles.includes("GATE_SECURITY")
+      : roles.includes("GATE_SECURITY")
             ? "GATE_SECURITY"
             : roles.includes("ASSEMBLY") ||
                 roles.includes("ASSEMBLY_MANAGER") ||
@@ -507,11 +503,7 @@ function Notifications() {
   const handleOpenNotificationDetails = (n: any) => {
     // Some older notification records contain the shared warehouse dashboard
     // as their target. Keep procurement users in their own dashboard context.
-    const notificationLink =
-      userRole === "PROCUREMENT" &&
-      ["/warehouse-dashboard", "/receiving"].includes(String(n.link || ""))
-        ? "/procurement-dashboard"
-        : n.link;
+    const notificationLink = n.link;
     const isGrnLinked = String(n.link || "").startsWith("/grn");
     const isDockAllocation =
       userRole !== "GRN" &&
@@ -803,8 +795,7 @@ function Notifications() {
                             badgeText = "SHIPMENT DISPATCHED";
                             badgeColor = "bg-blue-100 text-blue-800 border-blue-300";
                           } else if (
-                            titleUpper.includes("PO APPROVED") ||
-                            titleUpper.includes("APPROVED BY FINANCE")
+                            titleUpper.includes("PO APPROVED")
                           ) {
                             badgeText = "PO APPROVED";
                             badgeColor = "bg-emerald-100 text-emerald-800 border-emerald-300";

@@ -174,7 +174,7 @@ export const api = {
   }> {
     if (username.startsWith("supplier_") || username === "supplier") {
       const response = await request<any>(
-        `${BUSINESS_API_URL}/api/v1/procurement/auth/supplier-login`,
+        `${BUSINESS_API_URL}/api/v1/auth/supplier-login`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -254,7 +254,7 @@ export const api = {
   },
 
   async changePassword(data: any): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/auth/change-password`, {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/auth/change-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -262,7 +262,7 @@ export const api = {
   },
 
   async magicLogin(token: string): Promise<any> {
-    const response = await request<any>(`${BUSINESS_API_URL}/api/v1/procurement/auth/magic-login`, {
+    const response = await request<any>(`${BUSINESS_API_URL}/api/v1/auth/magic-login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token }),
@@ -291,7 +291,7 @@ export const api = {
 
   async verifyMagicToken(token: string): Promise<any> {
     return request<any>(
-      `${BUSINESS_API_URL}/api/v1/procurement/auth/verify-magic-token?token=${encodeURIComponent(token)}`,
+      `${BUSINESS_API_URL}/api/v1/auth/verify-magic-token?token=${encodeURIComponent(token)}`,
     );
   },
 
@@ -1027,23 +1027,11 @@ export const api = {
     vendor_type?: string;
     status?: string;
   }): Promise<any[]> {
-    let url = `${BUSINESS_API_URL}/api/v1/procurement/suppliers`;
-    if (filters) {
-      const params = new URLSearchParams();
-      if (filters.search) params.append("search", filters.search);
-      if (filters.category) params.append("category", filters.category);
-      if (filters.material) params.append("material", filters.material);
-      if (filters.city) params.append("city", filters.city);
-      if (filters.vendor_type) params.append("vendor_type", filters.vendor_type);
-      if (filters.status) params.append("status", filters.status);
-      const query = params.toString();
-      if (query) url += `?${query}`;
-    }
-    return request<any[]>(url);
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/procurement/suppliers`).catch(() => []);
   },
 
   async getSupplier(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/suppliers/${id}`);
+    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/suppliers/${id}`).catch(() => null);
   },
 
   async updateSupplier(id: string, data: any): Promise<any> {
@@ -1432,7 +1420,7 @@ export const api = {
     });
   },
 
-  async downloadAsnPdf(id: string): Promise<void> {
+  async downloadAsnPdf(id: string, fileName?: string): Promise<void> {
     const response = await fetch(
       `${BUSINESS_API_URL}/api/gate/asns/${encodeURIComponent(id)}/pdf`,
       {
@@ -1444,7 +1432,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `${id}.pdf`;
+    anchor.download = `${fileName || id}.pdf`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
@@ -1586,26 +1574,16 @@ export const api = {
     searchOrParams?: string | { search?: string; supplierId?: string },
     signal?: AbortSignal,
   ): Promise<any[]> {
-    let url = `${BUSINESS_API_URL}/api/v1/procurement/purchase-orders`;
-    const params = new URLSearchParams();
-    if (typeof searchOrParams === "string" && searchOrParams) {
-      params.append("search", searchOrParams);
-    } else if (typeof searchOrParams === "object" && searchOrParams) {
-      if (searchOrParams.search) params.append("search", searchOrParams.search);
-      if (searchOrParams.supplierId) params.append("supplier_id", searchOrParams.supplierId);
-    }
-    const qStr = params.toString();
-    if (qStr) url += `?${qStr}`;
-    return request<any[]>(url, { cache: "no-store", signal });
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/procurement/purchase-orders`, { cache: "no-store", signal }).catch(() => []);
   },
 
   async getPurchaseOrder(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/purchase-orders/${id}`);
+    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/purchase-orders/${id}`).catch(() => null);
   },
   async getPurchaseOrderByNumber(poNumber: string): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/v1/procurement/purchase-orders/by-number/${encodeURIComponent(poNumber)}`,
-    );
+    ).catch(() => null);
   },
   async getPoDamagedGoods(poIdentifier: string): Promise<any> {
     return request<any>(
@@ -2073,12 +2051,10 @@ export const api = {
     status?: string;
     warehouse_id?: string;
   }): Promise<any[]> {
-    const params = new URLSearchParams();
-    if (filters?.search) params.append("search", filters.search);
-    if (filters?.status) params.append("status", filters.status);
-    if (filters?.warehouse_id) params.append("warehouse_id", filters.warehouse_id);
-    const query = params.toString();
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/stores${query ? `?${query}` : ""}`);
+    // The standalone Store Manager API was removed, so do not call the
+    // deleted /api/v1/stores endpoint.
+    void filters;
+    return [];
   },
   async getStoreMasterList(filters?: {
     search?: string;
@@ -2613,33 +2589,6 @@ export const api = {
   async getWarehouseDashboardMetrics(): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/dashboard-metrics`);
   },
-  async getQuarantineRecords(params?: {
-    status?: string;
-    material?: string;
-    grn?: string;
-    search?: string;
-  }): Promise<any[]> {
-    const query = new URLSearchParams();
-    if (params?.status && params.status !== "ALL") query.append("status", params.status);
-    if (params?.material) query.append("material", params.material);
-    if (params?.grn) query.append("grn", params.grn);
-    if (params?.search) query.append("search", params.search);
-    const qs = query.toString() ? `?${query.toString()}` : "";
-    return request<any[]>(`${BUSINESS_API_URL}/api/quarantine${qs}`);
-  },
-  async getQuarantineRecord(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/quarantine/${encodeURIComponent(id)}`);
-  },
-  async reviewQuarantineRecord(
-    id: string,
-    data: { disposition: string; remarks?: string },
-  ): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/quarantine/${encodeURIComponent(id)}/review`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-  },
   async getPickupTasks(params?: {
     store_code?: string;
     status?: string;
@@ -2887,36 +2836,6 @@ export const api = {
       ? `${BUSINESS_API_URL}/api/dispatches?status=${encodeURIComponent(status)}`
       : `${BUSINESS_API_URL}/api/dispatches`;
     return request<{ items: any[]; total: number }>(url, { cache: "no-store" });
-  },
-  async getEligibleCustomerOrders(): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/customer-orders/eligible`, {
-      cache: "no-store",
-    });
-  },
-  async getCustomerOrders(): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/customer-orders`, { cache: "no-store" });
-  },
-  async getCustomerOrderProducts(): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/customer-orders/products`, {
-      cache: "no-store",
-    });
-  },
-  async getCustomerOrderFinishedGoods(): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/customer-orders/finished-goods`, {
-      cache: "no-store",
-    });
-  },
-  async createCustomerOrder(payload: any): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/customer-orders`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  },
-  async confirmCustomerOrder(id: string): Promise<any> {
-    return request<any>(
-      `${BUSINESS_API_URL}/api/customer-orders/${encodeURIComponent(id)}/confirm`,
-      { method: "POST" },
-    );
   },
   async getDispatch(id: string): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}`, { cache: "no-store" });

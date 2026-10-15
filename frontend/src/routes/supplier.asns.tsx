@@ -1,9 +1,12 @@
-import { createFileRoute, lazyRouteComponent } from "@tanstack/react-router";
+import { createFileRoute, redirect, Outlet } from "@tanstack/react-router";
 import { requireRole } from "@/lib/auth-utils";
 
-const NewAsnPage = lazyRouteComponent(() => import("./supplier.asns.new"), "NewAsnPage");
-
 export const Route = createFileRoute("/supplier/asns")({
-  beforeLoad: () => requireRole(["SUPPLIER", "ADMIN", "SUPERUSER"]),
-  component: NewAsnPage,
+  beforeLoad: ({ location }) => {
+    requireRole(["SUPPLIER", "ADMIN", "SUPERUSER"]);
+    if (location.pathname === "/supplier/asns" || location.pathname === "/supplier/asns/") {
+      throw redirect({ to: "/supplier/asns/new" });
+    }
+  },
+  component: Outlet,
 });

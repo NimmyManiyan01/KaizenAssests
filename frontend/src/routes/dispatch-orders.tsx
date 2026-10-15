@@ -183,10 +183,9 @@ function DispatchOrdersPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [res, customerOrders, balances, stores, putawayTasks, assemblyFinishedGoods, driverList, vehicleList] =
+      const [res, balances, stores, putawayTasks, assemblyFinishedGoods, driverList, vehicleList] =
         await Promise.all([
           api.getDispatches().catch(() => ({ items: [], total: 0 })),
-          api.getEligibleCustomerOrders().catch(() => []),
           api.getInventoryLocationBalances().catch(() => []),
           api.getStores().catch(() => []),
           api.getPutawayTasks().catch(() => []),
@@ -229,7 +228,7 @@ function DispatchOrdersPage() {
         }));
       setFgInventory(assemblyStock);
 
-      const requestOrders = (Array.isArray(customerOrders) ? customerOrders : [])
+      const requestOrders = ([] as any[])
         .filter((request) => String(request.status || "").toUpperCase() === "CONFIRMED")
         .map((request) => {
           const orderItems = Array.isArray(request.items) ? request.items : [];

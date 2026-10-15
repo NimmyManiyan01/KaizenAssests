@@ -72,16 +72,7 @@ function getUserRoleLabel(user: UserInfo | null): string {
   if (roles.includes("ADMIN") || roles.includes("SUPERUSER") || roles.includes("SUPER_ADMIN")) {
     return "Administrator";
   }
-  if (
-    roles.includes("PROCUREMENT") ||
-    roles.includes("PROCUREMENT_MANAGER") ||
-    roles.includes("PROCUREMENT_OFFICER")
-  ) {
-    return "Procurement Manager";
-  }
-  if (roles.includes("FINANCE") || roles.includes("FINANCE_MANAGER")) {
-    return "Finance Manager";
-  }
+
   if (roles.includes("GATE_SECURITY") || roles.includes("GATE_OPERATOR")) {
     return "Security Officer";
   }
@@ -131,8 +122,6 @@ const grnNav: NavItem[] = [
 ];
 
 const dispatchNav = [
-  { label: "Dashboard", to: "/dispatch", icon: LayoutDashboard },
-  { label: "Customer Orders", to: "/customer-orders", icon: ClipboardList },
   { label: "Dispatch Orders", to: "/dispatch-orders", icon: ClipboardList },
   { label: "Picking & Packing", to: "/dispatch-picking-packing", icon: PackageCheck },
   { label: "Loading", to: "/dispatch-loading", icon: Navigation },
@@ -185,14 +174,13 @@ const warehouseNav = [
 
 const supplierNav = [
   { label: "Dashboard", to: "/supplier-dashboard", icon: LayoutDashboard },
+  { label: "Material Master", to: "/supplier-materials", icon: Database },
   { label: "ASN Management", to: "/supplier/asns", icon: Truck },
   { label: "FG Dispatch Requests", to: "/supplier/dispatch", icon: PackageCheck },
   { label: "Damage Returns", to: "/damage-claims", icon: ShieldAlert },
 ];
 
 const managerNav: any[] = [];
-
-const financeNav = [{ label: "Dashboard", to: "/finance-dashboard", icon: LayoutDashboard }];
 
 const gateSecurityNav = [
   { label: "Dashboard", to: "/gate-dashboard", icon: LayoutDashboard },
@@ -202,10 +190,6 @@ const gateSecurityNav = [
   { label: "FG Pickup Gate Exit", to: "/gate/finished-goods-pickup-exit", icon: LogOut },
 ];
 
-const adminNav = [
-  { label: "Warehouse Locations", to: "/inventory?tab=locations", icon: Warehouse },
-  { label: "Audit Logs", to: "/notifications", icon: ClipboardList },
-];
 
 const ICON_MAP: Record<string, any> = {
   LayoutDashboard,
@@ -269,7 +253,6 @@ function isDispatchSession(user: { username?: string; roles?: string[] } | null)
 
 function getNotificationRole(user: { username?: string; roles?: string[] } | null): string {
   if (hasUserRole(user, "SUPPLIER")) return "SUPPLIER";
-  if (hasUserRole(user, "MANAGER")) return "MANAGER";
   if (hasUserRole(user, "GATE_SECURITY")) return "GATE_SECURITY";
   if (hasUserRole(user, "ASSEMBLY") || hasUserRole(user, "ASSEMBLY_MANAGER"))
     return "ASSEMBLY_MANAGER";
@@ -280,8 +263,6 @@ function getNotificationRole(user: { username?: string; roles?: string[] } | nul
 
 function getStrictRoleNav(user: { username?: string; roles?: string[] } | null): NavItem[] {
   if (!user) return [];
-  if (hasUserRole(user, "ADMIN") || hasUserRole(user, "SUPERUSER")) return adminNav;
-  if (hasUserRole(user, "MANAGER")) return managerNav;
   if (hasUserRole(user, "SUPPLIER")) return supplierNav;
   if (hasUserRole(user, "GATE_SECURITY") || hasUserRole(user, "GATE_OPERATOR"))
     return gateSecurityNav;
@@ -298,7 +279,6 @@ function getStrictRoleNav(user: { username?: string; roles?: string[] } | null):
 
 function getRoleLabel(user: { username?: string; roles?: string[] } | null): string {
   if (hasUserRole(user, "ADMIN") || hasUserRole(user, "SUPERUSER")) return "Administrator";
-  if (hasUserRole(user, "MANAGER")) return "Manager";
   if (hasUserRole(user, "GATE_SECURITY")) return "Security Officer";
   if (hasUserRole(user, "QUALITY") || hasUserRole(user, "QC")) return "Quality Inspector";
   if (hasUserRole(user, "ASSEMBLY") || hasUserRole(user, "ASSEMBLY_MANAGER"))
@@ -486,12 +466,6 @@ export function AppShell({
       ["/supplier/dispatch", "/supplier/asns", "/supplier/asns/"].some(
         (prefix) => path === prefix || path.startsWith(prefix),
       ));
-  const isFinanceUser = mounted && user?.roles?.includes("FINANCE");
-  const isSharedFinanceRoute = false;
-  const isFinanceRoute =
-    path === "/finance-dashboard" ||
-    path.startsWith("/finance/") ||
-    (isFinanceUser && isSharedFinanceRoute);
   const isGateSecurityUser =
     mounted && (user?.roles?.includes("GATE_SECURITY") || user?.roles?.includes("GATE_OPERATOR"));
   const isDispatchUser =
@@ -499,13 +473,7 @@ export function AppShell({
     (user?.roles?.includes("DISPATCH") ||
       user?.roles?.includes("DISPATCH_MANAGER") ||
       user?.username?.toLowerCase() === "dispatch");
-  const isDispatchRoute =
-    (path === "/dispatch" || path.startsWith("/dispatch-") || path.startsWith("/dispatch/")) &&
-    !["/dispatch-picking-packing", "/dispatch-loading"].includes(path);
-  const isAdminUser =
-    mounted && (user?.roles?.includes("ADMIN") || user?.roles?.includes("SUPERUSER"));
   const isNotificationsRoute = path.startsWith("/notifications");
-  const isAdminRoute = path.startsWith("/admin/");
   const isSharedOperationsRoute = ["/warehouse-dashboard", "/vehicle-exit"].some((route) =>
     path.startsWith(route),
   );
@@ -528,13 +496,9 @@ export function AppShell({
     ].some((route) => path.startsWith(route)) ||
     (isGateSecurityUser && (isSharedOperationsRoute || isNotificationsRoute));
   const resolvedNav =
-    isAdminRoute || isAdminUser
-      ? adminNav
-      : isSupplierRoute
+    isSupplierRoute
         ? supplierNav
-        : isDispatchUser || isDispatchRoute
-          ? dispatchNav
-          : isAssemblyUser || isAssemblyRoute
+        : isAssemblyUser || isAssemblyRoute
             ? assemblyNav
             : isStoreUser || isStoreRoute
               ? storeManagerNav
@@ -542,24 +506,20 @@ export function AppShell({
                 ? grnNav
                 : isSupplierRoute
                   ? supplierNav
-                  : isFinanceRoute
-                    ? financeNav
-                    : isGateSecurityRoute
-                      ? gateSecurityNav
-                      : isWarehouseRoute
-                        ? warehouseNav
-                        : mounted && user?.roles?.includes("DISPATCH")
-                          ? dispatchNav
-                          : mounted && user?.roles?.includes("ASSEMBLY")
-                            ? assemblyNav
-                            : mounted && user?.roles?.includes("SUPPLIER")
-                              ? supplierNav
-                              : mounted && user?.roles?.includes("FINANCE")
-                                ? financeNav
-                                : isGateSecurityUser
-                                  ? gateSecurityNav
-                                  : warehouseNav;
-  const navigationPending = !mounted && (isSharedOperationsRoute || isSharedFinanceRoute);
+                  : isGateSecurityRoute
+                    ? gateSecurityNav
+                    : isWarehouseRoute
+                      ? warehouseNav
+                      : mounted && user?.roles?.includes("DISPATCH")
+                        ? dispatchNav
+                        : mounted && user?.roles?.includes("ASSEMBLY")
+                          ? assemblyNav
+                          : mounted && user?.roles?.includes("SUPPLIER")
+                            ? supplierNav
+                            : isGateSecurityUser
+                              ? gateSecurityNav
+                              : warehouseNav;
+  const navigationPending = !mounted && isSharedOperationsRoute;
   const nav = navigationPending ? [] : resolvedNav;
   useEffect(() => {
     setMobileSidebarOpen(false);
@@ -977,7 +937,6 @@ export function StatusBadge({ status }: { status: string }) {
     Completed: "bg-success-soft text-success border-success/30",
     Rejected: "bg-danger-soft text-destructive border-destructive/25",
     REJECTED: "bg-danger-soft text-destructive border-destructive/25",
-    FINANCE_REJECTED: "bg-danger-soft text-destructive border-destructive/25",
     PO_VERIFIED: "bg-success-soft text-success border-success/30",
     UNSCHEDULED_ARRIVAL: "bg-warning-soft text-warning-foreground border-warning/30",
     AWAITING_DOCK: "bg-warning-soft text-warning-foreground border-warning/30",
@@ -1014,7 +973,6 @@ export function StatusBadge({ status }: { status: string }) {
     ASN_SUBMITTED: "bg-primary-soft text-primary border-primary/25",
     IN_TRANSIT: "bg-teal-soft text-teal border-teal/30",
     PLACED: "bg-teal-soft text-teal border-teal/30",
-    PENDING_FINANCE: "bg-warning-soft text-warning-foreground border-warning/30",
     SENT: "bg-primary-soft text-primary border-primary/25",
     SHIPPED: "bg-teal-soft text-teal border-teal/30",
     DISPATCHED: "bg-teal-soft text-teal border-teal/30",

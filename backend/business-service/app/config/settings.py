@@ -73,16 +73,8 @@ class Settings(BaseSettings):
     prometheus_enabled: bool = Field(default=True)
 
     # --- Role Credentials ---------------------------------------------------------
-    admin_username: str = Field(default="admin")
-    admin_password: str = Field(default="")
-    procurement_username: str = Field(default="procurement")
-    procurement_password: str = Field(default="")
-    finance_username: str = Field(default="finance")
-    finance_password: str = Field(default="")
     warehouse_username: str = Field(default="warehouse")
     warehouse_password: str = Field(default="")
-    manager_username: str = Field(default="manager")
-    manager_password: str = Field(default="")
     assembly_manager_username: str = Field(default="assembly_manager")
     assembly_manager_password: str = Field(default="")
     gate_security_username: str = Field(default="gate_entry")
@@ -93,8 +85,6 @@ class Settings(BaseSettings):
     supplier_password: str = Field(default="")
     grn_username: str = Field(default="grn")
     grn_password: str = Field(default="")
-    dispatch_username: str = Field(default="dispatch")
-    dispatch_password: str = Field(default="")
     magic_link_secret: str = Field(default="")
 
     # --- Email SMTP Settings ----------------------------------------------------
@@ -103,8 +93,7 @@ class Settings(BaseSettings):
     email_timeout_seconds: int = Field(default=8, ge=1, le=60)
     email_host_user: str = Field(default="")
     email_host_password: str = Field(default="")
-    email_from_name: str = Field(default="KaizenAssests Procurement")
-    procurement_email: str = Field(default="")
+    email_from_name: str = Field(default="KaizenAssests")
 
 
 @lru_cache

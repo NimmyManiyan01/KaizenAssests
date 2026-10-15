@@ -263,37 +263,14 @@ async def dev_login(
 
     # 2. Configured dev credentials lookup
     normalized_username = req_lower
-    admin_uname = getattr(settings, "admin_username", "admin").lower()
     wh_uname = getattr(settings, "warehouse_username", "warehouse").lower()
-    proc_uname = getattr(settings, "procurement_username", "procurement").lower()
-    fin_uname = getattr(settings, "finance_username", "finance").lower()
-    mgr_uname = getattr(settings, "manager_username", "manager").lower()
     sup_uname = getattr(settings, "supplier_username", "supplier").lower()
     gate_sec_uname = getattr(settings, "gate_security_username", "gate_security").lower()
     gate_ent_uname = getattr(settings, "gate_entry_username", "gate_entry").lower()
     asm_uname = getattr(settings, "assembly_manager_username", "assembly_manager").lower()
     grn_uname = getattr(settings, "grn_username", "grn").lower()
-    disp_uname = getattr(settings, "dispatch_username", "dispatch").lower()
 
-    if normalized_username == admin_uname and settings.admin_password and req_password == settings.admin_password:
-        return {
-            "token": "mock-jwt-admin-token",
-            "username": getattr(settings, "admin_username", "admin"),
-            "roles": ["ADMIN"],
-        }
-    elif normalized_username == proc_uname and settings.procurement_password and req_password == settings.procurement_password:
-        return {
-            "token": "mock-jwt-procurement-token",
-            "username": getattr(settings, "procurement_username", "procurement"),
-            "roles": ["PROCUREMENT"],
-        }
-    elif normalized_username == fin_uname and settings.finance_password and req_password == settings.finance_password:
-        return {
-            "token": "mock-jwt-finance-token",
-            "username": getattr(settings, "finance_username", "finance"),
-            "roles": ["FINANCE"],
-        }
-    elif normalized_username == wh_uname and settings.warehouse_password and req_password == settings.warehouse_password:
+    if normalized_username == wh_uname and settings.warehouse_password and req_password == settings.warehouse_password:
         return {
             "token": "mock-jwt-warehouse-token",
             "username": getattr(settings, "warehouse_username", "warehouse"),
@@ -333,26 +310,6 @@ async def dev_login(
             "token": "mock-jwt-grn-token",
             "username": req_username,
             "roles": ["GRN"],
-        }
-    elif (
-        normalized_username in (mgr_uname, "manager", "mgr", "procurement_manager")
-        and settings.manager_password
-        and req_password == settings.manager_password
-    ):
-        return {
-            "token": "mock-jwt-manager-token",
-            "username": req_username,
-            "roles": ["MANAGER"],
-        }
-    elif (
-        normalized_username in (disp_uname, "dispatch", "dispatch_manager")
-        and settings.dispatch_password
-        and req_password == settings.dispatch_password
-    ):
-        return {
-            "token": "mock-jwt-dispatch-token",
-            "username": req_username,
-            "roles": ["DISPATCH"],
         }
     else:
         raise HTTPException(

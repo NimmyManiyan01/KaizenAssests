@@ -36,7 +36,6 @@ from app.modules.storage.infrastructure.persistence.models import HandlingUnitMo
 from app.modules.storage.application.location_strategy import recommend_storage_location
 from app.modules.store.infrastructure.persistence.models import StoreModel, StoreManagerUserModel
 from app.modules.dock.infrastructure.persistence.models import DockMasterModel, DockAllocationRequestModel
-from app.modules.quarantine.infrastructure.persistence.models import QuarantineRecordModel
 from app.modules.gate.domain.aggregate import GateEntry
 from app.modules.gate.domain.services import GateVerificationService
 from app.modules.gate.domain.value_objects import (
@@ -304,10 +303,23 @@ async def add_material_component(
     if existing:
         return {"id": str(existing.id), "code": existing.material_code, "name": existing.material_name, "category": existing.category, "uom": existing.base_uom, "status": existing.status}
 
-    code_prefix = re.sub(r"[^A-Z0-9]", "", mat_name.upper())[:6] or "MAT"
+    code_prefix = re.sub(r"[^A-Z0-9]+", "-", mat_name.upper()).strip("-")[:24] or "MATERIAL"
+    # Allocate the code inside the transaction so the server, not the browser,
+    # is authoritative and concurrent creates cannot reuse the same sequence.
+    await uow.session.execute(text("SELECT pg_advisory_xact_lock(73002)"))
+    code_pattern = f"MAT-{code_prefix}-%"
+    existing_codes = await uow.session.execute(
+        select(MaterialModel.material_code).where(MaterialModel.material_code.like(code_pattern))
+    )
+    next_sequence = 1
+    for existing_code in existing_codes.scalars().all():
+        match = re.fullmatch(rf"MAT-{re.escape(code_prefix)}-(\d+)", str(existing_code).upper())
+        if match:
+            next_sequence = max(next_sequence, int(match.group(1)) + 1)
+    generated_code = f"MAT-{code_prefix}-{next_sequence:03d}"
     material = MaterialModel(
         id=uuid.uuid4(),
-        material_code=f"MAT-{code_prefix}-{uuid.uuid4().hex[:4].upper()}",
+        material_code=generated_code,
         material_name=mat_name,
         category=category,
         base_uom=uom,
@@ -316,6 +328,33 @@ async def add_material_component(
     uow.session.add(material)
     await uow.session.commit()
     return {"id": str(material.id), "code": material.material_code, "name": material.material_name, "category": material.category, "uom": material.base_uom, "status": material.status}
+
+
+@preview_router.delete("/asns/{asn_id}")
+async def delete_supplier_asn(
+    asn_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> dict:
+    """Delete an ASN owned by the authenticated supplier before gate processing."""
+    try:
+        parsed_id = uuid.UUID(asn_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="ASN not found") from exc
+
+    asn = await uow.session.get(AsnModel, parsed_id)
+    if asn is None:
+        raise HTTPException(status_code=404, detail="ASN not found")
+
+    supplier_id = await _authenticated_supplier_id(user, uow)
+    if asn.supplier_id != supplier_id:
+        raise HTTPException(status_code=403, detail="You cannot delete this ASN")
+    if str(asn.status or "").upper() not in {"SUBMITTED", "DRAFT", "CANCELLED"}:
+        raise HTTPException(status_code=409, detail="ASN cannot be deleted after gate processing")
+
+    await uow.session.delete(asn)
+    await uow.commit()
+    return {"deleted": True, "id": asn_id}
 
 
 @preview_router.get("/asns/next-number")
@@ -644,21 +683,27 @@ async def create_supplier_asn(
     driver_name = re.sub(r"\s+", " ", str(payload.get("driver_name") or "").strip())
     driver_contact = re.sub(r"[\s()-]+", "", str(payload.get("driver_contact") or "").strip())
     supplier_name = authenticated_supplier_name
-    if not vehicle_number or not driver_name or not driver_contact:
-        raise HTTPException(status_code=422, detail="vehicle_number, driver_name and driver_contact are required")
+    if not vehicle_number:
+        raise HTTPException(status_code=422, detail="Vehicle number is required.")
+    if not driver_name:
+        raise HTTPException(status_code=422, detail="Driver name is required.")
+    if not driver_contact:
+        raise HTTPException(status_code=422, detail="Driver contact number is required.")
     if (
         len(driver_name) < 2
         or len(driver_name) > 100
-        or re.search(r"[\x00-\x1f\x7f]", driver_name)
-        or re.search(r"[A-Za-z]", driver_name) is None
+        or re.fullmatch(r"[A-Za-z][A-Za-z' ]*[A-Za-z]", driver_name) is None
+        or len(re.findall(r"[A-Za-z]", driver_name)) < 2
     ):
-        raise HTTPException(status_code=422, detail="driver_name must be between 2 and 100 characters")
-    if re.fullmatch(r"\+?[0-9]{7,15}", driver_contact) is None:
-        raise HTTPException(status_code=422, detail="driver_contact must be a valid phone number")
+        raise HTTPException(status_code=422, detail="Enter a valid driver name.")
+    if re.fullmatch(r"[6-9]\d{9}", driver_contact) is None:
+        raise HTTPException(status_code=422, detail="Enter a valid 10-digit mobile number.")
+    if re.fullmatch(r"([6-9])\1{9}", driver_contact):
+        raise HTTPException(status_code=422, detail="Enter a valid driver mobile number.")
     if (
         re.fullmatch(r"(?:[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{1,4}|BH\d{2}[A-Z]{2}\d{4})", vehicle_number) is None
     ):
-        raise HTTPException(status_code=422, detail="vehicle_number must be a valid registration number")
+        raise HTTPException(status_code=422, detail="Enter a valid vehicle number, e.g. KA03AB1234.")
 
     submitted_lines = payload.get("lines") or []
     if not isinstance(submitted_lines, list):
@@ -679,20 +724,45 @@ async def create_supplier_asn(
             raise HTTPException(status_code=422, detail="shipped_quantity must be a finite number")
         if validated_quantity <= 0:
             raise HTTPException(status_code=422, detail="shipped_quantity must be greater than zero")
+        if abs(validated_quantity.as_tuple().exponent) > 4:
+            raise HTTPException(status_code=422, detail="shipped_quantity supports at most 4 decimal places")
         if not str(raw_line.get("item_code") or raw_line.get("material_code") or "").strip():
             raise HTTPException(status_code=422, detail="item_code is required for every material line")
         if not str(raw_line.get("material_name") or raw_line.get("material_description") or "").strip():
             raise HTTPException(status_code=422, detail="material_name is required for every material line")
         material_id = str(raw_line.get("material_id") or "").strip()
-        if material_id:
-            if material_id in submitted_material_ids:
-                raise HTTPException(status_code=422, detail="A material cannot be selected more than once in the same ASN")
-            try:
-                uuid.UUID(material_id)
-            except ValueError as exc:
-                raise HTTPException(status_code=422, detail="material_id must be a valid material identifier") from exc
-            submitted_material_ids.add(material_id)
+        if not material_id:
+            raise HTTPException(status_code=422, detail="Material is required for every material line")
+        if material_id in submitted_material_ids:
+            raise HTTPException(status_code=422, detail="A material cannot be selected more than once in the same ASN")
+        try:
+            uuid.UUID(material_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="material_id must be a valid material identifier") from exc
+        submitted_material_ids.add(material_id)
         validated_lines.append((raw_line, validated_quantity))
+
+    active_materials = (
+        await uow.session.execute(
+            select(MaterialModel).where(
+                MaterialModel.id.in_([uuid.UUID(material_id) for material_id in submitted_material_ids]),
+                func.upper(MaterialModel.status) == "ACTIVE",
+            )
+        )
+    ).scalars().all()
+    active_material_ids = {str(material.id) for material in active_materials}
+    if active_material_ids != submitted_material_ids:
+        raise HTTPException(status_code=422, detail="Only active materials from the database can be selected")
+    active_material_by_id = {str(material.id): material for material in active_materials}
+    discrete_uoms = {"PCS", "EA", "UNIT", "PIECE", "NOS", "SET", "BOX", "PACK"}
+    for raw_line, quantity in validated_lines:
+        material = active_material_by_id[str(raw_line["material_id"]).strip()]
+        material_uom = str(material.base_uom or "PCS").strip().upper()
+        requested_uom = str(raw_line.get("uom") or "").strip().upper()
+        if requested_uom != material_uom:
+            raise HTTPException(status_code=422, detail=f"UOM must match the selected material ({material_uom})")
+        if material_uom in discrete_uoms and quantity != quantity.to_integral_value():
+            raise HTTPException(status_code=422, detail=f"{material_uom} quantities must be whole numbers")
 
     if po_model and validated_lines:
         ordered_by_code: dict[str, Decimal] = {}

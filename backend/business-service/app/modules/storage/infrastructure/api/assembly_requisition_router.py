@@ -20,7 +20,6 @@ from app.common.persistence.models import (
     MaterialVariantModel,
     NotificationModel,
 )
-from app.modules.quarantine.infrastructure.persistence.models import QuarantineRecordModel
 from app.modules.storage.infrastructure.persistence.models import (
     AssemblyRequisitionItemModel,
     AssemblyRequisitionModel,

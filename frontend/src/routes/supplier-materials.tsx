@@ -53,7 +53,6 @@ const emptyForm = { code: "", name: "", category: "", description: "", uom: "PCS
 function SupplierMaterials() {
   const [materials, setMaterials] = useState<any[]>([]);
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("ALL");
   const [uomFilter, setUomFilter] = useState("ALL");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -94,10 +93,9 @@ function SupplierMaterials() {
       materials.filter(
         (m) =>
           `${m.code || ""} ${m.name || ""}`.toLowerCase().includes(query.toLowerCase()) &&
-          (status === "ALL" || String(m.status).toUpperCase() === status) &&
           (uomFilter === "ALL" || m.uom === uomFilter),
       ),
-    [materials, query, status, uomFilter],
+    [materials, query, uomFilter],
   );
   const uoms = [...new Set([...UOMS, ...materials.map((m) => m.uom).filter(Boolean)])];
   const openAdd = async () => {
@@ -105,10 +103,10 @@ function SupplierMaterials() {
     setForm(emptyForm);
     setDialogOpen(true);
   };
-  const generateMaterialCode = () => {
-    if (editing || !form.name.trim() || form.code.trim()) return;
+  const generateMaterialCode = (materialName = form.name) => {
+    if (editing || !materialName.trim()) return;
     const prefix =
-      form.name
+      materialName
         .toUpperCase()
         .replace(/[^A-Z0-9]/g, "")
         .slice(0, 4) || "MAT";
@@ -237,16 +235,6 @@ function SupplierMaterials() {
                 className="pl-9"
               />
             </div>
-            <Select value={status} onValueChange={setStatus}>
-              <SelectTrigger className="w-32">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">All status</SelectItem>
-                <SelectItem value="ACTIVE">Active</SelectItem>
-                <SelectItem value="INACTIVE">Inactive</SelectItem>
-              </SelectContent>
-            </Select>
             <Select value={uomFilter} onValueChange={setUomFilter}>
               <SelectTrigger className="w-28">
                 <SelectValue />
@@ -264,7 +252,6 @@ function SupplierMaterials() {
               variant="outline"
               onClick={() => {
                 setQuery("");
-                setStatus("ALL");
                 setUomFilter("ALL");
               }}
             >
@@ -289,8 +276,6 @@ function SupplierMaterials() {
                       "Material Code",
                       "Material Name",
                       "UOM",
-                      "Status",
-                      "Created Date",
                       "Actions",
                     ].map((title) => (
                       <th key={title} className="px-4 py-3">
@@ -302,13 +287,13 @@ function SupplierMaterials() {
                 <tbody className="divide-y">
                   {loading ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-10 text-center">
+                        <td colSpan={4} className="px-4 py-10 text-center">
                         <Loader2 className="mx-auto size-5 animate-spin" />
                       </td>
                     </tr>
                   ) : !filtered.length ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
+                      <td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">
                         {materials.length
                           ? "No materials match your filters."
                           : "No materials found."}
@@ -320,18 +305,6 @@ function SupplierMaterials() {
                         <td className="px-4 py-3 font-mono font-bold text-sky-700">{m.code}</td>
                         <td className="px-4 py-3 font-semibold">{m.name}</td>
                         <td className="px-4 py-3">{m.uom}</td>
-                        <td className="px-4 py-3">
-                          <Badge
-                            variant={
-                              String(m.status).toUpperCase() === "ACTIVE" ? "default" : "secondary"
-                            }
-                          >
-                            {m.status}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          {m.created_at ? new Date(m.created_at).toLocaleDateString() : "—"}
-                        </td>
                         <td className="px-4 py-3">
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -395,10 +368,15 @@ function SupplierMaterials() {
               <Label>Material Name *</Label>
               <Input
                 value={form.name}
-                onChange={(e) =>
-                  setForm({ ...form, name: e.target.value, code: editing ? form.code : "" })
-                }
-                onBlur={generateMaterialCode}
+                onChange={(e) => {
+                  setForm({
+                    ...form,
+                    name: e.target.value,
+                    code: editing ? form.code : "",
+                  });
+                  if (!editing && e.target.value.trim()) generateMaterialCode(e.target.value);
+                }}
+                onBlur={() => generateMaterialCode()}
                 placeholder="Enter material name"
               />
             </div>
@@ -459,11 +437,6 @@ function SupplierMaterials() {
                 ["Material Code", details.code],
                 ["Material Name", details.name],
                 ["UOM", details.uom],
-                ["Status", details.status],
-                [
-                  "Created Date",
-                  details.created_at ? new Date(details.created_at).toLocaleString() : "—",
-                ],
               ].map(([label, value]) => (
                 <div key={String(label)}>
                   <p className="text-xs text-muted-foreground">{label}</p>

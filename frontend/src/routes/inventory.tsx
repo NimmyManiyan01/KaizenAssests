@@ -225,7 +225,6 @@ function SimpleWarehouseModule() {
       const [
         putawaysRes,
         inventoryRes,
-        pickupsRes,
         storesRes,
         materialCatalogRes,
         assemblyRequestsRes,
@@ -233,7 +232,6 @@ function SimpleWarehouseModule() {
       ] = await Promise.all([
         api.getPutawayTasks(),
         api.getWarehouseInventorySummary(),
-        api.getPickupTasks(),
         api.getStores(),
         api.getMaterialComponents(),
         api.getAssemblyMaterialRequests(),
@@ -410,7 +408,7 @@ function SimpleWarehouseModule() {
           assembly_pick_task_id: task.id,
         })),
       );
-      setPickupTasks([...(Array.isArray(pickupsRes) ? pickupsRes : []), ...assemblyPickingTasks]);
+      setPickupTasks(assemblyPickingTasks);
       setStores(Array.isArray(storesRes) ? storesRes : []);
 
       const locationRows = await Promise.all(

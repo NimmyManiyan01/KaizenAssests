@@ -134,7 +134,7 @@ type DockHistory = {
   remarks?: string | null;
 };
 
-export const PREDEFINED_CATEGORIES = [
+const PREDEFINED_CATEGORIES = [
   { id: "ALL", name: "All Types" },
   { id: "CHEMICAL_HAZARDOUS", name: "Chemical / Hazardous" },
   { id: "ELECTRONICS", name: "Electronics" },

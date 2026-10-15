@@ -277,7 +277,7 @@ async def list_docks(
     user_roles = [r.upper() for r in getattr(user, "roles", [])]
     is_warehouse_or_admin = any(
         r in user_roles
-        for r in ("ADMIN", "SUPERUSER", "WAREHOUSE_MANAGER", "WAREHOUSE", "GATE_SECURITY", "PROCUREMENT", "FINANCE")
+        for r in ("ADMIN", "SUPERUSER", "WAREHOUSE_MANAGER", "WAREHOUSE", "GATE_SECURITY", "PROCUREMENT")
     )
     is_store_user = any(r in user_roles for r in ("STORE_MANAGER", "STORE_KEEPER", "STORE"))
 
@@ -359,7 +359,7 @@ async def get_dock_by_id(
     user_roles = [r.upper() for r in getattr(user, "roles", [])] if user else ["ADMIN"]
     is_warehouse_or_admin = any(
         r in user_roles
-        for r in ("ADMIN", "SUPERUSER", "WAREHOUSE_MANAGER", "WAREHOUSE", "GATE_SECURITY", "PROCUREMENT", "FINANCE")
+        for r in ("ADMIN", "SUPERUSER", "WAREHOUSE_MANAGER", "WAREHOUSE", "GATE_SECURITY", "PROCUREMENT")
     )
     is_store_user = any(r in user_roles for r in ("STORE_MANAGER", "STORE_KEEPER", "STORE"))
 

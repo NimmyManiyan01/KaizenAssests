@@ -11,9 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AssemblyDashboardRouteImport } from './routes/assembly-dashboard'
-import { Route as CustomerOrdersRouteImport } from './routes/customer-orders'
 import { Route as DamageClaimsRouteImport } from './routes/damage-claims'
-import { Route as DispatchRouteImport } from './routes/dispatch'
 import { Route as DispatchExceptionsRouteImport } from './routes/dispatch-exceptions'
 import { Route as DispatchGateOutRouteImport } from './routes/dispatch-gate-out'
 import { Route as DispatchLoadingRouteImport } from './routes/dispatch-loading'
@@ -25,7 +23,6 @@ import { Route as GateDashboardRouteImport } from './routes/gate-dashboard'
 import { Route as GrnRouteImport } from './routes/grn'
 import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as LoginRouteImport } from './routes/login'
-import { Route as MyStoreRouteImport } from './routes/my-store'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as PutawayTasksRouteImport } from './routes/putaway-tasks'
 import { Route as ReceivingRouteImport } from './routes/receiving'
@@ -63,19 +60,9 @@ const AssemblyDashboardRoute = AssemblyDashboardRouteImport.update({
   path: '/assembly-dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CustomerOrdersRoute = CustomerOrdersRouteImport.update({
-  id: '/customer-orders',
-  path: '/customer-orders',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const DamageClaimsRoute = DamageClaimsRouteImport.update({
   id: '/damage-claims',
   path: '/damage-claims',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DispatchRoute = DispatchRouteImport.update({
-  id: '/dispatch',
-  path: '/dispatch',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DispatchExceptionsRoute = DispatchExceptionsRouteImport.update({
@@ -131,11 +118,6 @@ const InventoryRoute = InventoryRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MyStoreRoute = MyStoreRouteImport.update({
-  id: '/my-store',
-  path: '/my-store',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NotificationsRoute = NotificationsRouteImport.update({
@@ -278,9 +260,7 @@ const SupplierAsnsNewRoute = SupplierAsnsNewRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/assembly-dashboard': typeof AssemblyDashboardRoute
-  '/customer-orders': typeof CustomerOrdersRoute
   '/damage-claims': typeof DamageClaimsRoute
-  '/dispatch': typeof DispatchRoute
   '/dispatch-exceptions': typeof DispatchExceptionsRoute
   '/dispatch-gate-out': typeof DispatchGateOutRoute
   '/dispatch-loading': typeof DispatchLoadingRoute
@@ -292,7 +272,6 @@ export interface FileRoutesByFullPath {
   '/grn': typeof GrnRoute
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
-  '/my-store': typeof MyStoreRoute
   '/notifications': typeof NotificationsRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
@@ -323,9 +302,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/assembly-dashboard': typeof AssemblyDashboardRoute
-  '/customer-orders': typeof CustomerOrdersRoute
   '/damage-claims': typeof DamageClaimsRoute
-  '/dispatch': typeof DispatchRoute
   '/dispatch-exceptions': typeof DispatchExceptionsRoute
   '/dispatch-gate-out': typeof DispatchGateOutRoute
   '/dispatch-loading': typeof DispatchLoadingRoute
@@ -337,7 +314,6 @@ export interface FileRoutesByTo {
   '/grn': typeof GrnRoute
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
-  '/my-store': typeof MyStoreRoute
   '/notifications': typeof NotificationsRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
@@ -369,9 +345,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/assembly-dashboard': typeof AssemblyDashboardRoute
-  '/customer-orders': typeof CustomerOrdersRoute
   '/damage-claims': typeof DamageClaimsRoute
-  '/dispatch': typeof DispatchRoute
   '/dispatch-exceptions': typeof DispatchExceptionsRoute
   '/dispatch-gate-out': typeof DispatchGateOutRoute
   '/dispatch-loading': typeof DispatchLoadingRoute
@@ -383,7 +357,6 @@ export interface FileRoutesById {
   '/grn': typeof GrnRoute
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
-  '/my-store': typeof MyStoreRoute
   '/notifications': typeof NotificationsRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
@@ -416,9 +389,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/assembly-dashboard'
-    | '/customer-orders'
     | '/damage-claims'
-    | '/dispatch'
     | '/dispatch-exceptions'
     | '/dispatch-gate-out'
     | '/dispatch-loading'
@@ -430,7 +401,6 @@ export interface FileRouteTypes {
     | '/grn'
     | '/inventory'
     | '/login'
-    | '/my-store'
     | '/notifications'
     | '/putaway-tasks'
     | '/receiving'
@@ -461,9 +431,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/assembly-dashboard'
-    | '/customer-orders'
     | '/damage-claims'
-    | '/dispatch'
     | '/dispatch-exceptions'
     | '/dispatch-gate-out'
     | '/dispatch-loading'
@@ -475,7 +443,6 @@ export interface FileRouteTypes {
     | '/grn'
     | '/inventory'
     | '/login'
-    | '/my-store'
     | '/notifications'
     | '/putaway-tasks'
     | '/receiving'
@@ -506,9 +473,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/assembly-dashboard'
-    | '/customer-orders'
     | '/damage-claims'
-    | '/dispatch'
     | '/dispatch-exceptions'
     | '/dispatch-gate-out'
     | '/dispatch-loading'
@@ -520,7 +485,6 @@ export interface FileRouteTypes {
     | '/grn'
     | '/inventory'
     | '/login'
-    | '/my-store'
     | '/notifications'
     | '/putaway-tasks'
     | '/receiving'
@@ -552,9 +516,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AssemblyDashboardRoute: typeof AssemblyDashboardRoute
-  CustomerOrdersRoute: typeof CustomerOrdersRoute
   DamageClaimsRoute: typeof DamageClaimsRoute
-  DispatchRoute: typeof DispatchRoute
   DispatchExceptionsRoute: typeof DispatchExceptionsRoute
   DispatchGateOutRoute: typeof DispatchGateOutRoute
   DispatchLoadingRoute: typeof DispatchLoadingRoute
@@ -566,7 +528,6 @@ export interface RootRouteChildren {
   GrnRoute: typeof GrnRoute
   InventoryRoute: typeof InventoryRoute
   LoginRoute: typeof LoginRoute
-  MyStoreRoute: typeof MyStoreRoute
   NotificationsRoute: typeof NotificationsRoute
   PutawayTasksRoute: typeof PutawayTasksRoute
   ReceivingRoute: typeof ReceivingRoute
@@ -610,25 +571,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AssemblyDashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/customer-orders': {
-      id: '/customer-orders'
-      path: '/customer-orders'
-      fullPath: '/customer-orders'
-      preLoaderRoute: typeof CustomerOrdersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/damage-claims': {
       id: '/damage-claims'
       path: '/damage-claims'
       fullPath: '/damage-claims'
       preLoaderRoute: typeof DamageClaimsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dispatch': {
-      id: '/dispatch'
-      path: '/dispatch'
-      fullPath: '/dispatch'
-      preLoaderRoute: typeof DispatchRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dispatch-exceptions': {
@@ -706,13 +653,6 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/my-store': {
-      id: '/my-store'
-      path: '/my-store'
-      fullPath: '/my-store'
-      preLoaderRoute: typeof MyStoreRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/notifications': {
@@ -915,9 +855,7 @@ const SupplierAsnsRouteWithChildren = SupplierAsnsRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AssemblyDashboardRoute: AssemblyDashboardRoute,
-  CustomerOrdersRoute: CustomerOrdersRoute,
   DamageClaimsRoute: DamageClaimsRoute,
-  DispatchRoute: DispatchRoute,
   DispatchExceptionsRoute: DispatchExceptionsRoute,
   DispatchGateOutRoute: DispatchGateOutRoute,
   DispatchLoadingRoute: DispatchLoadingRoute,
@@ -929,7 +867,6 @@ const rootRouteChildren: RootRouteChildren = {
   GrnRoute: GrnRoute,
   InventoryRoute: InventoryRoute,
   LoginRoute: LoginRoute,
-  MyStoreRoute: MyStoreRoute,
   NotificationsRoute: NotificationsRoute,
   PutawayTasksRoute: PutawayTasksRoute,
   ReceivingRoute: ReceivingRoute,

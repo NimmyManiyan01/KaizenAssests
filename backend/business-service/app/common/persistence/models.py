@@ -249,7 +249,6 @@ class QuotationModel(Base):
     delivery_time: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     expected_delivery_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     payment_terms: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    mode_of_payment: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     warranty: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     quotation_validity: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     remarks: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)

@@ -31,15 +31,9 @@ from app.modules.returns.infrastructure.api.router import router as returns_rout
 from app.modules.storage.infrastructure.api.router import router as storage_router
 from app.modules.assembly.infrastructure.api.router import router as assembly_router
 from app.modules.dispatch.infrastructure.api.router import router as dispatch_router
-from app.modules.customer_orders.infrastructure.api.router import router as customer_orders_router
-from app.modules.procurement.infrastructure.api.material_router import router as material_router
-from app.modules.storage.infrastructure.api.pickup_router import pickup_router
 from app.modules.storage.infrastructure.api.assembly_requisition_router import router as assembly_requisition_router
 from app.modules.storage.infrastructure.api.inventory_router import inventory_router, storage_req_router, v1_inventory_router
-from app.modules.store.infrastructure.api.router import router as store_router, zone_router, bin_router
-from app.modules.quarantine.infrastructure.api.router import router as quarantine_router
 from app.security.router import router as auth_router
-from app.security.auth_router import router as procurement_auth_router
 from app.workers.notification_consumer import start_notification_consumer
 from app.workers.outbox_relay import relay_once
 
@@ -102,7 +96,6 @@ async def lifespan(app: FastAPI):
         from app.modules.store.infrastructure.persistence import models as store_models  # noqa: F401
         from app.modules.assembly.infrastructure.persistence import models as assembly_models  # noqa: F401
         from app.modules.dispatch.infrastructure.persistence import models as dispatch_models  # noqa: F401
-        from app.modules.customer_orders.infrastructure.persistence import models as customer_order_models  # noqa: F401
 
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
@@ -704,7 +697,6 @@ async def lifespan(app: FastAPI):
             await run_ddl("ALTER TABLE purchase_order ADD COLUMN IF NOT EXISTS rejection_reason TEXT")
             await run_ddl("ALTER TABLE quotation ADD COLUMN IF NOT EXISTS additional_charges NUMERIC(18, 4) DEFAULT 0")
             await run_ddl("ALTER TABLE quotation ADD COLUMN IF NOT EXISTS warranty VARCHAR(128)")
-            await run_ddl("ALTER TABLE quotation ADD COLUMN IF NOT EXISTS mode_of_payment VARCHAR(128)")
         except Exception: pass
 
         # Create po_approval_history table
@@ -1673,19 +1665,11 @@ def create_app() -> FastAPI:
     app.include_router(damage_claims_router)
     app.include_router(assembly_router)
     app.include_router(dispatch_router)
-    app.include_router(customer_orders_router)
-    app.include_router(material_router)
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
-    app.include_router(procurement_auth_router)
 
     @app.get("/api/debug-assembly")
     async def debug_assembly():
         return {"status": "ok"}
-    app.include_router(store_router)
-    app.include_router(zone_router)
-    app.include_router(bin_router)
-    app.include_router(quarantine_router)
-    app.include_router(pickup_router)
     app.include_router(assembly_requisition_router)
     app.include_router(inventory_router)
     app.include_router(storage_req_router)

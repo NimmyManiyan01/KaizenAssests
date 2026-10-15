@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, Eye, FileText, Loader2, Plus, Search, Trash2 } from "lucide-react";
+import { CheckCircle2, Download, Eye, FileText, Loader2, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,20 +26,22 @@ const normalizeVehicleNumber = (value: string) =>
     .trim();
 
 const isValidVehicleNumber = (value: string) => {
-  return value.trim().length > 0 && /^[A-Za-z0-9 ]+$/.test(value);
+  const normalized = normalizeVehicleNumber(value);
+  return /^(?:[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{1,4}|BH\d{2}[A-Z]{2}\d{4})$/.test(normalized);
 };
 
 const normalizeDriverName = (value: string) => value.trim().replace(/\s+/g, " ");
 
 const isValidDriverName = (value: string) => {
   const normalized = normalizeDriverName(value);
-  return normalized.length >= 2 && normalized.length <= 100 && /^[A-Za-z ]+$/.test(normalized);
+  return normalized.length >= 2 && /[A-Za-z].*[A-Za-z]/.test(normalized) && /^[A-Za-z][A-Za-z' ]*[A-Za-z]$/.test(normalized);
 };
 
-const normalizeDriverContact = (value: string) => value.trim().replace(/[\s()-]+/g, "");
+const normalizeDriverContact = (value: string) => value.trim();
 
 const isValidDriverContact = (value: string) => {
-  return /^\d{10}$/.test(value.trim());
+  const normalized = value.trim();
+  return /^[6-9]\d{9}$/.test(normalized) && !/^([6-9])\1{9}$/.test(normalized);
 };
 
 interface AsnRecord {
@@ -61,7 +63,7 @@ interface AsnRecord {
 
 const INITIAL_ASNS: AsnRecord[] = [];
 
-export function NewAsnPage() {
+function NewAsnPage() {
   const navigate = useNavigate();
   const search = useSearch({ strict: false }) as any;
 
@@ -76,6 +78,7 @@ export function NewAsnPage() {
   const [manualVehicle, setManualVehicle] = useState(false);
   const [manualDriver, setManualDriver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [nextSubmitting, setNextSubmitting] = useState(false);
   const [creatingMaterial, setCreatingMaterial] = useState(false);
   const [selectedAsn, setSelectedAsn] = useState<AsnRecord | null>(null);
 
@@ -99,6 +102,7 @@ export function NewAsnPage() {
   const [lines, setLines] = useState<any[]>([
     { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" },
   ]);
+  const [lineErrors, setLineErrors] = useState<Record<number, string>>({});
 
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [materialCatalog, setMaterialCatalog] = useState<any[]>([]);
@@ -142,7 +146,7 @@ export function NewAsnPage() {
       );
     });
     void api
-      .getMaterials({ status: "ACTIVE" })
+      .getMaterialComponents("ACTIVE")
       .then((materials) =>
         setMaterialCatalog(
           (materials || []).map((material: any) => ({
@@ -228,6 +232,7 @@ export function NewAsnPage() {
     setLines([
       { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" },
     ]);
+    setLineErrors({});
   };
 
   const closeCreateFlow = () => {
@@ -244,25 +249,34 @@ export function NewAsnPage() {
 
   const continueToAsnForm = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (nextSubmitting) return;
+    setNextSubmitting(true);
     const errors = {
       vehicle: !vehicleNumber.trim()
         ? "Vehicle number is required."
         : !isValidVehicleNumber(vehicleNumber)
-          ? "Enter a valid vehicle registration number, for example KA03AB1234."
+          ? "Enter a valid vehicle number, e.g. KA03AB1234."
           : "",
       driver: !driverName.trim()
         ? "Driver name is required."
         : !isValidDriverName(driverName)
-          ? "Enter a valid driver name."
+          ? /^[A-Za-z ]+$/.test(normalizeDriverName(driverName))
+            ? "Enter a valid driver name."
+            : "Driver name must contain valid letters."
           : "",
       contact: !driverMobile.trim()
-        ? "Driver contact is required."
+        ? "Driver contact number is required."
         : !isValidDriverContact(driverMobile)
-          ? "Enter a valid driver contact number."
+          ? /^\d{10}$/.test(driverMobile.trim()) && /^([6-9])\1{9}$/.test(driverMobile.trim())
+            ? "Enter a valid driver mobile number."
+            : "Enter a valid 10-digit mobile number."
           : "",
     };
     setTransportErrors(errors);
-    if (errors.vehicle || errors.driver || errors.contact) return;
+    if (errors.vehicle || errors.driver || errors.contact) {
+      setNextSubmitting(false);
+      return;
+    }
 
     setVehicleNumber(normalizeVehicleNumber(vehicleNumber));
     setDriverName(normalizeDriverName(driverName));
@@ -375,27 +389,33 @@ export function NewAsnPage() {
       !driverMobile.trim()
     ) {
       if (!isValidVehicleNumber(vehicleNumber)) {
-        toast.error("Enter a valid vehicle registration number, for example KA03AB1234");
+        toast.error("Enter a valid vehicle number, e.g. KA03AB1234.");
         return;
       }
       if (!isValidDriverName(driverName)) {
         toast.error("Enter a valid driver name.");
         return;
       }
-      toast.error("Please fill in Vehicle Number, Driver Name, and Mobile Number *");
+      toast.error("Enter a valid 10-digit mobile number.");
       return;
     }
     const normalizedVehicleNumber = normalizeVehicleNumber(vehicleNumber);
     const normalizedDriverName = normalizeDriverName(driverName);
-    if (
-      lines.some((line) => {
-        const rawQuantity = String(line.shipped_quantity ?? "").trim();
-        if (!rawQuantity) return true;
-        const quantity = Number(rawQuantity);
-        return !Number.isFinite(quantity) || quantity <= 0;
-      })
-    ) {
-      toast.error("Shipped quantity must be a number greater than zero");
+    const quantityErrors: Record<number, string> = {};
+    lines.forEach((line, index) => {
+      const rawQuantity = String(line.shipped_quantity ?? "").trim();
+      const quantity = Number(rawQuantity);
+      const uom = String(line.uom || "").toUpperCase();
+      const discrete = ["PCS", "EA", "UNIT", "PIECE", "NOS", "SET", "BOX", "PACK"].includes(uom);
+      if (!/^\d+(\.\d{1,4})?$/.test(rawQuantity) || !Number.isFinite(quantity) || quantity <= 0) {
+        quantityErrors[index] = "Enter a positive quantity with up to 4 decimal places.";
+      } else if (discrete && !Number.isInteger(quantity)) {
+        quantityErrors[index] = `${uom} quantities must be whole numbers.`;
+      }
+    });
+    setLineErrors(quantityErrors);
+    if (Object.keys(quantityErrors).length) {
+      toast.error("Correct the shipped quantity errors before submitting.");
       return;
     }
     if (lines.some((line) => !String(line.uom || "").trim())) {
@@ -470,6 +490,27 @@ export function NewAsnPage() {
       a.po_number.toLowerCase().includes(q)
     );
   });
+
+  const downloadAsn = async (asn: AsnRecord) => {
+    try {
+      await api.downloadAsnPdf(asn.id, asn.asn_number);
+      toast.success(`ASN ${asn.asn_number} downloaded`);
+    } catch (error: any) {
+      toast.error(error?.message || "Unable to download ASN");
+    }
+  };
+
+  const deleteAsn = async (asn: AsnRecord) => {
+    if (!window.confirm(`Delete ASN ${asn.asn_number}?`)) return;
+    try {
+      await api.deleteAsn(asn.id);
+      setAsnList((rows) => rows.filter((row) => row.id !== asn.id));
+      setSelectedAsn(null);
+      toast.success(`ASN ${asn.asn_number} deleted`);
+    } catch (error: any) {
+      toast.error(error?.message || "Unable to delete ASN");
+    }
+  };
 
   return (
     <AppShell>
@@ -549,15 +590,12 @@ export function NewAsnPage() {
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="rounded-xl border-sky-500/40 text-sky-600 hover:bg-sky-50"
-                          onClick={() => setSelectedAsn(asn)}
-                        >
-                          <Eye className="mr-1.5 size-3.5" />
-                          View
-                        </Button>
+                        <div className="flex justify-end gap-1">
+                          <Button size="icon" variant="outline" title="Edit ASN" aria-label="Edit ASN" className="size-8 rounded-lg" onClick={() => toast.info("ASN editing is not available after submission.")}> <Pencil className="size-3.5" /> </Button>
+                          <Button size="icon" variant="outline" title="Download ASN" aria-label="Download ASN" className="size-8 rounded-lg" onClick={() => void downloadAsn(asn)}> <Download className="size-3.5" /> </Button>
+                          <Button size="icon" variant="outline" title="Delete ASN" aria-label="Delete ASN" className="size-8 rounded-lg text-red-600" onClick={() => void deleteAsn(asn)}> <Trash2 className="size-3.5" /> </Button>
+                          <Button size="sm" variant="outline" className="rounded-xl border-sky-500/40 text-sky-600 hover:bg-sky-50" onClick={() => setSelectedAsn(asn)}><Eye className="mr-1.5 size-3.5" />View</Button>
+                        </div>
                       </td>
                     </tr>
                   )) : (
@@ -634,7 +672,7 @@ export function NewAsnPage() {
                     placeholder="Enter vehicle number"
                     value={vehicleNumber}
                     onChange={(e) => {
-                      setVehicleNumber(e.target.value.replace(/[^A-Za-z0-9 ]/g, ""));
+                      setVehicleNumber(e.target.value.toUpperCase().replace(/[^A-Z0-9 ]/g, ""));
                       setTransportErrors((current) => ({ ...current, vehicle: "" }));
                     }}
                     className={inputClass}
@@ -650,7 +688,7 @@ export function NewAsnPage() {
                     placeholder="Enter driver name"
                     value={driverName}
                     onChange={(e) => {
-                      setDriverName(e.target.value.replace(/[^A-Za-z ]/g, ""));
+                      setDriverName(e.target.value.replace(/[^A-Za-z' ]/g, ""));
                       setTransportErrors((current) => ({ ...current, driver: "" }));
                     }}
                     className={inputClass}
@@ -682,7 +720,9 @@ export function NewAsnPage() {
                 <Button type="button" variant="outline" onClick={closeCreateFlow}>
                   Cancel
                 </Button>
-                <Button type="submit">Next</Button>
+                <Button type="submit" disabled={nextSubmitting}>
+                  {nextSubmitting ? "Checking…" : "Next"}
+                </Button>
               </div>
             </form>
           </DialogContent>
@@ -868,7 +908,9 @@ export function NewAsnPage() {
                       id="modal-driver-mobile"
                       required
                       type="tel"
-                      placeholder="e.g. +91 98450 12345"
+                      inputMode="numeric"
+                      maxLength={10}
+                      placeholder="e.g. 9845012345"
                       value={driverMobile}
                       onChange={(e) => setDriverMobile(e.target.value)}
                       className={inputClass}
@@ -965,7 +1007,7 @@ export function NewAsnPage() {
                                   {material.name} ({material.code})
                                 </option>
                               ))}
-                              <option value="__add_custom_material__">
+                              <option hidden value="__add_custom_material__">
                                 ＋ Add custom material
                               </option>
                             </select>
@@ -976,7 +1018,8 @@ export function NewAsnPage() {
                               type="number"
                               placeholder="Enter quantity"
                               value={line.shipped_quantity}
-                              onChange={(e) =>
+                              onChange={(e) => {
+                                setLineErrors((prev) => ({ ...prev, [idx]: "" }));
                                 setLines((prev) =>
                                   prev.map((item, i) =>
                                     i === idx
@@ -984,9 +1027,14 @@ export function NewAsnPage() {
                                       : item,
                                   ),
                                 )
-                              }
+                              }}
+                              min="0.0001"
+                              step="0.0001"
                               className="h-8 text-xs font-bold text-right"
                             />
+                            {lineErrors[idx] && (
+                              <p className="mt-1 text-[10px] text-destructive">{lineErrors[idx]}</p>
+                            )}
                           </td>
                           <td className="p-2">
                             <Input

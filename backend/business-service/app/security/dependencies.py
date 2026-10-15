@@ -54,8 +54,6 @@ async def get_current_user(
             claims["employee_id"] = emp_id
         roles_upper = {r.upper() for r in roles}
         perms = []
-        if "ADMIN" in roles_upper or "SUPERUSER" in roles_upper:
-            perms.extend(["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "procurement:read", "procurement:create", "procurement:write", "store:read", "store:write"])
         if "WAREHOUSE" in roles_upper or "WAREHOUSE_MANAGER" in roles_upper:
             perms.extend(["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "store:read", "store:write"])
         if "GATE_SECURITY" in roles_upper:
@@ -63,10 +61,6 @@ async def get_current_user(
             # read/execute permissions for dispatches that have already passed
             # warehouse loading and final verification.
             perms.extend(["gate:read", "gate:write", "gate:entry:read", "gate:entry:create", "gate:entry:verify", "dispatch:read", "dispatch:execute"])
-        if "PROCUREMENT" in roles_upper:
-            perms.extend(["procurement:read", "procurement:create", "procurement:write"])
-        if "FINANCE" in roles_upper:
-            perms.extend(["finance:read", "finance:approve"])
         if "STORE_MANAGER" in roles_upper:
             perms.extend(["store:read", "store:write", "storage:read", "putaway:execute", "pickup:execute"])
         if "STORE_KEEPER" in roles_upper:
@@ -87,7 +81,7 @@ async def get_current_user(
             return CurrentUser(
                 subject="local_security_officer",
                 username="local_security_officer",
-                roles=["ADMIN"],
+                roles=["WAREHOUSE"],
                 permissions=["gate:entry:create", "gate:entry:read", "gate:entry:verify"],
                 raw_claims={},
             )
@@ -167,15 +161,7 @@ async def get_current_user(
                     raw_claims=claims,
                 )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or invalid")
-        if token == "mock-jwt-admin-token" or token == "local_dev_mock_token":
-            return CurrentUser(
-                subject="admin",
-                username="admin",
-                roles=["ADMIN"],
-                permissions=["gate:read", "gate:entry:create", "gate:entry:read", "gate:entry:verify", "gate:write", "warehouse:write"],
-                raw_claims={},
-            )
-        elif token == "mock-jwt-supplier-token":
+        if token == "mock-jwt-supplier-token":
             return CurrentUser(
                 subject="supplier",
                 username="supplier_partner",
@@ -243,35 +229,6 @@ async def get_current_user(
                     "returns:write",
                     "store:read",
                     "store:write",
-                ],
-                raw_claims={},
-            )
-        elif token == "mock-jwt-procurement-token":
-            return CurrentUser(
-                subject="procurement",
-                username="procurement",
-                roles=["PROCUREMENT", "ADMIN"],
-                permissions=["gate:write", "gate:entry:create", "gate:entry:read", "gate:entry:verify"],
-                raw_claims={},
-            )
-        elif token == "mock-jwt-finance-token":
-            return CurrentUser(
-                subject="finance",
-                username="finance",
-                roles=["FINANCE", "ADMIN"],
-                permissions=["gate:write", "gate:entry:create", "gate:entry:read", "gate:entry:verify"],
-                raw_claims={},
-            )
-        elif token == "mock-jwt-manager-token":
-            return CurrentUser(
-                subject="manager",
-                username="manager",
-                roles=["MANAGER"],
-                permissions=[
-                    "procurement:read",
-                    "procurement:approve",
-                    "gate:approve",
-                    "warehouse:read",
                 ],
                 raw_claims={},
             )
@@ -443,16 +400,10 @@ async def get_current_user(
                 claims_override["employee_id"] = emp_id
             roles_upper = {r.upper() for r in roles}
             perms = list(user.permissions)
-            if "ADMIN" in roles_upper or "SUPERUSER" in roles_upper:
-                perms.extend(["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "procurement:read", "procurement:create", "procurement:write", "store:read", "store:write"])
             if "WAREHOUSE" in roles_upper or "WAREHOUSE_MANAGER" in roles_upper:
                 perms.extend(["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "store:read", "store:write"])
             if "GATE_SECURITY" in roles_upper:
                 perms.extend(["gate:read", "gate:write", "gate:entry:read", "gate:entry:create", "gate:entry:verify"])
-            if "PROCUREMENT" in roles_upper:
-                perms.extend(["procurement:read", "procurement:create", "procurement:write"])
-            if "FINANCE" in roles_upper:
-                perms.extend(["finance:read", "finance:approve"])
             if "STORE_MANAGER" in roles_upper:
                 perms.extend(["store:read", "store:write", "storage:read", "putaway:execute", "pickup:execute"])
             if "STORE_KEEPER" in roles_upper:
@@ -472,7 +423,7 @@ async def get_current_user(
             return CurrentUser(
                 subject="local_security_officer",
                 username="local_security_officer",
-                roles=["ADMIN"],
+                roles=["WAREHOUSE"],
                 permissions=["gate:entry:create", "gate:entry:read", "gate:entry:verify", "gate:write", "warehouse:write", "dispatch:read", "dispatch:write", "dispatch:execute"],
                 raw_claims={},
             )
