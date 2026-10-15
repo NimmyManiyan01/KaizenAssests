@@ -188,7 +188,8 @@ const warehouseNav = [
 
 const supplierNav = [
   { label: "Dashboard", to: "/supplier-dashboard", icon: LayoutDashboard },
-  { label: "Create ASN", to: "/supplier/asns/new?open=create", icon: Truck },
+  { label: "Materials", to: "/supplier-materials", icon: Boxes },
+  { label: "Create ASN", to: "/supplier/asns/new", icon: Truck },
   { label: "FG Dispatch Requests", to: "/supplier/dispatch", icon: PackageCheck },
   { label: "Damage Returns", to: "/damage-claims", icon: ShieldAlert },
 ];

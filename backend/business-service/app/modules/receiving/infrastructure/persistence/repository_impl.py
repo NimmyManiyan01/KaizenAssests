@@ -910,10 +910,13 @@ class SqlAlchemyGrnRepository(GrnRepository):
             await self._session.flush()
             return existing
 
-        datestr = now.strftime("%Y%m%d")
-        count_res = await self._session.execute(select(GrnModel))
-        total_count = len(count_res.scalars().all()) + 1
-        grn_num = f"GRN-{datestr}-{total_count:04d}"
+        year = now.strftime("%Y")
+        year_prefix = f"GRN-{year}-"
+        count_res = await self._session.execute(
+            select(GrnModel).where(GrnModel.grn_number.like(f"{year_prefix}%"))
+        )
+        sequence = len(count_res.scalars().all()) + 1
+        grn_num = f"{year_prefix}{sequence:03d}"
 
         po_uuid = None if is_unexpected or asn_receipt else _uuid_or_none(po_id)
         po_num_val = None if is_unexpected or asn_receipt else po_number

@@ -83,6 +83,19 @@ async def create_supplier_finished_goods_dispatch_request(
     uow: UnitOfWork = Depends(get_uow),
     current_user: CurrentUser = Depends(get_current_user),
 ):
+    vehicle_number = payload.vehicle_number.strip().upper()
+    driver_name = " ".join(payload.driver_name.split())
+    driver_contact = payload.driver_contact.strip()
+    if not re.fullmatch(r"[A-Z]{2}\s?\d{1,2}\s?[A-Z]{1,3}\s?\d{4}", vehicle_number):
+        raise HTTPException(422, "Enter a valid vehicle number.")
+    if not re.fullmatch(r"[A-Za-z][A-Za-z .-]*", driver_name):
+        raise HTTPException(422, "Driver name is required.")
+    if not re.fullmatch(r"[6-9]\d{9}", driver_contact):
+        raise HTTPException(422, "Enter a valid 10-digit mobile number.")
+    if payload.expected_pickup_date < datetime.now().date():
+        raise HTTPException(422, "Select today or a future pickup date.")
+    if payload.quantity != payload.quantity.to_integral_value():
+        raise HTTPException(422, "Dispatch quantity must be a whole number.")
     async with uow:
         now = datetime.now()
         request_number = f"FGD-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
@@ -92,8 +105,8 @@ async def create_supplier_finished_goods_dispatch_request(
             quantity=payload.quantity, uom=payload.uom, warehouse="ASSEMBLY", requested_by=current_user.username,
             department="SUPPLIER", priority="MEDIUM", required_date=payload.expected_pickup_date,
             requested_date=now.date(), remarks=payload.remarks, status="PENDING_ASSEMBLY", supplier_id=str(supplier_id),
-            supplier_name=current_user.username, vehicle_number=payload.vehicle_number, driver_name=payload.driver_name,
-            driver_contact=payload.driver_contact, expected_pickup_date=payload.expected_pickup_date,
+            supplier_name=current_user.username, vehicle_number=vehicle_number, driver_name=driver_name,
+            driver_contact=driver_contact, expected_pickup_date=payload.expected_pickup_date,
         )
         uow.session.add(row)
         uow.session.add(NotificationModel(user_role="ASSEMBLY_MANAGER", title="Supplier FG dispatch request", message=f"{request_number} requests {payload.quantity:g} {payload.uom} of {payload.product_name}.", link="/assembly/dispatch"))

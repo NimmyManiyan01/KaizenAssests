@@ -46,7 +46,6 @@ class SupplierModel(Base):
     remarks: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="Active")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
     updated_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 

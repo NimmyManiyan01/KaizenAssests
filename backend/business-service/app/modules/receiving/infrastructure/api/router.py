@@ -1789,7 +1789,7 @@ async def lookup_qr_code(
         parsed_qr_id
         or (matched_damage_qr.qr_code if matched_damage_qr else None)
         or (matched_batch_qr.qr_code if matched_batch_qr else None)
-        or (f"DMG-{grn_obj.grn_number if grn_obj else 'GRN-2026-0001'}-{item_code}-01" if is_damaged else f"QR-MAT-{item_code}")
+        or (f"DMG-{grn_obj.grn_number if grn_obj else 'GRN-2026-001'}-{item_code}-01" if is_damaged else f"QR-MAT-{item_code}")
     )
 
     receipt_date_str = (
@@ -1800,7 +1800,7 @@ async def lookup_qr_code(
 
     return QrScanLookupResponse(
         qr_id=resolved_qr_id,
-        grn_number=grn_obj.grn_number if grn_obj else (parsed_grn_num or "GRN-2026-0001"),
+        grn_number=grn_obj.grn_number if grn_obj else (parsed_grn_num or "GRN-2026-001"),
         po_number=po_number,
         material_code=item_code,
         material_name=matched_material.material_name if matched_material else (matched_grn_line.material_name if matched_grn_line else item_code),

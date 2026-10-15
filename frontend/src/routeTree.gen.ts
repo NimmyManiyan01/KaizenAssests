@@ -42,6 +42,7 @@ import { Route as ReceivingRouteImport } from './routes/receiving'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SupplierDashboardRouteImport } from './routes/supplier-dashboard'
+import { Route as SupplierMaterialsRouteImport } from './routes/supplier-materials'
 import { Route as UnscheduledArrivalsRouteImport } from './routes/unscheduled-arrivals'
 import { Route as VehicleExitRouteImport } from './routes/vehicle-exit'
 import { Route as VehicleQueueRouteImport } from './routes/vehicle-queue'
@@ -235,6 +236,11 @@ const SupplierDashboardRoute = SupplierDashboardRouteImport.update({
   path: '/supplier-dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SupplierMaterialsRoute = SupplierMaterialsRouteImport.update({
+  id: '/supplier-materials',
+  path: '/supplier-materials',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const UnscheduledArrivalsRoute = UnscheduledArrivalsRouteImport.update({
   id: '/unscheduled-arrivals',
   path: '/unscheduled-arrivals',
@@ -407,6 +413,7 @@ export interface FileRoutesByFullPath {
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/supplier-dashboard': typeof SupplierDashboardRoute
+  '/supplier-materials': typeof SupplierMaterialsRoute
   '/unscheduled-arrivals': typeof UnscheduledArrivalsRoute
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
@@ -468,6 +475,7 @@ export interface FileRoutesByTo {
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/supplier-dashboard': typeof SupplierDashboardRoute
+  '/supplier-materials': typeof SupplierMaterialsRoute
   '/unscheduled-arrivals': typeof UnscheduledArrivalsRoute
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
@@ -530,6 +538,7 @@ export interface FileRoutesById {
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/supplier-dashboard': typeof SupplierDashboardRoute
+  '/supplier-materials': typeof SupplierMaterialsRoute
   '/unscheduled-arrivals': typeof UnscheduledArrivalsRoute
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
@@ -593,6 +602,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/settings'
     | '/supplier-dashboard'
+    | '/supplier-materials'
     | '/unscheduled-arrivals'
     | '/vehicle-exit'
     | '/vehicle-queue'
@@ -654,6 +664,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/settings'
     | '/supplier-dashboard'
+    | '/supplier-materials'
     | '/unscheduled-arrivals'
     | '/vehicle-exit'
     | '/vehicle-queue'
@@ -715,6 +726,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/settings'
     | '/supplier-dashboard'
+    | '/supplier-materials'
     | '/unscheduled-arrivals'
     | '/vehicle-exit'
     | '/vehicle-queue'
@@ -777,6 +789,7 @@ export interface RootRouteChildren {
   ReportsRoute: typeof ReportsRoute
   SettingsRoute: typeof SettingsRoute
   SupplierDashboardRoute: typeof SupplierDashboardRoute
+  SupplierMaterialsRoute: typeof SupplierMaterialsRoute
   UnscheduledArrivalsRoute: typeof UnscheduledArrivalsRoute
   VehicleExitRoute: typeof VehicleExitRoute
   VehicleQueueRoute: typeof VehicleQueueRoute
@@ -1038,6 +1051,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SupplierDashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/supplier-materials': {
+      id: '/supplier-materials'
+      path: '/supplier-materials'
+      fullPath: '/supplier-materials'
+      preLoaderRoute: typeof SupplierMaterialsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/unscheduled-arrivals': {
       id: '/unscheduled-arrivals'
       path: '/unscheduled-arrivals'
@@ -1257,6 +1277,7 @@ const rootRouteChildren: RootRouteChildren = {
   ReportsRoute: ReportsRoute,
   SettingsRoute: SettingsRoute,
   SupplierDashboardRoute: SupplierDashboardRoute,
+  SupplierMaterialsRoute: SupplierMaterialsRoute,
   UnscheduledArrivalsRoute: UnscheduledArrivalsRoute,
   VehicleExitRoute: VehicleExitRoute,
   VehicleQueueRoute: VehicleQueueRoute,
