@@ -25,7 +25,7 @@ function WarehouseAssemblyRequisitionsPage() {
       const [requests, materialRequests, storeRows] = await Promise.all([
         api.getAssemblyRequisitions("Assembly"),
         api.getAssemblyMaterialRequests(),
-        api.getStores(),
+        api.getStores().catch(() => []),
       ]);
       const requisitionRows = Array.isArray(requests) ? requests : [];
       const existingIds = new Set(requisitionRows.map((request: any) => String(request.id)));

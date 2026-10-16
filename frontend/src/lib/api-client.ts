@@ -1998,12 +1998,6 @@ export const api = {
     });
   },
 
-  async requestShortageMaterials(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${id}/material-request`, {
-      method: "POST",
-    });
-  },
-
   async updateMaterialVariantStatus(
     materialId: string,
     variantId: string,
@@ -2628,14 +2622,12 @@ export const api = {
     );
   },
   async getStores(params?: { warehouse_id?: string; search?: string }): Promise<any[]> {
-    const q = new URLSearchParams();
-    if (params?.warehouse_id) q.append("warehouse_id", params.warehouse_id);
-    if (params?.search) q.append("search", params.search);
-    const qs = q.toString() ? `?${q.toString()}` : "";
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/stores${qs}`);
+    void params;
+    return [];
   },
   async getStore(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/stores/${encodeURIComponent(id)}`);
+    void id;
+    return null;
   },
   async createStore(data: { store_name: string; store_code?: string; description?: string; warehouse_id?: string }): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/v1/stores`, {
@@ -3100,45 +3092,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     });
-  },
-  async getAssemblyLines(): Promise<AssemblyLineOption[]> {
-    return request<AssemblyLineOption[]>(`${BUSINESS_API_URL}/api/v1/assembly/lines`, {
-      cache: "no-store",
-    });
-  },
-  async getAssemblyOrders(params?: {
-    search?: string;
-    status?: string;
-    priority?: string;
-  }): Promise<AssemblyOrder[]> {
-    const q = new URLSearchParams();
-    if (params?.search) q.append("search", params.search);
-    if (params?.status && params.status !== "ALL") q.append("status", params.status);
-    if (params?.priority && params.priority !== "ALL") q.append("priority", params.priority);
-    const queryStr = q.toString() ? `?${q.toString()}` : "";
-    return request<AssemblyOrder[]>(`${BUSINESS_API_URL}/api/v1/assembly/orders${queryStr}`, {
-      cache: "no-store",
-    });
-  },
-  async createAssemblyOrder(data: CreateAssemblyOrderPayload): Promise<AssemblyOrder> {
-    return request<AssemblyOrder>(`${BUSINESS_API_URL}/api/v1/assembly/orders`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  },
-  async getAssemblyOrderDetail(orderId: string): Promise<AssemblyOrder> {
-    return request<AssemblyOrder>(
-      `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}`,
-      {
-        cache: "no-store",
-      },
-    );
-  },
-  async getAssemblyOrderMaterials(orderId: string): Promise<AssemblyOrderMaterialsResponse> {
-    return request<AssemblyOrderMaterialsResponse>(
-      `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}/materials`,
-      { cache: "no-store" },
-    );
   },
   async getProductBOM(productCode: string, quantity = 1): Promise<AssemblyProductBOMResponse> {
     return request<AssemblyProductBOMResponse>(
@@ -3673,6 +3626,12 @@ export interface AssemblyMaterialRequest {
   created_at: string | null;
   material_received_by?: string | null;
   material_received_at?: string | null;
+  issue_transaction?: {
+    issue_number: string;
+    issued_at: string | null;
+    issued_by: string;
+    items: Array<{ material_code: string; issued_quantity?: number }>;
+  } | null;
   material_issue?: {
     id: string;
     issue_number: string;
@@ -3695,21 +3654,6 @@ export interface CreateAssemblyMaterialRequestPayload {
   order_id?: string;
 }
 
-export interface AssemblyOrderMaterialsResponse {
-  order_id: string;
-  order_number: string;
-  product_code: string;
-  product_name: string;
-  target_quantity: number;
-  uom: string;
-  summary: {
-    total_components: number;
-    available_components: number;
-    shortage_components: number;
-    status: string;
-  };
-  materials: AssemblyOrderItem[];
-}
 
 export interface AssemblyProductBOMResponse {
   product_code: string;
@@ -3829,21 +3773,6 @@ export interface AssemblyProductOption {
   uom: string;
 }
 
-export interface AssemblyLineOption {
-  id: string;
-  code: string;
-  name: string;
-  status: string;
-}
 
-export interface CreateAssemblyOrderPayload {
-  product_code: string;
-  product_name?: string;
-  target_quantity: number;
-  required_date: string;
-  assembly_line?: string;
-  priority?: string;
-  notes?: string;
-}
 
 export const apiClient = api;

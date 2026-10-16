@@ -232,7 +232,7 @@ function SimpleWarehouseModule() {
       ] = await Promise.all([
         api.getPutawayTasks(),
         api.getWarehouseInventorySummary(),
-        api.getStores(),
+        api.getStores().catch(() => []),
         api.getMaterialComponents(),
         api.getAssemblyMaterialRequests(),
         api.getAssemblyPickingTasks(),
