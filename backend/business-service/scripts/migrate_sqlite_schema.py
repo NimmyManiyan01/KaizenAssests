@@ -16,8 +16,6 @@ from app.modules.storage.infrastructure.persistence import models as storage_mod
 from app.modules.store.infrastructure.persistence import models as store_models  # noqa: F401
 from app.modules.assembly.infrastructure.persistence import models as assembly_models  # noqa: F401
 from app.modules.dispatch.infrastructure.persistence import models as dispatch_models  # noqa: F401
-from app.modules.customer_orders.infrastructure.persistence import models as customer_order_models  # noqa: F401
-from app.modules.procurement.infrastructure.persistence import models as procurement_models  # noqa: F401
 
 def migrate_sqlite(db_path: str = "wms.db"):
     if not os.path.exists(db_path):

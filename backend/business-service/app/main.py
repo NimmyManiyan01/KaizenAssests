@@ -50,6 +50,14 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     global _consumer_task, _producer_task
 
+    try:
+        from app.database.session import engine
+        from app.database.base import Base
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    except Exception as exc:
+        logger.debug(f"Schema create_all note: {exc}")
+
     if not settings.startup_schema_compatibility:
         async def start_kafka_background() -> None:
             try:
