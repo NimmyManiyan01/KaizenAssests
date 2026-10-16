@@ -1,4 +1,4 @@
-import { createFileRoute, useSearch } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -27,46 +27,45 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api-client";
-import { getUserInfo, requireRole } from "@/lib/auth-utils";
+import { getUserInfo } from "@/lib/auth-utils";
 
 export const Route = createFileRoute("/supplier-dashboard")({
-  beforeLoad: () => requireRole(["SUPPLIER", "ADMIN", "SUPERUSER"]),
   component: SupplierDashboard,
 });
 
 const inputClass = "mt-1.5 h-10 rounded-xl border-border/80 bg-background text-xs font-semibold";
-
-const sanitizeVehicleNumber = (value: string) => value.replace(/[^A-Za-z0-9 ]/g, "");
-const sanitizeDriverName = (value: string) => value.replace(/[^A-Za-z ]/g, "");
-const sanitizeDriverContact = (value: string) => value.replace(/[^0-9]/g, "");
-const isValidTransportDetails = (vehicle: string, driver: string, contact: string) =>
-  /^[A-Za-z0-9 ]+$/.test(vehicle.trim()) &&
-  /^[A-Za-z ]+$/.test(driver.trim()) &&
-  /^\d{10}$/.test(contact.trim());
-
-const statuses: Record<string, string> = {
-  SUBMITTED: "bg-success-soft text-success border-success/30",
-  APPROVED: "bg-primary-soft text-primary border-primary/30",
-  PENDING: "bg-warning-soft text-warning border-warning/30",
-  CANCELLED: "bg-destructive-soft text-destructive border-destructive/30",
-  GATE_ENTRY_CREATED: "bg-primary-soft text-primary border-primary/30",
-  DOCK_ALLOCATED: "bg-primary-soft text-primary border-primary/30",
-  VEHICLE_CHECKED_IN: "bg-warning-soft text-warning border-warning/30",
-  RECEIVING: "bg-warning-soft text-warning border-warning/30",
-  GRN_COMPLETED: "bg-success-soft text-success border-success/30",
-  PUTAWAY_COMPLETED: "bg-success-soft text-success border-success/30",
-  CLOSED: "bg-success-soft text-success border-success/30",
+const todayDate = () => {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 };
 
+const statuses: Record<string, string> = {
+  SUBMITTED: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  APPROVED: "bg-sky-50 text-sky-700 border-sky-200",
+  PENDING: "bg-amber-50 text-amber-700 border-amber-200",
+  CANCELLED: "bg-rose-50 text-rose-700 border-rose-200",
+};
+
+function validateTransportDetails(vehicle: string, driver: string, contact: string): string | null {
+  const normalizedVehicle = vehicle.replace(/\s+/g, "").toUpperCase();
+  if (!/^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/.test(normalizedVehicle)) {
+    return "Enter a valid vehicle number, for example KA42EH6940.";
+  }
+  if (!/^[A-Za-z][A-Za-z .'-]{1,49}$/.test(driver.trim())) {
+    return "Enter a valid driver name using letters only.";
+  }
+  if (!/^\d{10}$/.test(contact.trim())) {
+    return "Driver contact must contain exactly 10 digits.";
+  }
+  return null;
+}
+
 function SupplierDashboard() {
-  const search = useSearch({ strict: false }) as { open?: string };
   const [asns, setAsns] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
-  const [page, setPage] = useState(1);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<any>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [trendDays, setTrendDays] = useState<7 | 30 | 90>(7);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -97,7 +96,6 @@ function SupplierDashboard() {
   const [warehouses, setWarehouses] = useState<any[]>([]);
   const [selectedPo, setSelectedPo] = useState<any>(null);
   const currentUser = getUserInfo();
-  const pageSize = 10;
 
   useEffect(() => {
     loadAsns();
@@ -108,10 +106,6 @@ function SupplierDashboard() {
     void Promise.all([api.getPurchaseOrders({ supplierId: currentUser?.supplierId }).catch(() => []), api.getStores({ status: "ALL" }).catch(() => [])])
       .then(([pos, stores]) => { setPurchaseOrders(pos || []); setWarehouses((stores || []).filter((store: any) => String(store.status || "ACTIVE").toUpperCase() === "ACTIVE")); });
   }, []);
-
-  useEffect(() => {
-    if (search.open === "create") void handleOpenCreateModal();
-  }, [search.open]);
 
   const handleAddNewCustomMaterial = async () => {
     const compName = prompt("Enter New Material Component Name (to save in Database):");
@@ -133,21 +127,16 @@ function SupplierDashboard() {
   };
 
   const loadAsns = async () => {
-    setLoading(true);
-    setLoadError("");
     try {
-      const data = await api.getAsns(currentUser?.supplierId);
+      const data = await api.getAsns();
       setAsns((data || []).map((asn: any) => ({
         ...asn,
         expected_arrival_date: asn.expected_arrival_date || asn.delivery_date || asn.expected_arrival_at?.split("T")[0] || "",
         supplier_name: asn.supplier_name || asn.supplierName || asn.supplier_company_name || asn.supplier?.supplier_name || "",
         destination_warehouse: asn.destination_warehouse || asn.destinationWarehouse || asn.warehouse_name || asn.delivery_warehouse_name || "",
       })));
-    } catch (error: any) {
+    } catch {
       setAsns([]);
-      setLoadError(error?.message || "Unable to load ASN records.");
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -158,7 +147,7 @@ function SupplierDashboard() {
     } catch {
       setAsnNumber("");
     }
-    setExpectedArrivalDate("");
+    setExpectedArrivalDate(todayDate());
     setSupplierName(supplierCompanyName || currentUser?.full_name || currentUser?.username || "");
     setDestinationWarehouse("");
     setDestinationWarehouseId("");
@@ -180,12 +169,21 @@ function SupplierDashboard() {
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const transportError = validateTransportDetails(vehicleNumber, driverName, driverMobile);
+    if (transportError) {
+      toast.error(transportError);
+      return;
+    }
     if (!destinationWarehouse || !lines.length || lines.some((line) => !line.item_code || !line.material_name || Number(line.shipped_quantity) <= 0)) {
       toast.error("Select a warehouse and material; shipped quantities must be greater than zero");
       return;
     }
     if (!expectedArrivalDate) {
       toast.error("Expected Arrival Date is mandatory *");
+      return;
+    }
+    if (expectedArrivalDate < todayDate()) {
+      toast.error("Expected Arrival Date cannot be before today.");
       return;
     }
     if (!vehicleNumber.trim() || !driverName.trim() || !driverMobile.trim()) {
@@ -216,31 +214,32 @@ function SupplierDashboard() {
         status: "SUBMITTED",
       };
 
-      const createdAsn = await api.createAsn(payload);
-      const persistedAsnNumber = createdAsn?.asn_number || asnNumber;
+      await api.createAsn(payload);
 
       const newRecord = {
         id: `asn-${Date.now()}`,
-        asn_number: persistedAsnNumber,
+        asn_number: asnNumber,
         po_number: "",
         supplier_name: supplierName,
         supplier_company_name: supplierName,
         destination_warehouse: destinationWarehouse,
+        destination_warehouse_id: destinationWarehouseId,
         vehicle_number: vehicleNumber.toUpperCase().trim(),
         driver_name: driverName.trim(),
         driver_contact: driverMobile.trim(),
+        expected_arrival_date: expectedArrivalDate,
         expected_arrival_at: expectedArrivalDate,
         created_at: new Date().toISOString(),
         status: "SUBMITTED",
         lines: payload.lines,
       };
 
-      await loadAsns();
+      setAsns((prev) => [newRecord, ...prev]);
       setSubmitting(false);
       setIsModalOpen(false);
 
-      toast.success(`ASN ${persistedAsnNumber} Created Successfully ✓`, {
-        description: `Vehicle ${newRecord.vehicle_number} · Driver ${newRecord.driver_name} (${newRecord.driver_contact})\n\nGate Security can now scan or search ${persistedAsnNumber}!`,
+      toast.success(`ASN ${asnNumber} Created Successfully ✓`, {
+        description: `Vehicle ${newRecord.vehicle_number} · Driver ${newRecord.driver_name} (${newRecord.driver_contact})\n\nGate Security can now scan or search ${asnNumber}!`,
       });
     } catch (err: any) {
       setSubmitting(false);
@@ -257,28 +256,20 @@ function SupplierDashboard() {
       )
       .sort(
         (a, b) =>
-          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+          new Date(b.created_at || b.submitted_at || 0).getTime() -
+          new Date(a.created_at || a.submitted_at || 0).getTime()
       );
   }, [asns, query]);
 
-  useEffect(() => setPage(1), [query]);
-  const pageCount = rows.length ? Math.ceil(rows.length / pageSize) : 0;
-  const hasRows = rows.length > 0;
-  const visibleRows = rows.slice((page - 1) * pageSize, page * pageSize);
-
-  const activeAsns = asns.filter(
-    (a) => !["CLOSED", "COMPLETED", "CANCELLED"].includes(String(a.status || "").toUpperCase())
+  const submitted = asns.filter(
+    (a) => String(a.status || "SUBMITTED").toUpperCase() === "SUBMITTED"
   ).length;
-  const vehicles = new Set(
-    asns
-      .map((a) => String(a.vehicle_number || "").trim().toUpperCase())
-      .filter(Boolean),
-  ).size;
+  const vehicles = new Set(asns.map((a) => a.vehicle_number).filter(Boolean)).size;
 
   const metrics = [
-    { title: "Total ASNs", value: asns.length, icon: FileText, tone: "bg-primary-soft text-primary" },
-    { title: "Active ASNs", value: activeAsns, icon: Truck, tone: "bg-success-soft text-success" },
-    { title: "Vehicles", value: vehicles, icon: Truck, tone: "bg-primary-soft text-primary" },
+    { title: "Total ASNs", value: asns.length, icon: FileText, tone: "bg-sky-50 text-sky-600" },
+    { title: "Submitted", value: submitted, icon: Truck, tone: "bg-emerald-50 text-emerald-600" },
+    { title: "Vehicles", value: vehicles, icon: Truck, tone: "bg-purple-50 text-purple-600" },
   ];
 
   const showDetails = (asn: any) => {
@@ -287,41 +278,54 @@ function SupplierDashboard() {
   };
 
   const trend = useMemo(() => {
-    const toDayKey = (value: unknown) => {
+    const toLocalDateKey = (value: unknown) => {
       if (!value) return "";
-      const date = new Date(String(value));
-      if (Number.isNaN(date.getTime())) return "";
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, "0");
-      const day = String(date.getDate()).padStart(2, "0");
-      return `${year}-${month}-${day}`;
+      const text = String(value);
+      const isoDate = text.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+      if (isoDate) return isoDate;
+      const parsed = new Date(text);
+      if (Number.isNaN(parsed.getTime())) return "";
+      return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
     };
-    const days = Array.from({ length: 7 }, (_, i) => {
+    const days = Array.from({ length: trendDays }, (_, i) => {
       const d = new Date();
       d.setHours(0, 0, 0, 0);
-      d.setDate(d.getDate() - (6 - i));
+      d.setDate(d.getDate() - (trendDays - 1 - i));
       return d;
     });
     return days.map((day) => ({
+      key: `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`,
       label: day.toLocaleDateString(undefined, { month: "short", day: "2-digit" }),
-      count: asns.filter((asn) => toDayKey(asn.created_at) === toDayKey(day)).length,
+      count: asns.filter((a) => {
+        return toLocalDateKey(a.submitted_at || a.created_at || a.shipment_date) === `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+      }).length,
     }));
-  }, [asns]);
+  }, [asns, trendDays]);
 
   return (
     <AppShell>
-      <div className="h-[calc(100vh-6rem)] space-y-4 overflow-hidden">
+      <div className="space-y-4">
         {/* Top Banner Card with Top-Right Create ASN CTA */}
-        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-gradient-to-r from-white via-slate-50 to-sky-50 p-4 shadow-xs">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Supplier workspace</p>
-            <h1 className="text-2xl font-black text-foreground tracking-tight">
-              Supplier <span className="text-primary">Dashboard</span>
+            <p className="text-xs font-semibold text-slate-500">Welcome back,</p>
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+              Supplier <span className="text-sky-600">Dashboard</span>
             </h1>
-            <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">
+            <p className="text-xs text-slate-500 mt-0.5">
               Manage your advance shipping notices (ASNs) and track deliveries in real-time.
             </p>
           </div>
+
+          <Link
+            to="/supplier/asns/new"
+            search={{ open: "create" }}
+            className="inline-flex h-10 shrink-0 items-center rounded-xl bg-sky-600 px-4 text-xs font-bold text-white shadow-sm hover:bg-sky-700"
+          >
+            <Truck className="mr-2 size-4" />
+            Create ASN
+          </Link>
+
         </div>
 
         {/* High-Density Metric Cards */}
@@ -329,17 +333,17 @@ function SupplierDashboard() {
           {metrics.map(({ title, value, icon: Icon, tone }) => (
             <div
               key={title}
-              className="flex min-h-28 items-center justify-between rounded-2xl border border-border bg-card p-5 shadow-sm transition-shadow hover:shadow-md"
+              className="flex min-h-28 items-center justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
             >
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                   {title}
                 </p>
-                <p className="text-2xl font-black text-foreground mt-0.5">{value}</p>
+                <p className="text-2xl font-black text-slate-900 mt-0.5">{value}</p>
               </div>
 
               <div
-                className={`flex size-10 items-center justify-center rounded-xl border border-border/60 ${tone}`}
+                className={`flex size-10 items-center justify-center rounded-xl border border-slate-200/60 ${tone}`}
               >
                 <Icon className="size-5" />
               </div>
@@ -348,13 +352,13 @@ function SupplierDashboard() {
         </div>
 
         {/* ASN History Table Section */}
-        <section className="rounded-2xl border border-border bg-card p-4 shadow-xs">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-sm font-black uppercase tracking-wider text-slate-900">
-                ASN history
+                ASN HISTORY
               </h2>
-                <p className="text-xs text-muted-foreground">View and track all submitted shipments</p>
+              <p className="text-xs text-slate-500">View and track all your submitted ASNs</p>
             </div>
 
             <div className="flex items-center gap-2">
@@ -371,8 +375,8 @@ function SupplierDashboard() {
             </div>
           </div>
 
-          <div className="max-h-[calc(100vh-25rem)] overflow-auto rounded-xl border border-border">
-            <table className="w-full min-w-[680px] text-left text-xs">
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase font-bold text-slate-500">
                 <tr>
                   <th className="px-3.5 py-2.5">ASN Number</th>
@@ -383,9 +387,9 @@ function SupplierDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
-                {visibleRows.map((asn) => {
+                {rows.map((asn) => {
                   const key = String(asn.id || asn.asn_number);
-                  const status = String(asn.status || "UNKNOWN").toUpperCase();
+                  const status = String(asn.status || "SUBMITTED").toUpperCase();
                   return (
                     <tr key={key} className="hover:bg-slate-50/60 transition-colors">
                       <td className="px-3.5 py-2.5 font-bold font-mono text-sky-600 cursor-pointer" onClick={() => showDetails(asn)}>
@@ -404,7 +408,7 @@ function SupplierDashboard() {
                         </span>
                       </td>
                       <td className="px-3.5 py-2.5 text-slate-500">
-                        {asn.created_at && new Date(asn.created_at) <= new Date()
+                        {asn.created_at
                           ? new Date(asn.created_at).toLocaleDateString()
                           : asn.delivery_date || asn.expected_arrival_date || asn.expected_arrival_at?.split("T")[0] || "—"}
                       </td>
@@ -413,7 +417,7 @@ function SupplierDashboard() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-8 rounded-lg text-xs font-bold text-sky-700 hover:bg-sky-100"
+                            className="h-7 text-xs font-bold text-sky-600"
                             onClick={() => showDetails(asn)}
                           >
                             <Eye className="mr-1 size-3.5" /> View
@@ -422,8 +426,8 @@ function SupplierDashboard() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 size-8 rounded-lg text-slate-400"
-                              aria-label={`Open actions for ${asn.asn_number || "ASN"}`}
+                              className="h-7 size-7 text-slate-400"
+                              aria-label="Open ASN actions"
                               onClick={() => setOpenMenu(openMenu === key ? null : key)}
                             >
                               <MoreVertical className="size-3.5" />
@@ -448,27 +452,25 @@ function SupplierDashboard() {
               </tbody>
             </table>
 
-            {loading && <p className="p-6 text-center text-xs text-slate-400">Loading ASN records...</p>}
-            {!loading && loadError && <p className="p-6 text-center text-xs text-rose-600">{loadError}</p>}
-            {!loading && !loadError && !rows.length && (
-              <p className="p-6 text-center text-xs text-muted-foreground">No ASN records found. Create your first ASN to get started.</p>
+            {!rows.length && (
+              <p className="p-6 text-center text-xs text-slate-400">No ASN records found.</p>
             )}
           </div>
 
-          {rows.length > 0 && <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
-            <span>Showing {visibleRows.length} of {rows.length} entries</span>
+          <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+            <span>Showing {rows.length} entries</span>
             <div className="flex items-center gap-1">
-              <Button variant="outline" size="icon" className="size-7 rounded-lg" disabled={!hasRows || page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>
+              <Button variant="outline" size="icon" className="size-7 rounded-lg">
                 <ChevronLeft className="size-3.5" />
               </Button>
               <Button size="icon" className="size-7 rounded-lg bg-sky-600 text-xs font-bold">
-                {page}
+                1
               </Button>
-              <Button variant="outline" size="icon" className="size-7 rounded-lg" disabled={!hasRows || page >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}>
+              <Button variant="outline" size="icon" className="size-7 rounded-lg">
                 <ChevronRight className="size-3.5" />
               </Button>
             </div>
-          </div>}
+          </div>
 
           {false && selected && (
             <div className="mt-3 rounded-xl bg-sky-50 p-3.5 border border-sky-200 text-xs">
@@ -496,30 +498,31 @@ function SupplierDashboard() {
             <h2 className="text-xs font-black uppercase tracking-wider text-slate-900">
               ASN SUBMISSION TREND
             </h2>
-            <Button variant="outline" size="sm" className="h-7 text-xs rounded-lg font-bold">
-              Last 7 Days <ChevronDown className="ml-1.5 size-3" />
-            </Button>
+            <label className="inline-flex items-center rounded-lg border bg-background px-2 text-xs font-bold">
+              <select aria-label="ASN submission trend range" className="h-7 bg-transparent outline-none" value={trendDays} onChange={(event) => setTrendDays(Number(event.target.value) as 7 | 30 | 90)}>
+                <option value={7}>Last 7 Days</option>
+                <option value={30}>Last 30 Days</option>
+                <option value={90}>Last 90 Days</option>
+              </select>
+              <ChevronDown className="ml-1.5 size-3" />
+            </label>
           </div>
 
-          <div className="mt-4 flex h-28 items-end gap-2 border-b border-l border-slate-200 px-2 pb-1">
-            {trend.some((item) => item.count > 0) ? trend.map(({ label, count }) => {
+          <div className="mt-4 flex h-36 items-end gap-2 rounded-lg border-b border-l border-slate-200 bg-[repeating-linear-gradient(to_bottom,transparent_0,transparent_34px,rgba(148,163,184,0.18)_35px)] px-2 pb-1 pt-3">
+            {trend.map(({ key, label, count }) => {
               const max = Math.max(...trend.map((item) => item.count), 1);
               return (
-                <div key={label} className="flex flex-1 flex-col items-center justify-end gap-1">
+                <div key={key} className="flex flex-1 flex-col items-center justify-end gap-1">
+                  <span className="text-[10px] font-bold text-slate-500">{count}</span>
                   <div
-                    className="w-full max-w-8 rounded-t bg-primary/80"
+                    className="h-auto min-w-4 w-full max-w-8 rounded-t bg-blue-600 shadow-sm transition-all hover:bg-blue-700"
                     title={`${label}: ${count}`}
-                    style={{ height: `${Math.max((count / max) * 100, count ? 10 : 4)}%` }}
+                    style={{ height: `${count ? Math.max((count / max) * 100, 8) : 3}px` }}
                   />
-                  <span className="text-[9px] font-bold text-muted-foreground">{label}</span>
+                  <span className="text-[9px] font-bold text-slate-400">{label}</span>
                 </div>
               );
-            }) : (
-              <div className="flex w-full flex-col items-center justify-center gap-1 text-center">
-                <p className="text-xs font-bold text-foreground">No ASN submissions yet</p>
-                <p className="text-[11px] text-muted-foreground">Your ASN submission activity will appear here after you create an ASN.</p>
-              </div>
-            )}
+            })}
           </div>
         </section>
 
@@ -531,10 +534,9 @@ function SupplierDashboard() {
               </DialogTitle>
             </DialogHeader>
             {selected && (
-              <div className="grid gap-3 text-xs sm:grid-cols-2">
+              <div className="grid max-h-[70vh] gap-3 overflow-y-auto pr-1 text-xs sm:grid-cols-2">
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">ASN Number</p><p className="mt-1 font-mono font-black text-sky-600">{selected.asn_number || "—"}</p></div>
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Supplier Name</p><p className="mt-1 font-bold text-slate-900">{selected.supplier_name || selected.supplier_company_name || "—"}</p></div>
-                <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Destination Warehouse</p><p className="mt-1 font-bold text-slate-900">{selected.destination_warehouse || "—"}</p></div>
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Vehicle Number</p><p className="mt-1 font-mono font-bold text-slate-900">{selected.vehicle_number || "—"}</p></div>
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Driver Name & Mobile</p><p className="mt-1 font-bold text-slate-900">{selected.driver_name || "—"} · {selected.driver_contact || "—"}</p></div>
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Expected Arrival Date</p><p className="mt-1 font-bold text-slate-900">{selected.expected_arrival_date || selected.expected_arrival_at?.split("T")[0] || selected.delivery_date || "—"}</p></div>
@@ -556,20 +558,20 @@ function SupplierDashboard() {
               <div className="grid gap-4 md:grid-cols-3">
                 <div>
                   <Label htmlFor="dashboard-assignment-vehicle">Vehicle Number *</Label>
-                  <Input id="dashboard-assignment-vehicle" required placeholder="Enter vehicle number" value={vehicleNumber} onChange={(e) => setVehicleNumber(sanitizeVehicleNumber(e.target.value))} className={inputClass} />
+                  <Input id="dashboard-assignment-vehicle" required placeholder="e.g. KA42EH6940" value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())} maxLength={13} pattern="[A-Za-z]{2}[0-9]{1,2}[A-Za-z]{1,3}[0-9]{4}" className={inputClass} />
                 </div>
                 <div>
                   <Label htmlFor="dashboard-assignment-driver">Driver Name *</Label>
-                  <Input id="dashboard-assignment-driver" required placeholder="Enter driver name" value={driverName} onChange={(e) => setDriverName(sanitizeDriverName(e.target.value))} className={inputClass} />
+                  <Input id="dashboard-assignment-driver" required placeholder="Enter driver name" value={driverName} onChange={(e) => setDriverName(e.target.value)} maxLength={50} className={inputClass} />
                 </div>
                 <div>
                   <Label htmlFor="dashboard-assignment-mobile">Driver Contact *</Label>
-                  <Input id="dashboard-assignment-mobile" required maxLength={10} placeholder="Enter driver contact" value={driverMobile} onChange={(e) => setDriverMobile(sanitizeDriverContact(e.target.value).slice(0, 10))} className={inputClass} />
+                  <Input id="dashboard-assignment-mobile" required type="tel" inputMode="numeric" placeholder="10-digit mobile number" value={driverMobile} onChange={(e) => setDriverMobile(e.target.value.replace(/\D/g, "").slice(0, 10))} maxLength={10} pattern="[0-9]{10}" className={inputClass} />
                 </div>
               </div>
               <div className="flex justify-end gap-2 pt-1">
                 <Button type="button" variant="outline" className="rounded-xl" onClick={() => setIsAssignmentOpen(false)}>Cancel</Button>
-                <Button type="button" className="rounded-xl px-6" onClick={() => { if (!vehicleNumber.trim() || !driverName.trim() || !driverMobile.trim()) { toast.error("Vehicle number, driver name and driver contact are required"); return; } if (!isValidTransportDetails(vehicleNumber, driverName, driverMobile)) { toast.error("Vehicle number must use letters, numbers and spaces; driver name must use letters and spaces; driver contact must be exactly 10 digits"); return; } setIsAssignmentOpen(false); setIsModalOpen(true); }}>Next</Button>
+                <Button type="button" className="rounded-xl px-6" onClick={() => { const validationError = validateTransportDetails(vehicleNumber, driverName, driverMobile); if (validationError) { toast.error(validationError); return; } setVehicleNumber(vehicleNumber.replace(/\s+/g, "").toUpperCase()); setIsAssignmentOpen(false); setIsModalOpen(true); }}>Next</Button>
               </div>
             </div>
           </DialogContent>
@@ -625,6 +627,7 @@ function SupplierDashboard() {
                       id="dashboard-expected-arrival-date"
                       type="date"
                       required
+                      min={todayDate()}
                       value={expectedArrivalDate}
                       onChange={(e) => setExpectedArrivalDate(e.target.value)}
                       className={inputClass}

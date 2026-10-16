@@ -185,8 +185,8 @@ function GateDashboard() {
 
   return (
     <AppShell
-      title="Gate Entry Security Dashboard (FR-01)"
-      subtitle="FR-01: Live gate metrics, searchable recent gate pass activity, and vehicle tracking"
+      title="Gate Entry Security Dashboard"
+      subtitle="Live gate metrics, searchable recent gate pass activity, and vehicle tracking"
       actions={
         <div className="flex flex-wrap justify-end gap-2">
           <Button asChild className="rounded-xl font-bold shadow-sm">

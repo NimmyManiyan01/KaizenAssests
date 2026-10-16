@@ -4243,7 +4243,7 @@ function GrnPageWorkflow() {
                       )}
                     </label>
                     <Input
-                      placeholder="Enter ASN (e.g. ASN-2026-1)"
+                      placeholder="Enter ASN (e.g. ASN-2026-001)"
                       value={header.asn_number}
                       disabled={busyAction || loadingContext}
                       onChange={(e) => changePoNumber(e.target.value)}

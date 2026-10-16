@@ -184,7 +184,7 @@ const managerNav: any[] = [];
 
 const gateSecurityNav = [
   { label: "Dashboard", to: "/gate-dashboard", icon: LayoutDashboard },
-  { label: "New Gate Entry", to: "/vehicle-queue?action=new", icon: PlusCircle },
+  { label: "New Gate Entry", to: "/vehicle-queue", icon: PlusCircle },
   { label: "Vehicle Exit", to: "/vehicle-exit", icon: LogOut },
   { label: "FG Pickup Gate Entry", to: "/gate/finished-goods-pickup", icon: QrCode },
   { label: "FG Pickup Gate Exit", to: "/gate/finished-goods-pickup-exit", icon: LogOut },

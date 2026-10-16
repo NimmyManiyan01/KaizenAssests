@@ -15,11 +15,12 @@ import os
 import re
 import uuid
 from decimal import Decimal, InvalidOperation
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, or_, select, text
+from sqlalchemy import delete, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.common.domain.exceptions import DomainRuleViolationException, NotFoundException
@@ -36,6 +37,8 @@ from app.modules.storage.infrastructure.persistence.models import HandlingUnitMo
 from app.modules.storage.application.location_strategy import recommend_storage_location
 from app.modules.store.infrastructure.persistence.models import StoreModel, StoreManagerUserModel
 from app.modules.dock.infrastructure.persistence.models import DockMasterModel, DockAllocationRequestModel
+from app.modules.quarantine.infrastructure.persistence.models import QuarantineRecordModel
+from app.modules.gate.application.ocr_pipeline import EnterprisePoOcrEngine
 from app.modules.gate.domain.aggregate import GateEntry
 from app.modules.gate.domain.services import GateVerificationService
 from app.modules.gate.domain.value_objects import (
@@ -98,26 +101,12 @@ async def create_finished_goods_pickup_gate_entry(
     async with uow:
         request = (await uow.session.execute(select(FinishedGoodsRequestModel).where(FinishedGoodsRequestModel.request_number == payload.request_number))).scalar_one_or_none()
         if not request: raise HTTPException(404, "Finished-goods dispatch request not found")
-        if request.status == "PENDING_ASSEMBLY":
-            existing = (await uow.session.execute(select(AssemblyFinishedGoodsAllocationModel).where(AssemblyFinishedGoodsAllocationModel.finished_goods_request_id == request.id, AssemblyFinishedGoodsAllocationModel.status == "ALLOCATED"))).scalars().all()
-            already_allocated = sum((row.quantity for row in existing), Decimal("0"))
-            remaining = max(Decimal("0"), request.quantity - already_allocated)
-            finished_goods = (await uow.session.execute(select(AssemblyFinishedGoodsModel).where(AssemblyFinishedGoodsModel.product_code == request.material_code, AssemblyFinishedGoodsModel.status.in_(["QC_APPROVED", "AVAILABLE"]), AssemblyFinishedGoodsModel.quantity > 0).order_by(AssemblyFinishedGoodsModel.posted_at.asc()).with_for_update())).scalars().all()
-            for finished_good in finished_goods:
-                if remaining <= 0:
-                    break
-                used = sum((row.quantity for row in existing if row.finished_goods_id == finished_good.id), Decimal("0"))
-                available = max(Decimal("0"), finished_good.quantity - used)
-                quantity = min(available, remaining)
-                if quantity > 0:
-                    uow.session.add(AssemblyFinishedGoodsAllocationModel(finished_goods_id=finished_good.id, finished_goods_request_id=request.id, quantity=quantity, status="ALLOCATED"))
-                    remaining -= quantity
-            if remaining > 0:
-                raise HTTPException(409, f"Insufficient available Assembly finished goods for {request.material_code}")
-            request.status = "ALLOCATED"
-        if request.status not in ("ALLOCATED", "APPROVED"): raise HTTPException(409, f"Request is not ready for pickup: {request.status}")
+        if request.status == "CANCELLED": raise HTTPException(409, "This dispatch request is cancelled.")
+        if request.status not in ("ALLOCATED", "APPROVED", "READY_FOR_PICKUP"): raise HTTPException(409, "This dispatch request is not approved.")
         existing = (await uow.session.execute(select(FinishedGoodsPickupGateVisitModel).where(FinishedGoodsPickupGateVisitModel.request_id == request.id, FinishedGoodsPickupGateVisitModel.status == "INSIDE_FACILITY"))).scalar_one_or_none()
         if existing: return {"gate_pass_number": existing.gate_pass_number, "status": existing.status, "request_number": request.request_number}
+        closed = (await uow.session.execute(select(FinishedGoodsPickupGateVisitModel).where(FinishedGoodsPickupGateVisitModel.request_id == request.id, FinishedGoodsPickupGateVisitModel.status == "CLOSED"))).scalar_one_or_none()
+        if closed: raise HTTPException(409, "This dispatch request has already exited.")
         gate_pass = uuid.uuid4().hex.upper()[:6]
         while (await uow.session.execute(select(FinishedGoodsPickupGateVisitModel.id).where(FinishedGoodsPickupGateVisitModel.gate_pass_number == gate_pass))).scalar_one_or_none(): gate_pass = uuid.uuid4().hex.upper()[:6]
         now = datetime.datetime.now(datetime.timezone.utc)
@@ -134,17 +123,7 @@ async def complete_finished_goods_pickup_gate_exit(
     user: CurrentUser = Depends(require_permission("gate:verify")), uow: UnitOfWork = Depends(get_uow),
 ):
     async with uow:
-        normalized_gate_pass = gate_pass_number.strip().upper()
-        # Gate passes are user-entered/scanned values. Match case-insensitively
-        # so legacy rows created before uppercase normalization remain usable.
-        visit = (
-            await uow.session.execute(
-                select(FinishedGoodsPickupGateVisitModel).where(
-                    func.upper(FinishedGoodsPickupGateVisitModel.gate_pass_number)
-                    == normalized_gate_pass
-                )
-            )
-        ).scalar_one_or_none()
+        visit = (await uow.session.execute(select(FinishedGoodsPickupGateVisitModel).where(FinishedGoodsPickupGateVisitModel.gate_pass_number == gate_pass_number.upper().strip()))).scalar_one_or_none()
         if not visit: raise HTTPException(404, "Pickup gate pass not found")
         if visit.status != "INSIDE_FACILITY": raise HTTPException(409, f"Gate pass is already {visit.status}")
         if visit.vehicle_number.upper() != payload.vehicle_number.upper().strip() or visit.driver_name.strip().lower() != payload.driver_name.strip().lower(): raise HTTPException(422, "Vehicle or driver does not match the original pickup gate entry")
@@ -170,22 +149,6 @@ logger = logging.getLogger(__name__)
 def _asn_response(asn: AsnModel) -> dict:
     logistics = asn.logistics or []
     details = next((item for item in logistics if isinstance(item, dict) and item.get("type") == "asn_details"), {})
-    supplier_status = {
-        "SUBMITTED": "SUBMITTED",
-        "AWAITING_DOCK": "GATE_ENTRY_CREATED",
-        "GATE_ENTRY_APPROVED": "GATE_ENTRY_CREATED",
-        "DOCK_ASSIGNED": "DOCK_ALLOCATED",
-        "INSIDE_FACILITY": "VEHICLE_CHECKED_IN",
-        "MOVING_TO_DOCK": "VEHICLE_CHECKED_IN",
-        "AT_DOCK": "VEHICLE_CHECKED_IN",
-        "OCCUPIED": "RECEIVING",
-        "UNLOADING_IN_PROGRESS": "RECEIVING",
-        "QUALITY_INSPECTION_REQUIRED": "RECEIVING",
-        "QUALITY_PASSED": "RECEIVING",
-        "RECEIVING_COMPLETED": "GRN_COMPLETED",
-        "COMPLETED": "CLOSED",
-        "CLOSED": "CLOSED",
-    }.get(str(asn.status or "SUBMITTED").upper(), str(asn.status or "SUBMITTED").upper())
     return {
         "id": str(asn.id),
         "asn_number": asn.asn_number,
@@ -205,9 +168,17 @@ def _asn_response(asn: AsnModel) -> dict:
         "delivery_date": asn.expected_arrival_at.date().isoformat() if asn.expected_arrival_at else None,
         "expected_arrival_date": asn.expected_arrival_at.date().isoformat() if asn.expected_arrival_at else None,
         "shipment_date": asn.shipment_date.isoformat() if asn.shipment_date else None,
-        "status": supplier_status,
+        "status": asn.status,
         "created_at": asn.created_at.isoformat() if asn.created_at else None,
+        "invoice_number": asn.invoice_number,
+        "invoice_date": asn.invoice_date.isoformat() if asn.invoice_date else None,
+        "challan_number": asn.challan_number,
+        "challan_date": asn.challan_date.isoformat() if asn.challan_date else None,
         "transporter": asn.transporter,
+        "documents": [
+            {"id": str(document.id), "document_type": document.document_type, "file_name": document.file_name, "file_url": document.file_url, "uploaded_at": document.uploaded_at.isoformat() if document.uploaded_at else None}
+            for document in (asn.documents or [])
+        ],
         "logistics": logistics,
         "lines": [
             {
@@ -225,13 +196,10 @@ def _asn_response(asn: AsnModel) -> dict:
 @preview_router.get("/expected-deliveries")
 async def list_expected_deliveries(
     supplier_id: str | None = Query(default=None),
-    user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ) -> list[dict]:
-    query = select(AsnModel).options(selectinload(AsnModel.lines), selectinload(AsnModel.supplier)).order_by(AsnModel.created_at.desc())
-    if "SUPPLIER" in {role.upper() for role in user.roles}:
-        query = query.where(AsnModel.supplier_id == await _authenticated_supplier_id(user, uow))
-    elif supplier_id:
+    query = select(AsnModel).options(selectinload(AsnModel.lines), selectinload(AsnModel.documents), selectinload(AsnModel.supplier)).order_by(AsnModel.created_at.desc())
+    if supplier_id:
         try:
             query = query.where(AsnModel.supplier_id == uuid.UUID(supplier_id))
         except ValueError:
@@ -268,21 +236,21 @@ DEFAULT_MATERIAL_COMPONENTS = [
 _custom_materials_store: list[dict] = []
 
 @preview_router.get("/materials")
-async def get_material_components(uow: UnitOfWork = Depends(get_uow)) -> list[dict]:
+async def get_material_components(status_filter: str = Query(default="ACTIVE", alias="status"), uow: UnitOfWork = Depends(get_uow)) -> list[dict]:
     materials: list[dict] = []
     try:
         from app.common.persistence.models import MaterialModel
         res = await uow.session.execute(select(MaterialModel))
         db_mats = res.scalars().all()
         materials.extend(
-            {"id": str(m.id), "code": m.material_code, "name": m.material_name, "category": m.category, "uom": m.base_uom, "status": m.status}
+            {"id": str(m.id), "code": m.material_code, "name": m.material_name, "category": m.category, "description": m.description, "uom": m.base_uom, "status": m.status, "created_at": m.created_at.isoformat() if m.created_at else None, "updated_at": m.updated_at.isoformat() if m.updated_at else None, "created_by": m.created_by, "updated_by": m.updated_by}
             for m in db_mats
             if m.material_code and m.material_name
         )
     except Exception:
         pass
 
-    return [material for material in materials if str(material.get("status") or "ACTIVE").upper() == "ACTIVE"]
+    return materials if status_filter.upper() == "ALL" else [material for material in materials if str(material.get("status") or "ACTIVE").upper() == status_filter.upper()]
 
 
 @preview_router.post("/materials")
@@ -294,74 +262,87 @@ async def add_material_component(
     if not mat_name:
         raise HTTPException(status_code=400, detail="Material name is required.")
 
-    uom = str(payload.get("uom") or "PCS").upper()
-    category = str(payload.get("category") or "General Components")
-    existing_result = await uow.session.execute(
-        select(MaterialModel).where(func.lower(MaterialModel.material_name) == mat_name.lower())
-    )
+    uom = str(payload.get("uom") or payload.get("base_uom") or "PCS").upper()
+    category = str(payload.get("category") or "General").strip()
+    material_code = str(payload.get("material_code") or payload.get("code") or "").strip().upper()
+    if not material_code:
+        code_prefix = re.sub(r"[^A-Z0-9]", "", mat_name.upper())[:6] or "MAT"
+        material_code = f"MAT-{code_prefix}-{uuid.uuid4().hex[:4].upper()}"
+    existing_result = await uow.session.execute(select(MaterialModel).where(or_(func.lower(MaterialModel.material_name) == mat_name.lower(), func.upper(MaterialModel.material_code) == material_code)))
     existing = existing_result.scalar_one_or_none()
     if existing:
-        return {"id": str(existing.id), "code": existing.material_code, "name": existing.material_name, "category": existing.category, "uom": existing.base_uom, "status": existing.status}
-
-    code_prefix = re.sub(r"[^A-Z0-9]+", "-", mat_name.upper()).strip("-")[:24] or "MATERIAL"
-    # Allocate the code inside the transaction so the server, not the browser,
-    # is authoritative and concurrent creates cannot reuse the same sequence.
-    await uow.session.execute(text("SELECT pg_advisory_xact_lock(73002)"))
-    code_pattern = f"MAT-{code_prefix}-%"
-    existing_codes = await uow.session.execute(
-        select(MaterialModel.material_code).where(MaterialModel.material_code.like(code_pattern))
-    )
-    next_sequence = 1
-    for existing_code in existing_codes.scalars().all():
-        match = re.fullmatch(rf"MAT-{re.escape(code_prefix)}-(\d+)", str(existing_code).upper())
-        if match:
-            next_sequence = max(next_sequence, int(match.group(1)) + 1)
-    generated_code = f"MAT-{code_prefix}-{next_sequence:03d}"
+        raise HTTPException(status_code=409, detail="Material code or material name already exists.")
     material = MaterialModel(
         id=uuid.uuid4(),
-        material_code=generated_code,
+        material_code=material_code,
         material_name=mat_name,
         category=category,
+        description=str(payload.get("description") or "").strip() or None,
         base_uom=uom,
-        status="Active",
+        status=str(payload.get("status") or "Active").title(),
     )
     uow.session.add(material)
     await uow.session.commit()
-    return {"id": str(material.id), "code": material.material_code, "name": material.material_name, "category": material.category, "uom": material.base_uom, "status": material.status}
+    return {"id": str(material.id), "code": material.material_code, "name": material.material_name, "category": material.category, "uom": material.base_uom, "status": material.status, "created_at": material.created_at.isoformat() if material.created_at else None, "updated_at": material.updated_at.isoformat() if material.updated_at else None}
 
 
-@preview_router.delete("/asns/{asn_id}")
-async def delete_supplier_asn(
-    asn_id: str,
-    user: CurrentUser = Depends(get_current_user),
-    uow: UnitOfWork = Depends(get_uow),
-) -> dict:
-    """Delete an ASN owned by the authenticated supplier before gate processing."""
+@preview_router.put("/materials/{material_id}")
+async def update_material_component(material_id: uuid.UUID, payload: dict = Body(...), uow: UnitOfWork = Depends(get_uow)) -> dict:
+    material = await uow.session.get(MaterialModel, material_id)
+    if material is None:
+        raise HTTPException(status_code=404, detail="Material not found")
+    if "material_name" in payload and not str(payload["material_name"]).strip():
+        raise HTTPException(status_code=422, detail="Material name is required")
+    if "category" in payload and not str(payload["category"]).strip():
+        raise HTTPException(status_code=422, detail="Category is required")
+    material.material_name = str(payload.get("material_name", material.material_name)).strip()
+    material.category = str(payload.get("category", material.category)).strip()
+    material.description = str(payload.get("description", material.description or "")).strip() or None
+    material.base_uom = str(payload.get("base_uom", payload.get("uom", material.base_uom))).upper()
+    material.updated_at = datetime.datetime.now()
+    await uow.session.commit()
+    return {"id": str(material.id), "code": material.material_code, "name": material.material_name, "category": material.category, "description": material.description, "uom": material.base_uom, "status": material.status, "updated_at": material.updated_at.isoformat()}
+
+
+@preview_router.patch("/materials/{material_id}/status")
+async def update_material_component_status(material_id: uuid.UUID, payload: dict = Body(...), uow: UnitOfWork = Depends(get_uow)) -> dict:
+    material = await uow.session.get(MaterialModel, material_id)
+    if material is None:
+        raise HTTPException(status_code=404, detail="Material not found")
+    next_status = str(payload.get("status") or "").title()
+    if next_status not in {"Active", "Inactive"}:
+        raise HTTPException(status_code=422, detail="Status must be Active or Inactive")
+    material.status = next_status
+    material.updated_at = datetime.datetime.now()
+    await uow.session.commit()
+    return {"id": str(material.id), "status": material.status, "updated_at": material.updated_at.isoformat()}
+
+
+@preview_router.delete("/materials/{material_id}")
+async def delete_material_component(material_id: uuid.UUID, uow: UnitOfWork = Depends(get_uow)) -> dict:
+    material = await uow.session.get(MaterialModel, material_id)
+    if material is None:
+        raise HTTPException(status_code=404, detail="Material not found")
+    reference = await uow.session.execute(select(AsnLineModel.id).where(AsnLineModel.material_id == material_id).limit(1))
+    if reference.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="Material is referenced by an ASN and cannot be deleted. Deactivate it instead.")
     try:
-        parsed_id = uuid.UUID(asn_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="ASN not found") from exc
-
-    asn = await uow.session.get(AsnModel, parsed_id)
-    if asn is None:
-        raise HTTPException(status_code=404, detail="ASN not found")
-
-    supplier_id = await _authenticated_supplier_id(user, uow)
-    if asn.supplier_id != supplier_id:
-        raise HTTPException(status_code=403, detail="You cannot delete this ASN")
-    if str(asn.status or "").upper() not in {"SUBMITTED", "DRAFT", "CANCELLED"}:
-        raise HTTPException(status_code=409, detail="ASN cannot be deleted after gate processing")
-
-    await uow.session.delete(asn)
-    await uow.commit()
-    return {"deleted": True, "id": asn_id}
+        await uow.session.delete(material)
+        await uow.session.commit()
+        return {"id": str(material_id), "deleted": True}
+    except IntegrityError:
+        await uow.session.rollback()
+        material = await uow.session.get(MaterialModel, material_id)
+        if material is None:
+            raise HTTPException(status_code=404, detail="Material not found")
+        material.status = "Inactive"
+        material.updated_at = datetime.datetime.now()
+        await uow.session.commit()
+        return {"id": str(material_id), "deleted": False, "status": "Inactive", "message": "Material is referenced by a transaction and was deactivated instead."}
 
 
 @preview_router.get("/asns/next-number")
-async def get_next_asn_number(
-    _user: CurrentUser = Depends(get_current_user),
-    uow: UnitOfWork = Depends(get_uow),
-) -> dict:
+async def get_next_asn_number(uow: UnitOfWork = Depends(get_uow)) -> dict:
     year = datetime.date.today().year
     prefix = f"ASN-{year}-"
     result = await uow.session.execute(
@@ -372,15 +353,11 @@ async def get_next_asn_number(
         match = re.fullmatch(r"ASN-(?:\d{4}-)?(\d+)", str(value).strip().upper())
         if match:
             highest = max(highest, int(match.group(1)))
-    return {"asnNumber": f"{prefix}{highest + 1}"}
+    return {"asnNumber": f"{prefix}{highest + 1:03d}"}
 
 
 @preview_router.get("/asn/{reference}")
-async def get_expected_delivery(
-    reference: str,
-    user: CurrentUser = Depends(get_current_user),
-    uow: UnitOfWork = Depends(get_uow),
-) -> dict:
+async def get_expected_delivery(reference: str, uow: UnitOfWork = Depends(get_uow)) -> dict:
     normalized_reference = reference.strip().upper()
     filters = [func.upper(AsnModel.asn_number) == normalized_reference]
     try:
@@ -388,7 +365,11 @@ async def get_expected_delivery(
     except ValueError:
         pass
     result = await uow.session.execute(
-        select(AsnModel).options(selectinload(AsnModel.lines)).where(or_(*filters))
+        select(AsnModel).options(
+            selectinload(AsnModel.lines),
+            selectinload(AsnModel.documents),
+            selectinload(AsnModel.supplier),
+        ).where(or_(*filters))
     )
     asn = result.scalars().first()
     if asn is None:
@@ -396,7 +377,11 @@ async def get_expected_delivery(
         if compact_match:
             year, sequence = compact_match.groups()
             all_asns = await uow.session.execute(
-                select(AsnModel).options(selectinload(AsnModel.lines)).where(
+                select(AsnModel).options(
+                    selectinload(AsnModel.lines),
+                    selectinload(AsnModel.documents),
+                    selectinload(AsnModel.supplier),
+                ).where(
                     func.upper(AsnModel.asn_number).like(f"ASN-{year}-%")
                 )
             )
@@ -412,10 +397,6 @@ async def get_expected_delivery(
             )
     if asn is None:
         raise HTTPException(status_code=404, detail=f"ASN '{reference}' not found")
-    if "SUPPLIER" in {role.upper() for role in user.roles}:
-        supplier_id = await _authenticated_supplier_id(user, uow)
-        if asn.supplier_id != supplier_id:
-            raise HTTPException(status_code=404, detail=f"ASN '{reference}' not found")
     response = _asn_response(asn)
     gate_result = await uow.session.execute(
         select(GateEntryModel)
@@ -436,11 +417,7 @@ async def get_expected_delivery(
 
 
 @preview_router.get("/asns/{reference}/pdf")
-async def download_supplier_asn_pdf(
-    reference: str,
-    user: CurrentUser = Depends(get_current_user),
-    uow: UnitOfWork = Depends(get_uow),
-) -> Response:
+async def download_supplier_asn_pdf(reference: str, uow: UnitOfWork = Depends(get_uow)) -> Response:
     """Render the official supplier ASN certificate from persisted data."""
     normalized = reference.strip().upper()
     filters = [func.upper(AsnModel.asn_number) == normalized]
@@ -456,10 +433,6 @@ async def download_supplier_asn_pdf(
     asn = result.scalars().first()
     if asn is None:
         raise HTTPException(status_code=404, detail=f"ASN '{reference}' not found")
-    if "SUPPLIER" in {role.upper() for role in user.roles}:
-        supplier_id = await _authenticated_supplier_id(user, uow)
-        if asn.supplier_id != supplier_id:
-            raise HTTPException(status_code=404, detail=f"ASN '{reference}' not found")
 
     details = next((item for item in (asn.logistics or []) if isinstance(item, dict) and item.get("type") == "asn_details"), {})
     supplier = details.get("supplier_name") or (asn.supplier.supplier_name if asn.supplier else "")
@@ -524,6 +497,51 @@ async def download_supplier_asn_pdf(
     return Response(content=buffer.getvalue(), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{asn.asn_number}.pdf"'})
 
 
+@preview_router.post("/asns/{reference}/cancel")
+async def cancel_supplier_asn(reference: str, uow: UnitOfWork = Depends(get_uow)) -> dict:
+    normalized = reference.strip().upper()
+    async with uow:
+        result = await uow.session.execute(
+            select(AsnModel)
+            .options(
+                selectinload(AsnModel.lines),
+                selectinload(AsnModel.documents),
+                selectinload(AsnModel.supplier),
+            )
+            .where(func.upper(AsnModel.asn_number) == normalized)
+        )
+        asn = result.scalars().first()
+        if asn is None:
+            raise HTTPException(status_code=404, detail="ASN not found")
+        current_status = str(asn.status or "").upper()
+        # Cancellation is idempotent so a repeated click/retry does not show
+        # a conflict after the first request already succeeded.
+        if current_status == "CANCELLED":
+            return _asn_response(asn)
+        if current_status in {"COMPLETED", "RECEIVED"}:
+            raise HTTPException(status_code=409, detail=f"ASN cannot be cancelled from status {asn.status}")
+        asn.status = "CANCELLED"
+        await uow.commit()
+        return _asn_response(asn)
+
+
+@preview_router.delete("/asns/{reference}")
+async def delete_supplier_asn(reference: str, uow: UnitOfWork = Depends(get_uow)) -> dict:
+    normalized = reference.strip().upper()
+    async with uow:
+        result = await uow.session.execute(
+            select(AsnModel).where(func.upper(AsnModel.asn_number) == normalized)
+        )
+        asn = result.scalars().first()
+        if asn is None:
+            raise HTTPException(status_code=404, detail="ASN not found")
+        if str(asn.status or "").upper() not in {"DRAFT", "SUBMITTED"}:
+            raise HTTPException(status_code=409, detail="Only draft or submitted ASNs can be deleted")
+        await uow.session.delete(asn)
+        await uow.commit()
+        return {"asn_number": normalized, "deleted": True}
+
+
 async def _authenticated_supplier_id(user: CurrentUser, uow: UnitOfWork) -> uuid.UUID:
     """Resolve supplier ownership from the authenticated account, never request data."""
     if "SUPPLIER" not in {role.upper() for role in user.roles}:
@@ -586,74 +604,31 @@ async def _authenticated_supplier_id(user: CurrentUser, uow: UnitOfWork) -> uuid
     return supplier_id
 
 
-class SupplierAsnCreateRequest(BaseModel):
-    """Compatible boundary model for supplier ASN creation.
-
-    Optional fields preserve older clients while preventing malformed top-level
-    JSON values from reaching the route's business logic. Supplier identity,
-    ASN number, status, and timestamps remain server-controlled.
-    """
-
-    model_config = {"extra": "ignore"}
-
-    asn_number: Optional[str] = None
-    supplier_name: Optional[str] = None
-    destination_warehouse: Optional[str] = None
-    destination_warehouse_id: Optional[str] = None
-    expected_arrival_at: Optional[str] = None
-    vehicle_number: Optional[str] = None
-    driver_name: Optional[str] = None
-    driver_contact: Optional[str] = None
-    shipment_date: Optional[str] = None
-    shipment_type: Optional[str] = None
-    transporter: Optional[str] = None
-    number_of_packages: Optional[Any] = None
-    package_type: Optional[str] = None
-    po_id: Optional[str] = None
-    po_number: Optional[str] = None
-    lines: Optional[list[dict[str, Any]]] = None
-
-
 @preview_router.post("/asns", status_code=status.HTTP_201_CREATED)
 async def create_supplier_asn(
-    payload: "SupplierAsnCreateRequest" = Body(...),
+    payload: dict = Body(...),
     user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ) -> dict:
-    payload = payload.model_dump()
     supplier_id = await _authenticated_supplier_id(user, uow)
-    supplier_record = (await uow.session.execute(
-        select(SupplierModel).where(SupplierModel.id == supplier_id)
-    )).scalar_one()
-    # Never trust the client-supplied supplier label. The persisted ASN uses
-    # the authenticated supplier's registered company name when available.
-    authenticated_supplier_name = (
-        supplier_record.registered_company_name
-        or supplier_record.supplier_name
-        or user.username
-    ).strip()
     # The server is authoritative for the document number.  The UI may reserve
     # one for display, but a missing number must never prevent a valid ASN from
     # being created and a caller must not be able to choose an arbitrary format.
-    # The browser may display a preview number, but the persisted ASN number
-    # is always generated from the server-side record set.
-    year = datetime.date.today().year
-    prefix = f"ASN-{year}-"
-    # Serialize number allocation across concurrent submissions. The lock is
-    # transaction-scoped, so it is released automatically after this ASN is
-    # committed or rolled back.
-    await uow.session.execute(text("SELECT pg_advisory_xact_lock(73001)"))
-    numbers = await uow.session.execute(
-        select(AsnModel.asn_number).where(AsnModel.asn_number.like(f"{prefix}%"))
-    )
-    highest = 0
-    for value in numbers.scalars().all():
-        match = re.fullmatch(rf"ASN-{year}-(\d+)", str(value).strip().upper())
-        if match:
-            highest = max(highest, int(match.group(1)))
-    asn_number = f"{prefix}{highest + 1}"
-    if re.fullmatch(r"ASN-\d{4}-\d+", asn_number) is None:
-        raise HTTPException(status_code=422, detail="asn_number must use format ASN-YYYY-N, for example ASN-2026-1")
+    asn_number = str(payload.get("asn_number") or "").strip().upper()
+    if not asn_number:
+        year = datetime.date.today().year
+        prefix = f"ASN-{year}-"
+        numbers = await uow.session.execute(
+            select(AsnModel.asn_number).where(AsnModel.asn_number.like(f"{prefix}%"))
+        )
+        highest = 0
+        for value in numbers.scalars().all():
+            match = re.fullmatch(rf"ASN-{year}-(\d+)", str(value).strip().upper())
+            if match:
+                highest = max(highest, int(match.group(1)))
+        asn_number = f"{prefix}{highest + 1:03d}"
+    if re.fullmatch(r"ASN-\d{4}-\d{3}", asn_number) is None:
+        raise HTTPException(status_code=422, detail="asn_number must use format ASN-YYYY-NNN, for example ASN-2026-001")
     existing = await uow.session.execute(select(AsnModel).where(AsnModel.asn_number == asn_number))
     if existing.scalars().first() is not None:
         raise HTTPException(status_code=409, detail=f"ASN '{asn_number}' already exists")
@@ -679,31 +654,20 @@ async def create_supplier_asn(
         if po_model and not po_number:
             po_number = po_model.po_number
 
-    vehicle_number = re.sub(r"[\s-]+", "", str(payload.get("vehicle_number") or "").strip().upper())
-    driver_name = re.sub(r"\s+", " ", str(payload.get("driver_name") or "").strip())
-    driver_contact = re.sub(r"[\s()-]+", "", str(payload.get("driver_contact") or "").strip())
-    supplier_name = authenticated_supplier_name
-    if not vehicle_number:
-        raise HTTPException(status_code=422, detail="Vehicle number is required.")
-    if not driver_name:
-        raise HTTPException(status_code=422, detail="Driver name is required.")
-    if not driver_contact:
-        raise HTTPException(status_code=422, detail="Driver contact number is required.")
-    if (
-        len(driver_name) < 2
-        or len(driver_name) > 100
-        or re.fullmatch(r"[A-Za-z][A-Za-z' ]*[A-Za-z]", driver_name) is None
-        or len(re.findall(r"[A-Za-z]", driver_name)) < 2
-    ):
-        raise HTTPException(status_code=422, detail="Enter a valid driver name.")
-    if re.fullmatch(r"[6-9]\d{9}", driver_contact) is None:
-        raise HTTPException(status_code=422, detail="Enter a valid 10-digit mobile number.")
-    if re.fullmatch(r"([6-9])\1{9}", driver_contact):
-        raise HTTPException(status_code=422, detail="Enter a valid driver mobile number.")
-    if (
-        re.fullmatch(r"(?:[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{1,4}|BH\d{2}[A-Z]{2}\d{4})", vehicle_number) is None
-    ):
-        raise HTTPException(status_code=422, detail="Enter a valid vehicle number, e.g. KA03AB1234.")
+    vehicle_number = str(payload.get("vehicle_number") or "").strip().upper()
+    driver_name = str(payload.get("driver_name") or "").strip()
+    driver_contact = str(payload.get("driver_contact") or "").strip()
+    supplier_name = str(payload.get("supplier_name") or "").strip()
+    if not vehicle_number or not driver_name or not driver_contact:
+        raise HTTPException(status_code=422, detail="vehicle_number, driver_name and driver_contact are required")
+    if re.fullmatch(r"[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}", re.sub(r"\s+", "", vehicle_number)) is None:
+        raise HTTPException(status_code=422, detail="vehicle_number must use a valid format, for example KA42EH6948")
+    if re.fullmatch(r"[A-Za-z .'-]{2,80}", driver_name) is None:
+        raise HTTPException(status_code=422, detail="driver_name contains invalid characters")
+    if re.fullmatch(r"[6-9]\d{9}", re.sub(r"[\s-]", "", driver_contact)) is None:
+        raise HTTPException(status_code=422, detail="driver_contact must be a valid 10-digit mobile number")
+    if not supplier_name:
+        raise HTTPException(status_code=422, detail="supplier_name is required")
 
     submitted_lines = payload.get("lines") or []
     if not isinstance(submitted_lines, list):
@@ -724,45 +688,20 @@ async def create_supplier_asn(
             raise HTTPException(status_code=422, detail="shipped_quantity must be a finite number")
         if validated_quantity <= 0:
             raise HTTPException(status_code=422, detail="shipped_quantity must be greater than zero")
-        if abs(validated_quantity.as_tuple().exponent) > 4:
-            raise HTTPException(status_code=422, detail="shipped_quantity supports at most 4 decimal places")
         if not str(raw_line.get("item_code") or raw_line.get("material_code") or "").strip():
             raise HTTPException(status_code=422, detail="item_code is required for every material line")
         if not str(raw_line.get("material_name") or raw_line.get("material_description") or "").strip():
             raise HTTPException(status_code=422, detail="material_name is required for every material line")
         material_id = str(raw_line.get("material_id") or "").strip()
-        if not material_id:
-            raise HTTPException(status_code=422, detail="Material is required for every material line")
-        if material_id in submitted_material_ids:
-            raise HTTPException(status_code=422, detail="A material cannot be selected more than once in the same ASN")
-        try:
-            uuid.UUID(material_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail="material_id must be a valid material identifier") from exc
-        submitted_material_ids.add(material_id)
+        if material_id:
+            if material_id in submitted_material_ids:
+                raise HTTPException(status_code=422, detail="A material cannot be selected more than once in the same ASN")
+            try:
+                uuid.UUID(material_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail="material_id must be a valid material identifier") from exc
+            submitted_material_ids.add(material_id)
         validated_lines.append((raw_line, validated_quantity))
-
-    active_materials = (
-        await uow.session.execute(
-            select(MaterialModel).where(
-                MaterialModel.id.in_([uuid.UUID(material_id) for material_id in submitted_material_ids]),
-                func.upper(MaterialModel.status) == "ACTIVE",
-            )
-        )
-    ).scalars().all()
-    active_material_ids = {str(material.id) for material in active_materials}
-    if active_material_ids != submitted_material_ids:
-        raise HTTPException(status_code=422, detail="Only active materials from the database can be selected")
-    active_material_by_id = {str(material.id): material for material in active_materials}
-    discrete_uoms = {"PCS", "EA", "UNIT", "PIECE", "NOS", "SET", "BOX", "PACK"}
-    for raw_line, quantity in validated_lines:
-        material = active_material_by_id[str(raw_line["material_id"]).strip()]
-        material_uom = str(material.base_uom or "PCS").strip().upper()
-        requested_uom = str(raw_line.get("uom") or "").strip().upper()
-        if requested_uom != material_uom:
-            raise HTTPException(status_code=422, detail=f"UOM must match the selected material ({material_uom})")
-        if material_uom in discrete_uoms and quantity != quantity.to_integral_value():
-            raise HTTPException(status_code=422, detail=f"{material_uom} quantities must be whole numbers")
 
     if po_model and validated_lines:
         ordered_by_code: dict[str, Decimal] = {}
@@ -827,8 +766,6 @@ async def create_supplier_asn(
             # ISO timestamps before binding them through asyncpg.
             if expected_arrival_at.tzinfo is not None:
                 expected_arrival_at = expected_arrival_at.astimezone(datetime.timezone.utc).replace(tzinfo=None)
-            if expected_arrival_at.date() < datetime.date.today():
-                raise HTTPException(status_code=422, detail="Expected arrival date cannot be in the past.")
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="expected_arrival_at must be an ISO datetime") from exc
 
@@ -837,7 +774,7 @@ async def create_supplier_asn(
         supplier_id=supplier_id,
         po_id=str(payload.get("po_id")) if payload.get("po_id") else None,
         po_number=po_model.po_number if po_model else (po_number or None),
-        status="SUBMITTED",
+        status=str(payload.get("status") or "SUBMITTED").upper(),
         vehicle_number=vehicle_number,
         driver_name=driver_name,
         driver_contact=driver_contact,
@@ -902,7 +839,21 @@ async def create_supplier_asn(
                 "lines": [{"material": line.item_code, "quantity": float(line.shipped_quantity), "uom": line.uom} for line in asn.lines],
             }),
         ))
-    return _asn_response(asn)
+    # Reload relationships before serializing.  The create request runs in an
+    # async SQLAlchemy session, so accessing an unloaded relationship from
+    # _asn_response would otherwise trigger a lazy load outside the greenlet
+    # and return a 500 after the ASN has already been flushed.
+    persisted_result = await uow.session.execute(
+        select(AsnModel)
+        .options(
+            selectinload(AsnModel.lines),
+            selectinload(AsnModel.documents),
+            selectinload(AsnModel.supplier),
+        )
+        .where(AsnModel.id == asn.id)
+    )
+    persisted_asn = persisted_result.scalars().first()
+    return _asn_response(persisted_asn or asn)
 
 
 
@@ -926,6 +877,7 @@ def _quantity_result(ordered: float, received: float) -> tuple[str, float]:
 
 # Shared persistence components
 _gate_repo = InMemoryGateEntryRepository()
+_po_ocr_engine = EnterprisePoOcrEngine()
 
 
 def _to_iso_date(value: object) -> Optional[str]:
@@ -1598,6 +1550,7 @@ async def create_gate_entry(
     document_image_base64 snapshot, and generates sequential gate_entry_number (GE-YYYYMMDD-<HEX>).
     """
     request = await _read_gate_entry_request(http_request)
+    from app.modules.gate.infrastructure.services.ocr_service import normalize_vehicle_registration
     asn = None
     if request.asn_reference:
         reference = request.asn_reference.strip()
@@ -1613,7 +1566,10 @@ async def create_gate_entry(
         if asn is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"ASN '{reference}' not found")
 
-    plate = ((asn.vehicle_number if asn else request.vehicle_plate) or "").strip().upper()
+    try:
+        plate = normalize_vehicle_registration((asn.vehicle_number if asn else request.vehicle_plate) or "")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     po_num = ((asn.po_number if asn else request.po_number) or (asn.asn_number if asn else "")).strip().upper()
 
     if not plate:
@@ -1649,9 +1605,11 @@ async def create_gate_entry(
     active_entries = [_gate_entry_from_model(model) for model in active_result.scalars().all()]
     GateVerificationService.check_duplicate_active_entry(active_entries, po_num, plate)
 
-    # 2. Document Details & PO Verification
+    # 2. Dynamic OCR processing or extraction
     ocr_res: Optional[OcrResult] = None
 
+    # The scan preview or form input has already populated the submitted fields.
+    # Master PO data is authoritative whenever it is available.
     if asn:
         ocr_res = OcrResult(
             po_number=po_num,
@@ -1684,8 +1642,8 @@ async def create_gate_entry(
             confidence=1.0,
         )
 
-    computed_status = GateEntryStatus.PO_VERIFIED if po_record else GateEntryStatus.PO_VERIFIED
-    mismatches = []
+    # 3. Cross-verify 6 fields
+    computed_status, mismatches = EnterprisePoOcrEngine.cross_verify_against_db(ocr_res, po_record)
 
     # 4. Generate sequential Gate Entry Pass Number
     gate_entry_num = _generate_gate_entry_number()
