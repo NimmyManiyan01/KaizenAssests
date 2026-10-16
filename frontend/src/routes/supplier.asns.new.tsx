@@ -24,8 +24,6 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,7 +43,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { api } from "@/lib/api-client";
 import { getUserInfo } from "@/lib/auth-utils";
-import type { DateRange } from "react-day-picker";
 
 export const Route = createFileRoute("/supplier/asns/new")({
   beforeLoad: () => {},
