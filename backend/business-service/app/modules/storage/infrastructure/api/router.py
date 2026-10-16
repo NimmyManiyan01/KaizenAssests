@@ -103,7 +103,7 @@ async def _sync_finished_goods_putaway_status(uow: UnitOfWork, finished_goods_id
                 id=uuid.uuid4(), user_role="ASSEMBLY_MANAGER",
                 title="Assembly Order Putaway Completed",
                 message=f"Finished goods for {order.order_number} ({order.product_name}) are fully put away in the Finished Goods Store.",
-                link=f"/assembly-orders?order={order.id}", is_read=False, created_at=completed_at,
+                link="/assembly/production", is_read=False, created_at=completed_at,
             ))
     return order
 
@@ -2688,8 +2688,18 @@ async def resolve_bin_qr(
     target_zone: StoreZoneModel | None = None
     target_store: StoreModel | None = None
 
+    # The printed Warehouse label contains qr_identifier, not just bin_code.
+    # Resolve the persisted identifier first so repeated bin codes across stores
+    # cannot select an unrelated destination.
+    qr_result = await uow.session.execute(
+        select(StoreBinModel).where(
+            func.upper(StoreBinModel.qr_identifier) == raw_scan.upper()
+        )
+    )
+    bin_obj = qr_result.scalar_one_or_none()
+
     # Step 1: Check JSON
-    if (raw_scan.startswith("{") and raw_scan.endswith("}")) or (raw_scan.startswith('"{') and raw_scan.endswith('}"')):
+    if bin_obj is None and ((raw_scan.startswith("{") and raw_scan.endswith("}")) or (raw_scan.startswith('"{') and raw_scan.endswith('}"'))):
         try:
             unquoted = raw_scan[1:-1] if raw_scan.startswith('"{') else raw_scan
             payload = json.loads(unquoted)

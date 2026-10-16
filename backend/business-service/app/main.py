@@ -55,6 +55,11 @@ async def lifespan(app: FastAPI):
         from app.database.base import Base
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            if settings.environment.lower() in ("local", "test", "development"):
+                from app.database.schema_compatibility import ensure_local_qc_audit_columns
+                added = await conn.run_sync(ensure_local_qc_audit_columns)
+                if added:
+                    logger.info("Added local SQLite QC audit columns: %s", ", ".join(added))
     except Exception as exc:
         logger.debug(f"Schema create_all note: {exc}")
 

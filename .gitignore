@@ -68,3 +68,6 @@ uploads/
 **/.env
 scratch/
 **/scratch/
+
+# Local database safety backups
+/backend/business-service/backups/

@@ -29,6 +29,7 @@ from app.database.session import UnitOfWork, get_uow
 from app.modules.gate.adapters.mock_adapters import InMemoryGateEntryRepository
 from app.modules.gate.infrastructure.persistence.models import DamagePhotoModel, DamageReportModel, DockAssignmentModel, DockModel, GateEntryAuditLogModel, GateEntryModel, GateExitModel, ReceivingLineModel, SupplierDamageClaimModel, VehicleExitApprovalModel, FinishedGoodsPickupGateVisitModel
 from app.modules.assembly.infrastructure.persistence.models import AssemblyFinishedGoodsAllocationModel, AssemblyFinishedGoodsModel
+from app.modules.assembly.infrastructure.finished_goods import post_dispatch_stock
 from app.common.persistence.models import AsnLineModel, PurchaseOrderModel, AsnModel, MaterialModel, MaterialStockModel, NotificationModel, SupplierContactModel, SupplierModel, SupplierUserModel, FinishedGoodsRequestModel
 from app.modules.receiving.infrastructure.persistence.models import GrnDamageEvidenceModel, GrnLineModel, GrnModel, InventoryReceiptPostingModel
 from app.modules.receiving.domain.events import GrnPostedEvent, PostedInventoryLine
@@ -128,14 +129,16 @@ async def complete_finished_goods_pickup_gate_exit(
         if visit.vehicle_number.upper() != payload.vehicle_number.upper().strip() or visit.driver_name.strip().lower() != payload.driver_name.strip().lower(): raise HTTPException(422, "Vehicle or driver does not match the original pickup gate entry")
         if not payload.documents_verified: raise HTTPException(422, "Required packing and dispatch documents must be verified")
         request = (await uow.session.execute(select(FinishedGoodsRequestModel).where(FinishedGoodsRequestModel.id == visit.request_id))).scalar_one_or_none()
-        allocations = (await uow.session.execute(select(AssemblyFinishedGoodsAllocationModel).where(AssemblyFinishedGoodsAllocationModel.finished_goods_request_id == visit.request_id, AssemblyFinishedGoodsAllocationModel.status == "ALLOCATED"))).scalars().all()
+        allocations = (await uow.session.execute(select(AssemblyFinishedGoodsAllocationModel).where(AssemblyFinishedGoodsAllocationModel.finished_goods_request_id == visit.request_id, AssemblyFinishedGoodsAllocationModel.status.in_(["ALLOCATED", "LOADED"])))).scalars().all()
         if not request or request.status != "ALLOCATED": raise HTTPException(409, "Dispatch request is not ready for gate exit")
         if not allocations: raise HTTPException(409, "No allocated finished goods found")
-        for allocation in allocations:
-            fg = (await uow.session.execute(select(AssemblyFinishedGoodsModel).where(AssemblyFinishedGoodsModel.id == allocation.finished_goods_id).with_for_update())).scalar_one_or_none()
-            if not fg or fg.quantity < allocation.quantity: raise HTTPException(409, "Finished-goods stock changed; exit cannot be posted")
-            fg.quantity -= allocation.quantity
-            allocation.status = "DISPATCHED"
+        from app.modules.dispatch.infrastructure.persistence.models import DispatchModel
+        dispatch = (await uow.session.execute(select(DispatchModel).where(DispatchModel.order_number == request.request_number).with_for_update())).scalar_one_or_none()
+        if dispatch and dispatch.status not in ("READY_FOR_GATE_EXIT", "DISPATCHED", "GATE_OUT"):
+            raise HTTPException(409, "Complete picking, packing and loading before Gate Exit")
+        await post_dispatch_stock(uow.session, request_id=visit.request_id)
+        if dispatch:
+            dispatch.status = "DISPATCHED"
         now = datetime.datetime.now(datetime.timezone.utc)
         visit.status = "CLOSED"; visit.exited_at = now; visit.exit_approved_by = user.username; visit.documents_verified = True
         request.status = "DISPATCHED"

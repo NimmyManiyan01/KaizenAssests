@@ -10,9 +10,21 @@ export function parsePositiveNumber(value: unknown): number | null {
 }
 
 export function isValidDateInput(value: string): boolean {
-  if (!value.trim()) return false;
-  const parsed = new Date(`${value}T00:00:00`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  // Date inputs are calendar dates, so validate without a local-to-UTC shift.
+  const parsed = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+export function localDateInput(date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+export function completionDateError(value: string, today = localDateInput()): string | null {
+  if (!value) return "Required completion date is required.";
+  if (!isValidDateInput(value)) return "Enter a valid completion date.";
+  if (value < today) return "Required completion date must be today or later.";
+  return null;
 }
 
 export function requiredText(value: unknown): string | null {
@@ -49,6 +61,20 @@ export function isValidIdentifier(value: string, pattern = /^[A-Za-z0-9/_-]+$/):
   return pattern.test(value.trim());
 }
 
-export function isValidUpload(file: File, allowedTypes: readonly string[], maxBytes = 5 * 1024 * 1024): boolean {
+export function isValidUpload(
+  file: File,
+  allowedTypes: readonly string[],
+  maxBytes = 5 * 1024 * 1024,
+): boolean {
   return allowedTypes.includes(file.type) && file.size > 0 && file.size <= maxBytes;
+}
+
+export function isValidInspectorName(value: string): boolean {
+  const name = value.trim();
+  return (
+    name.length >= 2 &&
+    name.length <= 128 &&
+    /^[\p{L}\p{M} .'-]+$/u.test(name) &&
+    (name.match(/\p{L}/gu)?.length ?? 0) >= 2
+  );
 }

@@ -358,7 +358,7 @@ function AssemblyRequestsPage() {
       <div className="space-y-6">
         {/* Filters */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div className="relative w-72">
+          <div className="relative w-full md:w-72">
             <Search className="size-3.5 absolute left-3 top-2.5 text-muted-foreground" />
             <Input
               placeholder="Search request number or material..."
@@ -368,7 +368,7 @@ function AssemblyRequestsPage() {
             />
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-40 h-9 text-xs rounded-xl border-border/40">
                 <SelectValue placeholder="Status" />
@@ -664,7 +664,7 @@ function AssemblyRequestsPage() {
                 <Label className="text-xs font-bold uppercase text-muted-foreground">
                   Requested Items
                 </Label>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Button
                     type="button"
                     variant="outline"

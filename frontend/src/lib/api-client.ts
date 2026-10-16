@@ -3257,6 +3257,8 @@ export const api = {
   },
   async performAssemblyQualityInspection(payload: {
     order_id: string;
+    inspector_name: string;
+    authorized_person_confirmed: boolean;
     passed_quantity: number;
     failed_quantity?: number;
     rework_quantity?: number;
@@ -3270,9 +3272,11 @@ export const api = {
   },
   async getAssemblyFinishedGoods(params?: {
     search?: string;
+    group_by?: "product";
   }): Promise<AssemblyFinishedGoodItem[]> {
     const q = new URLSearchParams();
     if (params?.search) q.append("search", params.search);
+    if (params?.group_by) q.append("group_by", params.group_by);
     const queryStr = q.toString() ? `?${q.toString()}` : "";
     return request<AssemblyFinishedGoodItem[]>(
       `${BUSINESS_API_URL}/api/v1/assembly/finished-goods${queryStr}`,
@@ -3538,11 +3542,20 @@ export interface AssemblyQualityInspectionItem {
 }
 
 export interface AssemblyFinishedGoodItem {
+  batches?: AssemblyFinishedGoodItem[];
   id: string;
   order_id: string;
   order_number: string;
   product_code: string;
   product_name: string;
+  produced_quantity?: number;
+  available_quantity?: number;
+  reserved_quantity?: number;
+  dispatched_quantity?: number;
+  manufacturing_date?: string | null;
+  qc_status?: string;
+  inspected_by?: string | null;
+  inspected_at?: string | null;
   quantity: number;
   uom: string;
   status: string;
