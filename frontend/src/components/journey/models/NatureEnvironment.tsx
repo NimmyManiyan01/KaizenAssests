@@ -106,12 +106,19 @@ function WindGrass() {
     const indices: number[] = [];
     for (const angle of [0, Math.PI / 2]) {
       const base = positions.length / 3;
-      const c = Math.cos(angle), s = Math.sin(angle);
+      const c = Math.cos(angle),
+        s = Math.sin(angle);
       const add = (x: number, y: number, z: number) => {
         positions.push(x * c - z * s, y, x * s + z * c);
       };
-      add(-0.18, 0, 0); add(0.18, 0, 0); add(0.1, 0.52, 0); add(-0.1, 0.52, 0);
-      add(-0.13, 0.52, 0); add(0.13, 0.52, 0); add(0.035, 1, 0); add(-0.035, 1, 0);
+      add(-0.18, 0, 0);
+      add(0.18, 0, 0);
+      add(0.1, 0.52, 0);
+      add(-0.1, 0.52, 0);
+      add(-0.13, 0.52, 0);
+      add(0.13, 0.52, 0);
+      add(0.035, 1, 0);
+      add(-0.035, 1, 0);
       indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
       indices.push(base + 4, base + 5, base + 6, base + 4, base + 6, base + 7);
     }
@@ -168,7 +175,6 @@ function WindGrass() {
     </instancedMesh>
   );
 }
-
 
 export function NatureEnvironment() {
   const terrain = useMemo(() => {

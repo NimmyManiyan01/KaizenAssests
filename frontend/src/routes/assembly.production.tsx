@@ -2,10 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
 import { requireRole } from "@/lib/auth-utils";
-import {
-  api,
-  type AssemblyProductionOrder,
-} from "@/lib/api-client";
+import { api, type AssemblyProductionOrder } from "@/lib/api-client";
 import {
   AlertTriangle,
   ArrowRight,
@@ -41,6 +38,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { parsePositiveNumber } from "@/lib/input-validation";
 
 export const Route = createFileRoute("/assembly/production")({
   beforeLoad: () => requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER"]),
@@ -162,15 +160,20 @@ function AssemblyProductionPage() {
 
   const handleCompleteSubmit = async () => {
     if (!completeOrder) return;
-    if (producedQuantity <= 0) {
+    const validProducedQuantity = parsePositiveNumber(producedQuantity);
+    if (validProducedQuantity === null) {
       toast.error("Produced quantity must be greater than 0");
+      return;
+    }
+    if (validProducedQuantity > completeOrder.target_quantity) {
+      toast.error("Produced quantity cannot exceed the target quantity");
       return;
     }
 
     try {
       setCompleting(true);
       const res = await api.completeAssemblyProduction(completeOrder.id, {
-        produced_quantity: Number(producedQuantity),
+        produced_quantity: validProducedQuantity,
       });
       toast.success(res.message || `Production completed for ${completeOrder.order_number}`);
       setCompleteOrder(null);
@@ -187,7 +190,9 @@ function AssemblyProductionPage() {
   const readyToStart = orders.filter((o) => o.can_start).length;
   const inProduction = orders.filter((o) => o.can_complete).length;
   const qcPending = orders.filter((o) => o.status === "QC_PENDING").length;
-  const completedCount = orders.filter((o) => o.status === "COMPLETED" || o.status === "CLOSED").length;
+  const completedCount = orders.filter(
+    (o) => o.status === "COMPLETED" || o.status === "CLOSED",
+  ).length;
 
   // Local text search
   const filteredOrders = useMemo(() => {
@@ -198,7 +203,7 @@ function AssemblyProductionPage() {
         o.order_number?.toLowerCase().includes(q) ||
         o.product_name?.toLowerCase().includes(q) ||
         o.product_code?.toLowerCase().includes(q) ||
-        o.material_request_number?.toLowerCase().includes(q)
+        o.material_request_number?.toLowerCase().includes(q),
     );
   }, [orders, search]);
 
@@ -408,10 +413,14 @@ function AssemblyProductionPage() {
                   <div
                     className={cn(
                       "grid size-9 shrink-0 place-items-center rounded-lg border",
-                      sc.tone === "blue" && "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",
-                      sc.tone === "amber" && "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20",
-                      sc.tone === "cyan" && "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border-cyan-500/20",
-                      sc.tone === "purple" && "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/20"
+                      sc.tone === "blue" &&
+                        "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",
+                      sc.tone === "amber" &&
+                        "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20",
+                      sc.tone === "cyan" &&
+                        "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border-cyan-500/20",
+                      sc.tone === "purple" &&
+                        "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/20",
                     )}
                   >
                     <Icon className="size-4" />
@@ -440,7 +449,8 @@ function AssemblyProductionPage() {
                   Active Line Execution Center
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  Control bench operations, execute manufacturing steps, and record finished batch outputs
+                  Control bench operations, execute manufacturing steps, and record finished batch
+                  outputs
                 </p>
               </div>
               <div className="text-xs text-muted-foreground self-start sm:self-auto font-medium">
@@ -466,7 +476,7 @@ function AssemblyProductionPage() {
                       "px-2.5 py-1 text-xs font-semibold rounded-lg transition-all",
                       statusFilter === tab.key
                         ? "bg-card text-foreground shadow-xs border border-border/50"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted",
                     )}
                   >
                     {tab.label}
@@ -500,7 +510,9 @@ function AssemblyProductionPage() {
           {loading ? (
             <div className="py-16 text-center space-y-3">
               <RefreshCw className="size-6 animate-spin text-primary mx-auto opacity-70" />
-              <p className="text-xs text-muted-foreground">Loading production runs from database...</p>
+              <p className="text-xs text-muted-foreground">
+                Loading production runs from database...
+              </p>
             </div>
           ) : filteredOrders.length === 0 ? (
             <div className="py-14 text-center">
@@ -560,7 +572,10 @@ function AssemblyProductionPage() {
                   {filteredOrders.map((order) => {
                     const percent =
                       order.target_quantity > 0
-                        ? Math.min(100, Math.round((order.produced_quantity / order.target_quantity) * 100))
+                        ? Math.min(
+                            100,
+                            Math.round((order.produced_quantity / order.target_quantity) * 100),
+                          )
                         : 0;
                     const isDone = percent >= 100 || order.status === "COMPLETED";
 
@@ -587,7 +602,9 @@ function AssemblyProductionPage() {
 
                         {/* Product Details */}
                         <td className="py-3.5 px-3">
-                          <div className="font-semibold text-foreground text-xs">{order.product_name}</div>
+                          <div className="font-semibold text-foreground text-xs">
+                            {order.product_name}
+                          </div>
                           <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
                             {order.product_code}
                           </div>
@@ -616,8 +633,8 @@ function AssemblyProductionPage() {
                                   isDone
                                     ? "text-emerald-600 dark:text-emerald-400"
                                     : percent > 0
-                                    ? "text-amber-600 dark:text-amber-400"
-                                    : "text-muted-foreground"
+                                      ? "text-amber-600 dark:text-amber-400"
+                                      : "text-muted-foreground",
                                 )}
                               >
                                 {percent}%
@@ -630,8 +647,8 @@ function AssemblyProductionPage() {
                                   isDone
                                     ? "bg-emerald-500"
                                     : percent > 0
-                                    ? "bg-amber-500"
-                                    : "bg-muted-foreground/30"
+                                      ? "bg-amber-500"
+                                      : "bg-muted-foreground/30",
                                 )}
                                 style={{ width: `${percent}%` }}
                               />
@@ -640,7 +657,9 @@ function AssemblyProductionPage() {
                         </td>
 
                         {/* Status */}
-                        <td className="py-3.5 px-3 whitespace-nowrap">{getStatusBadge(order.status)}</td>
+                        <td className="py-3.5 px-3 whitespace-nowrap">
+                          {getStatusBadge(order.status)}
+                        </td>
 
                         {/* Line & Operator */}
                         <td className="py-3.5 px-3 whitespace-nowrap">
@@ -753,7 +772,9 @@ function AssemblyProductionPage() {
                 <div className="rounded-xl bg-muted/40 p-3.5 text-xs space-y-2 border border-border/60">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Product:</span>
-                    <span className="font-semibold text-foreground">{completeOrder.product_name}</span>
+                    <span className="font-semibold text-foreground">
+                      {completeOrder.product_name}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Target Quantity:</span>
@@ -776,10 +797,10 @@ function AssemblyProductionPage() {
                     className="h-9 text-sm font-mono font-bold rounded-xl"
                   />
                   <p className="text-[11px] text-muted-foreground">
-                    Pre-filled with target quantity. Adjust if any units were rejected or scrapped during bench work.
+                    Pre-filled with target quantity. Adjust if any units were rejected or scrapped
+                    during bench work.
                   </p>
                 </div>
-
               </div>
             )}
 

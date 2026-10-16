@@ -10,18 +10,16 @@ Supports:
 from __future__ import annotations
 
 import logging
-import asyncio
 import uuid
 from datetime import datetime
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import desc, func, or_, select, update
 
 from app.common.persistence.models import NotificationModel
 from app.database.session import UnitOfWork, get_uow
-from app.database.session import AsyncSessionFactory
 from app.modules.notification.application.use_cases import RecordIncomingEventUseCase
 from app.modules.notification.infrastructure.persistence.repository_impl import (
     SqlAlchemyNotificationLogRepository,
@@ -119,29 +117,6 @@ async def get_notifications(
     except Exception as exc:
         logger.exception("Failed to retrieve notifications: %s", exc)
         return []
-
-
-@router.websocket("/api/v1/notifications/ws")
-async def notifications_websocket(websocket: WebSocket, role: Optional[str] = Query(None), store_code: Optional[str] = Query(None)):
-    """Push newly persisted notifications to active users."""
-    await websocket.accept()
-    last_seen = None
-    try:
-        while True:
-            async with AsyncSessionFactory() as session:
-                stmt = select(NotificationModel)
-                cond = _build_role_condition(role, store_code)
-                if cond is not None: stmt = stmt.where(cond)
-                stmt = stmt.order_by(desc(NotificationModel.created_at)).limit(100)
-                rows = (await session.execute(stmt)).scalars().all()
-                current_ids = [str(row.id) for row in rows]
-                if last_seen is not None:
-                    fresh = [serialize_notification(row) for row in rows if str(row.id) not in last_seen]
-                    for notification in reversed(fresh): await websocket.send_json(notification)
-                last_seen = set(current_ids)
-            await asyncio.sleep(2)
-    except (WebSocketDisconnect, RuntimeError):
-        return
 
 
 class CreateNotificationPayload(BaseModel):

@@ -1,30 +1,32 @@
 import * as React from "react";
 import { createFileRoute, redirect, useNavigate, useSearch } from "@tanstack/react-router";
-import { Warehouse, Loader2, Eye, EyeOff, ShieldCheck, Clock, AlertTriangle } from "lucide-react";
+import {
+  ArrowRight,
+  Box,
+  Eye,
+  EyeOff,
+  Loader2,
+  LockKeyhole,
+  ShieldCheck,
+  Truck,
+  UserRound,
+  BarChart3,
+  Warehouse,
+} from "lucide-react";
 import { toast } from "sonner";
-
 import { api } from "@/lib/api-client";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
-
 import {
   getDefaultRouteForUser,
   getSafeRedirectPath,
   getUserInfo,
   isAuthenticated,
 } from "@/lib/auth-utils";
+import hero from "@/assets/login-warehouse.png";
 
 export const Route = createFileRoute("/login")({
   beforeLoad: () => {
-    // Skip server-side redirects for localStorage-based auth
-    if (typeof window === "undefined") return;
-
-    if (isAuthenticated()) {
-      const user = getUserInfo();
-      throw redirect({ to: getDefaultRouteForUser(user) as any });
-    }
+    if (typeof window !== "undefined" && isAuthenticated())
+      throw redirect({ to: getDefaultRouteForUser(getUserInfo()) as any });
   },
   component: LoginPage,
 });
@@ -34,7 +36,6 @@ function LoginPage() {
   const search = useSearch({ strict: false }) as any;
   const redirectPath = getSafeRedirectPath(search.redirect || search.next);
   const magicToken = search.token;
-
   const [employeeId, setEmployeeId] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [showPassword, setShowPassword] = React.useState(false);
@@ -42,256 +43,236 @@ function LoginPage() {
   const [rememberMe, setRememberMe] = React.useState(false);
   const [linkError, setLinkError] = React.useState<string | null>(null);
   const [verifyingMagicLink, setVerifyingMagicLink] = React.useState(false);
-
-  // Handle auto-login via magic token with 24h expiration check
   React.useEffect(() => {
-    if (magicToken && !isLoading && !verifyingMagicLink) {
-      const performAutoLogin = async () => {
-        setIsLoading(true);
-        setVerifyingMagicLink(true);
-        setLinkError(null);
-        try {
-          let data: any;
-          // If token has '.' or is not base64 "u:p", call magicLogin
-          if (magicToken.includes(".") || !magicToken.includes(":")) {
+    if (!magicToken || isLoading || verifyingMagicLink) return;
+    (async () => {
+      setIsLoading(true);
+      setVerifyingMagicLink(true);
+      try {
+        let data: any;
+        if (magicToken.includes(".") || !magicToken.includes(":"))
+          data = await api.magicLogin(magicToken);
+        else {
+          try {
+            const [u, p] = atob(magicToken).split(":");
+            data = await api.login(u, p);
+          } catch {
             data = await api.magicLogin(magicToken);
-          } else {
-            try {
-              const decoded = atob(magicToken);
-              const [u, p] = decoded.split(":");
-              data = await api.login(u, p);
-            } catch {
-              data = await api.magicLogin(magicToken);
-            }
           }
-          toast.success("Access link verified! Opening quotation portal...");
-          const target = data?.rfq_id
-            ? `/submit-quotation?rfqId=${data.rfq_id}`
-            : redirectPath || "/supplier-dashboard";
-          
-          setTimeout(() => {
-            navigate({ to: target as any });
-          }, 300);
-        } catch (error: any) {
-          console.error("Auto-login failed:", error);
-          const rawMsg = error?.message || error?.detail || "";
-          const isExpired = rawMsg.toLowerCase().includes("expired") || error?.status === 410;
-          const userMsg = isExpired
-            ? "This quotation invitation link has expired after 24 hours. For security, please contact procurement for a new access link."
-            : (rawMsg || "This quotation access link is invalid or expired. Please contact procurement.");
-          setLinkError(userMsg);
-          toast.error(userMsg);
-        } finally {
-          setIsLoading(false);
-          setVerifyingMagicLink(false);
         }
-      };
-      void performAutoLogin();
-    }
+        toast.success("Access link verified!");
+        navigate({
+          to: (data?.rfq_id
+            ? `/submit-quotation?rfqId=${data.rfq_id}`
+            : redirectPath || "/supplier-dashboard") as any,
+        });
+      } catch (e: any) {
+        const msg = e?.message || "This access link is invalid or expired.";
+        setLinkError(msg);
+        toast.error(msg);
+      } finally {
+        setIsLoading(false);
+        setVerifyingMagicLink(false);
+      }
+    })();
   }, [magicToken]);
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!employeeId || !password) {
-      toast.error("Please enter both Employee ID and password");
-      return;
+    const normalizedEmployeeId = employeeId.trim();
+    if (!normalizedEmployeeId || !password.trim()) {
+      return toast.error("Please enter both Employee ID and password");
     }
-
+    if (normalizedEmployeeId.length > 100 || password.length > 128) {
+      return toast.error("Employee ID or password exceeds the allowed length");
+    }
     setIsLoading(true);
     try {
-      const data = await api.login(employeeId, password, rememberMe);
-      completeAuthentication(data);
-    } catch (error: any) {
-      toast.error(error.message || "Login failed. Please check your credentials.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const completeAuthentication = (data: any) => {
-    toast.success(`Welcome back, ${data.username}!`);
-    const targetPath = redirectPath || getDefaultRouteForUser(data);
-
-    setTimeout(() => {
-      // Keep route transitions internal. `redirectPath` has already rejected external URLs.
-      const target = new URL(targetPath, window.location.origin);
+      const data = await api.login(normalizedEmployeeId, password, rememberMe);
+      toast.success(`Welcome back, ${data.username}!`);
+      const target = new URL(redirectPath || getDefaultRouteForUser(data), window.location.origin);
       navigate({
         to: target.pathname as any,
         search: Object.fromEntries(target.searchParams) as any,
         hash: target.hash,
       });
-    }, 500);
+    } catch (e: any) {
+      toast.error(e.message || "Login failed. Please check your credentials.");
+    } finally {
+      setIsLoading(false);
+    }
   };
-
-  const handleForgotPassword = () => {
-    toast.info("Please contact your IT administrator to reset your password.");
-  };
-
   return (
-    <div className="flex min-h-screen w-full flex-col lg:flex-row">
-      {/* Left side - Illustration/Branding */}
-      <div className="hidden lg:flex lg:w-1/2 flex-col justify-between bg-primary p-12 text-primary-foreground relative overflow-hidden">
-        <div className="relative z-10">
-          <div className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-            <Warehouse className="h-8 w-8" />
-            <span>KaizenAssests</span>
+    <main
+      className="relative isolate block min-h-svh overflow-hidden bg-[#eef5fd] px-5 pt-7 pb-10 font-[Inter,Arial,sans-serif] text-[#03113b] min-[1000px]:min-h-[max(100svh,47.65vw)] min-[1000px]:p-0 before:pointer-events-none before:absolute before:top-[-35%] before:left-[29%] before:hidden before:h-[150%] before:w-[40%] before:rotate-[24deg] before:rounded-[48%] before:border-[24px] before:border-[#e8f3ff66] before:shadow-[-2px_2px_#85b9ff66] before:content-[''] min-[1000px]:before:block"
+      style={{
+        backgroundImage: `url(${hero})`,
+        backgroundPosition: "center",
+        backgroundSize: "cover",
+      }}
+    >
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,#f7faffea_0%,#f1f6ffcf_23%,#e8f3ff78_34%,transparent_45%),linear-gradient(112deg,transparent_56%,#edf4ffb8_66%,#f5f8ffd0_100%)]" />
+      <section className="static z-10 min-h-0 p-0">
+        <header className="relative flex items-center gap-2.5 min-[1000px]:absolute min-[1000px]:top-[4%] min-[1000px]:left-[4%] min-[1000px]:gap-[.7vw]">
+          <div className="text-[#1268ff] [&_svg]:size-11 [&_svg]:stroke-[2.3] min-[1000px]:[&_svg]:size-[2.7vw]">
+            <Warehouse aria-hidden="true" />
           </div>
-          <div className="mt-20">
-            <h1 className="text-5xl font-extrabold leading-tight">
-              Warehouse Management <br /> Simplified.
-            </h1>
-            <p className="mt-6 text-xl text-primary-foreground/80 max-w-lg">
-              Optimizing your supply chain with real-time tracking, intelligent dock management, and
-              seamless arrival workflows.
-            </p>
-          </div>
-        </div>
-
-        <div className="relative z-10 mt-auto">
-          <div className="flex items-center gap-4 p-4 rounded-xl bg-white/10 backdrop-blur-md border border-white/20 max-w-md">
-            <div className="h-12 w-12 rounded-full bg-white/20 flex items-center justify-center">
-              <ShieldCheck className="h-6 w-6" />
+          <div>
+            <div className="text-[26px] leading-[1.15] font-black tracking-[-.06vw] min-[1000px]:text-[1.6vw]">
+              KaizenAssets
             </div>
-            <div>
-              <p className="text-sm font-medium">Enterprise Security</p>
-              <p className="text-xs text-primary-foreground/60">
-                End-to-end encryption and multi-factor authentication for all warehouse operations.
-              </p>
+            <div className="mt-[.25vw] ml-0.5 text-[9px] font-bold tracking-[3px] text-[#637694] min-[1000px]:text-[.6vw] min-[1000px]:tracking-[.2vw]">
+              INDUSTRIAL SYSTEMS
             </div>
           </div>
-        </div>
-
-        {/* Mesh Background Pattern */}
-        <div className="absolute inset-0 z-0 opacity-20">
-          <svg className="h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-            <defs>
-              <radialGradient id="mesh-gradient" cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
-                <stop offset="0%" stopColor="white" />
-                <stop offset="100%" stopColor="transparent" />
-              </radialGradient>
-            </defs>
-            <circle cx="20" cy="20" r="40" fill="url(#mesh-gradient)" />
-            <circle cx="80" cy="50" r="30" fill="url(#mesh-gradient)" />
-            <circle cx="40" cy="80" r="45" fill="url(#mesh-gradient)" />
-          </svg>
-        </div>
-      </div>
-
-      {/* Right side - Login Form */}
-      <div className="flex flex-1 items-center justify-center bg-background p-6 lg:p-12">
-        <div className="mx-auto w-full max-w-[400px] space-y-6">
-          <div className="flex flex-col space-y-2 text-center lg:text-left">
-            <div className="lg:hidden flex justify-center mb-6">
-              <div className="flex items-center gap-2 text-2xl font-bold text-primary">
-                <Warehouse className="h-8 w-8" />
-                <span>KaizenAssests</span>
+        </header>
+        <div className="relative mt-[38px] mb-[30px] max-w-[550px] min-[1000px]:absolute min-[1000px]:top-[15.8%] min-[1000px]:left-[4.6%] min-[1000px]:m-0 min-[1000px]:max-w-[33vw]">
+          <p className="text-[10px] leading-[1.2] font-bold tracking-[2px] text-[#627696] min-[1000px]:text-[.76vw] min-[1000px]:tracking-[.18vw]">
+            INTEGRATED WAREHOUSE OPERATIONS
+          </p>
+          <h1 className="mt-4 text-[46px] leading-[1.01] font-black tracking-[-1.5px] text-[#00113c] min-[1000px]:mt-[1.15vw] min-[1000px]:text-[3.85vw] min-[1000px]:tracking-[-.13vw]">
+            Warehouse
+            <br />
+            Management
+            <br />
+            <span className="text-[#1d70f4]">Simplified.</span>
+          </h1>
+          <p className="mt-[18px] text-base leading-[1.34] text-[#65799b] min-[1000px]:mt-[1.3vw] min-[1000px]:w-[29vw] min-[1000px]:text-[1.14vw]">
+            Real-time inventory tracking, intelligent dock management, and seamless supply chain
+            workflows — all in one platform.
+          </p>
+          <div className="mt-6 flex w-full max-w-[460px] justify-between min-[1000px]:mt-[1.65vw] min-[1000px]:w-[28vw] min-[1000px]:max-w-[550px]">
+            {[
+              [Box, "Real-time", "Inventory"],
+              [Truck, "Dock", "Management"],
+              [BarChart3, "Operational", "Insights"],
+              [ShieldCheck, "Secure &", "Reliable"],
+            ].map(([Icon, a, b]: any) => (
+              <div className="w-16 text-center min-[1000px]:w-[4.2vw]" key={a}>
+                <div className="mx-auto flex size-[58px] items-center justify-center rounded-xl border border-[#c9dcf8] bg-[#e6efffe8] text-[#1168ed] shadow-sm [&_svg]:size-[30px] [&_svg]:stroke-[2.5] min-[1000px]:size-[4.1vw] min-[1000px]:rounded-[.9vw] min-[1000px]:[&_svg]:size-[2.15vw]">
+                  <Icon size={34} />
+                </div>
+                <div className="mx-[-8px] mt-[9px] text-xs leading-[1.3] font-semibold min-[1000px]:mx-[-.8vw] min-[1000px]:mt-[.75vw] min-[1000px]:text-[.88vw]">
+                  {a}
+                  <br />
+                  {b}
+                </div>
               </div>
-            </div>
-            <h2 className="text-3xl font-bold tracking-tight">Staff Login</h2>
-            <p className="text-sm text-muted-foreground">
-              Enter your credentials to access the management console.
-            </p>
+            ))}
           </div>
-
+        </div>
+        <div className="absolute bottom-0 left-0 hidden h-[24%] w-[31%] pt-[4.8vw] pl-[4.3vw] text-[.69vw] leading-[1.9] font-bold tracking-[.28vw] text-[#b5d5ff] min-[1000px]:block before:absolute before:inset-0 before:-z-10 before:bg-[linear-gradient(115deg,#1970ee,#3289ff)] before:content-[''] before:[clip-path:polygon(0_0,86%_48%,93%_59%,96%_73%,100%_100%,0_100%)]">
+          BUILDING
+          <br />A MORE EFFICIENT
+          <br />
+          SUPPLY CHAIN FUTURE
+        </div>
+      </section>
+      <section className="relative z-10 mx-auto block w-full max-w-[580px] min-[1000px]:absolute min-[1000px]:top-[10.15%] min-[1000px]:right-[3%] min-[1000px]:m-0 min-[1000px]:w-[38%] min-[1000px]:max-w-none">
+        <div className="absolute right-0 top-[-2.5vw] hidden items-center gap-[.8vw] text-[.67vw] font-semibold tracking-[.07vw] whitespace-nowrap text-[#607391] min-[1000px]:flex">
+          PEOPLE&nbsp; | &nbsp;PROCESS&nbsp; | &nbsp;PRODUCTIVITY{" "}
+          <span className="h-0.5 w-[2.4vw] bg-[#0d214d]" />
+        </div>
+        <div className="relative w-full rounded-3xl bg-[linear-gradient(145deg,#fff,#f6f9fe)] px-6 py-[30px] shadow-[0_1.4vw_3vw_#4785e029] min-[1000px]:min-h-[40.7vw] min-[1000px]:rounded-[1.3vw] min-[1000px]:pt-[2.8vw] min-[1000px]:pr-[3.2vw] min-[1000px]:pb-[1.9vw] min-[1000px]:pl-[4.4vw] before:pointer-events-none before:absolute before:top-0 before:right-0 before:h-[65px] before:w-[75px] before:rounded-tr-3xl before:bg-[#eaf2ff] before:content-[''] before:[clip-path:polygon(0_0,100%_0,100%_100%)] min-[1000px]:before:h-[6vw] min-[1000px]:before:w-[6.9vw] min-[1000px]:before:rounded-tr-[1.3vw] [&_input:focus-visible]:outline-2 [&_input:focus-visible]:outline-offset-[3px] [&_input:focus-visible]:outline-[#3180ff] [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-offset-[3px] [&_button:focus-visible]:outline-[#3180ff]">
+          <p className="text-xs leading-[1.2] font-bold tracking-[3px] text-[#1168ed] min-[1000px]:text-[.8vw] min-[1000px]:tracking-[.18vw]">
+            WELCOME BACK
+          </p>
+          <h2 className="my-3 text-[32px] leading-[1.2] font-[850] tracking-[-1px] min-[1000px]:mt-[.8vw] min-[1000px]:mb-[.6vw] min-[1000px]:text-[2.1vw] min-[1000px]:tracking-[-.06vw]">
+            Staff Login
+          </h2>
+          <p className="m-0 text-[15px] leading-[1.35] text-[#65789b] max-[999px]:[&_br]:hidden min-[1000px]:text-[.96vw]">
+            Enter your credentials to access the KaizenAssets
+            <br />
+            management console.
+          </p>
           {verifyingMagicLink && (
-            <div className="flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/10 p-4 text-sm text-primary">
-              <Loader2 className="size-5 animate-spin shrink-0" />
-              <div>
-                <p className="font-semibold">Verifying secure quotation link...</p>
-                <p className="text-xs text-muted-foreground">Authenticating and opening supplier workspace.</p>
-              </div>
+            <div className="mt-5 flex items-center gap-2 text-sm text-[#1168ed]">
+              <Loader2 className="animate-spin" size={18} />
+              Verifying secure access link...
             </div>
           )}
-
           {linkError && (
-            <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-              <div className="flex items-center gap-2 font-semibold">
-                <Clock className="size-4 shrink-0" /> Quotation Link Expired or Invalid
-              </div>
-              <p className="mt-1 text-xs leading-relaxed">{linkError}</p>
-              <p className="mt-2 text-[11px] text-muted-foreground">
-                Quotation links expire 24 hours after issuance. You can still log in manually below if you have portal credentials.
-              </p>
-            </div>
+            <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-600">{linkError}</p>
           )}
-
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="employeeId">Employee ID / Username</Label>
-              <Input
-                id="employeeId"
-                placeholder="Enter your employee ID or username"
-                value={employeeId}
-                onChange={(e) => setEmployeeId(e.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">Password</Label>
+          <form onSubmit={handleLogin} className="mt-7 space-y-5 min-[1000px]:mt-[1.95vw]">
+            <label className="mb-5 block text-sm leading-[1.3] font-semibold min-[1000px]:mb-[1.15vw] min-[1000px]:text-[.94vw]">
+              Employee ID / Username
+              <div className="border-[#c9ddff]! shadow-[0_0_3px_1px_#c9ddff]! mt-2 flex h-[50px] items-center rounded-[10px] border border-[#dae4f3] bg-[#e8f1ff] px-3 shadow-[0_1px_2px_#123b7220] min-[1000px]:mt-[.4vw] min-[1000px]:h-[2.9vw] min-[1000px]:rounded-[.7vw] min-[1000px]:px-[.85vw] [&_svg]:size-[21px] [&_svg]:shrink-0 min-[1000px]:[&_svg]:size-[1.25vw]">
+                <UserRound size={22} />
+                <input
+                  className="ml-3 h-full min-w-0 w-full bg-transparent text-base font-normal outline-none placeholder:text-[#101725] placeholder:opacity-100 min-[1000px]:text-[.98vw]"
+                  value={employeeId}
+                  maxLength={100}
+                  onChange={(e) => setEmployeeId(e.target.value)}
+                  placeholder="supplier"
+                  required
+                />
+              </div>
+            </label>
+            <label className="mb-5 block text-sm leading-[1.3] font-semibold min-[1000px]:mb-[1.15vw] min-[1000px]:text-[.94vw]">
+              <span className="flex justify-between">
+                Password{" "}
                 <button
                   type="button"
-                  onClick={handleForgotPassword}
-                  className="text-sm font-medium text-primary hover:underline"
+                  onClick={() =>
+                    toast.info("Please contact your IT administrator to reset your password.")
+                  }
+                  className="text-[13px] font-normal text-[#1168ed] min-[1000px]:text-[.86vw]"
                 >
                   Forgot password?
                 </button>
-              </div>
-              <div className="relative">
-                <Input
-                  id="password"
+              </span>
+              <div className="mt-2 flex h-[50px] items-center rounded-[10px] border border-[#dae4f3] bg-[#e8f1ff] px-3 shadow-[0_1px_2px_#123b7220] min-[1000px]:mt-[.4vw] min-[1000px]:h-[2.9vw] min-[1000px]:rounded-[.7vw] min-[1000px]:px-[.85vw] [&_svg]:size-[21px] [&_svg]:shrink-0 min-[1000px]:[&_svg]:size-[1.25vw]">
+                <LockKeyhole size={22} />
+                <input
+                  className="ml-3 h-full min-w-0 w-full bg-transparent text-base font-normal outline-none placeholder:text-[#101725] placeholder:opacity-100 min-[1000px]:text-[.98vw]"
                   type={showPassword ? "text" : "password"}
-                  placeholder="••••••••"
                   value={password}
+                  maxLength={128}
                   onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••••••"
                   required
-                  className="pr-10"
                 />
                 <button
                   type="button"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showPassword ? <Eye size={20} /> : <EyeOff size={20} />}
                 </button>
               </div>
-            </div>
-
-
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="remember"
+            </label>
+            <label className="my-5 flex items-center gap-[9px] text-sm text-[#61718e] min-[1000px]:mt-[1.05vw] min-[1000px]:mb-[1.2vw] min-[1000px]:gap-[.55vw] min-[1000px]:text-[.9vw]">
+              <input
+                type="checkbox"
                 checked={rememberMe}
-                onCheckedChange={(checked) => setRememberMe(checked as boolean)}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="m-0 size-5 accent-[#1168ed] min-[1000px]:size-[1.2vw]"
               />
-              <Label
-                htmlFor="remember"
-                className="text-sm font-normal leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-              >
-                Remember me on this device
-              </Label>
-            </div>
-            <Button type="submit" className="w-full font-bold" disabled={isLoading}>
+              Remember me on this device
+            </label>
+            <button
+              disabled={isLoading}
+              className="relative flex h-[54px] w-full items-center justify-center rounded-xl bg-[linear-gradient(160deg,#278eff,#0763ff_65%,#0545c0)] text-xl font-bold text-white shadow-[0_2px_3px_#1057b533] disabled:opacity-60 min-[1000px]:h-[3.1vw] min-[1000px]:rounded-[.8vw] min-[1000px]:text-[1.2vw] [&_svg]:w-[22px] min-[1000px]:[&_svg]:w-[1.3vw]"
+            >
               {isLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Signing in...
-                </>
+                <Loader2 className="animate-spin" />
               ) : (
-                "Sign In"
+                <>
+                  <span>Sign In</span>
+                  <ArrowRight className="absolute right-5" size={24} />
+                </>
               )}
-            </Button>
+            </button>
           </form>
-
-          <div className="mt-8 pt-8 border-t border-border text-center">
-            <p className="text-xs text-muted-foreground">
-              By signing in, you agree to our Terms of Service and Privacy Policy.
-              <br />
-              &copy; 2026 KaizenAssests Industrial Systems.
-            </p>
-          </div>
+          <p className="mt-7 text-center text-[10px] text-[#5d6f8d] min-[1000px]:mt-[1.85vw] min-[1000px]:text-[.72vw] min-[1000px]:whitespace-nowrap">
+            <ShieldCheck className="mr-1 inline" size={15} />
+            Use your assigned credentials to access your workspace.
+          </p>
+          <p className="mt-3 text-center text-[11px] text-[#1168ed] min-[1000px]:mt-[.65vw] min-[1000px]:text-[.72vw]">
+            Terms of Service&nbsp; | &nbsp;Privacy Policy
+          </p>
         </div>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }

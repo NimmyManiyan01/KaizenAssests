@@ -46,7 +46,11 @@ function WarehouseAssemblyRequisitionsPage() {
           legacy_material_request: true,
         }));
       setRows([...requisitionRows, ...legacyRows]);
-      setStores(Array.isArray(storeRows) ? storeRows.filter((store: any) => String(store.status).toUpperCase() === "ACTIVE") : []);
+      setStores(
+        Array.isArray(storeRows)
+          ? storeRows.filter((store: any) => String(store.status).toUpperCase() === "ACTIVE")
+          : [],
+      );
     } catch (error: any) {
       toast.error(error?.message || "Unable to load Assembly requisitions");
     } finally {
@@ -56,8 +60,8 @@ function WarehouseAssemblyRequisitionsPage() {
 
   useEffect(() => {
     void refresh();
-    const stop = api.subscribeNotifications("WAREHOUSE", () => void refresh());
-    return stop;
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
   }, [refresh]);
 
   const runAction = async (id: string, action: () => Promise<unknown>, message: string) => {
@@ -74,64 +78,224 @@ function WarehouseAssemblyRequisitionsPage() {
   };
 
   return (
-    <AppShell title="Assembly Requisitions" subtitle="Review persisted material requests, reserve stock, and create store picking work.">
+    <AppShell
+      title="Assembly Requisitions"
+      subtitle="Review persisted material requests, reserve stock, and create store picking work."
+    >
       <div className="mb-4 flex justify-end">
-        <Button variant="outline" onClick={() => void refresh()}><RefreshCw className="mr-2 size-4" />Refresh</Button>
+        <Button variant="outline" onClick={() => void refresh()}>
+          <RefreshCw className="mr-2 size-4" />
+          Refresh
+        </Button>
       </div>
-      {loading ? <div className="grid min-h-64 place-items-center"><Loader2 className="size-6 animate-spin" /></div> : rows.length === 0 ? (
-        <Card><CardContent className="p-10 text-center text-muted-foreground">No Assembly requisitions have been submitted.</CardContent></Card>
-      ) : <div className="space-y-3">{rows.map((request) => {
-        const id = String(request.id);
-        const status = String(request.status || "").toUpperCase();
-        const approvalRequired = status === "PENDING_WAREHOUSE_APPROVAL";
-        const canReview = approvalRequired || ["PENDING", "SUBMITTED", "PARTIALLY_RESERVED"].includes(status);
-        const hasReservation = (request.reservations || []).some((reservation: any) => Number(reservation.reserved_quantity) > 0);
-        const selectedStore = storeChoice[id] || request.assigned_store_id || request.suggested_store_id || request.reservations?.find((r: any) => r.store_id)?.store_id || "";
-        const isBusy = busyId === id;
-        const productionQuantity = Number(request.target_quantity || request.planned_quantity || 0);
-        const firstItem = request.items?.[0];
-        const bomQuantityPerUnit = productionQuantity > 0 && firstItem
-          ? Number(firstItem.requested_quantity || firstItem.quantity || 0) / productionQuantity
-          : 0;
-        return <Card key={id}><CardContent className="space-y-4 p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div><h2 className="font-semibold">{request.requisition_number}</h2><p className="text-xs text-muted-foreground">{request.department} · Requested by {request.requested_by} · {request.required_date}</p></div>
-            <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold">{status || ""}</span>
-          </div>
-          {productionQuantity > 0 && firstItem && <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
-            <span className="font-semibold">BOM calculation: </span>
-            {request.product_name || "Finished good"} × {productionQuantity} {request.uom || "PCS"}
-            {" → "}{firstItem.material_name || firstItem.material_code} × {bomQuantityPerUnit} {firstItem.uom || ""}/{request.uom || "PCS"}
-            {" → Required "}{firstItem.requested_quantity ?? firstItem.quantity ?? 0} {firstItem.uom || ""}
-          </div>}
-          {status === "ISSUED" && !request.issue_transaction_exists && <p className="text-xs text-amber-600">Issue status requires a persisted warehouse issue transaction; this request is awaiting verification.</p>}
-          {status === "ISSUED" && request.issue_transaction && <p className="text-xs text-emerald-700">
-            Issued under {request.issue_transaction.issue_number} by {request.issue_transaction.issued_by || "Warehouse"}
-            {request.issue_transaction.issued_at ? ` on ${new Date(request.issue_transaction.issued_at).toLocaleString()}` : ""}. Reserved quantity is 0 because the reservation was consumed by issue.
-          </p>}
-          {(request.items || []).length > 0 && (request.items || []).every((item: any) => Number(item.received_quantity || 0) >= Number(item.required_quantity ?? item.requested_quantity ?? item.quantity ?? 0)) && <p className="text-xs font-semibold text-emerald-700">Materials Received — Ready for Production. Warehouse stock is tracked separately.</p>}
-          <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b text-xs text-muted-foreground"><th className="py-2">Material</th><th>Requested</th><th>Available</th><th>Reserved</th><th>Unit</th></tr></thead><tbody>
-            {(request.items || []).map((item: any) => <tr key={item.id || item.material_code} className="border-b last:border-0"><td className="py-2">{item.material_code} · {item.material_name}</td><td>{item.requested_quantity}</td><td>{item.available_quantity}</td><td>{item.reserved_quantity}</td><td>{item.uom || ""}</td></tr>)}
-          </tbody></table></div>
-          {request.availability_message && <p className="text-xs text-muted-foreground">{request.availability_message}</p>}
-          <div className="flex flex-wrap items-center gap-2">
-            {canReview && <>
-              <Button disabled={isBusy} onClick={() => void runAction(id, () => request.legacy_material_request || approvalRequired ? api.approveAssemblyMaterialRequest(id) : api.reserveAssemblyRequisitionStock(id), approvalRequired ? "Material request approved" : "Stock approved and request released for picking")}>{isBusy && <Loader2 className="mr-2 size-4 animate-spin" />}{approvalRequired ? "Approve Request" : "Approve &amp; Reserve Stock"}</Button>
-              <Button variant="outline" disabled={isBusy} onClick={() => {
-                const reason = window.prompt("Reason for rejecting this requisition:")?.trim();
-                if (reason) void runAction(id, () => api.rejectAssemblyRequisition(id, reason), "Requisition rejected");
-              }}>Reject</Button>
-            </>}
-            {(hasReservation || request.assigned_store_id) && !["REJECTED", "ASSEMBLY_RECEIVED"].includes(status) && <>
-              <select className="h-9 min-w-56 rounded-md border bg-background px-3 text-sm" value={selectedStore} onChange={(event) => setStoreChoice((current) => ({ ...current, [id]: event.target.value }))}>
-                <option value="">Select fulfilling store</option>
-                {stores.map((store: any) => <option key={store.id} value={store.id}>{store.store_code} · {store.store_name}</option>)}
-              </select>
-              <Button variant="secondary" disabled={isBusy || !selectedStore} onClick={() => void runAction(id, () => api.assignAssemblyRequisitionStore(id, selectedStore), "Store picking task created")}>Assign store and create pick task</Button>
-            </>}
-          </div>
-        </CardContent></Card>;
-      })}</div>}
+      {loading ? (
+        <div className="grid min-h-64 place-items-center">
+          <Loader2 className="size-6 animate-spin" />
+        </div>
+      ) : rows.length === 0 ? (
+        <Card>
+          <CardContent className="p-10 text-center text-muted-foreground">
+            No Assembly requisitions have been submitted.
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {rows.map((request) => {
+            const id = String(request.id);
+            const status = String(request.status || "").toUpperCase();
+            const approvalRequired = status === "PENDING_WAREHOUSE_APPROVAL";
+            const canReview =
+              approvalRequired || ["PENDING", "SUBMITTED", "PARTIALLY_RESERVED"].includes(status);
+            const hasReservation = (request.reservations || []).some(
+              (reservation: any) => Number(reservation.reserved_quantity) > 0,
+            );
+            const selectedStore =
+              storeChoice[id] ||
+              request.assigned_store_id ||
+              request.suggested_store_id ||
+              request.reservations?.find((r: any) => r.store_id)?.store_id ||
+              "";
+            const isBusy = busyId === id;
+            const productionQuantity = Number(
+              request.target_quantity || request.planned_quantity || 0,
+            );
+            const firstItem = request.items?.[0];
+            const bomQuantityPerUnit =
+              productionQuantity > 0 && firstItem
+                ? Number(firstItem.requested_quantity || firstItem.quantity || 0) /
+                  productionQuantity
+                : 0;
+            return (
+              <Card key={id}>
+                <CardContent className="space-y-4 p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h2 className="font-semibold">{request.requisition_number}</h2>
+                      <p className="text-xs text-muted-foreground">
+                        {request.department} · Requested by {request.requested_by} ·{" "}
+                        {request.required_date}
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold">
+                      {status || ""}
+                    </span>
+                  </div>
+                  {productionQuantity > 0 && firstItem && (
+                    <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
+                      <span className="font-semibold">BOM calculation: </span>
+                      {request.product_name || "Finished good"} × {productionQuantity}{" "}
+                      {request.uom || "PCS"}
+                      {" → "}
+                      {firstItem.material_name || firstItem.material_code} × {bomQuantityPerUnit}{" "}
+                      {firstItem.uom || ""}/{request.uom || "PCS"}
+                      {" → Required "}
+                      {firstItem.requested_quantity ?? firstItem.quantity ?? 0}{" "}
+                      {firstItem.uom || ""}
+                    </div>
+                  )}
+                  {status === "ISSUED" && !request.issue_transaction_exists && (
+                    <p className="text-xs text-amber-600">
+                      Issue status requires a persisted warehouse issue transaction; this request is
+                      awaiting verification.
+                    </p>
+                  )}
+                  {status === "ISSUED" && request.issue_transaction && (
+                    <p className="text-xs text-emerald-700">
+                      Issued under {request.issue_transaction.issue_number} by{" "}
+                      {request.issue_transaction.issued_by || "Warehouse"}
+                      {request.issue_transaction.issued_at
+                        ? ` on ${new Date(request.issue_transaction.issued_at).toLocaleString()}`
+                        : ""}
+                      . Reserved quantity is 0 because the reservation was consumed by issue.
+                    </p>
+                  )}
+                  {(request.items || []).length > 0 &&
+                    (request.items || []).every(
+                      (item: any) =>
+                        Number(item.received_quantity || 0) >=
+                        Number(
+                          item.required_quantity ?? item.requested_quantity ?? item.quantity ?? 0,
+                        ),
+                    ) && (
+                      <p className="text-xs font-semibold text-emerald-700">
+                        Materials Received — Ready for Production. Warehouse stock is tracked
+                        separately.
+                      </p>
+                    )}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead>
+                        <tr className="border-b text-xs text-muted-foreground">
+                          <th className="py-2">Material</th>
+                          <th>Requested</th>
+                          <th>Available</th>
+                          <th>Reserved</th>
+                          <th>Unit</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(request.items || []).map((item: any) => (
+                          <tr
+                            key={item.id || item.material_code}
+                            className="border-b last:border-0"
+                          >
+                            <td className="py-2">
+                              {item.material_code} · {item.material_name}
+                            </td>
+                            <td>{item.requested_quantity}</td>
+                            <td>{item.available_quantity}</td>
+                            <td>{item.reserved_quantity}</td>
+                            <td>{item.uom || ""}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {request.availability_message && (
+                    <p className="text-xs text-muted-foreground">{request.availability_message}</p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {canReview && (
+                      <>
+                        <Button
+                          disabled={isBusy}
+                          onClick={() =>
+                            void runAction(
+                              id,
+                              () =>
+                                request.legacy_material_request || approvalRequired
+                                  ? api.approveAssemblyMaterialRequest(id)
+                                  : api.reserveAssemblyRequisitionStock(id),
+                              approvalRequired
+                                ? "Material request approved"
+                                : "Stock approved and request released for picking",
+                            )
+                          }
+                        >
+                          {isBusy && <Loader2 className="mr-2 size-4 animate-spin" />}
+                          {approvalRequired ? "Approve Request" : "Approve &amp; Reserve Stock"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          disabled={isBusy}
+                          onClick={() => {
+                            const reason = window
+                              .prompt("Reason for rejecting this requisition:")
+                              ?.trim();
+                            if (reason)
+                              void runAction(
+                                id,
+                                () => api.rejectAssemblyRequisition(id, reason),
+                                "Requisition rejected",
+                              );
+                          }}
+                        >
+                          Reject
+                        </Button>
+                      </>
+                    )}
+                    {(hasReservation || request.assigned_store_id) &&
+                      !["REJECTED", "ASSEMBLY_RECEIVED"].includes(status) && (
+                        <>
+                          <select
+                            className="h-9 min-w-56 rounded-md border bg-background px-3 text-sm"
+                            value={selectedStore}
+                            onChange={(event) =>
+                              setStoreChoice((current) => ({
+                                ...current,
+                                [id]: event.target.value,
+                              }))
+                            }
+                          >
+                            <option value="">Select fulfilling store</option>
+                            {stores.map((store: any) => (
+                              <option key={store.id} value={store.id}>
+                                {store.store_code} · {store.store_name}
+                              </option>
+                            ))}
+                          </select>
+                          <Button
+                            variant="secondary"
+                            disabled={isBusy || !selectedStore}
+                            onClick={() =>
+                              void runAction(
+                                id,
+                                () => api.assignAssemblyRequisitionStore(id, selectedStore),
+                                "Store picking task created",
+                              )
+                            }
+                          >
+                            Assign store and create pick task
+                          </Button>
+                        </>
+                      )}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
     </AppShell>
   );
 }

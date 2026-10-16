@@ -1,11 +1,31 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { Truck, Inbox, Loader2, FileText, AlertTriangle, Camera, X, Eye, ExternalLink, QrCode, CheckCircle2, PackageCheck, History } from "lucide-react";
+import {
+  Truck,
+  Inbox,
+  Loader2,
+  FileText,
+  AlertTriangle,
+  Camera,
+  X,
+  Eye,
+  ExternalLink,
+  QrCode,
+  CheckCircle2,
+  PackageCheck,
+  History,
+} from "lucide-react";
 import { AppShell, DockAllocationNotificationCard } from "@/components/wms/app-shell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { api, BUSINESS_API_URL } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { requireAuth, getUserInfo } from "@/lib/auth-utils";
@@ -15,27 +35,64 @@ export const Route = createFileRoute("/notifications")({
   component: Notifications,
 });
 
-export function extractGrnPayload(n: any) {
+function extractGrnPayload(n: any) {
   if (!n) return null;
   let parsedJson: any = null;
   if (n.payload_json || n.payloadJson) {
     try {
-      parsedJson = typeof (n.payload_json || n.payloadJson) === "string"
-        ? JSON.parse(n.payload_json || n.payloadJson)
-        : (n.payload_json || n.payloadJson);
+      parsedJson =
+        typeof (n.payload_json || n.payloadJson) === "string"
+          ? JSON.parse(n.payload_json || n.payloadJson)
+          : n.payload_json || n.payloadJson;
     } catch (e) {
       console.warn("Could not parse payload_json:", e);
     }
   }
 
-  const grnNumber = parsedJson?.grn_number || n.grn_number || n.grnNumber || (n.message ? (n.message.match(/GRN:\s*([^\s|\n]+)/i)?.[1] || n.message.match(/(GRN-[A-Za-z0-9-]+)/i)?.[1]) : null) || "";
-  const poNumber = parsedJson?.po_number || n.po_number || n.poNumber || (n.message ? (n.message.match(/PO:\s*([^\s|\n]+)/i)?.[1] || n.message.match(/(PO-[A-Za-z0-9-]+)/i)?.[1]) : null) || "";
-  const supplierName = parsedJson?.supplier_name || n.supplier_name || n.supplierName || (n.message ? n.message.match(/Supplier:\s*([^|\n]+)/i)?.[1]?.trim() : null) || "Supplier";
-  const rawVeh = parsedJson?.vehicle_number || n.vehicle_number || n.vehicleNumber || (n.message ? n.message.match(/vehicle:\s*([^\s|\n,]+)/i)?.[1]?.trim() : null) || "";
+  const grnNumber =
+    parsedJson?.grn_number ||
+    n.grn_number ||
+    n.grnNumber ||
+    (n.message
+      ? n.message.match(/GRN:\s*([^\s|\n]+)/i)?.[1] || n.message.match(/(GRN-[A-Za-z0-9-]+)/i)?.[1]
+      : null) ||
+    "";
+  const poNumber =
+    parsedJson?.po_number ||
+    n.po_number ||
+    n.poNumber ||
+    (n.message
+      ? n.message.match(/PO:\s*([^\s|\n]+)/i)?.[1] || n.message.match(/(PO-[A-Za-z0-9-]+)/i)?.[1]
+      : null) ||
+    "";
+  const supplierName =
+    parsedJson?.supplier_name ||
+    n.supplier_name ||
+    n.supplierName ||
+    (n.message ? n.message.match(/Supplier:\s*([^|\n]+)/i)?.[1]?.trim() : null) ||
+    "Supplier";
+  const rawVeh =
+    parsedJson?.vehicle_number ||
+    n.vehicle_number ||
+    n.vehicleNumber ||
+    (n.message ? n.message.match(/vehicle:\s*([^\s|\n,]+)/i)?.[1]?.trim() : null) ||
+    "";
   const vehicleNumber = rawVeh && rawVeh.toLowerCase() !== "vehicle" ? rawVeh : "";
-  const warehouseName = parsedJson?.warehouse_name || n.warehouse_name || n.warehouseName || (n.message ? n.message.match(/Warehouse:\s*([^|\n]+)/i)?.[1]?.trim() : null) || "Main Warehouse";
-  const dockCode = parsedJson?.dock_number || n.dock_code || n.dockCode || (n.message ? n.message.match(/Dock:\s*([^\s|\n]+)/i)?.[1]?.trim() : null) || "DOCK-01";
-  const poStatus = parsedJson?.po_status || (n.title?.includes("Completed") ? "FULLY RECEIVED" : "PARTIALLY RECEIVED");
+  const warehouseName =
+    parsedJson?.warehouse_name ||
+    n.warehouse_name ||
+    n.warehouseName ||
+    (n.message ? n.message.match(/Warehouse:\s*([^|\n]+)/i)?.[1]?.trim() : null) ||
+    "Main Warehouse";
+  const dockCode =
+    parsedJson?.dock_number ||
+    n.dock_code ||
+    n.dockCode ||
+    (n.message ? n.message.match(/Dock:\s*([^\s|\n]+)/i)?.[1]?.trim() : null) ||
+    "DOCK-01";
+  const poStatus =
+    parsedJson?.po_status ||
+    (n.title?.includes("Completed") ? "FULLY RECEIVED" : "PARTIALLY RECEIVED");
 
   const totals = parsedJson?.totals || {
     ordered_qty: 0,
@@ -98,7 +155,7 @@ function parseDamageNotificationMessage(msg?: string, notifObj?: any) {
         damageLotNumber: it.damage_lot_number,
         quarantineQrRef: it.quarantine_qr_ref,
         reason: it.damage_reason || "Damaged / Rejected during inspection",
-        photoCount: it.photo_count || (it.photos?.length || 0),
+        photoCount: it.photo_count || it.photos?.length || 0,
         photos: it.photos || [],
         quantity: `${it.current_damaged_qty > 0 ? it.current_damaged_qty : it.current_received_qty} ${it.uom}`,
       })),
@@ -133,50 +190,81 @@ function parseDamageNotificationMessage(msg?: string, notifObj?: any) {
     msg.match(/(PO-[A-Za-z0-9-]+)/i);
 
   const supplierMatch =
-    msg.match(/Supplier:\s*([^|\n]+)/i) ||
-    msg.match(/Supplier Name\s*[:\n]\s*([^|\n]+)/i);
+    msg.match(/Supplier:\s*([^|\n]+)/i) || msg.match(/Supplier Name\s*[:\n]\s*([^|\n]+)/i);
 
   const warehouseMatch =
-    msg.match(/Warehouse:\s*([^|\n]+)/i) ||
-    msg.match(/Warehouse Name\s*[:\n]\s*([^|\n]+)/i);
+    msg.match(/Warehouse:\s*([^|\n]+)/i) || msg.match(/Warehouse Name\s*[:\n]\s*([^|\n]+)/i);
 
   const remarksMatch =
-    msg.match(/Inspector Remarks:\s*([^\n]+)/i) ||
-    msg.match(/Remarks:\s*([^\n]+)/i);
+    msg.match(/Inspector Remarks:\s*([^\n]+)/i) || msg.match(/Remarks:\s*([^\n]+)/i);
 
   const items: { material: string; quantity: string; reason: string; itemCode?: string }[] = [];
   const lines = msg.split("\n");
   let inItems = false;
   for (const line of lines) {
     const trimmed = line.trim();
-    if (trimmed.toLowerCase().includes("damaged items:") || trimmed.toLowerCase().includes("damaged materials") || trimmed.toLowerCase().includes("flagged") || trimmed.toLowerCase().includes("material breakdown:")) {
+    if (
+      trimmed.toLowerCase().includes("damaged items:") ||
+      trimmed.toLowerCase().includes("damaged materials") ||
+      trimmed.toLowerCase().includes("flagged") ||
+      trimmed.toLowerCase().includes("material breakdown:")
+    ) {
       inItems = true;
       continue;
     }
-    if (inItems && (trimmed.startsWith("•") || trimmed.startsWith("-") || trimmed.startsWith("*") || /^\d+\./.test(trimmed))) {
+    if (
+      inItems &&
+      (trimmed.startsWith("•") ||
+        trimmed.startsWith("-") ||
+        trimmed.startsWith("*") ||
+        /^\d+\./.test(trimmed))
+    ) {
       const cleanLine = trimmed.replace(/^[•\-*]|\d+\.\s*/, "").trim();
       const parts = cleanLine.split("|").map((p) => p.trim());
       let mat = parts[0] || "Material Item";
       if (mat.includes("undefined") || mat.includes("null")) {
         mat = "Damaged Material Item";
       }
-      let qty = parts.find((p) => p.toLowerCase().startsWith("qty:") || p.toLowerCase().startsWith("damaged:") || p.toLowerCase().startsWith("rec:"))
-        ?.replace(/^(qty|damaged|rec):\s*/i, "") || "1.0 Units";
+      let qty =
+        parts
+          .find(
+            (p) =>
+              p.toLowerCase().startsWith("qty:") ||
+              p.toLowerCase().startsWith("damaged:") ||
+              p.toLowerCase().startsWith("rec:"),
+          )
+          ?.replace(/^(qty|damaged|rec):\s*/i, "") || "1.0 Units";
       if (qty.includes("undefined") || qty.includes("null")) {
         qty = "1.0 Units";
       }
-      const rsn = parts.find((p) => p.toLowerCase().startsWith("reason:"))
-        ?.replace(/^reason:\s*/i, "") || (remarksMatch && remarksMatch[1] ? remarksMatch[1] : "Damaged / Rejected");
-      
+      const rsn =
+        parts.find((p) => p.toLowerCase().startsWith("reason:"))?.replace(/^reason:\s*/i, "") ||
+        (remarksMatch && remarksMatch[1] ? remarksMatch[1] : "Damaged / Rejected");
+
       const codeMatch = mat.match(/(MAT-[A-Za-z0-9-]+)/i);
-      items.push({ material: mat, quantity: qty, reason: rsn, itemCode: codeMatch ? codeMatch[1] : undefined });
+      items.push({
+        material: mat,
+        quantity: qty,
+        reason: rsn,
+        itemCode: codeMatch ? codeMatch[1] : undefined,
+      });
     }
   }
 
-  const grnNumber = notifObj?.grn_number || notifObj?.grnNumber || (grnMatch && grnMatch[1] ? grnMatch[1] : (notifObj?.link?.match(/grn_id=([^&]+)/)?.[1] || ""));
-  const poNumber = notifObj?.po_number || notifObj?.poNumber || (poMatch && poMatch[1] ? poMatch[1] : "");
-  const supplierName = notifObj?.supplier_name || notifObj?.supplierName || (supplierMatch && supplierMatch[1] ? supplierMatch[1].trim() : "Supplier");
-  const warehouseName = notifObj?.warehouse_name || notifObj?.warehouseName || (warehouseMatch && warehouseMatch[1] ? warehouseMatch[1].trim() : "Main Warehouse");
+  const grnNumber =
+    notifObj?.grn_number ||
+    notifObj?.grnNumber ||
+    (grnMatch && grnMatch[1] ? grnMatch[1] : notifObj?.link?.match(/grn_id=([^&]+)/)?.[1] || "");
+  const poNumber =
+    notifObj?.po_number || notifObj?.poNumber || (poMatch && poMatch[1] ? poMatch[1] : "");
+  const supplierName =
+    notifObj?.supplier_name ||
+    notifObj?.supplierName ||
+    (supplierMatch && supplierMatch[1] ? supplierMatch[1].trim() : "Supplier");
+  const warehouseName =
+    notifObj?.warehouse_name ||
+    notifObj?.warehouseName ||
+    (warehouseMatch && warehouseMatch[1] ? warehouseMatch[1].trim() : "Main Warehouse");
 
   return {
     grnNumber,
@@ -186,7 +274,16 @@ function parseDamageNotificationMessage(msg?: string, notifObj?: any) {
     vehicleNumber: notifObj?.vehicle_number || notifObj?.vehicleNumber || "",
     reportedBy: "GRN Quality Inspector",
     customRemarks: remarksMatch && remarksMatch[1] ? remarksMatch[1].trim() : "",
-    items: items.length > 0 ? items : [{ material: "Damaged Material Item", quantity: "1.0 Units", reason: "Damaged during receiving inspection" }],
+    items:
+      items.length > 0
+        ? items
+        : [
+            {
+              material: "Damaged Material Item",
+              quantity: "1.0 Units",
+              reason: "Damaged during receiving inspection",
+            },
+          ],
     totals: null,
   };
 }
@@ -202,7 +299,8 @@ function parseGrnNotificationDetails(n: any) {
   else if (title.toLowerCase().includes("posted")) statusText = "GRN Posted";
   else if (title.toLowerCase().includes("required")) statusText = "Quality Inspection Required";
   else if (title.toLowerCase().includes("pass")) statusText = "Quality Inspection Passed";
-  else if (title.toLowerCase().includes("fail") || title.toLowerCase().includes("damage")) statusText = "Quality Failed / Damaged";
+  else if (title.toLowerCase().includes("fail") || title.toLowerCase().includes("damage"))
+    statusText = "Quality Failed / Damaged";
   else if (title.toLowerCase().includes("completed")) statusText = "Receiving Completed";
 
   return {
@@ -248,36 +346,32 @@ function Notifications() {
     const username = String(parsedUser?.username || "").toLowerCase();
     const role = roles.includes("SUPPLIER")
       ? "SUPPLIER"
-      : roles.includes("FINANCE")
-        ? "FINANCE"
-          : roles.includes("PROCUREMENT")
-            ? "PROCUREMENT"
-          : roles.includes("GATE_SECURITY")
+      : roles.includes("GATE_SECURITY")
             ? "GATE_SECURITY"
-          : roles.includes("ASSEMBLY") || roles.includes("ASSEMBLY_MANAGER") || roles.includes("ASSEMBLY_OPERATOR")
-            ? "ASSEMBLY_MANAGER"
-          : roles.includes("DISPATCH") ||
-              roles.includes("DISPATCH_MANAGER") ||
-              username === "dispatch" ||
-              username.includes("dispatch")
-            ? "DISPATCH"
-            : roles.includes("GRN") ||
-                roles.includes("GRN_MANAGER") ||
-                roles.includes("OPERATIONS_MANAGER") ||
-                roles.includes("OPERATIONS") ||
-                roles.includes("RECEIVING") ||
-                username === "grn" ||
-                username.includes("grn")
-              ? "GRN"
-              : "WAREHOUSE";
+            : roles.includes("ASSEMBLY") ||
+                roles.includes("ASSEMBLY_MANAGER") ||
+                roles.includes("ASSEMBLY_OPERATOR")
+              ? "ASSEMBLY_MANAGER"
+              : roles.includes("DISPATCH") ||
+                  roles.includes("DISPATCH_MANAGER") ||
+                  username === "dispatch" ||
+                  username.includes("dispatch")
+                ? "DISPATCH"
+                : roles.includes("GRN") ||
+                    roles.includes("GRN_MANAGER") ||
+                    roles.includes("OPERATIONS_MANAGER") ||
+                    roles.includes("OPERATIONS") ||
+                    roles.includes("RECEIVING") ||
+                    username === "grn" ||
+                    username.includes("grn")
+                  ? "GRN"
+                  : "WAREHOUSE";
     setUserRole(role);
     void fetchData(role, false);
-    const unsubscribe = api.subscribeNotifications(role, () => void fetchData(role, true));
     const refresh = () => void fetchData(role, true);
     window.addEventListener("focus", refresh);
     window.addEventListener("notifications:refresh", refresh);
     return () => {
-      unsubscribe();
       window.removeEventListener("focus", refresh);
       window.removeEventListener("notifications:refresh", refresh);
     };
@@ -294,13 +388,18 @@ function Notifications() {
     const loadDamageData = async () => {
       try {
         setDamageLoading(true);
-        const parsed = parseDamageNotificationMessage(selectedDamageNotif.message, selectedDamageNotif);
-        let targetGrnId = selectedDamageNotif.grn_id || selectedDamageNotif.grn_number || parsed.grnNumber;
+        const parsed = parseDamageNotificationMessage(
+          selectedDamageNotif.message,
+          selectedDamageNotif,
+        );
+        let targetGrnId =
+          selectedDamageNotif.grn_id || selectedDamageNotif.grn_number || parsed.grnNumber;
         if (selectedDamageNotif.link) {
           const match = selectedDamageNotif.link.match(/grn_id=([^&]+)/);
           if (match && match[1]) targetGrnId = match[1];
         }
-        const targetPoNumber = selectedDamageNotif.po_number || selectedDamageNotif.poNumber || parsed.poNumber;
+        const targetPoNumber =
+          selectedDamageNotif.po_number || selectedDamageNotif.poNumber || parsed.poNumber;
 
         let grnData: any = null;
         if (targetGrnId) {
@@ -388,7 +487,9 @@ function Notifications() {
       } else {
         await api.markAllNotificationsRead(userRole);
       }
-      setNotifications((current) => current.map((notification) => ({ ...notification, is_read: true })));
+      setNotifications((current) =>
+        current.map((notification) => ({ ...notification, is_read: true })),
+      );
       toast.success("All notifications marked as read");
     } catch (error) {
       toast.error("Unable to mark all notifications as read", {
@@ -402,11 +503,7 @@ function Notifications() {
   const handleOpenNotificationDetails = (n: any) => {
     // Some older notification records contain the shared warehouse dashboard
     // as their target. Keep procurement users in their own dashboard context.
-    const notificationLink =
-      userRole === "PROCUREMENT" &&
-      ["/warehouse-dashboard", "/receiving"].includes(String(n.link || ""))
-        ? "/procurement-dashboard"
-        : n.link;
+    const notificationLink = n.link;
     const isGrnLinked = String(n.link || "").startsWith("/grn");
     const isDockAllocation =
       userRole !== "GRN" &&
@@ -438,7 +535,8 @@ function Notifications() {
       // Dock allocation card is rendered directly on page
     } else if (
       notificationLink &&
-      (userRole === "PROCUREMENT" || !["/warehouse-dashboard", "/receiving"].includes(notificationLink))
+      (userRole === "PROCUREMENT" ||
+        !["/warehouse-dashboard", "/receiving"].includes(notificationLink))
     ) {
       window.location.href = notificationLink;
     } else {
@@ -451,9 +549,7 @@ function Notifications() {
     ? parseDamageNotificationMessage(selectedDamageNotif.message, selectedDamageNotif)
     : null;
 
-  const grnDetails = selectedGrnNotif
-    ? parseGrnNotificationDetails(selectedGrnNotif)
-    : null;
+  const grnDetails = selectedGrnNotif ? parseGrnNotificationDetails(selectedGrnNotif) : null;
 
   const getPhotosForMaterial = (matString: string, itemCode?: string) => {
     const cleanMat = (matString || "").toLowerCase();
@@ -465,7 +561,9 @@ function Notifications() {
         const code = (l.itemCode || l.item_code || "").toLowerCase();
         const name = (l.materialName || l.material_name || "").toLowerCase();
         return (
-          (cleanCode && code && (code === cleanCode || cleanCode.includes(code) || code.includes(cleanCode))) ||
+          (cleanCode &&
+            code &&
+            (code === cleanCode || cleanCode.includes(code) || code.includes(cleanCode))) ||
           (code && cleanMat.includes(code)) ||
           (name && cleanMat.includes(name))
         );
@@ -487,7 +585,9 @@ function Notifications() {
         const code = (m.item_code || m.itemCode || "").toLowerCase();
         const name = (m.material_name || m.materialName || "").toLowerCase();
         return (
-          (cleanCode && code && (code === cleanCode || cleanCode.includes(code) || code.includes(cleanCode))) ||
+          (cleanCode &&
+            code &&
+            (code === cleanCode || cleanCode.includes(code) || code.includes(cleanCode))) ||
           (code && cleanMat.includes(code)) ||
           (name && cleanMat.includes(name))
         );
@@ -504,7 +604,7 @@ function Notifications() {
     // 3. Global fallback: Check all evidence photos on the GRN or PO
     if (damageGrnData?.lines && Array.isArray(damageGrnData.lines)) {
       const allEv = damageGrnData.lines.flatMap(
-        (l: any) => l.damageEvidence || l.damage_evidence || []
+        (l: any) => l.damageEvidence || l.damage_evidence || [],
       );
       if (allEv.length > 0) {
         return allEv.map((e: any) => ({
@@ -579,7 +679,9 @@ function Notifications() {
               n.notification_type === "GRN_DAMAGE_RECORDED";
 
             const payloadData = extractGrnPayload(n);
-            const isGrnAlert = /dock is empty|dock released|receiving completed|grn/i.test(`${n.title || ""} ${n.message || ""}`);
+            const isGrnAlert = /dock is empty|dock released|receiving completed|grn/i.test(
+              `${n.title || ""} ${n.message || ""}`,
+            );
             const totals = payloadData?.totals;
             const hasTotals = totals && totals.ordered_qty > 0;
             const notificationDate = n.created_at || n.createdAt || payloadData?.receiptDate;
@@ -645,37 +747,63 @@ function Notifications() {
                           if (isGrnAlert) {
                             badgeText = "GRN ALERT";
                             badgeColor = "bg-blue-100 text-blue-800 border-blue-300";
-                          } else if (isDamage || titleUpper.includes("DAMAGE") || msgUpper.includes("DAMAGE")) {
+                          } else if (
+                            isDamage ||
+                            titleUpper.includes("DAMAGE") ||
+                            msgUpper.includes("DAMAGE")
+                          ) {
                             badgeText = "DAMAGE & REPLACEMENT REQUIRED";
                             badgeColor = "bg-rose-100 text-rose-800 border-rose-300";
-                          } else if (titleUpper.includes("GATE OUT") || titleUpper.includes("GATE EXIT")) {
+                          } else if (
+                            titleUpper.includes("GATE OUT") ||
+                            titleUpper.includes("GATE EXIT")
+                          ) {
                             badgeText = "GATE OUT APPROVED";
                             badgeColor = "bg-emerald-100 text-emerald-800 border-emerald-300";
                           } else if (titleUpper.includes("IN TRANSIT")) {
                             badgeText = "IN TRANSIT";
                             badgeColor = "bg-blue-100 text-blue-800 border-blue-300";
-                          } else if (titleUpper.includes("DELIVERY COMPLETED") || titleUpper.includes("DELIVERED")) {
+                          } else if (
+                            titleUpper.includes("DELIVERY COMPLETED") ||
+                            titleUpper.includes("DELIVERED")
+                          ) {
                             badgeText = "DELIVERED";
                             badgeColor = "bg-emerald-100 text-emerald-800 border-emerald-300";
                           } else if (titleUpper.includes("LOADING")) {
                             badgeText = "LOADING VERIFIED";
                             badgeColor = "bg-amber-100 text-amber-800 border-amber-300";
-                          } else if (titleUpper.includes("PICKING") || titleUpper.includes("PACKING")) {
+                          } else if (
+                            titleUpper.includes("PICKING") ||
+                            titleUpper.includes("PACKING")
+                          ) {
                             badgeText = "PICK & PACK";
                             badgeColor = "bg-indigo-100 text-indigo-800 border-indigo-300";
-                          } else if (titleUpper.includes("TRANSPORT") || titleUpper.includes("DRIVER") || titleUpper.includes("VEHICLE")) {
+                          } else if (
+                            titleUpper.includes("TRANSPORT") ||
+                            titleUpper.includes("DRIVER") ||
+                            titleUpper.includes("VEHICLE")
+                          ) {
                             badgeText = "FLEET ALLOCATION";
                             badgeColor = "bg-cyan-100 text-cyan-800 border-cyan-300";
                           } else if (titleUpper.includes("DISPATCH")) {
                             badgeText = "DISPATCH ORDER";
                             badgeColor = "bg-blue-100 text-blue-800 border-blue-300";
-                          } else if (titleUpper.includes("ASN") || titleUpper.includes("SHIPMENT")) {
+                          } else if (
+                            titleUpper.includes("ASN") ||
+                            titleUpper.includes("SHIPMENT")
+                          ) {
                             badgeText = "SHIPMENT DISPATCHED";
                             badgeColor = "bg-blue-100 text-blue-800 border-blue-300";
-                          } else if (titleUpper.includes("PO APPROVED") || titleUpper.includes("APPROVED BY FINANCE")) {
+                          } else if (
+                            titleUpper.includes("PO APPROVED")
+                          ) {
                             badgeText = "PO APPROVED";
                             badgeColor = "bg-emerald-100 text-emerald-800 border-emerald-300";
-                          } else if (titleUpper.includes("PO PROPOSAL") || titleUpper.includes("PURCHASE ORDER") || titleUpper.includes("PO ")) {
+                          } else if (
+                            titleUpper.includes("PO PROPOSAL") ||
+                            titleUpper.includes("PURCHASE ORDER") ||
+                            titleUpper.includes("PO ")
+                          ) {
                             badgeText = "PURCHASE ORDER";
                             badgeColor = "bg-indigo-100 text-indigo-800 border-indigo-300";
                           } else if (titleUpper.includes("SUPPLIER")) {
@@ -687,19 +815,34 @@ function Notifications() {
                           } else if (titleUpper.includes("QUOTATION")) {
                             badgeText = "QUOTATION";
                             badgeColor = "bg-amber-100 text-amber-800 border-amber-300";
-                          } else if (titleUpper.includes("FINISHED GOODS") || titleUpper.includes("MATERIAL REQUEST") || titleUpper.includes("REQUISITION")) {
+                          } else if (
+                            titleUpper.includes("FINISHED GOODS") ||
+                            titleUpper.includes("MATERIAL REQUEST") ||
+                            titleUpper.includes("REQUISITION")
+                          ) {
                             badgeText = "REQUISITION";
                             badgeColor = "bg-sky-100 text-sky-800 border-sky-300";
-                          } else if (payloadData?.poStatus === "FULLY_RECEIVED" || titleUpper.includes("RECEIVING COMPLETED")) {
+                          } else if (
+                            payloadData?.poStatus === "FULLY_RECEIVED" ||
+                            titleUpper.includes("RECEIVING COMPLETED")
+                          ) {
                             badgeText = "FULLY RECEIVED";
                             badgeColor = "bg-emerald-100 text-emerald-800 border-emerald-300";
-                          } else if (payloadData?.poStatus === "PARTIALLY_RECEIVED" || titleUpper.includes("GRN")) {
+                          } else if (
+                            payloadData?.poStatus === "PARTIALLY_RECEIVED" ||
+                            titleUpper.includes("GRN")
+                          ) {
                             badgeText = "GRN RECORDED";
                             badgeColor = "bg-blue-100 text-blue-800 border-blue-300";
                           }
 
                           return (
-                            <span className={cn("px-2 py-0.5 rounded text-[10px] font-extrabold border", badgeColor)}>
+                            <span
+                              className={cn(
+                                "px-2 py-0.5 rounded text-[10px] font-extrabold border",
+                                badgeColor,
+                              )}
+                            >
                               {badgeText}
                             </span>
                           );
@@ -744,7 +887,8 @@ function Notifications() {
                             This Vehicle Received
                           </span>
                           <span className="font-mono font-bold text-foreground block">
-                            {totals.current_received_qty} ({totals.current_good_qty} Good / <span className="text-rose-600">{totals.current_damaged_qty} Dmg</span>)
+                            {totals.current_received_qty} ({totals.current_good_qty} Good /{" "}
+                            <span className="text-rose-600">{totals.current_damaged_qty} Dmg</span>)
                           </span>
                         </div>
 
@@ -782,7 +926,6 @@ function Notifications() {
                         {n.message}
                       </p>
                     )}
-
                   </div>
                 </div>
               </Card>
@@ -862,20 +1005,36 @@ function Notifications() {
           {damageDetails?.totals && (
             <div className="grid gap-3 sm:grid-cols-4">
               <div className="rounded-xl border bg-muted/20 p-3">
-                <span className="text-[10px] font-bold uppercase text-muted-foreground block">Total PO Ordered</span>
-                <span className="font-mono text-lg font-black text-foreground">{damageDetails.totals.ordered_qty}</span>
+                <span className="text-[10px] font-bold uppercase text-muted-foreground block">
+                  Total PO Ordered
+                </span>
+                <span className="font-mono text-lg font-black text-foreground">
+                  {damageDetails.totals.ordered_qty}
+                </span>
               </div>
               <div className="rounded-xl border border-amber-300 bg-amber-500/10 p-3">
-                <span className="text-[10px] font-bold uppercase text-amber-800 block">Pending Delivery Qty</span>
-                <span className="font-mono text-lg font-black text-amber-700">{damageDetails.totals.pending_delivery_qty}</span>
+                <span className="text-[10px] font-bold uppercase text-amber-800 block">
+                  Pending Delivery Qty
+                </span>
+                <span className="font-mono text-lg font-black text-amber-700">
+                  {damageDetails.totals.pending_delivery_qty}
+                </span>
               </div>
               <div className="rounded-xl border border-rose-300 bg-rose-500/10 p-3">
-                <span className="text-[10px] font-bold uppercase text-rose-800 block">Replacement Required</span>
-                <span className="font-mono text-lg font-black text-rose-700">{damageDetails.totals.replacement_required_qty}</span>
+                <span className="text-[10px] font-bold uppercase text-rose-800 block">
+                  Replacement Required
+                </span>
+                <span className="font-mono text-lg font-black text-rose-700">
+                  {damageDetails.totals.replacement_required_qty}
+                </span>
               </div>
               <div className="rounded-xl border border-primary/30 bg-primary-soft/10 p-3">
-                <span className="text-[10px] font-bold uppercase text-primary block">Acceptable Outstanding</span>
-                <span className="font-mono text-lg font-black text-primary">{damageDetails.totals.acceptable_qty_outstanding}</span>
+                <span className="text-[10px] font-bold uppercase text-primary block">
+                  Acceptable Outstanding
+                </span>
+                <span className="font-mono text-lg font-black text-primary">
+                  {damageDetails.totals.acceptable_qty_outstanding}
+                </span>
               </div>
             </div>
           )}
@@ -901,23 +1060,28 @@ function Notifications() {
 
             <div className="space-y-4">
               {damageDetails?.items.map((item: any, idx: number) => {
-                const photosToRender = (item.photos && Array.isArray(item.photos) && item.photos.length > 0)
-                  ? item.photos.map((p: string, pIdx: number) => ({
-                      evidenceId: `ev_${idx}_${pIdx}`,
-                      fileName: `damage_evidence_${pIdx + 1}.jpg`,
-                      filePath: p,
-                    }))
-                  : getPhotosForMaterial(item.material, item.itemCode);
+                const photosToRender =
+                  item.photos && Array.isArray(item.photos) && item.photos.length > 0
+                    ? item.photos.map((p: string, pIdx: number) => ({
+                        evidenceId: `ev_${idx}_${pIdx}`,
+                        fileName: `damage_evidence_${pIdx + 1}.jpg`,
+                        filePath: p,
+                      }))
+                    : getPhotosForMaterial(item.material, item.itemCode);
 
                 return (
-                  <div key={idx} className="rounded-2xl border border-border/80 bg-card p-4 space-y-3 shadow-xs">
+                  <div
+                    key={idx}
+                    className="rounded-2xl border border-border/80 bg-card p-4 space-y-3 shadow-xs"
+                  >
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2.5">
                       <div>
                         <span className="font-bold text-foreground text-sm block">
                           {item.material}
                         </span>
                         <span className="text-[10px] text-muted-foreground font-medium">
-                          Category: {item.category || "Raw Materials"} • Reason: <b className="text-rose-600">{item.reason}</b>
+                          Category: {item.category || "Raw Materials"} • Reason:{" "}
+                          <b className="text-rose-600">{item.reason}</b>
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
@@ -928,7 +1092,8 @@ function Notifications() {
                         )}
                         {item.quarantineQrRef && (
                           <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-muted text-foreground border">
-                            <QrCode className="inline size-3 mr-1" />{item.quarantineQrRef}
+                            <QrCode className="inline size-3 mr-1" />
+                            {item.quarantineQrRef}
                           </span>
                         )}
                       </div>
@@ -939,23 +1104,34 @@ function Notifications() {
                       <div className="grid gap-2 sm:grid-cols-5 text-xs bg-muted/20 p-2.5 rounded-xl">
                         <div>
                           <span className="text-[10px] text-muted-foreground block">PO Qty</span>
-                          <span className="font-bold">{item.orderedQty} {item.uom}</span>
+                          <span className="font-bold">
+                            {item.orderedQty} {item.uom}
+                          </span>
                         </div>
                         <div>
                           <span className="text-[10px] text-muted-foreground block">Delivered</span>
-                          <span className="font-bold">{item.currentReceivedQty} ({item.currentGoodQty} Good / <span className="text-rose-600">{item.currentDamagedQty} Dmg</span>)</span>
+                          <span className="font-bold">
+                            {item.currentReceivedQty} ({item.currentGoodQty} Good /{" "}
+                            <span className="text-rose-600">{item.currentDamagedQty} Dmg</span>)
+                          </span>
                         </div>
                         <div>
                           <span className="text-[10px] text-amber-600 block">Pending Delivery</span>
-                          <span className="font-bold text-amber-600">{item.pendingDeliveryQty} {item.uom}</span>
+                          <span className="font-bold text-amber-600">
+                            {item.pendingDeliveryQty} {item.uom}
+                          </span>
                         </div>
                         <div>
                           <span className="text-[10px] text-rose-600 block">Replacement Req.</span>
-                          <span className="font-bold text-rose-600">{item.replacementRequiredQty} {item.uom}</span>
+                          <span className="font-bold text-rose-600">
+                            {item.replacementRequiredQty} {item.uom}
+                          </span>
                         </div>
                         <div>
                           <span className="text-[10px] text-primary block">Acceptable Out.</span>
-                          <span className="font-bold text-primary">{item.acceptableQtyOutstanding} {item.uom}</span>
+                          <span className="font-bold text-primary">
+                            {item.acceptableQtyOutstanding} {item.uom}
+                          </span>
                         </div>
                       </div>
                     )}
@@ -969,10 +1145,12 @@ function Notifications() {
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                           {photosToRender.map((photo: any, pIdx: number) => {
                             const filePath = photo.filePath || photo.file_path || "";
-                            const fileName = photo.fileName || photo.file_name || `damage_photo_${pIdx + 1}.jpg`;
-                            const fullUrl = filePath.startsWith("http") || filePath.startsWith("data:")
-                              ? filePath
-                              : `${BUSINESS_API_URL}${filePath.startsWith("/") ? "" : "/"}${filePath}`;
+                            const fileName =
+                              photo.fileName || photo.file_name || `damage_photo_${pIdx + 1}.jpg`;
+                            const fullUrl =
+                              filePath.startsWith("http") || filePath.startsWith("data:")
+                                ? filePath
+                                : `${BUSINESS_API_URL}${filePath.startsWith("/") ? "" : "/"}${filePath}`;
 
                             return (
                               <div
@@ -987,7 +1165,8 @@ function Notifications() {
                                     className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
                                     onError={(e) => {
                                       const target = e.target as HTMLImageElement;
-                                      target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='%23e11d48' stroke-width='2'%3E%3Crect width='18' height='18' x='3' y='3' rx='2' ry='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/%3E%3C/svg%3E";
+                                      target.src =
+                                        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='%23e11d48' stroke-width='2'%3E%3Crect width='18' height='18' x='3' y='3' rx='2' ry='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/%3E%3C/svg%3E";
                                     }}
                                   />
                                 </div>
@@ -1002,7 +1181,10 @@ function Notifications() {
                       ) : (
                         <div className="flex items-center gap-2 p-3 bg-muted/20 rounded-xl border border-dashed text-xs text-muted-foreground">
                           <Camera className="size-4 text-muted-foreground/50 shrink-0" />
-                          <span>No photo evidence uploaded for this material during receiving inspection.</span>
+                          <span>
+                            No photo evidence uploaded for this material during receiving
+                            inspection.
+                          </span>
                         </div>
                       )}
                     </div>
@@ -1024,7 +1206,8 @@ function Notifications() {
                     window.location.href = `/purchase-order?po_number=${damageDetails.poNumber}`;
                   }}
                 >
-                  <ExternalLink className="mr-1.5 size-3.5" /> View Purchase Order ({damageDetails.poNumber})
+                  <ExternalLink className="mr-1.5 size-3.5" /> View Purchase Order (
+                  {damageDetails.poNumber})
                 </Button>
               )}
               <Button
@@ -1131,20 +1314,36 @@ function Notifications() {
           {grnDetails?.totals && (
             <div className="grid gap-3 sm:grid-cols-4">
               <div className="rounded-xl border bg-muted/20 p-3">
-                <span className="text-[10px] font-bold uppercase text-muted-foreground block">Total PO Ordered</span>
-                <span className="font-mono text-lg font-black text-foreground">{grnDetails.totals.ordered_qty}</span>
+                <span className="text-[10px] font-bold uppercase text-muted-foreground block">
+                  Total PO Ordered
+                </span>
+                <span className="font-mono text-lg font-black text-foreground">
+                  {grnDetails.totals.ordered_qty}
+                </span>
               </div>
               <div className="rounded-xl border border-amber-300 bg-amber-500/10 p-3">
-                <span className="text-[10px] font-bold uppercase text-amber-800 block">Pending Delivery Qty</span>
-                <span className="font-mono text-lg font-black text-amber-700">{grnDetails.totals.pending_delivery_qty}</span>
+                <span className="text-[10px] font-bold uppercase text-amber-800 block">
+                  Pending Delivery Qty
+                </span>
+                <span className="font-mono text-lg font-black text-amber-700">
+                  {grnDetails.totals.pending_delivery_qty}
+                </span>
               </div>
               <div className="rounded-xl border border-rose-300 bg-rose-500/10 p-3">
-                <span className="text-[10px] font-bold uppercase text-rose-800 block">Replacement Required</span>
-                <span className="font-mono text-lg font-black text-rose-700">{grnDetails.totals.replacement_required_qty}</span>
+                <span className="text-[10px] font-bold uppercase text-rose-800 block">
+                  Replacement Required
+                </span>
+                <span className="font-mono text-lg font-black text-rose-700">
+                  {grnDetails.totals.replacement_required_qty}
+                </span>
               </div>
               <div className="rounded-xl border border-primary/30 bg-primary-soft/10 p-3">
-                <span className="text-[10px] font-bold uppercase text-primary block">Acceptable Outstanding</span>
-                <span className="font-mono text-lg font-black text-primary">{grnDetails.totals.acceptable_qty_outstanding}</span>
+                <span className="text-[10px] font-bold uppercase text-primary block">
+                  Acceptable Outstanding
+                </span>
+                <span className="font-mono text-lg font-black text-primary">
+                  {grnDetails.totals.acceptable_qty_outstanding}
+                </span>
               </div>
             </div>
           )}
@@ -1172,20 +1371,41 @@ function Notifications() {
                     {grnDetails.items.map((it: any, iIdx: number) => (
                       <tr key={iIdx} className="hover:bg-muted/10">
                         <td className="p-2.5">
-                          <span className="font-bold text-foreground block">{it.material_name || it.item_code}</span>
-                          <span className="font-mono text-[10px] text-muted-foreground">{it.item_code}</span>
+                          <span className="font-bold text-foreground block">
+                            {it.material_name || it.item_code}
+                          </span>
+                          <span className="font-mono text-[10px] text-muted-foreground">
+                            {it.item_code}
+                          </span>
                         </td>
-                        <td className="p-2.5 text-right font-bold">{it.ordered_qty} {it.uom}</td>
+                        <td className="p-2.5 text-right font-bold">
+                          {it.ordered_qty} {it.uom}
+                        </td>
                         <td className="p-2.5 text-right">
-                          <span className="font-bold text-success">{it.current_good_qty}</span> / <span className="font-bold text-destructive">{it.current_damaged_qty}</span>
+                          <span className="font-bold text-success">{it.current_good_qty}</span> /{" "}
+                          <span className="font-bold text-destructive">
+                            {it.current_damaged_qty}
+                          </span>
                         </td>
-                        <td className="p-2.5 text-right font-mono font-bold text-amber-600">{it.pending_delivery_qty}</td>
-                        <td className="p-2.5 text-right font-mono font-bold text-rose-600">{it.replacement_required_qty}</td>
-                        <td className="p-2.5 text-right font-mono font-bold text-primary">{it.acceptable_qty_outstanding}</td>
+                        <td className="p-2.5 text-right font-mono font-bold text-amber-600">
+                          {it.pending_delivery_qty}
+                        </td>
+                        <td className="p-2.5 text-right font-mono font-bold text-rose-600">
+                          {it.replacement_required_qty}
+                        </td>
+                        <td className="p-2.5 text-right font-mono font-bold text-primary">
+                          {it.acceptable_qty_outstanding}
+                        </td>
                         <td className="p-2.5 font-mono text-[10px]">
                           <div>Batch: {it.batch_number || "N/A"}</div>
-                          {it.standard_qr_ref && <div className="text-teal-600">QR: {it.standard_qr_ref}</div>}
-                          {it.quarantine_qr_ref && <div className="text-rose-600">Quarantine QR: {it.quarantine_qr_ref}</div>}
+                          {it.standard_qr_ref && (
+                            <div className="text-teal-600">QR: {it.standard_qr_ref}</div>
+                          )}
+                          {it.quarantine_qr_ref && (
+                            <div className="text-rose-600">
+                              Quarantine QR: {it.quarantine_qr_ref}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -1219,7 +1439,8 @@ function Notifications() {
                     window.location.href = `/purchase-order?po_number=${grnDetails.poNumber}`;
                   }}
                 >
-                  <ExternalLink className="mr-1.5 size-3.5" /> View Purchase Order ({grnDetails.poNumber})
+                  <ExternalLink className="mr-1.5 size-3.5" /> View Purchase Order (
+                  {grnDetails.poNumber})
                 </Button>
               )}
               <Button
@@ -1261,7 +1482,11 @@ function Notifications() {
               </button>
             </div>
             <div className="mt-3 overflow-hidden rounded-xl bg-black flex items-center justify-center max-h-[70vh]">
-              <img src={enlargedPhoto} alt="Enlarged damage evidence" className="max-h-[70vh] object-contain" />
+              <img
+                src={enlargedPhoto}
+                alt="Enlarged damage evidence"
+                className="max-h-[70vh] object-contain"
+              />
             </div>
           </DialogContent>
         </Dialog>
@@ -1269,7 +1494,3 @@ function Notifications() {
     </AppShell>
   );
 }
-
-
-
-

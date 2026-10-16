@@ -28,7 +28,9 @@ function WarehouseDashboard() {
       <div className="flex h-96 items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="text-sm text-muted-foreground">Redirecting to Warehouse & Inventory Hub...</p>
+          <p className="text-sm text-muted-foreground">
+            Redirecting to Warehouse & Inventory Hub...
+          </p>
         </div>
       </div>
     </AppShell>

@@ -21,12 +21,6 @@ rfq_supplier_link = Table(
     Column("supplier_id", GUID, ForeignKey("supplier.id"), primary_key=True),
     extend_existing=True,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import relationship
-
-from app.database.base import Base
-
-
 class SupplierModel(Base):
     __tablename__ = "supplier"
 
@@ -46,7 +40,6 @@ class SupplierModel(Base):
     remarks: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="Active")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
     updated_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
@@ -256,7 +249,6 @@ class QuotationModel(Base):
     delivery_time: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     expected_delivery_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     payment_terms: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    mode_of_payment: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     warranty: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     quotation_validity: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     remarks: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)

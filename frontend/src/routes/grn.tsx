@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { DamagePhoto } from "@/components/wms/damage-photo";
+import { isValidPersonName, isValidVehicleNumber } from "@/lib/input-validation";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -190,9 +191,8 @@ const GRN_LOCAL_DRAFT_KEY = "grn_wizard_local_draft";
 
 function generateGrnNumber(): string {
   const now = new Date();
-  const date = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
-  const sequence = `${Date.now()}`.slice(-6);
-  return `GRN-${date}-${sequence}`;
+  const year = now.getFullYear();
+  return `GRN-${year}-001`;
 }
 
 function formatCardDate(dateVal?: string | null): string {
@@ -362,14 +362,18 @@ function GrnPageWorkflow() {
 
   const openAsnDocumentCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+      });
       asnCameraStreamRef.current = stream;
       setAsnCameraOpen(true);
       requestAnimationFrame(() => {
         if (asnCameraVideoRef.current) asnCameraVideoRef.current.srcObject = stream;
       });
     } catch {
-      toast.error("Unable to open camera", { description: "Allow camera permission and try again." });
+      toast.error("Unable to open camera", {
+        description: "Allow camera permission and try again.",
+      });
     }
   };
 
@@ -409,7 +413,10 @@ function GrnPageWorkflow() {
           file_path: saved.file_path || saved.filePath || "",
           file_type: file.type,
         };
-        setUploadedDocuments((prev) => [...prev.filter((doc) => !doc.category.toLowerCase().includes("asn")), newDoc]);
+        setUploadedDocuments((prev) => [
+          ...prev.filter((doc) => !doc.category.toLowerCase().includes("asn")),
+          newDoc,
+        ]);
         toast.success(`Saved ASN Copy: ${file.name}`);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Unable to save ASN document.");
@@ -679,7 +686,8 @@ function GrnPageWorkflow() {
           dock_number: match.dock_number,
           dock_name: match.dock_name || match.dock_type || match.dock_number,
           status: match.status,
-          allocation_id: match.current_allocation?.id || match.current_allocation?.allocation_request_id,
+          allocation_id:
+            match.current_allocation?.id || match.current_allocation?.allocation_request_id,
           is_allocated: true,
         };
       }
@@ -715,7 +723,8 @@ function GrnPageWorkflow() {
         dock_number: matched.dock_number,
         dock_name: matched.dock_name || matched.dock_type || matched.dock_number,
         status: matched.status,
-        allocation_id: matched.current_allocation?.id || matched.current_allocation?.allocation_request_id,
+        allocation_id:
+          matched.current_allocation?.id || matched.current_allocation?.allocation_request_id,
         is_allocated: true,
       };
     }
@@ -1088,11 +1097,7 @@ function GrnPageWorkflow() {
 
       setDamagePhotos({});
       const resolvedGrnId =
-        resolvedContext.grn_id ||
-        resolvedContext.grnId ||
-        ctx.grn_id ||
-        ctx.grnId ||
-        null;
+        resolvedContext.grn_id || resolvedContext.grnId || ctx.grn_id || ctx.grnId || null;
       if (resolvedGrnId) {
         setGrnId(String(resolvedGrnId));
         localStorage.setItem("active_grn_id", String(resolvedGrnId));
@@ -1197,7 +1202,7 @@ function GrnPageWorkflow() {
     if (newType === "UNEXPECTED_DELIVERY") {
       const generatedGrn =
         header.grn_number ||
-        `GRN-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, "0")}${String(new Date().getDate()).padStart(2, "0")}-${Math.floor(1000 + Math.random() * 9000)}`;
+        generateGrnNumber();
       setHeader((prev) => ({
         ...prev,
         receipt_type: "UNEXPECTED_DELIVERY",
@@ -1646,10 +1651,10 @@ function GrnPageWorkflow() {
     }
     if (!header.asn_number.trim()) throw new Error("Please enter an ASN on Step 1.");
     if (header.receipt_type === "UNEXPECTED_DELIVERY") {
-      if (!header.vehicle_number.trim()) {
+      if (!isValidVehicleNumber(header.vehicle_number)) {
         throw new Error("Please enter a Vehicle Number for Unexpected Delivery.");
       }
-      if (!header.driver_name.trim()) {
+      if (!isValidPersonName(header.driver_name)) {
         throw new Error("Please enter a Driver Name for Unexpected Delivery.");
       }
     }
@@ -2117,7 +2122,8 @@ function GrnPageWorkflow() {
             grn_line_id: m.grn_line_id,
             item_code: m.item_code,
             accepted_quantity: qualityApproved[grnMaterialKey(m, idx)] ?? m.good_quantity ?? 0,
-            quality_approved_quantity: qualityApproved[grnMaterialKey(m, idx)] ?? m.good_quantity ?? 0,
+            quality_approved_quantity:
+              qualityApproved[grnMaterialKey(m, idx)] ?? m.good_quantity ?? 0,
             good_quantity: qualityApproved[grnMaterialKey(m, idx)] ?? m.good_quantity ?? 0,
             rejected_quantity: m.rejected_quantity || 0,
             damaged_quantity: m.damaged_quantity || 0,
@@ -2174,12 +2180,16 @@ function GrnPageWorkflow() {
             throw new Error("Backend did not return all saved batch records.");
           }
           const persistedBatches = savedBatches.map((entry: any, batchIndex: number) => {
-            const draftBatch = batchesForLine[batchIndex] || { batch_number: "", batch_quantity: 0 };
+            const draftBatch = batchesForLine[batchIndex] || {
+              batch_number: "",
+              batch_quantity: 0,
+            };
             return {
               batch_number:
-              entry?.batch?.batch_number || entry?.batch_number || draftBatch.batch_number,
-              batch_quantity:
-              Number(entry?.batch?.batch_quantity ?? entry?.batch_quantity ?? draftBatch.batch_quantity),
+                entry?.batch?.batch_number || entry?.batch_number || draftBatch.batch_number,
+              batch_quantity: Number(
+                entry?.batch?.batch_quantity ?? entry?.batch_quantity ?? draftBatch.batch_quantity,
+              ),
               batch_id: entry?.batch?.batch_id || entry?.batch_id,
               qr_id: entry?.qr?.qr_id || entry?.qr_id,
               qr_payload: entry?.qr?.qr_payload || entry?.qr_payload,
@@ -2215,13 +2225,10 @@ function GrnPageWorkflow() {
   async function handleProceedFromPage5() {
     {
       const asnDoc = uploadedDocuments.find(
-        (d) =>
-          isPersistedDocument(d) && d.category.toLowerCase().includes("asn"),
+        (d) => isPersistedDocument(d) && d.category.toLowerCase().includes("asn"),
       );
       if (!asnDoc) {
-        toast.error(
-          "ASN document must be uploaded and saved before proceeding.",
-        );
+        toast.error("ASN document must be uploaded and saved before proceeding.");
         return;
       }
     }
@@ -2247,11 +2254,11 @@ function GrnPageWorkflow() {
     const path = String(document.file_path || "");
     const activeGrnId = grnId || localStorage.getItem("active_grn_id") || "";
     const documentId = String(document.document_id || "").trim();
-    const belongsToCurrentGrn =
-      !document.grn_id || !activeGrnId || document.grn_id === activeGrnId;
+    const belongsToCurrentGrn = !document.grn_id || !activeGrnId || document.grn_id === activeGrnId;
     return (
       belongsToCurrentGrn &&
-      ((!["", "undefined", "null"].includes(documentId.toLowerCase()) && !path.startsWith("blob:")) ||
+      ((!["", "undefined", "null"].includes(documentId.toLowerCase()) &&
+        !path.startsWith("blob:")) ||
         Boolean(path && !path.startsWith("blob:")))
     );
   }
@@ -2259,18 +2266,21 @@ function GrnPageWorkflow() {
   useEffect(() => {
     if (currentPage !== 5 || !grnId) return;
     let cancelled = false;
-    void api.getGrnDetail(grnId).then((detail: any) => {
-      if (cancelled || !Array.isArray(detail?.documents)) return;
-      setUploadedDocuments(
-        detail.documents.map((document: any) => ({
-          document_id: document.id || document.document_id,
-          grn_id: document.grn_id || grnId,
-          category: document.document_type || document.category || "Document",
-          file_name: document.file_name || "document.pdf",
-          file_path: document.file_path || document.filePath || "",
-        })),
-      );
-    }).catch(() => undefined);
+    void api
+      .getGrnDetail(grnId)
+      .then((detail: any) => {
+        if (cancelled || !Array.isArray(detail?.documents)) return;
+        setUploadedDocuments(
+          detail.documents.map((document: any) => ({
+            document_id: document.id || document.document_id,
+            grn_id: document.grn_id || grnId,
+            category: document.document_type || document.category || "Document",
+            file_name: document.file_name || "document.pdf",
+            file_path: document.file_path || document.filePath || "",
+          })),
+        );
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -2576,9 +2586,7 @@ function GrnPageWorkflow() {
           : [];
     const lookupIds = Array.from(
       new Set(
-        [record.grn_id, record.id, record.grn_number, record.grnNumber]
-          .filter(Boolean)
-          .map(String),
+        [record.grn_id, record.id, record.grn_number, record.grnNumber].filter(Boolean).map(String),
       ),
     );
     const hasBatchData = linesToRender.some(
@@ -2592,7 +2600,11 @@ function GrnPageWorkflow() {
             const detailLines = fullDetail.lines || fullDetail.materials;
             // Prefer the persisted detail because it contains the exact batch
             // allocations created on the Batch-wise QR Code Generation page.
-            if (detailLines.some((line: any) => Array.isArray(line?.batches) && line.batches.length > 0)) {
+            if (
+              detailLines.some(
+                (line: any) => Array.isArray(line?.batches) && line.batches.length > 0,
+              )
+            ) {
               linesToRender = detailLines;
               record = { ...record, ...fullDetail };
               break;
@@ -2638,19 +2650,28 @@ function GrnPageWorkflow() {
         m.batches && m.batches.length > 0
           ? m.batches
           : m.batch_number || m.batchNumber
-            ? [{ batch_number: m.batch_number || m.batchNumber, batch_quantity: m.batch_quantity ?? m.batchQuantity ?? 0 }]
+            ? [
+                {
+                  batch_number: m.batch_number || m.batchNumber,
+                  batch_quantity: m.batch_quantity ?? m.batchQuantity ?? 0,
+                },
+              ]
             : [
-              {
-                batch_number: `BATCH-${itemCode}-001`,
-                batch_quantity: m.good_quantity ?? m.received_quantity ?? 0,
-              },
-            ];
+                {
+                  batch_number: `BATCH-${itemCode}-001`,
+                  batch_quantity: m.good_quantity ?? m.received_quantity ?? 0,
+                },
+              ];
 
       for (const b of batches) {
         const savedBatch = b.batch || b;
         const batchNum =
-          savedBatch.batch_number || savedBatch.batchNumber || savedBatch.batch_no || savedBatch.batchNo ||
-          savedBatch.lot_number || savedBatch.lotNumber ||
+          savedBatch.batch_number ||
+          savedBatch.batchNumber ||
+          savedBatch.batch_no ||
+          savedBatch.batchNo ||
+          savedBatch.lot_number ||
+          savedBatch.lotNumber ||
           `BATCH-${itemCode}-001`;
         const batchQty =
           savedBatch.batch_quantity !== undefined
@@ -3364,28 +3385,33 @@ function GrnPageWorkflow() {
     let active = true;
 
     if (currentPage === 6 && grnId) {
-      void api.getGrnDetail(grnId).then((detail: any) => {
-        if (!active || !Array.isArray(detail?.lines)) return;
-        setMaterialBatches((previous) => {
-          const next = { ...previous };
-          detail.lines.forEach((line: any, index: number) => {
-            const material = materials.find(
-              (item) =>
-                item.grn_line_id === (line.grn_line_id || line.id) ||
-                item.item_code === (line.item_code || line.material_code),
-            );
-            const key = material ? grnMaterialKey(material, materials.indexOf(material)) : `${line.item_code || line.material_code}:${index}`;
-            const savedBatches = Array.isArray(line.batches) ? line.batches : [];
-            if (savedBatches.length > 0) {
-              next[key] = savedBatches.map((batch: any) => ({
-                batch_number: batch.batch_number,
-                batch_quantity: Number(batch.batch_quantity || 0),
-              }));
-            }
+      void api
+        .getGrnDetail(grnId)
+        .then((detail: any) => {
+          if (!active || !Array.isArray(detail?.lines)) return;
+          setMaterialBatches((previous) => {
+            const next = { ...previous };
+            detail.lines.forEach((line: any, index: number) => {
+              const material = materials.find(
+                (item) =>
+                  item.grn_line_id === (line.grn_line_id || line.id) ||
+                  item.item_code === (line.item_code || line.material_code),
+              );
+              const key = material
+                ? grnMaterialKey(material, materials.indexOf(material))
+                : `${line.item_code || line.material_code}:${index}`;
+              const savedBatches = Array.isArray(line.batches) ? line.batches : [];
+              if (savedBatches.length > 0) {
+                next[key] = savedBatches.map((batch: any) => ({
+                  batch_number: batch.batch_number,
+                  batch_quantity: Number(batch.batch_quantity || 0),
+                }));
+              }
+            });
+            return next;
           });
-          return next;
-        });
-      }).catch(() => undefined);
+        })
+        .catch(() => undefined);
     }
 
     // Ensure EVERY material line item has batches compulsory
@@ -3441,7 +3467,11 @@ function GrnPageWorkflow() {
         for (const m of damagedLines) {
           const exceptionTypes = [
             { key: "DAMAGED", quantity: Number(m.damaged_quantity || 0), reason: m.damage_reason },
-            { key: "REJECTED", quantity: Number(m.rejected_quantity || 0), reason: m.rejected_reason },
+            {
+              key: "REJECTED",
+              quantity: Number(m.rejected_quantity || 0),
+              reason: m.rejected_reason,
+            },
             { key: "QC_HOLD", quantity: Number(m.held_quantity || 0), reason: m.held_reason },
           ].filter((entry) => entry.quantity > 0);
           if (!grnId || ["undefined", "null"].includes(String(grnId).toLowerCase())) continue;
@@ -3449,8 +3479,16 @@ function GrnPageWorkflow() {
             const exceptionMaterial = { ...m, damaged_quantity: entry.quantity };
             const reasonText = entry.reason || "No reason recorded";
             const lotKey = `${header.grn_number || grnId}-${m.item_code}-${entry.key}`;
-            const payload = buildDamageQrPayload(exceptionMaterial, reasonText, entry.key as "DAMAGED" | "REJECTED" | "QC_HOLD");
-            const dataUrl = await QRCode.toDataURL(payload, { margin: 2, width: 500, errorCorrectionLevel: "M" });
+            const payload = buildDamageQrPayload(
+              exceptionMaterial,
+              reasonText,
+              entry.key as "DAMAGED" | "REJECTED" | "QC_HOLD",
+            );
+            const dataUrl = await QRCode.toDataURL(payload, {
+              margin: 2,
+              width: 500,
+              errorCorrectionLevel: "M",
+            });
             damageGenerated.push({
               damage_lot_id: `dmg_lot_${lotKey}`,
               damage_lot_number: `DMG-LOT-${lotKey}`,
@@ -3463,7 +3501,12 @@ function GrnPageWorkflow() {
               quarantine_location: "QUARANTINE-ZONE-A",
               status: entry.key,
               exception_type: entry.key,
-              quantity_label: entry.key === "REJECTED" ? "Rejected Qty" : entry.key === "QC_HOLD" ? "Held Qty" : "Damaged Qty",
+              quantity_label:
+                entry.key === "REJECTED"
+                  ? "Rejected Qty"
+                  : entry.key === "QC_HOLD"
+                    ? "Held Qty"
+                    : "Damaged Qty",
               qr_id: `dmg_qr_${lotKey}`,
               qr_code: `DMG-${lotKey}`,
               qr_payload: payload,
@@ -3476,22 +3519,28 @@ function GrnPageWorkflow() {
           try {
             const savedDamageLots = await api.generateDamageQrs(grnId);
             if (false && Array.isArray(savedDamageLots) && savedDamageLots.length > 0) {
-              damageGenerated.splice(0, damageGenerated.length, ...savedDamageLots.map((lot: any) => ({
-                damage_lot_id: lot.damage_lot_id,
-                damage_lot_number: lot.damage_lot_number,
-                item_code: lot.qr?.item_code || lot.item_code,
-                material_name: materials.find((item) => item.grn_line_id === lot.grn_line_id)?.material_name || "Material",
-                damaged_quantity: Number(lot.damaged_quantity || 0),
-                uom: lot.uom || "PCS",
-                reason: lot.reason || "",
-                qa_status: lot.qa_status || "REJECTED / DAMAGED",
-                quarantine_location: lot.quarantine_location || "",
-                status: lot.status || "DAMAGED",
-                qr_id: lot.qr?.qr_id || lot.damage_lot_id,
-                qr_code: lot.qr?.qr_code || lot.damage_lot_number,
-                qr_payload: lot.qr?.qr_payload || "",
-                qr_data_url: "",
-              })));
+              damageGenerated.splice(
+                0,
+                damageGenerated.length,
+                ...savedDamageLots.map((lot: any) => ({
+                  damage_lot_id: lot.damage_lot_id,
+                  damage_lot_number: lot.damage_lot_number,
+                  item_code: lot.qr?.item_code || lot.item_code,
+                  material_name:
+                    materials.find((item) => item.grn_line_id === lot.grn_line_id)?.material_name ||
+                    "Material",
+                  damaged_quantity: Number(lot.damaged_quantity || 0),
+                  uom: lot.uom || "PCS",
+                  reason: lot.reason || "",
+                  qa_status: lot.qa_status || "REJECTED / DAMAGED",
+                  quarantine_location: lot.quarantine_location || "",
+                  status: lot.status || "DAMAGED",
+                  qr_id: lot.qr?.qr_id || lot.damage_lot_id,
+                  qr_code: lot.qr?.qr_code || lot.damage_lot_number,
+                  qr_payload: lot.qr?.qr_payload || "",
+                  qr_data_url: "",
+                })),
+              );
             }
           } catch (error) {
             console.warn("Could not refresh saved damage lots:", error);
@@ -3526,10 +3575,18 @@ function GrnPageWorkflow() {
     return lines.reduce(
       (totals: { received: number; accounted: number }, line: any, index: number) => {
         const current = materials[index];
-        const received = Number(line.received_quantity ?? line.receivedQuantity ?? current?.received_quantity ?? 0);
-        const accepted = Number(line.good_quantity ?? line.goodQuantity ?? current?.good_quantity ?? 0);
-        const damaged = Number(line.damaged_quantity ?? line.damagedQuantity ?? current?.damaged_quantity ?? 0);
-        const rejected = Number(line.rejected_quantity ?? line.rejectedQuantity ?? current?.rejected_quantity ?? 0);
+        const received = Number(
+          line.received_quantity ?? line.receivedQuantity ?? current?.received_quantity ?? 0,
+        );
+        const accepted = Number(
+          line.good_quantity ?? line.goodQuantity ?? current?.good_quantity ?? 0,
+        );
+        const damaged = Number(
+          line.damaged_quantity ?? line.damagedQuantity ?? current?.damaged_quantity ?? 0,
+        );
+        const rejected = Number(
+          line.rejected_quantity ?? line.rejectedQuantity ?? current?.rejected_quantity ?? 0,
+        );
         const held = Number(line.held_quantity ?? line.heldQuantity ?? current?.held_quantity ?? 0);
         totals.received += received;
         totals.accounted += accepted + damaged + rejected + held;
@@ -3545,34 +3602,34 @@ function GrnPageWorkflow() {
       subtitle="Manage goods receipts, quality checks, and GRN records"
       actions={
         <>
-            {activeTab === "dashboard" && (
-              <>
-                <Button
-                  variant={activeTab === "records" ? "default" : "outline"}
-                  className="rounded-xl"
-                  onClick={() => {
-                    const nextTab = activeTab === "records" ? "dashboard" : "records";
-                    setActiveTab(nextTab);
-                    navigate({ to: "/grn", search: { tab: nextTab, page: 1 } });
-                  }}
-                >
-                  <ClipboardList className="size-4" />{" "}
-                  {activeTab === "records" ? "Dashboard View" : "All GRN Records"}
-                </Button>
-                <Button
-                  className="rounded-xl shadow-glow bg-primary text-primary-foreground font-bold"
-                  onClick={() => {
-                    startNewGrn();
-                    setActiveTab("wizard");
-                    setCurrentPage(1);
-                    navigate({ to: "/grn", search: { tab: "wizard", page: 1 } });
-                  }}
-                >
-                  <Plus className="size-4" /> New GRN Entry
-                </Button>
-              </>
-            )}
-          </>
+          {activeTab === "dashboard" && (
+            <>
+              <Button
+                variant={activeTab === "records" ? "default" : "outline"}
+                className="rounded-xl"
+                onClick={() => {
+                  const nextTab = activeTab === "records" ? "dashboard" : "records";
+                  setActiveTab(nextTab);
+                  navigate({ to: "/grn", search: { tab: nextTab, page: 1 } });
+                }}
+              >
+                <ClipboardList className="size-4" />{" "}
+                {activeTab === "records" ? "Dashboard View" : "All GRN Records"}
+              </Button>
+              <Button
+                className="rounded-xl shadow-glow bg-primary text-primary-foreground font-bold"
+                onClick={() => {
+                  startNewGrn();
+                  setActiveTab("wizard");
+                  setCurrentPage(1);
+                  navigate({ to: "/grn", search: { tab: "wizard", page: 1 } });
+                }}
+              >
+                <Plus className="size-4" /> New GRN Entry
+              </Button>
+            </>
+          )}
+        </>
       }
     >
       {/* 📊 GRN OPERATIONS DASHBOARD TAB */}
@@ -3597,7 +3654,8 @@ function GrnPageWorkflow() {
             const lines = r.lines || r.materials || [];
             for (const l of lines) {
               totalLines += 1;
-              if (l.quality_result || l.qualityResult || l.condition_result || l.conditionResult) inspectedLines += 1;
+              if (l.quality_result || l.qualityResult || l.condition_result || l.conditionResult)
+                inspectedLines += 1;
               const g = Number(l.good_quantity ?? l.goodQuantity ?? 0);
               const d = Number(l.damaged_quantity ?? l.damagedQuantity ?? 0);
               soundUnits += g;
@@ -3616,7 +3674,8 @@ function GrnPageWorkflow() {
           // Health is inspection completion, not the percentage accepted as
           // sound. A completed inspection can legitimately contain damaged,
           // rejected, or held quantities.
-          const healthPercent = totalLines > 0 ? Number(((inspectedLines / totalLines) * 100).toFixed(1)) : 100;
+          const healthPercent =
+            totalLines > 0 ? Number(((inspectedLines / totalLines) * 100).toFixed(1)) : 100;
 
           return (
             <div className="space-y-6">
@@ -3988,6 +4047,8 @@ function GrnPageWorkflow() {
                       const receiptDate = formatCardDate(r.receipt_date || r.created_at);
                       const receivedBy = r.received_by ? `(${r.received_by})` : "";
                       const status = r.status || "COMPLETED";
+                      const allocationId =
+                        r.allocation_id || r.allocation_request_id || r.dock_allocation_id || "";
 
                       return (
                         <Card
@@ -4054,6 +4115,18 @@ function GrnPageWorkflow() {
                                 onClick={() => void viewGrnRecordBatchLabels(r)}
                               >
                                 <QrCode className="mr-1.5 size-3.5 text-primary" /> Batch QR Labels
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={!allocationId}
+                                className="rounded-xl border-amber-300 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                                onClick={() => {
+                                  if (allocationId) setDockReleasePrompt(String(allocationId));
+                                  else toast.error("No active dock allocation found for this GRN.");
+                                }}
+                              >
+                                <DoorOpen className="mr-1.5 size-3.5" /> Dock Release
                               </Button>
                             </div>
 
@@ -4170,7 +4243,7 @@ function GrnPageWorkflow() {
                       )}
                     </label>
                     <Input
-                      placeholder="Enter ASN (e.g. ASN-2026-1)"
+                      placeholder="Enter ASN (e.g. ASN-2026-001)"
                       value={header.asn_number}
                       disabled={busyAction || loadingContext}
                       onChange={(e) => changePoNumber(e.target.value)}
@@ -5087,7 +5160,9 @@ function GrnPageWorkflow() {
                                 key={`${grnId || "draft"}:${m.grn_line_id || m.item_code}`}
                                 lineId={
                                   m.grn_line_id &&
-                                  !["undefined", "null"].includes(String(m.grn_line_id).toLowerCase())
+                                  !["undefined", "null"].includes(
+                                    String(m.grn_line_id).toLowerCase(),
+                                  )
                                     ? String(m.grn_line_id)
                                     : undefined
                                 }
@@ -5132,25 +5207,75 @@ function GrnPageWorkflow() {
                 <div className="overflow-x-auto rounded-xl border">
                   <table className="w-full text-sm text-left">
                     <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
-                      <tr><th className="px-4 py-3">Material</th><th className="px-4 py-3">Exception</th><th className="px-4 py-3 text-right">Quantity</th><th className="px-4 py-3">Reason *</th></tr>
+                      <tr>
+                        <th className="px-4 py-3">Material</th>
+                        <th className="px-4 py-3">Exception</th>
+                        <th className="px-4 py-3 text-right">Quantity</th>
+                        <th className="px-4 py-3">Reason *</th>
+                      </tr>
                     </thead>
                     <tbody className="divide-y">
                       {materials.flatMap((m, idx) => {
                         const rows = [
-                          { kind: "Damaged", qty: Number(m.damaged_quantity || 0), field: "damage_reason" as const },
-                          { kind: "Rejected", qty: Number(m.rejected_quantity || 0), field: "rejected_reason" as const },
-                          { kind: "Held", qty: Number(m.held_quantity || 0), field: "held_reason" as const },
+                          {
+                            kind: "Damaged",
+                            qty: Number(m.damaged_quantity || 0),
+                            field: "damage_reason" as const,
+                          },
+                          {
+                            kind: "Rejected",
+                            qty: Number(m.rejected_quantity || 0),
+                            field: "rejected_reason" as const,
+                          },
+                          {
+                            kind: "Held",
+                            qty: Number(m.held_quantity || 0),
+                            field: "held_reason" as const,
+                          },
                         ].filter((row) => row.qty > 0);
                         return rows.map((row) => (
                           <tr key={`${grnMaterialKey(m, idx)}-${row.kind}`}>
-                            <td className="px-4 py-3 font-semibold">{resolveGrnMaterialCode(m) || "—"} — {m.material_name}</td>
+                            <td className="px-4 py-3 font-semibold">
+                              {resolveGrnMaterialCode(m) || "—"} — {m.material_name}
+                            </td>
                             <td className="px-4 py-3 font-semibold">{row.kind}</td>
-                            <td className="px-4 py-3 text-right font-bold">{row.qty} {m.uom || "PCS"}</td>
-                            <td className="px-4 py-3"><Input placeholder={`${row.kind} reason *`} value={m[row.field] || ""} onChange={(e) => setMaterials((prev) => prev.map((item, i) => i === idx ? { ...item, [row.field]: e.target.value } : item))} className="rounded-xl text-xs" /></td>
+                            <td className="px-4 py-3 text-right font-bold">
+                              {row.qty} {m.uom || "PCS"}
+                            </td>
+                            <td className="px-4 py-3">
+                              <Input
+                                placeholder={`${row.kind} reason *`}
+                                value={m[row.field] || ""}
+                                onChange={(e) =>
+                                  setMaterials((prev) =>
+                                    prev.map((item, i) =>
+                                      i === idx ? { ...item, [row.field]: e.target.value } : item,
+                                    ),
+                                  )
+                                }
+                                className="rounded-xl text-xs"
+                              />
+                            </td>
                           </tr>
                         ));
                       })}
-                      {materials.every((m) => !(Number(m.damaged_quantity || 0) || Number(m.rejected_quantity || 0) || Number(m.held_quantity || 0))) && <tr><td colSpan={4} className="px-4 py-4 text-center text-xs text-muted-foreground">No exception quantities recorded.</td></tr>}
+                      {materials.every(
+                        (m) =>
+                          !(
+                            Number(m.damaged_quantity || 0) ||
+                            Number(m.rejected_quantity || 0) ||
+                            Number(m.held_quantity || 0)
+                          ),
+                      ) && (
+                        <tr>
+                          <td
+                            colSpan={4}
+                            className="px-4 py-4 text-center text-xs text-muted-foreground"
+                          >
+                            No exception quantities recorded.
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -5427,10 +5552,7 @@ function GrnPageWorkflow() {
                     >
                       {customDocTypes.map((cat) => (
                         <option key={cat} value={cat}>
-                          {cat}{" "}
-                          {cat.toLowerCase().includes("asn")
-                            ? "(Required)"
-                            : "(Optional)"}
+                          {cat} {cat.toLowerCase().includes("asn") ? "(Required)" : "(Optional)"}
                         </option>
                       ))}
                     </select>
@@ -5455,7 +5577,10 @@ function GrnPageWorkflow() {
                         return;
                       }
                       const activeGrnId = grnId || localStorage.getItem("active_grn_id");
-                      if (!activeGrnId || ["undefined", "null"].includes(activeGrnId.toLowerCase())) {
+                      if (
+                        !activeGrnId ||
+                        ["undefined", "null"].includes(activeGrnId.toLowerCase())
+                      ) {
                         toast.error("Save the GRN header before uploading documents.");
                         return;
                       }
@@ -5474,12 +5599,15 @@ function GrnPageWorkflow() {
                         formData.append("document_type", selectedDocCategory);
                         formData.append("file", pendingDocFile);
                         const saved = await api.uploadGrnDocument(activeGrnId, formData);
-                      const newDoc: UploadedDocument = {
+                        const newDoc: UploadedDocument = {
                           document_id: saved.document_id || saved.documentId,
                           grn_id: saved.grn_id || saved.grnId || activeGrnId,
                           category: saved.document_type || selectedDocCategory,
                           file_name: saved.file_name || pendingDocFile.name,
-                          file_path: saved.file_path || saved.filePath || URL.createObjectURL(pendingDocFile),
+                          file_path:
+                            saved.file_path ||
+                            saved.filePath ||
+                            URL.createObjectURL(pendingDocFile),
                           file_type: fileType,
                         };
                         setUploadedDocuments((prev) => {
@@ -5500,7 +5628,9 @@ function GrnPageWorkflow() {
                         setPendingDocFile(null);
                         toast.success(`Saved ${newDoc.file_name} under ${newDoc.category}`);
                       } catch (error) {
-                        toast.error(error instanceof Error ? error.message : "Unable to save document.");
+                        toast.error(
+                          error instanceof Error ? error.message : "Unable to save document.",
+                        );
                       } finally {
                         setBusyAction(false);
                       }
@@ -5526,9 +5656,8 @@ function GrnPageWorkflow() {
                   <tbody className="divide-y font-medium">
                     {/* ALWAYS RENDER ASN COMPULSORY ROW FIRST */}
                     {(() => {
-                      const asnDoc = uploadedDocuments.find(
-                        (d) =>
-                          d.category.toLowerCase().includes("asn"),
+                      const asnDoc = uploadedDocuments.find((d) =>
+                        d.category.toLowerCase().includes("asn"),
                       );
                       return (
                         <tr className={!asnDoc ? "bg-rose-50/30" : "hover:bg-muted/10"}>
@@ -5591,17 +5720,48 @@ function GrnPageWorkflow() {
                               </div>
                             ) : (
                               <div>
-                                <Button type="button" className="rounded-xl bg-rose-600 text-xs font-bold hover:bg-rose-700" onClick={() => void openAsnDocumentCamera()}>
+                                <Button
+                                  type="button"
+                                  className="rounded-xl bg-rose-600 text-xs font-bold hover:bg-rose-700"
+                                  onClick={() => void openAsnDocumentCamera()}
+                                >
                                   <Camera className="mr-1 size-3" /> Open Camera *
                                 </Button>
-                                <Dialog open={asnCameraOpen} onOpenChange={(open) => { if (!open) closeAsnDocumentCamera(); }}>
+                                <Dialog
+                                  open={asnCameraOpen}
+                                  onOpenChange={(open) => {
+                                    if (!open) closeAsnDocumentCamera();
+                                  }}
+                                >
                                   <DialogContent className="max-w-xl rounded-2xl p-5">
-                                    <DialogHeader><DialogTitle className="font-black text-primary">Capture ASN Document</DialogTitle></DialogHeader>
+                                    <DialogHeader>
+                                      <DialogTitle className="font-black text-primary">
+                                        Capture ASN Document
+                                      </DialogTitle>
+                                    </DialogHeader>
                                     <div className="space-y-3">
-                                      <video ref={asnCameraVideoRef} autoPlay playsInline className="w-full rounded-xl border bg-black" />
+                                      <video
+                                        ref={asnCameraVideoRef}
+                                        autoPlay
+                                        playsInline
+                                        className="w-full rounded-xl border bg-black"
+                                      />
                                       <div className="flex gap-2">
-                                        <Button type="button" className="flex-1 rounded-xl" onClick={captureAsnDocument}>Capture & Save</Button>
-                                        <Button type="button" variant="outline" className="rounded-xl" onClick={closeAsnDocumentCamera}>Close</Button>
+                                        <Button
+                                          type="button"
+                                          className="flex-1 rounded-xl"
+                                          onClick={captureAsnDocument}
+                                        >
+                                          Capture & Save
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          className="rounded-xl"
+                                          onClick={closeAsnDocumentCamera}
+                                        >
+                                          Close
+                                        </Button>
                                       </div>
                                     </div>
                                   </DialogContent>
@@ -5796,7 +5956,6 @@ function GrnPageWorkflow() {
                               </b>
                             </p>
                           </div>
-
                         </div>
 
                         {bList.length === 0 ? (
@@ -5846,8 +6005,7 @@ function GrnPageWorkflow() {
                                   </div>
 
                                   <div className="text-xs text-left space-y-1 font-mono text-gray-800 border-t pt-2">
-                                    <p>
-                                    </p>
+                                    <p></p>
                                     <p>
                                       <b>GRN Number:</b> {header.grn_number}
                                     </p>
@@ -5872,7 +6030,10 @@ function GrnPageWorkflow() {
                                         <Download className="mr-1 size-3" /> Download QR
                                       </a>
                                     ) : (
-                                      <Button disabled className="w-full rounded-xl text-xs font-bold">
+                                      <Button
+                                        disabled
+                                        className="w-full rounded-xl text-xs font-bold"
+                                      >
                                         <Download className="mr-1 size-3" /> Download QR
                                       </Button>
                                     )}
@@ -6056,7 +6217,8 @@ function GrnPageWorkflow() {
                 <Button variant="outline" className="rounded-xl" onClick={() => handleStepClick(5)}>
                   <ArrowLeft className="mr-2 size-4" /> Back to Step 5
                 </Button>
-                <Button
+                <div className="flex items-center gap-2">
+                  <Button
                   disabled={busyAction}
                   onClick={async () => {
                     setBusyAction(true);
@@ -6095,7 +6257,7 @@ function GrnPageWorkflow() {
 
                       const grnNumber =
                         header.grn_number ||
-                        `GRN-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, "0")}${String(new Date().getDate()).padStart(2, "0")}-${Math.floor(1000 + Math.random() * 9000)}`;
+                        generateGrnNumber();
 
                       const newRecord = {
                         grn_id: grnId || grnNumber,
@@ -6112,6 +6274,7 @@ function GrnPageWorkflow() {
                         receipt_date: new Date().toISOString().split("T")[0],
                         created_at: new Date().toISOString(),
                         received_by: loggedInUserName || "Warehouse Officer",
+                        allocation_id: allocatedDockInfo?.allocation_id || "",
                         materials: processedMaterials,
                       };
 
@@ -6121,7 +6284,8 @@ function GrnPageWorkflow() {
                           grnId || grnNumber,
                           `Status: ${computedStatus} - Posted from GRN Console`,
                         );
-                        persistedStatus = postedGrn?.status || postedGrn?.grn?.status || computedStatus;
+                        persistedStatus =
+                          postedGrn?.status || postedGrn?.grn?.status || computedStatus;
                       }
                       newRecord.status = persistedStatus;
 
@@ -6172,7 +6336,8 @@ function GrnPageWorkflow() {
                       <ShieldCheck className="size-5" /> COMPLETE & POST GOODS RECEIVING
                     </>
                   )}
-                </Button>
+                  </Button>
+                </div>
               </div>
             </Card>
           )}
@@ -6184,10 +6349,12 @@ function GrnPageWorkflow() {
           <DialogContent className="w-[min(96vw,1100px)] max-w-none rounded-2xl p-0 overflow-hidden">
             <DialogHeader className="border-b px-5 py-4 text-left">
               <DialogTitle className="flex items-center gap-2 text-lg font-bold">
-                <QrCode className="size-5 text-primary" /> Batch QR Labels ({historyQrLabels.length})
+                <QrCode className="size-5 text-primary" /> Batch QR Labels ({historyQrLabels.length}
+                )
               </DialogTitle>
               <DialogDescription>
-                {historyQrLabels.length} batch QR label{historyQrLabels.length === 1 ? "" : "s"} generated for this GRN. Download any label when needed.
+                {historyQrLabels.length} batch QR label{historyQrLabels.length === 1 ? "" : "s"}{" "}
+                generated for this GRN. Download any label when needed.
               </DialogDescription>
             </DialogHeader>
             <div className="max-h-[75vh] overflow-y-auto p-5">
@@ -6359,8 +6526,8 @@ function GrnPageWorkflow() {
         <Dialog open={manualScanInputOpen} onOpenChange={setManualScanInputOpen}>
           <DialogContent className="sm:max-w-md rounded-2xl p-6 space-y-4">
             <DialogHeader>
-                <DialogTitle className="text-base font-bold flex items-center gap-2">
-                  <QrCode className="size-5 text-primary" /> Paste Material QR Before Putaway
+              <DialogTitle className="text-base font-bold flex items-center gap-2">
+                <QrCode className="size-5 text-primary" /> Paste Material QR Before Putaway
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
                 Paste or scan the received material QR after dock GRN and before forklift putaway.
@@ -6515,8 +6682,8 @@ function GrnPageWorkflow() {
                 Procurement
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
-                Publishes the damage return in the supplier application for {header.supplier_name} to review.
-                and alerts the internal Procurement team in KaizenAssests.
+                Publishes the damage return in the supplier application for {header.supplier_name}{" "}
+                to review. and alerts the internal Procurement team in KaizenAssests.
               </DialogDescription>
             </DialogHeader>
 
@@ -6828,7 +6995,8 @@ function GrnPageWorkflow() {
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
                 <span>
-                  {selectedReconciliation.received > 0 && selectedReconciliation.accounted === selectedReconciliation.received
+                  {selectedReconciliation.received > 0 &&
+                  selectedReconciliation.accounted === selectedReconciliation.received
                     ? `✓ RECEIVED QUANTITY RECONCILED: ${selectedReconciliation.accounted} ${materials.find((m) => Number(m.received_quantity ?? m.receivedQuantity ?? 0) === selectedReconciliation.received)?.uom || materials[0]?.uom || "PCS"} accounted across accepted, rejected, damaged, and held quantities.`
                     : `⚠ RECONCILIATION PENDING: ${Math.max(0, selectedReconciliation.received - selectedReconciliation.accounted)} ${materials.find((m) => Number(m.received_quantity ?? m.receivedQuantity ?? 0) === selectedReconciliation.received)?.uom || materials[0]?.uom || "PCS"} unaccounted.`}
                 </span>
@@ -6932,7 +7100,10 @@ function GrnPageWorkflow() {
                         const goodQty = rawGoodQty > 0 ? rawGoodQty : currentGoodQty;
                         const damQty = rawDamQty > 0 ? rawDamQty : currentDamQty;
                         const rejectedQty = Number(
-                          m.rejected_quantity ?? m.rejectedQuantity ?? currentMaterial?.rejected_quantity ?? 0,
+                          m.rejected_quantity ??
+                            m.rejectedQuantity ??
+                            currentMaterial?.rejected_quantity ??
+                            0,
                         );
                         const heldQty = Number(
                           m.held_quantity ?? m.heldQuantity ?? currentMaterial?.held_quantity ?? 0,
@@ -7290,7 +7461,6 @@ function GrnPageWorkflow() {
                   >
                     Close Viewer
                   </Button>
-
                 </div>
               </DialogContent>
             </Dialog>
@@ -7298,28 +7468,46 @@ function GrnPageWorkflow() {
         })()}
 
       {dockReleasePrompt && (
-        <Dialog open={!!dockReleasePrompt} onOpenChange={(open) => !open && setDockReleasePrompt(null)}>
+        <Dialog
+          open={!!dockReleasePrompt}
+          onOpenChange={(open) => !open && setDockReleasePrompt(null)}
+        >
           <DialogContent className="max-w-md rounded-2xl p-6">
             <DialogHeader>
               <DialogTitle className="font-black text-primary">Release Dock</DialogTitle>
-              <DialogDescription>Goods receiving is complete. Release the occupied dock now.</DialogDescription>
+              <DialogDescription>
+                Goods receiving is complete. Release the occupied dock now.
+              </DialogDescription>
             </DialogHeader>
             <div className="flex justify-end gap-2 pt-3">
-              <Button variant="outline" className="rounded-xl" onClick={() => setDockReleasePrompt(null)}>Later</Button>
-              <Button className="rounded-xl" onClick={async () => {
-                try {
-                  setBusyAction(true);
-                  await api.completeDockReceiving(dockReleasePrompt);
-                  await api.releaseDock(dockReleasePrompt);
-                  setDockReleasePrompt(null);
-                  setDockReleasedAlert(true);
-                  window.dispatchEvent(new CustomEvent("notifications:refresh"));
-                } catch (error: any) {
-                  toast.error("Unable to release dock", { description: error?.message || "Try again." });
-                } finally {
-                  setBusyAction(false);
-                }
-              }}>Release Dock</Button>
+              <Button
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => setDockReleasePrompt(null)}
+              >
+                Later
+              </Button>
+              <Button
+                className="rounded-xl"
+                onClick={async () => {
+                  try {
+                    setBusyAction(true);
+                    await api.completeDockReceiving(dockReleasePrompt);
+                    await api.releaseDock(dockReleasePrompt);
+                    setDockReleasePrompt(null);
+                    setDockReleasedAlert(true);
+                    window.dispatchEvent(new CustomEvent("notifications:refresh"));
+                  } catch (error: any) {
+                    toast.error("Unable to release dock", {
+                      description: error?.message || "Try again.",
+                    });
+                  } finally {
+                    setBusyAction(false);
+                  }
+                }}
+              >
+                Release Dock
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -7328,13 +7516,17 @@ function GrnPageWorkflow() {
       <Dialog open={dockReleasedAlert} onOpenChange={setDockReleasedAlert}>
         <DialogContent className="max-w-md rounded-2xl p-6">
           <DialogHeader>
-            <DialogTitle className="font-black text-emerald-600">Dock Released Successfully</DialogTitle>
+            <DialogTitle className="font-black text-emerald-600">
+              Dock Released Successfully
+            </DialogTitle>
             <DialogDescription>
               The dock is now available. The next vehicle can enter.
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end pt-3">
-            <Button className="rounded-xl" onClick={() => setDockReleasedAlert(false)}>OK</Button>
+            <Button className="rounded-xl" onClick={() => setDockReleasedAlert(false)}>
+              OK
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

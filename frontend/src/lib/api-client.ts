@@ -174,7 +174,7 @@ export const api = {
   }> {
     if (username.startsWith("supplier_") || username === "supplier") {
       const response = await request<any>(
-        `${BUSINESS_API_URL}/api/v1/procurement/auth/supplier-login`,
+        `${BUSINESS_API_URL}/api/v1/auth/supplier-login`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -254,7 +254,7 @@ export const api = {
   },
 
   async changePassword(data: any): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/auth/change-password`, {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/auth/change-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -262,7 +262,7 @@ export const api = {
   },
 
   async magicLogin(token: string): Promise<any> {
-    const response = await request<any>(`${BUSINESS_API_URL}/api/v1/procurement/auth/magic-login`, {
+    const response = await request<any>(`${BUSINESS_API_URL}/api/v1/auth/magic-login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token }),
@@ -291,7 +291,7 @@ export const api = {
 
   async verifyMagicToken(token: string): Promise<any> {
     return request<any>(
-      `${BUSINESS_API_URL}/api/v1/procurement/auth/verify-magic-token?token=${encodeURIComponent(token)}`,
+      `${BUSINESS_API_URL}/api/v1/auth/verify-magic-token?token=${encodeURIComponent(token)}`,
     );
   },
 
@@ -320,11 +320,25 @@ export const api = {
       body: formData,
     });
   },
-  async createFinishedGoodsPickupGateEntry(payload: { request_number: string; vehicle_number: string; driver_name: string; driver_contact: string }): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/gate-entries/finished-goods-pickup`, { method: "POST", body: JSON.stringify(payload) });
+  async createFinishedGoodsPickupGateEntry(payload: {
+    request_number: string;
+    vehicle_number: string;
+    driver_name: string;
+    driver_contact: string;
+  }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/gate-entries/finished-goods-pickup`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
-  async completeFinishedGoodsPickupGateExit(gatePassNumber: string, payload: { vehicle_number: string; driver_name: string; documents_verified: boolean }): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/gate-entries/finished-goods-pickup/${encodeURIComponent(gatePassNumber)}/exit`, { method: "POST", body: JSON.stringify(payload) });
+  async completeFinishedGoodsPickupGateExit(
+    gatePassNumber: string,
+    payload: { vehicle_number: string; driver_name: string; documents_verified: boolean },
+  ): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/gate-entries/finished-goods-pickup/${encodeURIComponent(gatePassNumber)}/exit`,
+      { method: "POST", body: JSON.stringify(payload) },
+    );
   },
 
   async getDocks(
@@ -958,27 +972,6 @@ export const api = {
     }
   },
 
-  async scanOcr(file: File, kind = "general"): Promise<any> {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("kind", kind);
-    return request<any>(`${BUSINESS_API_URL}/api/gate-entries/scan-ocr`, {
-      method: "POST",
-      body: formData,
-    });
-  },
-
-  async previewPoOcr(base64Image: string, poNumberOverride?: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/gate/po-ocr-preview`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        documentImageBase64: base64Image,
-        poNumberOverride: poNumberOverride,
-      }),
-    });
-  },
-
   // Returns Use Cases
   async createReturn(
     lines: { itemCode: string; quantity: number; reason: string }[],
@@ -1034,23 +1027,11 @@ export const api = {
     vendor_type?: string;
     status?: string;
   }): Promise<any[]> {
-    let url = `${BUSINESS_API_URL}/api/v1/procurement/suppliers`;
-    if (filters) {
-      const params = new URLSearchParams();
-      if (filters.search) params.append("search", filters.search);
-      if (filters.category) params.append("category", filters.category);
-      if (filters.material) params.append("material", filters.material);
-      if (filters.city) params.append("city", filters.city);
-      if (filters.vendor_type) params.append("vendor_type", filters.vendor_type);
-      if (filters.status) params.append("status", filters.status);
-      const query = params.toString();
-      if (query) url += `?${query}`;
-    }
-    return request<any[]>(url);
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/procurement/suppliers`).catch(() => []);
   },
 
   async getSupplier(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/suppliers/${id}`);
+    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/suppliers/${id}`).catch(() => null);
   },
 
   async updateSupplier(id: string, data: any): Promise<any> {
@@ -1399,15 +1380,11 @@ export const api = {
   },
 
   async getAsns(supplierId?: string): Promise<any[]> {
-    try {
-      const url = supplierId
-        ? `${BUSINESS_API_URL}/api/gate/expected-deliveries?supplier_id=${supplierId}`
-        : `${BUSINESS_API_URL}/api/gate/expected-deliveries`;
-      const res = await request<any[]>(url, { cache: "no-store" });
-      return Array.isArray(res) ? res : [];
-    } catch {
-      return [];
-    }
+    const url = supplierId
+      ? `${BUSINESS_API_URL}/api/gate/expected-deliveries?supplier_id=${encodeURIComponent(supplierId)}`
+      : `${BUSINESS_API_URL}/api/gate/expected-deliveries`;
+    const res = await request<any[]>(url, { cache: "no-store" });
+    return Array.isArray(res) ? res : [];
   },
 
   async getSupplierReplacementRequests(): Promise<any[]> {
@@ -1443,20 +1420,35 @@ export const api = {
     });
   },
 
-  async downloadAsnPdf(id: string): Promise<void> {
-    const response = await fetch(`${BUSINESS_API_URL}/api/gate/asns/${encodeURIComponent(id)}/pdf`, {
-      headers: getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {},
-    });
+  async downloadAsnPdf(id: string, fileName?: string): Promise<void> {
+    const response = await fetch(
+      `${BUSINESS_API_URL}/api/gate/asns/${encodeURIComponent(id)}/pdf`,
+      {
+        headers: getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {},
+      },
+    );
     if (!response.ok) throw new Error("Failed to download ASN PDF");
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `${id}.pdf`;
+    anchor.download = `${fileName || id}.pdf`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
+  },
+
+  async cancelAsn(id: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/gate/asns/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+    });
+  },
+
+  async deleteAsn(id: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/gate/asns/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
   },
 
   async getArrivalNotifications(): Promise<any[]> {
@@ -1485,25 +1477,18 @@ export const api = {
   },
 
   async getNextAsnNumber(): Promise<{ asnNumber: string }> {
-    const pendingKey = "kaizen-pending-asn-number-v2";
-    // A pending number may belong to a previous database lifecycle. Never use
-    // it to generate a new ASN after records have been cleared.
-    if (typeof window !== "undefined") window.localStorage.removeItem(pendingKey);
     try {
-      // The database is authoritative. Do not reuse a cached pending number,
-      // because it can survive a backend data reset and skip the new sequence.
+      // This is display-only preview data. Final ASN allocation happens inside
+      // the create endpoint and is never persisted when the form is opened.
       const result = await request<any>(`${BUSINESS_API_URL}/api/gate/asns/next-number`);
-      if (typeof window !== "undefined" && result?.asnNumber) {
-        window.localStorage.setItem(pendingKey, result.asnNumber);
-      }
       return result;
     } catch {
       throw new Error("Unable to retrieve the next ASN number from the backend.");
     }
   },
 
-  async getMaterialComponents(): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/gate/materials`);
+  async getMaterialComponents(status: string = "ACTIVE"): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/gate/materials?status=${encodeURIComponent(status)}`);
     /*
       { code: "MAT-RAD-001", name: "SKID MOUNTED RADIATOR", category: "Heavy Components", uom: "PCS" },
       { code: "MAT-ECP-002", name: "ENGINE CONTROL PANEL", category: "Control Systems", uom: "PCS" },
@@ -1530,12 +1515,24 @@ export const api = {
     ]; */
   },
 
-  async createMaterialComponent(name: string, uom: string = "PCS"): Promise<any> {
+  async createMaterialComponent(name: string, uom: string = "PCS", materialCode?: string, category = "General", description = ""): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/gate/materials`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, uom }),
+      body: JSON.stringify({ name, uom, material_code: materialCode, category, description }),
     });
+  },
+
+  async updateGateMaterial(id: string, data: any): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+  },
+
+  async updateGateMaterialStatus(id: string, status: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+  },
+
+  async deleteGateMaterial(id: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
   async getNextMaterialRequestNumber(): Promise<{
@@ -1577,26 +1574,16 @@ export const api = {
     searchOrParams?: string | { search?: string; supplierId?: string },
     signal?: AbortSignal,
   ): Promise<any[]> {
-    let url = `${BUSINESS_API_URL}/api/v1/procurement/purchase-orders`;
-    const params = new URLSearchParams();
-    if (typeof searchOrParams === "string" && searchOrParams) {
-      params.append("search", searchOrParams);
-    } else if (typeof searchOrParams === "object" && searchOrParams) {
-      if (searchOrParams.search) params.append("search", searchOrParams.search);
-      if (searchOrParams.supplierId) params.append("supplier_id", searchOrParams.supplierId);
-    }
-    const qStr = params.toString();
-    if (qStr) url += `?${qStr}`;
-    return request<any[]>(url, { cache: "no-store", signal });
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/procurement/purchase-orders`, { cache: "no-store", signal }).catch(() => []);
   },
 
   async getPurchaseOrder(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/purchase-orders/${id}`);
+    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/purchase-orders/${id}`).catch(() => null);
   },
   async getPurchaseOrderByNumber(poNumber: string): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/v1/procurement/purchase-orders/by-number/${encodeURIComponent(poNumber)}`,
-    );
+    ).catch(() => null);
   },
   async getPoDamagedGoods(poIdentifier: string): Promise<any> {
     return request<any>(
@@ -1727,15 +1714,6 @@ export const api = {
         headers: { "Content-Type": "application/json" },
       },
     );
-  },
-
-  subscribeNotifications(role: string, onChange: () => void): () => void {
-    const wsBase = BUSINESS_API_URL.replace(/^http/, "ws");
-    const socket = new WebSocket(`${wsBase}/api/v1/notifications/ws?role=${encodeURIComponent(role)}`);
-    socket.onmessage = () => onChange();
-    socket.onerror = () => socket.close();
-    const fallback = window.setInterval(onChange, 30000);
-    return () => { window.clearInterval(fallback); socket.close(); };
   },
 
   async markNotificationRead(_id: string): Promise<any> {
@@ -2073,12 +2051,10 @@ export const api = {
     status?: string;
     warehouse_id?: string;
   }): Promise<any[]> {
-    const params = new URLSearchParams();
-    if (filters?.search) params.append("search", filters.search);
-    if (filters?.status) params.append("status", filters.status);
-    if (filters?.warehouse_id) params.append("warehouse_id", filters.warehouse_id);
-    const query = params.toString();
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/stores${query ? `?${query}` : ""}`);
+    // The standalone Store Manager API was removed, so do not call the
+    // deleted /api/v1/stores endpoint.
+    void filters;
+    return [];
   },
   async getStoreMasterList(filters?: {
     search?: string;
@@ -2499,9 +2475,12 @@ export const api = {
     );
   },
   async verifyHandlingUnitLabel(scanValue: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/storage/putaway-tasks/handling-units/${encodeURIComponent(scanValue)}/verify-label`, {
-      method: "POST",
-    });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/storage/putaway-tasks/handling-units/${encodeURIComponent(scanValue)}/verify-label`,
+      {
+        method: "POST",
+      },
+    );
   },
   async getStorageLocations(warehouseId?: string): Promise<any[]> {
     const q = warehouseId ? `?warehouse_id=${encodeURIComponent(warehouseId)}` : "";
@@ -2611,33 +2590,6 @@ export const api = {
   },
   async getWarehouseDashboardMetrics(): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/dashboard-metrics`);
-  },
-  async getQuarantineRecords(params?: {
-    status?: string;
-    material?: string;
-    grn?: string;
-    search?: string;
-  }): Promise<any[]> {
-    const query = new URLSearchParams();
-    if (params?.status && params.status !== "ALL") query.append("status", params.status);
-    if (params?.material) query.append("material", params.material);
-    if (params?.grn) query.append("grn", params.grn);
-    if (params?.search) query.append("search", params.search);
-    const qs = query.toString() ? `?${query.toString()}` : "";
-    return request<any[]>(`${BUSINESS_API_URL}/api/quarantine${qs}`);
-  },
-  async getQuarantineRecord(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/quarantine/${encodeURIComponent(id)}`);
-  },
-  async reviewQuarantineRecord(
-    id: string,
-    data: { disposition: string; remarks?: string },
-  ): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/quarantine/${encodeURIComponent(id)}/review`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
   },
   async getPickupTasks(params?: {
     store_code?: string;
@@ -2962,36 +2914,6 @@ export const api = {
       : `${BUSINESS_API_URL}/api/dispatches`;
     return request<{ items: any[]; total: number }>(url, { cache: "no-store" });
   },
-  async getEligibleCustomerOrders(): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/customer-orders/eligible`, {
-      cache: "no-store",
-    });
-  },
-  async getCustomerOrders(): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/customer-orders`, { cache: "no-store" });
-  },
-  async getCustomerOrderProducts(): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/customer-orders/products`, {
-      cache: "no-store",
-    });
-  },
-  async getCustomerOrderFinishedGoods(): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/customer-orders/finished-goods`, {
-      cache: "no-store",
-    });
-  },
-  async createCustomerOrder(payload: any): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/customer-orders`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  },
-  async confirmCustomerOrder(id: string): Promise<any> {
-    return request<any>(
-      `${BUSINESS_API_URL}/api/customer-orders/${encodeURIComponent(id)}/confirm`,
-      { method: "POST" },
-    );
-  },
   async getDispatch(id: string): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/dispatches/${id}`, { cache: "no-store" });
   },
@@ -3274,16 +3196,26 @@ export const api = {
       },
     );
   },
-  async approveAssemblyMaterialRequest(requestId: string, payload?: { approved_items?: Array<{ material_code: string; approved_quantity: number }>; remarks?: string }): Promise<any> {
+  async approveAssemblyMaterialRequest(
+    requestId: string,
+    payload?: {
+      approved_items?: Array<{ material_code: string; approved_quantity: number }>;
+      remarks?: string;
+    },
+  ): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/v1/assembly/material-requests/${encodeURIComponent(requestId)}/approve`,
       { method: "POST", body: JSON.stringify(payload || {}) },
     );
   },
   async rejectAssemblyMaterialRequest(requestId: string, reason: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/material-requests/${encodeURIComponent(requestId)}/reject`, {
-      method: "POST", body: JSON.stringify({ reason }),
-    });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/material-requests/${encodeURIComponent(requestId)}/reject`,
+      {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      },
+    );
   },
   async warehouseIssueMaterials(requestId: string, payload?: { remarks?: string }): Promise<any> {
     return request<any>(
@@ -3297,7 +3229,11 @@ export const api = {
   async confirmAssemblyMaterialReceipt(
     requestId: string,
     payload?: {
-      received_items?: Array<{ material_code: string; received_quantity: number; material_scan?: string }>;
+      received_items?: Array<{
+        material_code: string;
+        received_quantity: number;
+        material_scan?: string;
+      }>;
       remarks?: string;
     },
   ): Promise<any> {
@@ -3335,7 +3271,13 @@ export const api = {
   },
   async completeAssemblyProduction(
     orderId: string,
-    payload: { produced_quantity: number; notes?: string; wastage_quantity?: number; wastage_material_code?: string; wastage_reason?: string },
+    payload: {
+      produced_quantity: number;
+      notes?: string;
+      wastage_quantity?: number;
+      wastage_material_code?: string;
+      wastage_reason?: string;
+    },
   ): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}/complete-production`,
@@ -3397,23 +3339,47 @@ export const api = {
     fifo_oldest_completion?: string | null;
     assembly_location: string;
   }> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/finished-goods/inventory-summary`, { cache: "no-store" });
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/finished-goods/inventory-summary`, {
+      cache: "no-store",
+    });
   },
   async createSupplierFinishedGoodsDispatchRequest(payload: {
-    product_code: string; product_name: string; quantity: number; uom?: string;
-    vehicle_number: string; driver_name: string; driver_contact: string;
-    expected_pickup_date: string; remarks?: string;
+    product_code: string;
+    product_name: string;
+    quantity: number;
+    uom?: string;
+    vehicle_number: string;
+    driver_name: string;
+    driver_contact: string;
+    expected_pickup_date: string;
+    remarks?: string;
   }): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/supplier/finished-goods-dispatch-requests`, { method: "POST", body: JSON.stringify(payload) });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/supplier/finished-goods-dispatch-requests`,
+      { method: "POST", body: JSON.stringify(payload) },
+    );
   },
   async getSupplierFinishedGoodsDispatchRequests(): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/supplier/finished-goods-dispatch-requests`, { cache: "no-store" });
+    return request<any[]>(
+      `${BUSINESS_API_URL}/api/v1/assembly/supplier/finished-goods-dispatch-requests`,
+      { cache: "no-store" },
+    );
   },
   async allocateSupplierFinishedGoodsFifo(requestId: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/supplier/finished-goods-dispatch-requests/${encodeURIComponent(requestId)}/allocate-fifo`, { method: "POST", body: JSON.stringify({}) });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/supplier/finished-goods-dispatch-requests/${encodeURIComponent(requestId)}/allocate-fifo`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
   },
-  async scanAllocatedFinishedGoods(dispatchId: string, qrCode: string, quantity: number): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/dispatch/${encodeURIComponent(dispatchId)}/scan-finished-goods`, { method: "POST", body: JSON.stringify({ qr_code: qrCode, quantity }) });
+  async scanAllocatedFinishedGoods(
+    dispatchId: string,
+    qrCode: string,
+    quantity: number,
+  ): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/dispatch/${encodeURIComponent(dispatchId)}/scan-finished-goods`,
+      { method: "POST", body: JSON.stringify({ qr_code: qrCode, quantity }) },
+    );
   },
   async getAssemblyFinishedGoodsDetail(fgId: string): Promise<AssemblyFinishedGoodDetail> {
     return request<AssemblyFinishedGoodDetail>(
@@ -3424,10 +3390,13 @@ export const api = {
     );
   },
   async verifyAssemblyFinishedGoodsQr(fgId: string, qrCode: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/finished-goods/${encodeURIComponent(fgId)}/verify-qr`, {
-      method: "POST",
-      body: JSON.stringify({ qr_code: qrCode }),
-    });
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/assembly/finished-goods/${encodeURIComponent(fgId)}/verify-qr`,
+      {
+        method: "POST",
+        body: JSON.stringify({ qr_code: qrCode }),
+      },
+    );
   },
   async allocateAssemblyFinishedGoodsFifo(dispatchId: string): Promise<any> {
     return request<any>(

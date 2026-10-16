@@ -320,7 +320,7 @@ export function WarehouseForklift({
               <cylinderGeometry args={[0.036, 0.04, 1.45, 12]} />
               <meshStandardMaterial color="#0f172a" metalness={0.8} roughness={0.25} />
             </mesh>
-          ))
+          )),
         )}
 
         {/* Heavy Overhead Welded Steel Safety Protective Canopy */}
@@ -359,11 +359,7 @@ export function WarehouseForklift({
             </mesh>
             <mesh position={[0, 0, 0.042]}>
               <planeGeometry args={[0.1, 0.08]} />
-              <meshStandardMaterial
-                color="#ffffff"
-                emissive="#38bdf8"
-                emissiveIntensity={4.0}
-              />
+              <meshStandardMaterial color="#ffffff" emissive="#38bdf8" emissiveIntensity={4.0} />
             </mesh>
             {/* Forward Illumination Beam */}
             <pointLight
@@ -378,7 +374,11 @@ export function WarehouseForklift({
 
         {/* ─── DUAL PANORAMIC REARVIEW MIRRORS ─── */}
         {[-0.62, 0.62].map((mx, idx) => (
-          <group key={`mirror-${idx}`} position={[mx, 0.52, 0.62]} rotation={[0, mx > 0 ? -0.4 : 0.4, 0]}>
+          <group
+            key={`mirror-${idx}`}
+            position={[mx, 0.52, 0.62]}
+            rotation={[0, mx > 0 ? -0.4 : 0.4, 0]}
+          >
             {/* Bracket */}
             <mesh>
               <boxGeometry args={[0.08, 0.02, 0.02]} />
@@ -390,7 +390,10 @@ export function WarehouseForklift({
               <meshStandardMaterial color="#090d16" roughness={0.5} />
             </mesh>
             {/* Reflective Mirror Glass */}
-            <mesh position={[mx > 0 ? 0.056 : -0.056, 0, 0]} rotation={[0, mx > 0 ? Math.PI / 2 : -Math.PI / 2, 0]}>
+            <mesh
+              position={[mx > 0 ? 0.056 : -0.056, 0, 0]}
+              rotation={[0, mx > 0 ? Math.PI / 2 : -Math.PI / 2, 0]}
+            >
               <planeGeometry args={[0.08, 0.16]} />
               <meshStandardMaterial color="#ffffff" metalness={0.98} roughness={0.05} />
             </mesh>
@@ -509,16 +512,9 @@ export function WarehouseForklift({
               <meshStandardMaterial color="#090d16" metalness={0.8} roughness={0.3} />
             </mesh>
             {/* Mirror Chrome High-Pressure Piston Shaft */}
-            <mesh
-              ref={idx === 0 ? leftPistonRef : rightPistonRef}
-              position={[0, 0.9, 0]}
-            >
+            <mesh ref={idx === 0 ? leftPistonRef : rightPistonRef} position={[0, 0.9, 0]}>
               <cylinderGeometry args={[0.026, 0.026, 1.5, 16]} />
-              <meshStandardMaterial
-                color="#ffffff"
-                metalness={0.98}
-                roughness={0.04}
-              />
+              <meshStandardMaterial color="#ffffff" metalness={0.98} roughness={0.04} />
             </mesh>
           </group>
         ))}

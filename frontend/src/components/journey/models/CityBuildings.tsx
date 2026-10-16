@@ -49,8 +49,30 @@ function BuildingParts({
 }
 
 function StreetLights() {
-  const positions = [-30, 0, 30].flatMap((z) => [[-108, z], [108, z]]);
-  return <>{positions.map(([x, z]) => <group key={`${x}-${z}`} position={[x, 0, z]}><mesh position={[0, 2.2, 0]} castShadow><cylinderGeometry args={[0.06, 0.09, 4.4, 8]} /><meshStandardMaterial color="#334155" metalness={0.7} roughness={0.35} /></mesh><mesh position={[x < 0 ? 0.38 : -0.38, 4.35, 0]} rotation={[0, 0, x < 0 ? -0.35 : 0.35]}><boxGeometry args={[0.8, 0.08, 0.08]} /><meshStandardMaterial color="#475569" /></mesh><mesh position={[x < 0 ? 0.72 : -0.72, 4.22, 0]}><sphereGeometry args={[0.16, 12, 8]} /><meshStandardMaterial color="#fef3c7" emissive="#fbbf24" emissiveIntensity={2.2} /></mesh></group>)}</>;
+  const positions = [-30, 0, 30].flatMap((z) => [
+    [-108, z],
+    [108, z],
+  ]);
+  return (
+    <>
+      {positions.map(([x, z]) => (
+        <group key={`${x}-${z}`} position={[x, 0, z]}>
+          <mesh position={[0, 2.2, 0]} castShadow>
+            <cylinderGeometry args={[0.06, 0.09, 4.4, 8]} />
+            <meshStandardMaterial color="#334155" metalness={0.7} roughness={0.35} />
+          </mesh>
+          <mesh position={[x < 0 ? 0.38 : -0.38, 4.35, 0]} rotation={[0, 0, x < 0 ? -0.35 : 0.35]}>
+            <boxGeometry args={[0.8, 0.08, 0.08]} />
+            <meshStandardMaterial color="#475569" />
+          </mesh>
+          <mesh position={[x < 0 ? 0.72 : -0.72, 4.22, 0]}>
+            <sphereGeometry args={[0.16, 12, 8]} />
+            <meshStandardMaterial color="#fef3c7" emissive="#fbbf24" emissiveIntensity={2.2} />
+          </mesh>
+        </group>
+      ))}
+    </>
+  );
 }
 
 export function CityBuildings() {

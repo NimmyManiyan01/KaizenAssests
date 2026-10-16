@@ -29,10 +29,6 @@ from app.common.persistence.models import (
     NotificationModel,
     PickTaskModel as AssemblyPickTaskModel,
 )
-from app.modules.quarantine.infrastructure.persistence.models import (
-    QuarantineAuditModel,
-    QuarantineRecordModel,
-)
 from app.modules.receiving.infrastructure.persistence.models import (
     GrnBatchQrModel,
     GrnBatchModel,
@@ -726,14 +722,8 @@ async def get_material_inventory_detail(
             "reserved_at": r.reserved_at.isoformat() if r.reserved_at else None,
         })
 
-    # 4. Quarantine / Hold (QuarantineRecordModel)
-    quar_stmt = select(QuarantineRecordModel).where(
-        (func.lower(QuarantineRecordModel.item_code) == m_code.lower())
-        & (QuarantineRecordModel.status.in_(["PENDING_REVIEW", "QUARANTINED"]))
-    )
-    quar_db = await uow.session.execute(quar_stmt)
-    quar_list = quar_db.scalars().all()
-    tot_hold = sum(float(q.damaged_quantity) for q in quar_list)
+    # Quarantine was removed; no quarantine-held stock is included.
+    tot_hold = 0.0
 
     # Total Stock & Available Stock according to Stock Formula (Section 22)
     total_stock = sum(float(stock.on_hand_quantity) for stock in stock_rows) if stock_rows else max(tot_loc_on_hand, tot_loc_avail + tot_hold)
@@ -929,23 +919,8 @@ async def get_warehouse_inventory_summary(
     stock_res = await uow.session.execute(select(MaterialStockModel))
     stock_map = {s.material_code: s for s in stock_res.scalars().all()}
 
-    # 4. Fetch Quarantined / Hold stock
-    quar_res = await uow.session.execute(
-        select(QuarantineRecordModel).where(
-            QuarantineRecordModel.status.in_(["PENDING_REVIEW", "QUARANTINED"])
-        )
-    )
-    quarantine_records = quar_res.scalars().all()
+    # Quarantine was removed; no quarantine-held stock is included.
     quar_by_mat: Dict[str, Decimal] = {}
-    quar_by_mat_batch: Dict[tuple[str, str], Decimal] = {}
-    for q in quarantine_records:
-        m_code = q.item_code
-        q_qty = Decimal(str(q.damaged_quantity))
-        if q.batch_number:
-            key = (m_code.upper(), q.batch_number.upper())
-            quar_by_mat_batch[key] = quar_by_mat_batch.get(key, Decimal("0.0")) + q_qty
-        else:
-            quar_by_mat[m_code] = quar_by_mat.get(m_code, Decimal("0.0")) + q_qty
 
     # 5. Fetch Reserved stock by material
     res_stmt = select(AssemblyStockReservationModel)

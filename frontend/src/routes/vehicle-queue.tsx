@@ -13,7 +13,6 @@ import {
   RefreshCw,
   ShieldCheck,
   Truck,
-  Trash2,
   Camera,
 } from "lucide-react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
@@ -83,7 +82,7 @@ function InboundArrivals() {
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
   const [docks, setDocks] = useState<Dock[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [selectedArrival, setSelectedArrival] = useState<Arrival | null>(null);
   const [selectedDock, setSelectedDock] = useState<Record<string, string>>({});
   const [assigning, setAssigning] = useState<string | null>(null);
 
@@ -218,14 +217,18 @@ function InboundArrivals() {
 
   const openAsnCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+      });
       asnCameraStreamRef.current = stream;
       setAsnCameraOpen(true);
       requestAnimationFrame(() => {
         if (asnCameraVideoRef.current) asnCameraVideoRef.current.srcObject = stream;
       });
     } catch {
-      toast.error("Unable to open camera", { description: "Allow camera permission and try again." });
+      toast.error("Unable to open camera", {
+        description: "Allow camera permission and try again.",
+      });
     }
   };
 
@@ -245,7 +248,9 @@ function InboundArrivals() {
     canvas.toBlob((blob) => {
       if (blob) {
         if (asnDocumentPreview) URL.revokeObjectURL(asnDocumentPreview);
-        setAsnDocumentFile(new File([blob], `asn-document-${Date.now()}.jpg`, { type: "image/jpeg" }));
+        setAsnDocumentFile(
+          new File([blob], `asn-document-${Date.now()}.jpg`, { type: "image/jpeg" }),
+        );
         setAsnDocumentPreview(URL.createObjectURL(blob));
       }
       closeAsnCamera();
@@ -370,7 +375,10 @@ function InboundArrivals() {
 
   async function approveGateExit(arrival: Arrival) {
     const vehName = arrival.vehicle_number || "this vehicle";
-    const gatePassId = window.prompt(`Enter gate pass ID for ${vehName}:`, arrival.gate_entry_number || "");
+    const gatePassId = window.prompt(
+      `Enter gate pass ID for ${vehName}:`,
+      arrival.gate_entry_number || "",
+    );
     if (!gatePassId?.trim()) return;
     if (
       !confirm(
@@ -400,12 +408,20 @@ function InboundArrivals() {
 
   return (
     <AppShell
-      title="Inbound arrivals"
+      title="Inbound Arrivals"
       subtitle="Approved gate entries awaiting warehouse dock assignment"
       actions={
-        <Button variant="outline" className="rounded-xl" onClick={() => void load()}>
-          <RefreshCw className="size-4" /> Refresh
-        </Button>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
+            className="rounded-xl font-bold shadow-sm"
+            onClick={() => setIsNewRegistrationModalOpen(true)}
+          >
+            <PlusCircle className="mr-2 size-4" /> New Gate Entry
+          </Button>
+          <Button variant="outline" className="rounded-xl" onClick={() => void load()}>
+            <RefreshCw className="size-4" /> Refresh
+          </Button>
+        </div>
       }
     >
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -452,8 +468,8 @@ function InboundArrivals() {
                   <ArrivalRows
                     key={arrival.id}
                     arrival={arrival}
-                    expanded={expanded === arrival.id}
-                    onToggle={() => setExpanded(expanded === arrival.id ? null : arrival.id)}
+                    expanded={false}
+                    onToggle={() => setSelectedArrival(arrival)}
                     docks={docks}
                     selected={selectedDock[arrival.id] || ""}
                     onSelect={(dockId) => setSelectedDock((v) => ({ ...v, [arrival.id]: dockId }))}
@@ -472,20 +488,59 @@ function InboundArrivals() {
         )}
       </Card>
 
+      <Dialog
+        open={Boolean(selectedArrival)}
+        onOpenChange={(open) => !open && setSelectedArrival(null)}
+      >
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto rounded-2xl bg-card p-6 shadow-2xl">
+          {selectedArrival && (
+            <ArrivalDetails
+              arrival={selectedArrival}
+              docks={docks}
+              selected={selectedDock[selectedArrival.id] || ""}
+              onSelect={(dockId) =>
+                setSelectedDock((v) => ({ ...v, [selectedArrival.id]: dockId }))
+              }
+              onAssign={() => void assignDock(selectedArrival)}
+              onMove={() => void startMovement(selectedArrival)}
+              onCheckIn={() => void confirmDockArrival(selectedArrival)}
+              onDockCheckIn={() => void confirmPhysicalDockArrival(selectedArrival)}
+              onApproveExit={() => void approveGateExit(selectedArrival)}
+              isEligibleForInboundExit={isEligibleForInboundExit}
+              busy={assigning === selectedArrival.id}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* FR-02 New Gate Entry Registration Modal */}
       <Dialog open={isNewRegistrationModalOpen} onOpenChange={setIsNewRegistrationModalOpen}>
         <DialogContent className="max-w-2xl rounded-2xl bg-card p-6 shadow-2xl">
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              if (!asnDocumentFile) {
+                toast.error("ASN Document Photo is required", {
+                  description: "Capture the ASN document photo before generating the gate pass.",
+                });
+                return;
+              }
+              if (!vehiclePhotoBlob) {
+                toast.error("Vehicle Photo is required", {
+                  description: "Capture the vehicle photo before generating the gate pass.",
+                });
+                return;
+              }
               setSubmittingWebEntry(true);
               const formData = new FormData();
               formData.append("vehicle_number", vehicleNumberInput);
               formData.append("asn_reference", selectedAsn);
               formData.append("supplier_name", selectedSupplier);
               formData.append("driver_name", driverNameInput);
-              if (driverMobileInput.trim()) formData.append("driver_contact", driverMobileInput.trim());
-              if (asnDocumentFile) formData.append("po_document", asnDocumentFile, asnDocumentFile.name);
+              if (driverMobileInput.trim())
+                formData.append("driver_contact", driverMobileInput.trim());
+              if (asnDocumentFile)
+                formData.append("po_document", asnDocumentFile, asnDocumentFile.name);
               const asnQuantity = asnMaterials.reduce(
                 (total, line) => total + Number(line.shipped_quantity ?? line.quantity ?? 0),
                 0,
@@ -506,15 +561,21 @@ function InboundArrivals() {
                     savedEntry?.gate_pass_id;
                   if (!gatePassId) {
                     const arrivals = await api.getInboundArrivals();
-                    const matchingArrival = arrivals.find((arrival: any) =>
-                      String(arrival.asn_number || "").toLowerCase() === selectedAsn.toLowerCase() &&
-                      String(arrival.vehicle_number || "").replace(/[^a-z0-9]/gi, "").toLowerCase() ===
-                        vehicleNumberInput.replace(/[^a-z0-9]/gi, "").toLowerCase(),
+                    const matchingArrival = arrivals.find(
+                      (arrival: any) =>
+                        String(arrival.asn_number || "").toLowerCase() ===
+                          selectedAsn.toLowerCase() &&
+                        String(arrival.vehicle_number || "")
+                          .replace(/[^a-z0-9]/gi, "")
+                          .toLowerCase() ===
+                          vehicleNumberInput.replace(/[^a-z0-9]/gi, "").toLowerCase(),
                     );
                     gatePassId = matchingArrival?.gate_entry_number;
                   }
                   if (!gatePassId) {
-                    throw new Error("Gate entry was created but no persisted gate-pass number was returned.");
+                    throw new Error(
+                      "Gate entry was created but no persisted gate-pass number was returned.",
+                    );
                   }
                   setGeneratedGatePass(gatePassId);
                   toast.success("Web Gate Entry Registered Successfully ✓", {
@@ -551,7 +612,7 @@ function InboundArrivals() {
                 {/* ASN Number Searchable Dropdown */}
                 <div className="order-first sm:order-first">
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
-                    ASN Number (Required for ASN Delivery) *
+                    ASN Number (Enter to load ASN) *
                   </label>
                   <input
                     type="text"
@@ -585,7 +646,7 @@ function InboundArrivals() {
                 {/* Expected Delivery Date Auto-Filled */}
                 <div>
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
-                    Expected Delivery Date (Read-Only)
+                    Expected Delivery Date *
                   </label>
                   <input
                     type="text"
@@ -597,23 +658,54 @@ function InboundArrivals() {
 
                 <div>
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
-                    ASN Document Photograph / Camera *
+                    ASN Document Photo *
                   </label>
-                  <Button type="button" variant="outline" className="h-9 w-full rounded-xl text-xs" onClick={() => void openAsnCamera()}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 w-full rounded-xl text-xs"
+                    onClick={() => void openAsnCamera()}
+                  >
                     <Camera className="mr-2 size-4" /> Open Camera
                   </Button>
                   {asnCameraOpen && (
                     <div className="mt-2 space-y-2 rounded-xl border bg-background p-2">
-                      <video ref={asnCameraVideoRef} autoPlay playsInline className="w-full rounded-lg" />
+                      <video
+                        ref={asnCameraVideoRef}
+                        autoPlay
+                        playsInline
+                        className="w-full rounded-lg"
+                      />
                       <div className="flex gap-2">
-                        <Button type="button" className="h-8 flex-1 text-xs" onClick={captureAsnDocument}>Capture Photograph</Button>
-                        <Button type="button" variant="outline" className="h-8 text-xs" onClick={closeAsnCamera}>Close</Button>
+                        <Button
+                          type="button"
+                          className="h-8 flex-1 text-xs"
+                          onClick={captureAsnDocument}
+                        >
+                          Capture Photograph
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-8 text-xs"
+                          onClick={closeAsnCamera}
+                        >
+                          Close
+                        </Button>
                       </div>
                     </div>
                   )}
-                  {asnDocumentFile && <p className="mt-1 text-[10px] font-bold text-emerald-600">✓ Photograph captured</p>}
+                  {asnDocumentFile && (
+                    <p className="mt-1 text-[10px] font-bold text-emerald-600">
+                      ✓ Photograph captured
+                    </p>
+                  )}
                   {asnDocumentPreview && (
-                    <img src={asnDocumentPreview} alt="Captured ASN document" className="mt-2 h-32 w-full rounded-lg border object-cover" />
+                    <img
+                      src={asnDocumentPreview}
+                      alt="Captured ASN document"
+                      className="mt-2 h-32 w-full rounded-lg border object-cover"
+                    />
                   )}
                 </div>
 
@@ -639,7 +731,7 @@ function InboundArrivals() {
               {/* Material Summary Auto-Filled Table */}
               <div>
                 <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
-                  Material Summary (Auto-Filled Table)
+                  Material Summary
                 </label>
                 <div className="rounded-xl border bg-background overflow-hidden p-2 text-xs">
                   {asnMaterials.length ? (
@@ -690,9 +782,8 @@ function InboundArrivals() {
                     type="text"
                     required
                     value={vehicleNumberInput}
-                    onChange={(e) => setVehicleNumberInput(e.target.value.toUpperCase())}
-                    placeholder="e.g. KA 01 AB 4582"
-                    className="h-9 w-full rounded-xl border bg-background px-3 font-mono font-bold text-xs focus:ring-1 focus:ring-primary"
+                    readOnly
+                    className="h-9 w-full rounded-xl border bg-muted/50 px-3 font-mono font-bold text-xs text-primary"
                   />
                 </div>
 
@@ -722,9 +813,8 @@ function InboundArrivals() {
                     type="text"
                     required
                     value={driverNameInput}
-                    onChange={(e) => setDriverNameInput(e.target.value)}
-                    placeholder="Driver's Full Name"
-                    className="h-9 w-full rounded-xl border bg-background px-3 font-semibold text-xs focus:ring-1 focus:ring-primary"
+                    readOnly
+                    className="h-9 w-full rounded-xl border bg-muted/50 px-3 font-semibold text-xs text-primary"
                   />
                 </div>
 
@@ -736,15 +826,14 @@ function InboundArrivals() {
                     type="text"
                     required
                     value={driverMobileInput}
-                    onChange={(e) => setDriverMobileInput(e.target.value)}
-                    placeholder="+91 98450 12345"
-                    className="h-9 w-full rounded-xl border bg-background px-3 font-mono text-xs focus:ring-1 focus:ring-primary"
+                    readOnly
+                    className="h-9 w-full rounded-xl border bg-muted/50 px-3 font-mono text-xs text-primary"
                   />
                 </div>
 
                 <div>
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
-                    Vehicle Photo
+                    Vehicle Photo *
                   </label>
                   <Button
                     type="button"
@@ -793,19 +882,6 @@ function InboundArrivals() {
                         alt="Captured vehicle"
                         className="h-24 w-full rounded-lg object-cover"
                       />
-                      <button
-                        type="button"
-                        aria-label="Delete vehicle photo"
-                        onClick={() => {
-                          URL.revokeObjectURL(vehiclePhotoPreview);
-                          setVehiclePhotoPreview(null);
-                          setUploadedVehiclePhoto(null);
-                          setVehiclePhotoBlob(null);
-                        }}
-                        className="absolute right-2 top-2 rounded-lg bg-rose-600 p-1.5 text-white shadow hover:bg-rose-700"
-                      >
-                        <Trash2 className="size-4" />
-                      </button>
                     </div>
                   )}
                 </div>
@@ -1046,9 +1122,13 @@ function InboundArrivals() {
             {generatedGatePass}
           </div>
           <div className="mt-5 flex gap-2">
-            <Button variant="outline" className="w-full rounded-xl" onClick={() => {
-              setGeneratedGatePass(null);
-            }}>
+            <Button
+              variant="outline"
+              className="w-full rounded-xl"
+              onClick={() => {
+                setGeneratedGatePass(null);
+              }}
+            >
               Done
             </Button>
           </div>
@@ -1197,6 +1277,13 @@ function ArrivalDetails({
   onDockCheckIn: () => void;
   busy: boolean;
 }) {
+  const imageSrc = (value?: string | null) => {
+    if (!value) return "";
+    return value.startsWith("data:") || value.startsWith("http")
+      ? value
+      : `data:image/jpeg;base64,${value}`;
+  };
+
   return (
     <div className="space-y-5">
       <div className="rounded-xl border bg-card p-4">
@@ -1211,36 +1298,53 @@ function ArrivalDetails({
         </div>
         <dl className="grid gap-x-6 gap-y-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <Detail label="ASN number" value={arrival.asn_number} mono />
+          <Detail label="ASN ID" value={arrival.asn_id} mono />
+          <Detail label="PO number" value={arrival.po_number} mono />
           <Detail label="Supplier" value={arrival.supplier_name} />
           <Detail label="Current status" value={arrival.status.replaceAll("_", " ")} />
           <Detail label="Vehicle number" value={arrival.vehicle_number} mono />
           <Detail label="Driver" value={arrival.driver_name} />
           <Detail label="Driver contact" value={arrival.driver_contact} />
           <Detail label="Arrival time" value={new Date(arrival.arrival_time).toLocaleString()} />
-          <Detail label="Facility entry" value={arrival.facility_entry_at ? new Date(arrival.facility_entry_at).toLocaleString() : "Not entered"} />
+          <Detail
+            label="Expected arrival"
+            value={
+              arrival.expected_arrival_at
+                ? new Date(arrival.expected_arrival_at).toLocaleString()
+                : null
+            }
+          />
         </dl>
         <div className="mt-5 border-t pt-4">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Vehicle photo</p>
-          {(arrival.truck_photo_base64 || arrival.vehicle_photo_base64) ? (
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Vehicle photo
+          </p>
+          {arrival.truck_photo_base64 || arrival.vehicle_photo_base64 ? (
             <img
-              src={`data:image/jpeg;base64,${arrival.truck_photo_base64 || arrival.vehicle_photo_base64}`}
+              src={imageSrc(arrival.truck_photo_base64 || arrival.vehicle_photo_base64)}
               alt={`Vehicle ${arrival.vehicle_number || "photo"}`}
               className="max-h-72 w-full rounded-xl border object-contain bg-muted/20 p-2 sm:w-96"
             />
           ) : (
-            <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No vehicle photo uploaded.</p>
+            <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              No vehicle photo uploaded.
+            </p>
           )}
         </div>
         <div className="mt-5 border-t pt-4">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">ASN document photograph</p>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            ASN document photograph
+          </p>
           {arrival.document_image_base64 ? (
             <img
-              src={arrival.document_image_base64.startsWith("data:") ? arrival.document_image_base64 : `data:image/jpeg;base64,${arrival.document_image_base64}`}
+              src={imageSrc(arrival.document_image_base64)}
               alt={`ASN document for ${arrival.asn_number || "gate entry"}`}
               className="max-h-72 w-full rounded-xl border object-contain bg-muted/20 p-2 sm:w-96"
             />
           ) : (
-            <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No ASN document photograph captured.</p>
+            <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              No ASN document photograph captured.
+            </p>
           )}
         </div>
       </div>
@@ -1253,13 +1357,19 @@ function ArrivalDetails({
             <dt className="text-muted-foreground">Gate entry</dt>
             <dd className="font-mono">{arrival.gate_entry_number}</dd>
             <dt className="text-muted-foreground">Entry time</dt>
-            <dd>{arrival.facility_entry_at ? new Date(arrival.facility_entry_at).toLocaleString() : "Not entered"}</dd>
-            <dt className="hidden text-muted-foreground">Transporter</dt>
-            <dd className="hidden">{arrival.shipment.transporter || "—"}</dd>
-            <dt className="hidden text-muted-foreground">Packages</dt>
-            <dd className="hidden">
+            <dd>
+              {arrival.facility_entry_at
+                ? new Date(arrival.facility_entry_at).toLocaleString()
+                : "Not entered"}
+            </dd>
+            <dt className="text-muted-foreground">Transporter</dt>
+            <dd>{arrival.shipment.transporter || "—"}</dd>
+            <dt className="text-muted-foreground">Packages</dt>
+            <dd>
               {arrival.shipment.number_of_packages ?? "—"} {arrival.shipment.package_type || ""}
             </dd>
+            <dt className="text-muted-foreground">Shipping method</dt>
+            <dd>{arrival.shipment.shipping_method || "—"}</dd>
             <dt className="text-muted-foreground">Expected arrival</dt>
             <dd>
               {arrival.expected_arrival_at
@@ -1270,23 +1380,32 @@ function ArrivalDetails({
             <dd className="font-semibold">{arrival.assigned_dock_id || "—"}</dd>
             <dt className="text-muted-foreground">Dock assigned</dt>
             <dd>{arrival.assigned_at ? new Date(arrival.assigned_at).toLocaleString() : "—"}</dd>
+            <dt className="text-muted-foreground">Assigned by</dt>
+            <dd>{arrival.assigned_by || "—"}</dd>
             <dt className="text-muted-foreground">Dock check-in</dt>
             <dd>
-              {(arrival.dock_arrival_at || arrival.allocation_arrived_at)
-                ? new Date(arrival.dock_arrival_at || arrival.allocation_arrived_at!).toLocaleString()
+              {arrival.dock_arrival_at || arrival.allocation_arrived_at
+                ? new Date(
+                    arrival.dock_arrival_at || arrival.allocation_arrived_at!,
+                  ).toLocaleString()
                 : "Not checked in"}
             </dd>
           </dl>
           {arrival.status === "DOCK_ASSIGNED" && (
-            <Button className="mt-4 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700" onClick={onMove} disabled={busy}>
+            <Button
+              className="mt-4 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
+              onClick={onMove}
+              disabled={busy}
+            >
               <ShieldCheck className="size-4" /> Allow Entry
             </Button>
           )}
-          {arrival.assigned_dock_id && (arrival.status === "INSIDE_FACILITY" || arrival.status === "MOVING_TO_DOCK") && (
-            <Button className="mt-4 rounded-lg" onClick={onDockCheckIn} disabled={busy}>
-              <ShieldCheck className="size-4" /> Confirm Dock Check-In
-            </Button>
-          )}
+          {arrival.assigned_dock_id &&
+            (arrival.status === "INSIDE_FACILITY" || arrival.status === "MOVING_TO_DOCK") && (
+              <Button className="mt-4 rounded-lg" onClick={onDockCheckIn} disabled={busy}>
+                <ShieldCheck className="size-4" /> Confirm Dock Check-In
+              </Button>
+            )}
         </div>
         <div>
           <h3 className="mb-3 font-semibold">Expected materials</h3>

@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 from app.modules.dispatch.domain.dispatch import DispatchOrder, DispatchItem, DispatchStatus
 from app.modules.dispatch.domain.driver import Driver, DriverStatus
 from app.modules.dispatch.domain.vehicle import Vehicle, VehicleStatus
@@ -95,3 +96,18 @@ def test_vehicle_domain_creation():
     )
     assert vehicle.vehicle_number == "KA-01-AB-1234"
     assert vehicle.status == VehicleStatus.AVAILABLE
+
+
+def test_dispatch_quantity_commands_reject_negative_values():
+    with pytest.raises(ValidationError):
+        DispatchItemDTO(
+            material_code="FG-001",
+            material_name="Test Finished Good",
+            quantity_ordered=-1,
+        )
+
+    with pytest.raises(ValidationError):
+        PickItemsCommand(items=[{"material_code": "FG-001", "quantity_picked": -1}])
+
+    with pytest.raises(ValidationError):
+        PackItemsCommand(items=[{"material_code": "FG-001", "quantity_packed": -1}])

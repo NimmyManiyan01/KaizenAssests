@@ -57,7 +57,11 @@ function GateDashboard() {
   }, []);
 
   useEffect(() => {
-    const gatePassId = selectedPassModal?.gate_entry_no || selectedPassModal?.gate_entry_number || selectedPassModal?.gate_pass_number || selectedPassModal?.id;
+    const gatePassId =
+      selectedPassModal?.gate_entry_no ||
+      selectedPassModal?.gate_entry_number ||
+      selectedPassModal?.gate_pass_number ||
+      selectedPassModal?.id;
     if (!gatePassId) {
       setGatePassQr(null);
       return;
@@ -125,7 +129,9 @@ function GateDashboard() {
   const filteredEntries = entries.filter((e: any) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
-    const gp = String(e.gate_entry_no || e.gate_entry_number || e.gate_pass_number || e.id || "").toLowerCase();
+    const gp = String(
+      e.gate_entry_no || e.gate_entry_number || e.gate_pass_number || e.id || "",
+    ).toLowerCase();
     const veh = String(e.vehicle_number || "").toLowerCase();
     const sup = String(e.supplier_name || e.vendor || "").toLowerCase();
     const asn = String(e.asn_number || "").toLowerCase();
@@ -133,21 +139,38 @@ function GateDashboard() {
   });
 
   const metrics = dashboardData?.stats || dashboardData?.metrics || dashboardData || {};
-  const totalEntries = metrics.totalEntries ?? metrics.totalGateEntries ?? metrics.totalArrivals ?? entries.length;
-  const todayEntries = metrics.todayEntries ?? metrics.todaysEntries ?? metrics.totalArrivals ?? entries.length;
-  const vehiclesInside = metrics.vehiclesInside ?? Math.max(0, Number(todayEntries) - Number(metrics.vehiclesExited || 0));
-  const awaitingDock = metrics.awaitingDock ?? entries.filter((e: any) => String(e.status).toUpperCase() === "AWAITING_DOCK").length;
-  const totalExits = metrics.totalExits ?? metrics.totalGateExits ?? entries.filter((e: any) => String(e.status).toUpperCase() === "VEHICLE_EXITED").length;
+  const totalEntries =
+    metrics.totalEntries ?? metrics.totalGateEntries ?? metrics.totalArrivals ?? entries.length;
+  const todayEntries =
+    metrics.todayEntries ?? metrics.todaysEntries ?? metrics.totalArrivals ?? entries.length;
+  const vehiclesInside =
+    metrics.vehiclesInside ??
+    Math.max(0, Number(todayEntries) - Number(metrics.vehiclesExited || 0));
+  const awaitingDock =
+    metrics.awaitingDock ??
+    entries.filter((e: any) => String(e.status).toUpperCase() === "AWAITING_DOCK").length;
+  const totalExits =
+    metrics.totalExits ??
+    metrics.totalGateExits ??
+    entries.filter((e: any) => String(e.status).toUpperCase() === "VEHICLE_EXITED").length;
 
   const handlePrintPass = (pass: any) => {
-    toast.success(`Print job sent for Gate Pass ${pass.gate_entry_no || pass.gate_entry_number || pass.gate_pass_number || pass.id}`, {
-      description: "Opening print preview...",
-    });
+    toast.success(
+      `Print job sent for Gate Pass ${pass.gate_entry_no || pass.gate_entry_number || pass.gate_pass_number || pass.id}`,
+      {
+        description: "Opening print preview...",
+      },
+    );
     window.print();
   };
 
   const handleDeleteGateEntryData = async () => {
-    if (!window.confirm("Delete all gate entry records and related gate activity? This cannot be undone.")) return;
+    if (
+      !window.confirm(
+        "Delete all gate entry records and related gate activity? This cannot be undone.",
+      )
+    )
+      return;
 
     try {
       await api.resetGateEntries();
@@ -162,8 +185,8 @@ function GateDashboard() {
 
   return (
     <AppShell
-      title="Gate Entry Security Dashboard (FR-01)"
-      subtitle="FR-01: Live gate metrics, searchable recent gate pass activity, and vehicle tracking"
+      title="Gate Entry Security Dashboard"
+      subtitle="Live gate metrics, searchable recent gate pass activity, and vehicle tracking"
       actions={
         <div className="flex flex-wrap justify-end gap-2">
           <Button asChild className="rounded-xl font-bold shadow-sm">
@@ -191,7 +214,6 @@ function GateDashboard() {
             delta="All gate entries registered"
             icon={Truck}
             tone="primary"
-            to="/vehicle-queue"
           />
           <StatCard
             label="Vehicles Inside"
@@ -199,7 +221,6 @@ function GateDashboard() {
             delta="Currently inside facility"
             icon={ShieldCheck}
             tone="success"
-            to="/vehicle-queue"
           />
           <StatCard
             label="Awaiting Dock"
@@ -207,7 +228,6 @@ function GateDashboard() {
             delta="Pending dock check-in"
             icon={Clock3}
             tone="warning"
-            to="/vehicle-queue?tab=waiting"
           />
           <StatCard
             label="Total Exits"
@@ -257,7 +277,8 @@ function GateDashboard() {
                 </thead>
                 <tbody className="divide-y divide-border/60">
                   {filteredEntries.map((e: any, idx: number) => {
-                    const passNo = e.gate_entry_no || e.gate_entry_number || e.gate_pass_number || "—";
+                    const passNo =
+                      e.gate_entry_no || e.gate_entry_number || e.gate_pass_number || "—";
                     const vehNo = e.vehicle_number || "—";
                     const suppName = e.supplier_name || e.vendor || "—";
                     const asnNumber = e.asn_number || "—";
@@ -292,10 +313,13 @@ function GateDashboard() {
                               size="sm"
                               variant="ghost"
                               className="h-7 px-2 text-xs font-bold text-sky-600"
-                              onClick={() => setSelectedPassModal({
-                                ...e,
-                                gate_pass_number: e.gate_entry_no || e.gate_entry_number || e.gate_pass_number,
-                              })}
+                              onClick={() =>
+                                setSelectedPassModal({
+                                  ...e,
+                                  gate_pass_number:
+                                    e.gate_entry_no || e.gate_entry_number || e.gate_pass_number,
+                                })
+                              }
                             >
                               <QrCode className="mr-1 size-3.5" /> Gate Pass
                             </Button>
@@ -339,15 +363,21 @@ function GateDashboard() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground font-semibold">Vehicle Plate:</span>
-                    <span className="font-bold text-foreground">{selectedPassModal.vehicle_number}</span>
+                    <span className="font-bold text-foreground">
+                      {selectedPassModal.vehicle_number}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground font-semibold">Supplier:</span>
-                    <span className="font-bold text-foreground text-right">{selectedPassModal.supplier_name}</span>
+                    <span className="font-bold text-foreground text-right">
+                      {selectedPassModal.supplier_name}
+                    </span>
                   </div>
                   <div className="flex justify-between border-t pt-2">
                     <span className="text-muted-foreground font-semibold">Allocated Dock:</span>
-                    <span className="font-bold text-emerald-600">{selectedPassModal.dock_number || selectedPassModal.dock_name || "—"}</span>
+                    <span className="font-bold text-emerald-600">
+                      {selectedPassModal.dock_number || selectedPassModal.dock_name || "—"}
+                    </span>
                   </div>
                 </div>
 
@@ -369,10 +399,17 @@ function GateDashboard() {
                 </div>
 
                 <div className="flex gap-2">
-                  <Button className="flex-1 rounded-xl font-bold" onClick={() => handlePrintPass(selectedPassModal)}>
+                  <Button
+                    className="flex-1 rounded-xl font-bold"
+                    onClick={() => handlePrintPass(selectedPassModal)}
+                  >
                     <Printer className="mr-2 size-4" /> Print Ticket
                   </Button>
-                  <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setSelectedPassModal(null)}>
+                  <Button
+                    variant="outline"
+                    className="flex-1 rounded-xl"
+                    onClick={() => setSelectedPassModal(null)}
+                  >
                     Close
                   </Button>
                 </div>
@@ -382,24 +419,65 @@ function GateDashboard() {
         </Dialog>
 
         {/* View Details Drawer / Modal */}
-        <Dialog open={Boolean(selectedDetailsDrawer)} onOpenChange={() => setSelectedDetailsDrawer(null)}>
+        <Dialog
+          open={Boolean(selectedDetailsDrawer)}
+          onOpenChange={() => setSelectedDetailsDrawer(null)}
+        >
           <DialogContent className="max-w-lg rounded-2xl bg-card p-6 shadow-2xl">
             <DialogHeader>
-              <DialogTitle className="font-black text-base">INBOUND ENTRY RECORD DETAILS</DialogTitle>
+              <DialogTitle className="font-black text-base">
+                INBOUND ENTRY RECORD DETAILS
+              </DialogTitle>
             </DialogHeader>
 
             {selectedDetailsDrawer && (
               <div className="space-y-3 text-xs">
                 <div className="rounded-xl bg-muted/40 p-3 border space-y-1.5">
-                  <p className="flex justify-between"><span className="text-muted-foreground">Gate Pass Number:</span> <span className="font-mono font-bold text-primary">{selectedDetailsDrawer.gate_pass_number || selectedDetailsDrawer.gate_entry_no || "—"}</span></p>
-                  <p className="flex justify-between"><span className="text-muted-foreground">Vehicle Number:</span> <span className="font-bold text-foreground">{selectedDetailsDrawer.vehicle_number}</span></p>
-                  <p className="flex justify-between"><span className="text-muted-foreground">Driver Name:</span> <span className="font-bold text-foreground">{selectedDetailsDrawer.driver_name || "Suresh Gowda"} ({selectedDetailsDrawer.driver_contact || "+91 98450 12345"})</span></p>
-                  <p className="flex justify-between"><span className="text-muted-foreground">Invoice Number:</span> <span className="font-bold text-foreground">{selectedDetailsDrawer.invoice_number || "INV-2026-9901"}</span></p>
-                  <p className="flex justify-between"><span className="text-muted-foreground">Assigned Dock:</span> <span className="font-bold text-emerald-600">{selectedDetailsDrawer.dock_number || selectedDetailsDrawer.dock_name || "—"}</span></p>
-                  <p className="flex justify-between"><span className="text-muted-foreground">Status:</span> <span className="font-bold uppercase text-emerald-600">{selectedDetailsDrawer.status || "INSIDE_FACILITY"}</span></p>
+                  <p className="flex justify-between">
+                    <span className="text-muted-foreground">Gate Pass Number:</span>{" "}
+                    <span className="font-mono font-bold text-primary">
+                      {selectedDetailsDrawer.gate_pass_number ||
+                        selectedDetailsDrawer.gate_entry_no ||
+                        "—"}
+                    </span>
+                  </p>
+                  <p className="flex justify-between">
+                    <span className="text-muted-foreground">Vehicle Number:</span>{" "}
+                    <span className="font-bold text-foreground">
+                      {selectedDetailsDrawer.vehicle_number}
+                    </span>
+                  </p>
+                  <p className="flex justify-between">
+                    <span className="text-muted-foreground">Driver Name:</span>{" "}
+                    <span className="font-bold text-foreground">
+                      {selectedDetailsDrawer.driver_name || "Suresh Gowda"} (
+                      {selectedDetailsDrawer.driver_contact || "+91 98450 12345"})
+                    </span>
+                  </p>
+                  <p className="flex justify-between">
+                    <span className="text-muted-foreground">Invoice Number:</span>{" "}
+                    <span className="font-bold text-foreground">
+                      {selectedDetailsDrawer.invoice_number || "INV-2026-9901"}
+                    </span>
+                  </p>
+                  <p className="flex justify-between">
+                    <span className="text-muted-foreground">Assigned Dock:</span>{" "}
+                    <span className="font-bold text-emerald-600">
+                      {selectedDetailsDrawer.dock_number || selectedDetailsDrawer.dock_name || "—"}
+                    </span>
+                  </p>
+                  <p className="flex justify-between">
+                    <span className="text-muted-foreground">Status:</span>{" "}
+                    <span className="font-bold uppercase text-emerald-600">
+                      {selectedDetailsDrawer.status || "INSIDE_FACILITY"}
+                    </span>
+                  </p>
                 </div>
 
-                <Button className="w-full rounded-xl font-bold" onClick={() => setSelectedDetailsDrawer(null)}>
+                <Button
+                  className="w-full rounded-xl font-bold"
+                  onClick={() => setSelectedDetailsDrawer(null)}
+                >
                   Close Details
                 </Button>
               </div>

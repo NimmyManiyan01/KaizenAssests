@@ -5,13 +5,13 @@ from datetime import datetime, date
 class DispatchItemDTO(BaseModel):
     material_code: str
     material_name: str
-    quantity_ordered: float = 0.0
-    quantity_available: float = 0.0
-    quantity_reserved: float = 0.0
-    quantity_picked: float = 0.0
-    quantity_packed: float = 0.0
-    quantity_loaded: float = 0.0
-    quantity_pending: float = 0.0
+    quantity_ordered: float = Field(default=0.0, ge=0)
+    quantity_available: float = Field(default=0.0, ge=0)
+    quantity_reserved: float = Field(default=0.0, ge=0)
+    quantity_picked: float = Field(default=0.0, ge=0)
+    quantity_packed: float = Field(default=0.0, ge=0)
+    quantity_loaded: float = Field(default=0.0, ge=0)
+    quantity_pending: float = Field(default=0.0, ge=0)
     uom: str = "PCS"
     batch: str | None = None
     bin: str | None = None
@@ -39,7 +39,7 @@ class CreateDispatchCommand(BaseModel):
 class PickItemEntry(BaseModel):
     id: str | None = None
     material_code: str | None = None
-    quantity_picked: float
+    quantity_picked: float = Field(..., ge=0)
 
 class PickItemsCommand(BaseModel):
     items: list[PickItemEntry]
@@ -47,7 +47,7 @@ class PickItemsCommand(BaseModel):
 class PackItemEntry(BaseModel):
     id: str | None = None
     material_code: str | None = None
-    quantity_packed: float
+    quantity_packed: float = Field(..., ge=0)
     package_number: str | None = None
     package_type: str | None = None
     package_count: int | None = None

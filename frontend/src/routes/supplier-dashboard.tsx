@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -34,6 +34,10 @@ export const Route = createFileRoute("/supplier-dashboard")({
 });
 
 const inputClass = "mt-1.5 h-10 rounded-xl border-border/80 bg-background text-xs font-semibold";
+const todayDate = () => {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+};
 
 const statuses: Record<string, string> = {
   SUBMITTED: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -42,11 +46,26 @@ const statuses: Record<string, string> = {
   CANCELLED: "bg-rose-50 text-rose-700 border-rose-200",
 };
 
+function validateTransportDetails(vehicle: string, driver: string, contact: string): string | null {
+  const normalizedVehicle = vehicle.replace(/\s+/g, "").toUpperCase();
+  if (!/^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/.test(normalizedVehicle)) {
+    return "Enter a valid vehicle number, for example KA42EH6940.";
+  }
+  if (!/^[A-Za-z][A-Za-z .'-]{1,49}$/.test(driver.trim())) {
+    return "Enter a valid driver name using letters only.";
+  }
+  if (!/^\d{10}$/.test(contact.trim())) {
+    return "Driver contact must contain exactly 10 digits.";
+  }
+  return null;
+}
+
 function SupplierDashboard() {
   const [asns, setAsns] = useState<any[]>([]);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<any>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [trendDays, setTrendDays] = useState<7 | 30 | 90>(7);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -128,7 +147,7 @@ function SupplierDashboard() {
     } catch {
       setAsnNumber("");
     }
-    setExpectedArrivalDate("");
+    setExpectedArrivalDate(todayDate());
     setSupplierName(supplierCompanyName || currentUser?.full_name || currentUser?.username || "");
     setDestinationWarehouse("");
     setDestinationWarehouseId("");
@@ -150,12 +169,21 @@ function SupplierDashboard() {
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const transportError = validateTransportDetails(vehicleNumber, driverName, driverMobile);
+    if (transportError) {
+      toast.error(transportError);
+      return;
+    }
     if (!destinationWarehouse || !lines.length || lines.some((line) => !line.item_code || !line.material_name || Number(line.shipped_quantity) <= 0)) {
       toast.error("Select a warehouse and material; shipped quantities must be greater than zero");
       return;
     }
     if (!expectedArrivalDate) {
       toast.error("Expected Arrival Date is mandatory *");
+      return;
+    }
+    if (expectedArrivalDate < todayDate()) {
+      toast.error("Expected Arrival Date cannot be before today.");
       return;
     }
     if (!vehicleNumber.trim() || !driverName.trim() || !driverMobile.trim()) {
@@ -195,9 +223,11 @@ function SupplierDashboard() {
         supplier_name: supplierName,
         supplier_company_name: supplierName,
         destination_warehouse: destinationWarehouse,
+        destination_warehouse_id: destinationWarehouseId,
         vehicle_number: vehicleNumber.toUpperCase().trim(),
         driver_name: driverName.trim(),
         driver_contact: driverMobile.trim(),
+        expected_arrival_date: expectedArrivalDate,
         expected_arrival_at: expectedArrivalDate,
         created_at: new Date().toISOString(),
         status: "SUBMITTED",
@@ -248,20 +278,29 @@ function SupplierDashboard() {
   };
 
   const trend = useMemo(() => {
-    const days = Array.from({ length: 7 }, (_, i) => {
+    const toLocalDateKey = (value: unknown) => {
+      if (!value) return "";
+      const text = String(value);
+      const isoDate = text.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+      if (isoDate) return isoDate;
+      const parsed = new Date(text);
+      if (Number.isNaN(parsed.getTime())) return "";
+      return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
+    };
+    const days = Array.from({ length: trendDays }, (_, i) => {
       const d = new Date();
       d.setHours(0, 0, 0, 0);
-      d.setDate(d.getDate() - (6 - i));
+      d.setDate(d.getDate() - (trendDays - 1 - i));
       return d;
     });
     return days.map((day) => ({
+      key: `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`,
       label: day.toLocaleDateString(undefined, { month: "short", day: "2-digit" }),
       count: asns.filter((a) => {
-        const raw = a.created_at || a.submitted_at || a.shipment_date;
-        return raw && new Date(raw).toDateString() === day.toDateString();
+        return toLocalDateKey(a.submitted_at || a.created_at || a.shipment_date) === `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
       }).length,
     }));
-  }, [asns]);
+  }, [asns, trendDays]);
 
   return (
     <AppShell>
@@ -277,6 +316,15 @@ function SupplierDashboard() {
               Manage your advance shipping notices (ASNs) and track deliveries in real-time.
             </p>
           </div>
+
+          <Link
+            to="/supplier/asns/new"
+            search={{ open: "create" }}
+            className="inline-flex h-10 shrink-0 items-center rounded-xl bg-sky-600 px-4 text-xs font-bold text-white shadow-sm hover:bg-sky-700"
+          >
+            <Truck className="mr-2 size-4" />
+            Create ASN
+          </Link>
 
         </div>
 
@@ -450,20 +498,26 @@ function SupplierDashboard() {
             <h2 className="text-xs font-black uppercase tracking-wider text-slate-900">
               ASN SUBMISSION TREND
             </h2>
-            <Button variant="outline" size="sm" className="h-7 text-xs rounded-lg font-bold">
-              Last 7 Days <ChevronDown className="ml-1.5 size-3" />
-            </Button>
+            <label className="inline-flex items-center rounded-lg border bg-background px-2 text-xs font-bold">
+              <select aria-label="ASN submission trend range" className="h-7 bg-transparent outline-none" value={trendDays} onChange={(event) => setTrendDays(Number(event.target.value) as 7 | 30 | 90)}>
+                <option value={7}>Last 7 Days</option>
+                <option value={30}>Last 30 Days</option>
+                <option value={90}>Last 90 Days</option>
+              </select>
+              <ChevronDown className="ml-1.5 size-3" />
+            </label>
           </div>
 
-          <div className="mt-4 flex h-28 items-end gap-2 border-b border-l border-slate-200 px-2 pb-1">
-            {trend.map(({ label, count }) => {
+          <div className="mt-4 flex h-36 items-end gap-2 rounded-lg border-b border-l border-slate-200 bg-[repeating-linear-gradient(to_bottom,transparent_0,transparent_34px,rgba(148,163,184,0.18)_35px)] px-2 pb-1 pt-3">
+            {trend.map(({ key, label, count }) => {
               const max = Math.max(...trend.map((item) => item.count), 1);
               return (
-                <div key={label} className="flex flex-1 flex-col items-center justify-end gap-1">
+                <div key={key} className="flex flex-1 flex-col items-center justify-end gap-1">
+                  <span className="text-[10px] font-bold text-slate-500">{count}</span>
                   <div
-                    className="w-full max-w-8 rounded-t bg-sky-500/80"
+                    className="h-auto min-w-4 w-full max-w-8 rounded-t bg-blue-600 shadow-sm transition-all hover:bg-blue-700"
                     title={`${label}: ${count}`}
-                    style={{ height: `${Math.max((count / max) * 100, count ? 10 : 4)}%` }}
+                    style={{ height: `${count ? Math.max((count / max) * 100, 8) : 3}px` }}
                   />
                   <span className="text-[9px] font-bold text-slate-400">{label}</span>
                 </div>
@@ -480,10 +534,9 @@ function SupplierDashboard() {
               </DialogTitle>
             </DialogHeader>
             {selected && (
-              <div className="grid gap-3 text-xs sm:grid-cols-2">
+              <div className="grid max-h-[70vh] gap-3 overflow-y-auto pr-1 text-xs sm:grid-cols-2">
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">ASN Number</p><p className="mt-1 font-mono font-black text-sky-600">{selected.asn_number || "—"}</p></div>
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Supplier Name</p><p className="mt-1 font-bold text-slate-900">{selected.supplier_name || selected.supplier_company_name || "—"}</p></div>
-                <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Destination Warehouse</p><p className="mt-1 font-bold text-slate-900">{selected.destination_warehouse || "—"}</p></div>
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Vehicle Number</p><p className="mt-1 font-mono font-bold text-slate-900">{selected.vehicle_number || "—"}</p></div>
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Driver Name & Mobile</p><p className="mt-1 font-bold text-slate-900">{selected.driver_name || "—"} · {selected.driver_contact || "—"}</p></div>
                 <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Expected Arrival Date</p><p className="mt-1 font-bold text-slate-900">{selected.expected_arrival_date || selected.expected_arrival_at?.split("T")[0] || selected.delivery_date || "—"}</p></div>
@@ -505,20 +558,20 @@ function SupplierDashboard() {
               <div className="grid gap-4 md:grid-cols-3">
                 <div>
                   <Label htmlFor="dashboard-assignment-vehicle">Vehicle Number *</Label>
-                  <Input id="dashboard-assignment-vehicle" required placeholder="Enter vehicle number" value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} className={inputClass} />
+                  <Input id="dashboard-assignment-vehicle" required placeholder="e.g. KA42EH6940" value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())} maxLength={13} pattern="[A-Za-z]{2}[0-9]{1,2}[A-Za-z]{1,3}[0-9]{4}" className={inputClass} />
                 </div>
                 <div>
                   <Label htmlFor="dashboard-assignment-driver">Driver Name *</Label>
-                  <Input id="dashboard-assignment-driver" required placeholder="Enter driver name" value={driverName} onChange={(e) => setDriverName(e.target.value)} className={inputClass} />
+                  <Input id="dashboard-assignment-driver" required placeholder="Enter driver name" value={driverName} onChange={(e) => setDriverName(e.target.value)} maxLength={50} className={inputClass} />
                 </div>
                 <div>
                   <Label htmlFor="dashboard-assignment-mobile">Driver Contact *</Label>
-                  <Input id="dashboard-assignment-mobile" required placeholder="Enter driver contact" value={driverMobile} onChange={(e) => setDriverMobile(e.target.value)} className={inputClass} />
+                  <Input id="dashboard-assignment-mobile" required type="tel" inputMode="numeric" placeholder="10-digit mobile number" value={driverMobile} onChange={(e) => setDriverMobile(e.target.value.replace(/\D/g, "").slice(0, 10))} maxLength={10} pattern="[0-9]{10}" className={inputClass} />
                 </div>
               </div>
               <div className="flex justify-end gap-2 pt-1">
                 <Button type="button" variant="outline" className="rounded-xl" onClick={() => setIsAssignmentOpen(false)}>Cancel</Button>
-                <Button type="button" className="rounded-xl px-6" onClick={() => { if (!vehicleNumber || !driverName || !driverMobile.trim()) { toast.error("Vehicle number, driver name and driver contact are required"); return; } setIsAssignmentOpen(false); setIsModalOpen(true); }}>Next</Button>
+                <Button type="button" className="rounded-xl px-6" onClick={() => { const validationError = validateTransportDetails(vehicleNumber, driverName, driverMobile); if (validationError) { toast.error(validationError); return; } setVehicleNumber(vehicleNumber.replace(/\s+/g, "").toUpperCase()); setIsAssignmentOpen(false); setIsModalOpen(true); }}>Next</Button>
               </div>
             </div>
           </DialogContent>
@@ -574,6 +627,7 @@ function SupplierDashboard() {
                       id="dashboard-expected-arrival-date"
                       type="date"
                       required
+                      min={todayDate()}
                       value={expectedArrivalDate}
                       onChange={(e) => setExpectedArrivalDate(e.target.value)}
                       className={inputClass}

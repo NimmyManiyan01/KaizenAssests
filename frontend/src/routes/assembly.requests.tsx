@@ -19,6 +19,7 @@ import {
   ArrowRightLeft,
 } from "lucide-react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
+import { isValidDateInput } from "@/lib/input-validation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -216,7 +217,7 @@ function AssemblyRequestsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.warehouse_id.trim() || !formData.required_date) {
+    if (!formData.warehouse_id.trim() || !isValidDateInput(formData.required_date)) {
       toast.error("Enter the warehouse and required date before submitting");
       return;
     }
@@ -267,9 +268,16 @@ function AssemblyRequestsPage() {
 
       const created = await api.createAssemblyRequisition(payload);
       const shortage = Number(created?.totalShortage ?? created?.total_shortage ?? 0);
-      if (shortage > 0 || created?.availabilityStatus === "SHORTAGE" || created?.availability_status === "SHORTAGE") {
+      if (
+        shortage > 0 ||
+        created?.availabilityStatus === "SHORTAGE" ||
+        created?.availability_status === "SHORTAGE"
+      ) {
         toast.warning("Request submitted with an inventory shortage", {
-          description: created?.availabilityMessage || created?.availability_message || `${shortage} unit${shortage === 1 ? "" : "s"} are not currently available. Warehouse must replenish stock before the full request can be issued.`,
+          description:
+            created?.availabilityMessage ||
+            created?.availability_message ||
+            `${shortage} unit${shortage === 1 ? "" : "s"} are not currently available. Warehouse must replenish stock before the full request can be issued.`,
         });
       } else {
         toast.success("Assembly Material Requisition submitted to Warehouse!");
@@ -480,13 +488,15 @@ function AssemblyRequestsPage() {
                             it.isCustom ||
                             it.materialCode === "CUSTOM" ||
                             it.material_code === "CUSTOM" ||
-                            (!it.material_id && !it.materialId && (it.custom_material_name || it.customMaterialName))
+                            (!it.material_id &&
+                              !it.materialId &&
+                              (it.custom_material_name || it.customMaterialName)),
                           );
                           const matCreated = Boolean(
                             it.materialCode &&
                             it.materialCode !== "CUSTOM" &&
                             it.materialCode !== "MAT-REQ" &&
-                            (it.custom_material_name || it.customMaterialName)
+                            (it.custom_material_name || it.customMaterialName),
                           );
 
                           return (
@@ -532,22 +542,31 @@ function AssemblyRequestsPage() {
                       {Number(req.totalShortage ?? req.total_shortage ?? 0) > 0 && (
                         <div className="mt-2 flex items-center gap-2 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-200">
                           <AlertCircle className="size-3.5 shrink-0" />
-                          Inventory shortage: {Number(req.totalShortage ?? req.total_shortage).toLocaleString()} {req.items?.[0]?.uom || "units"} still required. Inventory low-stock alerts have been updated.
+                          Inventory shortage:{" "}
+                          {Number(req.totalShortage ?? req.total_shortage).toLocaleString()}{" "}
+                          {req.items?.[0]?.uom || "units"} still required. Inventory low-stock
+                          alerts have been updated.
                         </div>
                       )}
                       {req.pickup_progress && req.pickup_progress.task_count > 0 && (
                         <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50/60 px-3 py-2 text-xs dark:border-blue-900 dark:bg-blue-950/30">
                           <div className="flex flex-wrap items-center gap-2 font-bold text-blue-800 dark:text-blue-200">
                             <PackageCheck className="size-3.5" />
-                            Store pickup: {req.pickup_progress.status ? String(req.pickup_progress.status).replaceAll("_", " ") : "—"}
+                            Store pickup:{" "}
+                            {req.pickup_progress.status
+                              ? String(req.pickup_progress.status).replaceAll("_", " ")
+                              : "—"}
                             <span className="font-normal text-blue-700 dark:text-blue-300">
-                              {req.pickup_progress.picked_quantity}/{req.pickup_progress.requested_quantity} issued
+                              {req.pickup_progress.picked_quantity}/
+                              {req.pickup_progress.requested_quantity} issued
                             </span>
                           </div>
                           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
                             {(req.pickup_tracking || []).map((task: any) => (
                               <span key={task.task_number}>
-                                {task.task_number}: {task.status ? String(task.status).replaceAll("_", " ") : "—"} ({task.picked_quantity}/{task.requested_quantity})
+                                {task.task_number}:{" "}
+                                {task.status ? String(task.status).replaceAll("_", " ") : "—"} (
+                                {task.picked_quantity}/{task.requested_quantity})
                               </span>
                             ))}
                           </div>
@@ -563,10 +582,15 @@ function AssemblyRequestsPage() {
                         {new Date(req.createdAt || req.created_at).toLocaleDateString()}
                       </p>
                       {req.status === "PICKED_UP" && (
-                        <Button size="sm" disabled={submitting} className="mt-2" onClick={(event) => {
-                          event.stopPropagation();
-                          void confirmReceipt(req);
-                        }}>
+                        <Button
+                          size="sm"
+                          disabled={submitting}
+                          className="mt-2"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void confirmReceipt(req);
+                          }}
+                        >
                           Confirm Assembly Receipt
                         </Button>
                       )}
@@ -597,7 +621,12 @@ function AssemblyRequestsPage() {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs font-bold text-muted-foreground">Warehouse</Label>
-                <Input value={formData.warehouse_id} onChange={(e) => setFormData({ ...formData, warehouse_id: e.target.value })} className="h-9 rounded-xl text-xs" required />
+                <Input
+                  value={formData.warehouse_id}
+                  onChange={(e) => setFormData({ ...formData, warehouse_id: e.target.value })}
+                  className="h-9 rounded-xl text-xs"
+                  required
+                />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs font-bold text-muted-foreground">Priority</Label>
@@ -671,14 +700,16 @@ function AssemblyRequestsPage() {
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-[10px] font-bold px-2 py-0.5">
-                            <Sparkles className="size-3 mr-1 text-amber-500 inline" /> Custom / New Raw Material
+                            <Sparkles className="size-3 mr-1 text-amber-500 inline" /> Custom / New
+                            Raw Material
                           </Badge>
                           <button
                             type="button"
                             onClick={() => toggleRowMode(idx, false)}
                             className="text-[11px] text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:underline flex items-center gap-1 font-medium"
                           >
-                            <ArrowRightLeft className="size-3" /> Select from Material Master instead
+                            <ArrowRightLeft className="size-3" /> Select from Material Master
+                            instead
                           </button>
                         </div>
 
@@ -775,7 +806,8 @@ function AssemblyRequestsPage() {
                                 className="text-blue-600 font-semibold cursor-pointer border-b border-border/40 pb-1.5 focus:bg-blue-50 dark:focus:bg-blue-950"
                               >
                                 <span className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
-                                  <Sparkles className="size-3.5 text-amber-500" /> + Add Custom Item (New Raw Material)
+                                  <Sparkles className="size-3.5 text-amber-500" /> + Add Custom Item
+                                  (New Raw Material)
                                 </span>
                               </SelectItem>
                               {masterMaterials.map((m) => (
@@ -800,7 +832,7 @@ function AssemblyRequestsPage() {
                             onChange={(e) =>
                               setItems(
                                 items.map((it, i) =>
-                                    i === idx ? { ...it, quantity: e.target.value } : it,
+                                  i === idx ? { ...it, quantity: e.target.value } : it,
                                 ),
                               )
                             }
@@ -953,17 +985,22 @@ function AssemblyRequestsPage() {
                       it.isCustom ||
                       it.materialCode === "CUSTOM" ||
                       it.material_code === "CUSTOM" ||
-                      (!it.material_id && !it.materialId && (it.custom_material_name || it.customMaterialName))
+                      (!it.material_id &&
+                        !it.materialId &&
+                        (it.custom_material_name || it.customMaterialName)),
                     );
                     const matCreated = Boolean(
                       it.materialCode &&
                       it.materialCode !== "CUSTOM" &&
                       it.materialCode !== "MAT-REQ" &&
-                      (it.custom_material_name || it.customMaterialName)
+                      (it.custom_material_name || it.customMaterialName),
                     );
 
                     return (
-                      <div key={idx} className="flex justify-between items-center text-xs pb-2 border-b border-border/30 last:border-0 last:pb-0">
+                      <div
+                        key={idx}
+                        className="flex justify-between items-center text-xs pb-2 border-b border-border/30 last:border-0 last:pb-0"
+                      >
                         <div className="space-y-1">
                           <div className="flex items-center gap-1.5">
                             <p className="font-semibold text-foreground">

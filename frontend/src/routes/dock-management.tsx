@@ -248,6 +248,7 @@ function DockManagement() {
   // Create New Dock State
   const [showCreateDock, setShowCreateDock] = useState(false);
   const [createDockType, setCreateDockType] = useState("RAW_MATERIAL");
+  const [customDockType, setCustomDockType] = useState("");
   const [createDockDirection, setCreateDockDirection] = useState("INBOUND");
   const [createDockCode, setCreateDockCode] = useState("");
   const [createDockName, setCreateDockName] = useState("");
@@ -257,7 +258,8 @@ function DockManagement() {
 
   const handleDockTypeChange = (newType: string) => {
     setCreateDockType(newType);
-    const generated = generateDockCodeAndName(newType, docks);
+    if (newType !== "CUSTOM") setCustomDockType("");
+    const generated = generateDockCodeAndName(newType === "CUSTOM" ? "CUSTOM" : newType, docks);
     setCreateDockCode(generated.code);
     setCreateDockName(generated.name);
   };
@@ -432,13 +434,20 @@ function DockManagement() {
   // Handle Create Dock
   async function handleCreateDock(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const effectiveDockType = createDockType === "CUSTOM"
+      ? customDockType.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_")
+      : createDockType;
+    if (!effectiveDockType || effectiveDockType === "CUSTOM") {
+      toast.error("Enter a custom dock type before creating the dock.");
+      return;
+    }
     setActionBusy(true);
     const data = new FormData(event.currentTarget);
     try {
       await api.createDock({
         dock_code: String(data.get("dock_code") || createDockCode),
         dock_name: String(data.get("dock_name") || createDockName),
-        dock_type: String(data.get("dock_type") || createDockType),
+        dock_type: effectiveDockType,
         direction: String(data.get("direction") || createDockDirection),
         location: "",
         description: "",
@@ -546,9 +555,6 @@ function DockManagement() {
     setActionBusy(true);
     try {
       await api.allocateDock(reqId, dockId);
-      toast.success(`Dock ${dockCode} allocated successfully`, {
-        description: "Status updated to OCCUPIED.",
-      });
       setAllocateModalPendingReq(null);
       setAllocateModalDock(null);
       setSelectedDockIdToAllocate("");
@@ -1735,8 +1741,29 @@ function DockManagement() {
                 <option value="ELECTRONICS">ELECTRONICS (Electronics — EC)</option>
                 <option value="MAIN_RECEIVING">MAIN_RECEIVING (Main Receiving — MR)</option>
                 <option value="FINISHED_GOODS">FINISHED_GOODS (Finished Goods / FG)</option>
+                <option value="CUSTOM">＋ Add New Dock Type</option>
               </select>
             </div>
+
+            {createDockType === "CUSTOM" && (
+              <div>
+                <Label htmlFor="custom_dock_type" className="text-xs font-semibold">Custom Dock Type</Label>
+                <Input
+                  id="custom_dock_type"
+                  value={customDockType}
+                  onChange={(e) => {
+                    const value = e.target.value.toUpperCase().replace(/[^A-Z0-9 _-]/g, "");
+                    setCustomDockType(value);
+                    const generated = generateDockCodeAndName(value || "CUSTOM", docks);
+                    setCreateDockCode(generated.code);
+                    setCreateDockName(generated.name);
+                  }}
+                  placeholder="e.g. COLD_STORAGE"
+                  required
+                  className="mt-1.5 h-10 rounded-xl bg-background"
+                />
+              </div>
+            )}
 
             <div>
               <Label htmlFor="create_dock_direction" className="text-xs font-semibold">
