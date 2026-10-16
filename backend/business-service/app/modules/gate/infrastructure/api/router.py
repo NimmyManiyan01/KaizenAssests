@@ -37,7 +37,6 @@ from app.modules.storage.infrastructure.persistence.models import HandlingUnitMo
 from app.modules.storage.application.location_strategy import recommend_storage_location
 from app.modules.store.infrastructure.persistence.models import StoreModel, StoreManagerUserModel
 from app.modules.dock.infrastructure.persistence.models import DockMasterModel, DockAllocationRequestModel
-from app.modules.quarantine.infrastructure.persistence.models import QuarantineRecordModel
 from app.modules.gate.application.ocr_pipeline import EnterprisePoOcrEngine
 from app.modules.gate.domain.aggregate import GateEntry
 from app.modules.gate.domain.services import GateVerificationService
