@@ -921,6 +921,7 @@ async def get_warehouse_inventory_summary(
 
     # Quarantine was removed; no quarantine-held stock is included.
     quar_by_mat: Dict[str, Decimal] = {}
+    quar_by_mat_batch: Dict[tuple[str, str], Decimal] = {}
 
     # 5. Fetch Reserved stock by material
     res_stmt = select(AssemblyStockReservationModel)

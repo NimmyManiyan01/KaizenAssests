@@ -1725,6 +1725,9 @@ def create_app() -> FastAPI:
     )
     register_exception_handlers(app)
 
+    from app.modules.store.infrastructure.api.router import router as store_router, zone_router
+    app.include_router(store_router)
+    app.include_router(zone_router)
     app.include_router(dock_router)
     app.include_router(receiving_router)
     app.include_router(returns_router)

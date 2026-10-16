@@ -132,6 +132,7 @@ type UploadedDocument = {
 };
 
 type GrnHeaderState = {
+  warehouse_id?: string;
   po_number: string;
   supplier_name: string;
   supplier_company_name: string;
@@ -1086,6 +1087,7 @@ function GrnPageWorkflow() {
         supplier_email: supplierEmail,
         asn_number: asnNum,
         gate_entry_number: gateNum,
+        warehouse_id: resolvedContext.warehouse_id || resolvedContext.warehouseId || "",
         warehouse_name: warehouseName,
         grn_number: generatedGrnNum,
         vehicle_number: vehicleNum,
@@ -1376,6 +1378,7 @@ function GrnPageWorkflow() {
           detail.asn?.asnNumber ||
           "",
         gate_entry_number: detail.gate_entry_number || "",
+        warehouse_id: detail.warehouse_id || "",
         warehouse_name: detail.warehouse_name || "",
         grn_number: detail.grn_number || "",
         vehicle_number: detail.vehicle_number || "",
@@ -1672,6 +1675,10 @@ function GrnPageWorkflow() {
         header.receipt_type === "PO_RECEIPT"
           ? header.supplier_company_name
           : header.supplier_company_name || header.supplier_name || "Unknown / Unexpected Supplier",
+      warehouse_id:
+        header.warehouse_id ||
+        dockOptions.find((dock: any) => dock.dock_number === receivingDock)?.warehouse_id ||
+        undefined,
       warehouse_name: header.warehouse_name,
       vehicle_number: header.vehicle_number,
       driver_name: header.driver_name,

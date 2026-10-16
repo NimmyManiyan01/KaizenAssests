@@ -71,3 +71,6 @@ scratch/
 
 # Local database safety backups
 /backend/business-service/backups/
+*.db
+*.db.backup*
+kaizenX/

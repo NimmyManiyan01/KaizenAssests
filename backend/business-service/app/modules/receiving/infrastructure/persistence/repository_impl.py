@@ -23,7 +23,7 @@ from typing import Optional
 import uuid
 
 from datetime import datetime, timezone
-from sqlalchemy import func, or_, select
+from sqlalchemy import bindparam, func, insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -964,6 +964,9 @@ class SqlAlchemyGrnRepository(GrnRepository):
                 if assignment is None or assignment.dock_arrival_at is None:
                     raise ValueError("Receiving can start only after dock check-in is completed")
 
+                if not (warehouse_id or "").strip():
+                    warehouse_id = await _warehouse_for_receiving_dock(self._session, assignment.dock_number)
+
                 duplicate_result = await self._session.execute(
                     select(GrnModel)
                     .options(selectinload(GrnModel.lines))
@@ -1014,6 +1017,8 @@ class SqlAlchemyGrnRepository(GrnRepository):
                 gate_id_val = _uuid_or_none(gate.id)
                 gate_num_val = gate.gate_entry_number
 
+        if not (warehouse_id or "").strip():
+            warehouse_id = await _warehouse_for_receiving_dock(self._session, dock_number)
         if not (warehouse_id or "").strip():
             raise ValueError("A configured warehouse must be selected before creating a GRN")
         if not (received_by or "").strip():
@@ -1738,14 +1743,12 @@ class SqlAlchemyGrnRepository(GrnRepository):
                         eligible_quantity = min(batch.batch_quantity or Decimal("0"), eligible_remaining)
                         if eligible_quantity > Decimal("0"):
                             existing_task = await self._session.execute(
-                                text("""
-                                    SELECT id FROM putaway_task
-                                    WHERE grn_id = :grn_id
-                                      AND item_code = :code
-                                      AND UPPER(TRIM(COALESCE(batch_number, ''))) = UPPER(TRIM(:batch_number))
-                                      AND status NOT IN ('CANCELLED', 'VOID')
-                                    LIMIT 1
-                                """),
+                                select(PutawayTaskModel.id).where(
+                                    PutawayTaskModel.grn_id == grn.id,
+                                    PutawayTaskModel.item_code == line.item_code,
+                                    func.upper(func.trim(func.coalesce(PutawayTaskModel.batch_number, ""))) == batch_key,
+                                    PutawayTaskModel.status.notin_(["CANCELLED", "VOID"]),
+                                ).limit(1),
                                 {
                                     "grn_id": grn.id,
                                     "code": line.item_code,
@@ -1757,11 +1760,26 @@ class SqlAlchemyGrnRepository(GrnRepository):
                                 continue
                             task_num = f"PT-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
                             await self._session.execute(
-                                text("""
-                                    INSERT INTO putaway_task
-                                    (id, task_number, grn_id, grn_number, item_code, material_name, quantity, uom, warehouse_id, source_location, destination_store_id, assigned_to, assigned_by, assigned_at, status, created_by, created_at, batch_number)
-                                    VALUES (:id, :task_num, :grn_id, :grn_num, :code, :name, :qty, :uom, :wh, :source, :dest_store_id, :assigned_to, :assigned_by, :assigned_at, 'PUTAWAY_PENDING', :user, :now, :batch_number)
-                                """),
+                                insert(PutawayTaskModel.__table__).values(
+                                    id=bindparam("id"),
+                                    task_number=bindparam("task_num"),
+                                    grn_id=bindparam("grn_id"),
+                                    grn_number=bindparam("grn_num"),
+                                    item_code=bindparam("code"),
+                                    material_name=bindparam("name"),
+                                    quantity=bindparam("qty"),
+                                    uom=bindparam("uom"),
+                                    warehouse_id=bindparam("wh"),
+                                    source_location=bindparam("source"),
+                                    destination_store_id=bindparam("dest_store_id"),
+                                    assigned_to=bindparam("assigned_to"),
+                                    assigned_by=bindparam("assigned_by"),
+                                    assigned_at=bindparam("assigned_at"),
+                                    status="PUTAWAY_PENDING",
+                                    created_by=bindparam("user"),
+                                    created_at=bindparam("now"),
+                                    batch_number=bindparam("batch_number")
+                                ),
                                 {
                                     "id": uuid.uuid4(),
                                     "task_num": task_num,
@@ -1795,11 +1813,25 @@ class SqlAlchemyGrnRepository(GrnRepository):
                         continue
                     task_num = f"PT-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
                     await self._session.execute(
-                        text("""
-                            INSERT INTO putaway_task
-                            (id, task_number, grn_id, grn_number, item_code, material_name, quantity, uom, warehouse_id, source_location, destination_store_id, assigned_to, assigned_by, assigned_at, status, created_by, created_at)
-                            VALUES (:id, :task_num, :grn_id, :grn_num, :code, :name, :qty, :uom, :wh, :source, :dest_store_id, :assigned_to, :assigned_by, :assigned_at, 'PUTAWAY_PENDING', :user, :now)
-                        """),
+                        insert(PutawayTaskModel.__table__).values(
+                                    id=bindparam("id"),
+                                    task_number=bindparam("task_num"),
+                                    grn_id=bindparam("grn_id"),
+                                    grn_number=bindparam("grn_num"),
+                                    item_code=bindparam("code"),
+                                    material_name=bindparam("name"),
+                                    quantity=bindparam("qty"),
+                                    uom=bindparam("uom"),
+                                    warehouse_id=bindparam("wh"),
+                                    source_location=bindparam("source"),
+                                    destination_store_id=bindparam("dest_store_id"),
+                                    assigned_to=bindparam("assigned_to"),
+                                    assigned_by=bindparam("assigned_by"),
+                                    assigned_at=bindparam("assigned_at"),
+                                    status="PUTAWAY_PENDING",
+                                    created_by=bindparam("user"),
+                                    created_at=bindparam("now")
+                                ),
                         {
                             "id": uuid.uuid4(),
                             "task_num": task_num,
@@ -2006,3 +2038,14 @@ class SqlAlchemyGrnRepository(GrnRepository):
         await self._session.delete(grn)
         await self._session.flush()
         return True
+
+
+async def _warehouse_for_receiving_dock(session: AsyncSession, dock_number: str | None) -> str | None:
+    """Resolve a missing warehouse from the actual configured receiving dock."""
+    if not (dock_number or "").strip():
+        return None
+    result = await session.execute(
+        select(DockModel.warehouse_id).where(DockModel.dock_number == dock_number.strip())
+    )
+    warehouse_id = result.scalar_one_or_none()
+    return warehouse_id.strip() if warehouse_id and warehouse_id.strip() else None

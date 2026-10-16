@@ -2040,15 +2040,16 @@ export const api = {
 
     return request<any>(`${BUSINESS_API_URL}/api/v1/materials/next-code${query}`);
   },
-  async getStores(filters?: {
+  async getStores(params?: {
+    warehouse_id?: string;
     search?: string;
     status?: string;
-    warehouse_id?: string;
   }): Promise<any[]> {
-    // The standalone Store Manager API was removed, so do not call the
-    // deleted /api/v1/stores endpoint.
-    void filters;
-    return [];
+    const query = new URLSearchParams();
+    if (params?.warehouse_id) query.set("warehouse_id", params.warehouse_id);
+    if (params?.search) query.set("search", params.search);
+    if (params?.status) query.set("status", params.status);
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/stores?${query.toString()}`);
   },
   async getStoreMasterList(filters?: {
     search?: string;
@@ -2264,6 +2265,7 @@ export const api = {
     zoneId: string,
     data: {
       bin_name: string;
+      qr_identifier?: string;
       bin_code?: string;
       rack?: string;
       shelf?: string;
@@ -2610,7 +2612,14 @@ export const api = {
   },
   async completePickupTask(
     id: string,
-    data: { material_scan: string; zone_scan: string; quantity: number; notes?: string; batch_number?: string; confirmation_id?: string },
+    data: {
+      material_scan: string;
+      zone_scan: string;
+      quantity: number;
+      notes?: string;
+      batch_number?: string;
+      confirmation_id?: string;
+    },
   ): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/storage/pickup-tasks/${encodeURIComponent(id)}/complete`,
@@ -2620,44 +2629,6 @@ export const api = {
         body: JSON.stringify(data),
       },
     );
-  },
-  async getStores(params?: { warehouse_id?: string; search?: string }): Promise<any[]> {
-    void params;
-    return [];
-  },
-  async getStore(id: string): Promise<any> {
-    void id;
-    return null;
-  },
-  async createStore(data: { store_name: string; store_code?: string; description?: string; warehouse_id?: string }): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/stores`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-  },
-  async getStoreZones(storeId: string): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/stores/${encodeURIComponent(storeId)}/zones`);
-  },
-  async createZone(storeId: string, data: { zone_name: string; zone_code?: string; description?: string }): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/stores/${encodeURIComponent(storeId)}/zones`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-  },
-  async getStoreBins(storeId: string, zoneId?: string): Promise<any[]> {
-    if (zoneId) {
-      return request<any[]>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/bins`);
-    }
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/stores/${encodeURIComponent(storeId)}/bins`);
-  },
-  async createBin(storeId: string, zoneId: string, data: { bin_code: string; bin_name?: string; rack?: string; position?: string; qr_identifier?: string }): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/bins`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
   },
   async createBulkRack(storeId: string, data: {
     zone_id: string;
@@ -2687,7 +2658,11 @@ export const api = {
       method: "POST",
     });
   },
-  async createMaterialIssue(data: { requisition_number?: string; assembly_order_number?: string; issued_to?: string }): Promise<any> {
+  async createMaterialIssue(data: {
+    requisition_number?: string;
+    assembly_order_number?: string;
+    issued_to?: string;
+  }): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/material-issues`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3666,7 +3641,6 @@ export interface CreateAssemblyMaterialRequestPayload {
   assembly_line?: string;
   order_id?: string;
 }
-
 
 export interface AssemblyProductBOMResponse {
   product_code: string;
