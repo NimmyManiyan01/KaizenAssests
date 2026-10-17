@@ -92,19 +92,24 @@ function SupplierDashboard() {
   const [materialsLoading, setMaterialsLoading] = useState(false);
   const [materialsError, setMaterialsError] = useState("");
   const [materialSearch, setMaterialSearch] = useState("");
-  const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [warehouses, setWarehouses] = useState<any[]>([]);
-  const [selectedPo, setSelectedPo] = useState<any>(null);
   const currentUser = getUserInfo();
 
   useEffect(() => {
     loadAsns();
-    void (currentUser?.supplierId ? api.getSupplier(currentUser.supplierId) : api.getSuppliers({ search: currentUser?.username })).then((result: any) => { const rows = Array.isArray(result) ? result : result?.items || result?.suppliers || []; const supplier = rows.length ? rows.find((item: any) => String(item.id) === String(currentUser?.supplierId) || String(item.username || item.supplier_name || "").toLowerCase() === String(currentUser?.username || "").toLowerCase()) || rows[0] : result; const companyName = supplier?.registered_company_name || supplier?.company_name || supplier?.supplier_name || ""; setSupplierCompanyName(companyName); if (companyName) setSupplierName(companyName); }).catch(() => undefined);
+    const companyName = currentUser?.full_name || currentUser?.username || "";
+    setSupplierCompanyName(companyName);
+    if (companyName) setSupplierName(companyName);
     setMaterialsLoading(true);
     void api.getMaterialComponents().then((materials) => { setMaterialCatalog((materials || []).map((material: any) => ({ ...material, id: material.id || material.material_id, code: material.code || material.material_code, name: material.name || material.material_name, uom: material.uom || material.base_uom || material.unit_of_measure })).filter((material: any) => material.id && material.code && material.name && material.uom)); setMaterialsError(""); }).catch(() => { setMaterialCatalog([]); setMaterialsError("Unable to load Material Master records."); }).finally(() => setMaterialsLoading(false));
     void Promise.all([api.getVehicles().catch(() => []), api.getDrivers().catch(() => [])]).then(([vehicles, drivers]) => { setRegisteredVehicles((vehicles || []).filter((v: any) => v.is_active !== false && String(v.status || "AVAILABLE").toUpperCase() === "AVAILABLE")); setRegisteredDrivers((drivers || []).filter((d: any) => d.is_active !== false && String(d.status || "ACTIVE").toUpperCase() === "ACTIVE")); });
-    void Promise.all([api.getPurchaseOrders({ supplierId: currentUser?.supplierId }).catch(() => []), api.getStores({ status: "ALL" }).catch(() => [])])
-      .then(([pos, stores]) => { setPurchaseOrders(pos || []); setWarehouses((stores || []).filter((store: any) => String(store.status || "ACTIVE").toUpperCase() === "ACTIVE")); });
+    void api.getStores({ status: "ALL" }).then((stores) => {
+      setWarehouses(
+        (stores || []).filter(
+          (store: any) => String(store.status || "ACTIVE").toUpperCase() === "ACTIVE",
+        ),
+      );
+    });
   }, []);
 
   const handleAddNewCustomMaterial = async () => {
@@ -151,20 +156,11 @@ function SupplierDashboard() {
     setSupplierName(supplierCompanyName || currentUser?.full_name || currentUser?.username || "");
     setDestinationWarehouse("");
     setDestinationWarehouseId("");
-    setSelectedPo(null);
     setVehicleNumber("");
     setDriverName("");
     setDriverMobile("");
     setLines([{ material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" }]);
     setIsModalOpen(true);
-  };
-
-  const selectPurchaseOrder = async (id: string) => {
-    if (!id) { setSelectedPo(null); setLines([]); return; }
-    const po = await api.getPurchaseOrder(id);
-    setSelectedPo(po);
-    const poLines = po?.lines || po?.items || po?.materials || po?.purchase_order_lines || [];
-    setLines(poLines.map((line: any) => ({ item_code: line.item_code || line.material_code || line.code || "", material_name: line.material_name || line.material?.name || line.name || "", shipped_quantity: "", remaining_quantity: Number(line.remaining_quantity ?? line.remaining ?? line.balance_quantity ?? line.ordered_quantity ?? line.quantity ?? 0), uom: line.uom || line.unit_of_measure || "PCS" })));
   };
 
   const handleFormSubmit = async (e: React.FormEvent) => {

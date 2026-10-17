@@ -34,6 +34,11 @@ from app.modules.dispatch.infrastructure.api.router import router as dispatch_ro
 from app.modules.storage.infrastructure.api.assembly_requisition_router import router as assembly_requisition_router
 from app.modules.storage.infrastructure.api.inventory_router import inventory_router, storage_req_router, v1_inventory_router
 from app.security.router import router as auth_router
+from app.modules.assistant.infrastructure.api.router import router as assistant_router
+from app.modules.store.infrastructure.api.location_router import (
+    store_router as store_location_router,
+    zone_router as zone_location_router,
+)
 from app.workers.notification_consumer import start_notification_consumer
 from app.workers.outbox_relay import relay_once
 
@@ -1666,6 +1671,9 @@ def create_app() -> FastAPI:
     app.include_router(assembly_router)
     app.include_router(dispatch_router)
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+    app.include_router(assistant_router)
+    app.include_router(store_location_router)
+    app.include_router(zone_location_router)
 
     @app.get("/api/debug-assembly")
     async def debug_assembly():

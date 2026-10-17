@@ -125,10 +125,24 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
     // Ignore if running in non-browser context
   }
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
+  const method = (options.method || "GET").toUpperCase();
+  let response: Response;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      response = await fetch(url, {
+        ...options,
+        headers,
+      });
+      break;
+    } catch (error) {
+      // Browser network changes briefly interrupt local API calls while the
+      // dev server or network adapter reconnects. Retry idempotent reads only.
+      if (!(error instanceof TypeError) || method !== "GET" || attempt >= 2) {
+        throw error;
+      }
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 300 * (attempt + 1)));
+    }
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -373,7 +387,9 @@ export const api = {
     return request<any[]>(`${BUSINESS_API_URL}/api/v1/warehouse/dock-allocation-requests/pending`);
   },
   async getDockAllocationRequests(): Promise<any[]> {
-    return this.getPendingAllocations();
+    // GRN needs the allocation already assigned to an inbound shipment.
+    // The pending endpoint deliberately omits those completed allocations.
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/warehouse/dock-allocation-requests`);
   },
   async allocateDock(
     allocationRequestId: string,
@@ -2051,10 +2067,12 @@ export const api = {
     status?: string;
     warehouse_id?: string;
   }): Promise<any[]> {
-    // The standalone Store Manager API was removed, so do not call the
-    // deleted /api/v1/stores endpoint.
-    void filters;
-    return [];
+    const params = new URLSearchParams();
+    if (filters?.search) params.set("search", filters.search);
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.warehouse_id) params.set("warehouse_id", filters.warehouse_id);
+    const query = params.toString();
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/stores${query ? `?${query}` : ""}`);
   },
   async getStoreMasterList(filters?: {
     search?: string;
@@ -2139,6 +2157,23 @@ export const api = {
     return request<any[]>(
       `${BUSINESS_API_URL}/api/v1/stores/${encodeURIComponent(storeIdOrCode)}/zones${query ? `?${query}` : ""}`,
     );
+  },
+  async getLocationZones(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/zones`);
+  },
+  async getNextLocationZoneCode(): Promise<{ suggested_zone_code: string }> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/next-code`);
+  },
+  async createLocationZone(data: {
+    zone_name: string;
+    description?: string;
+    zone_code?: string;
+  }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
   },
   async getNextZoneCode(storeIdOrCode: string): Promise<{ suggested_zone_code: string }> {
     return request<any>(
@@ -2274,6 +2309,7 @@ export const api = {
       rack?: string;
       shelf?: string;
       position?: string;
+      qr_identifier?: string;
       storage_type?: string;
       capacity?: number;
       maximum_weight?: number;
@@ -3464,7 +3500,28 @@ export const api = {
     const qStr = role ? `?role=${encodeURIComponent(role)}` : "";
     return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/notifications${qStr}`);
   },
+  async assistantChat(
+    message: string,
+    history: AssistantChatMessage[] = [],
+  ): Promise<AssistantChatResponse> {
+    return request<AssistantChatResponse>(`${BUSINESS_API_URL}/api/v1/assistant/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, history }),
+    });
+  },
 };
+
+export interface AssistantChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AssistantChatResponse {
+  reply: string;
+  model: string;
+}
+
 
 export interface AssemblyQualityInspectionItem {
   order_id: string;

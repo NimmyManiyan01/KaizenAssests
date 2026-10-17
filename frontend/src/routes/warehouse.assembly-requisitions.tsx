@@ -6,7 +6,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { api } from "@/lib/api-client";
 import { requireRole } from "@/lib/auth-utils";
 import { toast } from "sonner";
-import { Loader2, RefreshCw } from "lucide-react";
+import { ClipboardList, Loader2, RefreshCw } from "lucide-react";
+import warehouseHero from "@/assets/login-warehouse.png";
 
 export const Route = createFileRoute("/warehouse/assembly-requisitions")({
   beforeLoad: () => requireRole(["WAREHOUSE", "WAREHOUSE_MANAGER", "ADMIN", "SUPERUSER"]),
@@ -78,22 +79,34 @@ function WarehouseAssemblyRequisitionsPage() {
   };
 
   return (
-    <AppShell
-      title="Assembly Requisitions"
-      subtitle="Review persisted material requests, reserve stock, and create store picking work."
-    >
-      <div className="mb-4 flex justify-end">
-        <Button variant="outline" onClick={() => void refresh()}>
-          <RefreshCw className="mr-2 size-4" />
-          Refresh
-        </Button>
-      </div>
+    <AppShell>
+      <div className="space-y-5 pb-10">
+        <div className="relative isolate flex min-h-[176px] flex-col justify-center gap-4 overflow-hidden border border-[#0b315c] bg-[#0b315c] px-6 py-5 shadow-sm md:flex-row md:items-center md:justify-between md:px-8">
+          <div aria-hidden="true" className="absolute inset-0 -z-20 bg-cover bg-[center_43%]" style={{ backgroundImage: `url(${warehouseHero})` }} />
+          <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[linear-gradient(90deg,#071d3df2_0%,#0b315ce8_38%,#0b315ca8_68%,#0b315c32_100%)]" />
+          <div className="relative max-w-3xl text-white">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-200">
+              Warehouse Control <span className="px-1 text-blue-300/70">/</span> Assembly Supply Operations
+            </p>
+            <h1 className="mt-2 flex items-center gap-2.5 text-[25px] font-semibold tracking-tight md:text-[28px]">
+              <ClipboardList className="size-6 text-[#71b5ff]" />
+              Assembly Requisitions
+            </h1>
+            <p className="mt-1.5 text-sm text-blue-50/85">
+              Review material requests, reserve warehouse stock, and prepare supplies for production.
+            </p>
+          </div>
+          <Button variant="outline" onClick={() => void refresh()} aria-label="Refresh Assembly requisitions" className="border-white/35 bg-white/10 text-white hover:bg-white/20 hover:text-white">
+            <RefreshCw className="mr-2 size-4" />
+            Refresh
+          </Button>
+        </div>
       {loading ? (
         <div className="grid min-h-64 place-items-center">
           <Loader2 className="size-6 animate-spin" />
         </div>
       ) : rows.length === 0 ? (
-        <Card>
+        <Card className="rounded-lg border-slate-300 bg-white shadow-none dark:border-slate-700 dark:bg-slate-900">
           <CardContent className="p-10 text-center text-muted-foreground">
             No Assembly requisitions have been submitted.
           </CardContent>
@@ -103,6 +116,20 @@ function WarehouseAssemblyRequisitionsPage() {
           {rows.map((request) => {
             const id = String(request.id);
             const status = String(request.status || "").toUpperCase();
+            const statusBorderTone = ["ISSUED", "ASSEMBLY_RECEIVED", "COMPLETED"].includes(status)
+              ? "border-l-emerald-600 dark:border-l-emerald-500"
+              : ["REJECTED", "CANCELLED"].includes(status)
+                ? "border-l-rose-600 dark:border-l-rose-500"
+                : ["APPROVED", "RESERVED", "PARTIALLY_RESERVED"].includes(status)
+                  ? "border-l-blue-700 dark:border-l-blue-500"
+                  : "border-l-amber-600 dark:border-l-amber-500";
+            const statusPillTone = ["ISSUED", "ASSEMBLY_RECEIVED", "COMPLETED"].includes(status)
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200"
+              : ["REJECTED", "CANCELLED"].includes(status)
+                ? "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200"
+                : ["APPROVED", "RESERVED", "PARTIALLY_RESERVED"].includes(status)
+                  ? "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-200"
+                  : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200";
             const approvalRequired = status === "PENDING_WAREHOUSE_APPROVAL";
             const canReview =
               approvalRequired || ["PENDING", "SUBMITTED", "PARTIALLY_RESERVED"].includes(status);
@@ -126,23 +153,23 @@ function WarehouseAssemblyRequisitionsPage() {
                   productionQuantity
                 : 0;
             return (
-              <Card key={id}>
+              <Card key={id} className={`rounded-lg border-slate-300 border-l-[3px] bg-white shadow-none dark:border-slate-700 dark:bg-slate-900 ${statusBorderTone}`}>
                 <CardContent className="space-y-4 p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h2 className="font-semibold">{request.requisition_number}</h2>
+                      <h2 className="font-semibold text-slate-900 dark:text-slate-100">{request.requisition_number}</h2>
                       <p className="text-xs text-muted-foreground">
                         {request.department} · Requested by {request.requested_by} ·{" "}
                         {request.required_date}
                       </p>
                     </div>
-                    <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold">
+                    <span className={`inline-flex items-center rounded-md border px-2.5 py-1 text-[11px] font-semibold tracking-wide ${statusPillTone}`}>
                       {status || ""}
                     </span>
                   </div>
                   {productionQuantity > 0 && firstItem && (
-                    <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
-                      <span className="font-semibold">BOM calculation: </span>
+                    <div className="rounded-md border border-blue-200 bg-blue-50/70 px-3 py-2 text-xs text-slate-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-slate-200">
+                      <span className="font-semibold text-blue-900 dark:text-blue-200">BOM calculation: </span>
                       {request.product_name || "Finished good"} × {productionQuantity}{" "}
                       {request.uom || "PCS"}
                       {" → "}
@@ -185,27 +212,27 @@ function WarehouseAssemblyRequisitionsPage() {
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
                       <thead>
-                        <tr className="border-b text-xs text-muted-foreground">
-                          <th className="py-2">Material</th>
-                          <th>Requested</th>
-                          <th>Available</th>
-                          <th>Reserved</th>
-                          <th>Unit</th>
+                        <tr className="border-b bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800/70 dark:text-slate-300">
+                          <th className="px-3 py-2">Material</th>
+                          <th className="px-3 py-2">Requested</th>
+                          <th className="px-3 py-2">Available</th>
+                          <th className="px-3 py-2">Reserved</th>
+                          <th className="px-3 py-2">Unit</th>
                         </tr>
                       </thead>
                       <tbody>
                         {(request.items || []).map((item: any) => (
                           <tr
                             key={item.id || item.material_code}
-                            className="border-b last:border-0"
+                            className="border-b border-slate-100 text-slate-700 transition-colors hover:bg-blue-50/50 last:border-0 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-blue-950/20"
                           >
-                            <td className="py-2">
+                            <td className="px-3 py-2.5 font-medium">
                               {item.material_code} · {item.material_name}
                             </td>
-                            <td>{item.requested_quantity}</td>
-                            <td>{item.available_quantity}</td>
-                            <td>{item.reserved_quantity}</td>
-                            <td>{item.uom || ""}</td>
+                            <td className="px-3 py-2.5 tabular-nums">{item.requested_quantity}</td>
+                            <td className="px-3 py-2.5 tabular-nums">{item.available_quantity}</td>
+                            <td className="px-3 py-2.5 tabular-nums font-medium text-blue-800 dark:text-blue-300">{item.reserved_quantity}</td>
+                            <td className="px-3 py-2.5 text-slate-500">{item.uom || ""}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -296,6 +323,7 @@ function WarehouseAssemblyRequisitionsPage() {
           })}
         </div>
       )}
+      </div>
     </AppShell>
   );
 }

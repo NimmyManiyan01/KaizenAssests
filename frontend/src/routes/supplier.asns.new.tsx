@@ -133,41 +133,16 @@ function NewAsnPage() {
     { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" },
   ]);
 
-  const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [materialCatalog, setMaterialCatalog] = useState<any[]>([]);
   const [warehouses, setWarehouses] = useState<any[]>([]);
-  const [selectedPo, setSelectedPo] = useState<any>(null);
   const currentUser = getUserInfo();
 
   useEffect(() => {
     loadAsnData();
-    void (
-      currentUser?.supplierId
-        ? api.getSupplier(currentUser.supplierId)
-        : api.getSuppliers({ search: currentUser?.username })
-    )
-      .then((result: any) => {
-        const supplierRows = Array.isArray(result)
-          ? result
-          : result?.items || result?.suppliers || [];
-        const supplier = supplierRows.length
-          ? supplierRows.find(
-              (item: any) =>
-                String(item.id) === String(currentUser?.supplierId) ||
-                String(item.username || item.supplier_name || "").toLowerCase() ===
-                  String(currentUser?.username || "").toLowerCase(),
-            ) || supplierRows[0]
-          : result;
-        const companyName =
-          supplier?.registered_company_name ||
-          supplier?.company_name ||
-          supplier?.supplier_name ||
-          "";
-        const displaySupplierName = /seeded supplier/i.test(companyName) ? "MTU" : companyName;
-        setSupplierCompanyName(displaySupplierName);
-        if (displaySupplierName) setSupplierName(displaySupplierName);
-      })
-      .catch(() => undefined);
+    const companyName = currentUser?.full_name || currentUser?.username || "";
+    const displaySupplierName = /seeded supplier/i.test(companyName) ? "MTU" : companyName;
+    setSupplierCompanyName(displaySupplierName);
+    if (displaySupplierName) setSupplierName(displaySupplierName);
     void Promise.all([api.getStores({ status: "ALL" }).catch(() => [])]).then(([stores]) => {
       setWarehouses(
         (stores || []).filter(
@@ -258,7 +233,6 @@ function NewAsnPage() {
     setSupplierName(supplierCompanyName || currentUser?.full_name || currentUser?.username || "");
     setDestinationWarehouse("");
     setDestinationWarehouseId("");
-    setSelectedPo(null);
     setVehicleNumber("");
     setDriverName("");
     setDriverMobile("");
@@ -376,33 +350,6 @@ function NewAsnPage() {
     } finally {
       setCreatingMaterial(false);
     }
-  };
-
-  const selectPurchaseOrder = async (id: string) => {
-    if (!id) {
-      setSelectedPo(null);
-      setLines([]);
-      return;
-    }
-    const po = await api.getPurchaseOrder(id);
-    setSelectedPo(po);
-    const poLines = po?.lines || po?.items || po?.materials || po?.purchase_order_lines || [];
-    setLines(
-      poLines.map((line: any) => ({
-        item_code: line.item_code || line.material_code || line.code || "",
-        material_name: line.material_name || line.material?.name || line.name || "",
-        shipped_quantity: "",
-        remaining_quantity: Number(
-          line.remaining_quantity ??
-            line.remaining ??
-            line.balance_quantity ??
-            line.ordered_quantity ??
-            line.quantity ??
-            0,
-        ),
-        uom: line.uom || line.unit_of_measure || "PCS",
-      })),
-    );
   };
 
   const handleFormSubmit = async (e: React.FormEvent) => {

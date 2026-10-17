@@ -603,27 +603,17 @@ function GrnPageWorkflow() {
   // Fetch All Docks & Allocations Created in Warehouse Module
   const loadWarehouseDocks = useCallback(async () => {
     try {
-      const [docksRes, allocsRes] = await Promise.all([
-        api.getDocks().catch(() => []),
-        api.getDockAllocationRequests().catch(() => []),
-      ]);
+      // The dock master response already includes its active allocation.
+      // Avoid a second legacy allocations endpoint that can fail on older
+      // databases and leave the GRN page without the assigned gate pass.
+      const docksRes = await api.getDocks();
 
       const docksList = Array.isArray(docksRes) ? docksRes : [];
-      const allocsList = Array.isArray(allocsRes) ? allocsRes : [];
 
-      if (docksList.length > 0 || allocsList.length > 0) {
+      if (docksList.length > 0) {
         const enrichedDocks = docksList.map((d: any) => {
           const num = d.dock_number || d.dock_code || d.name || `DOCK-${d.id}`;
-          const currentAlloc =
-            d.current_allocation ||
-            allocsList.find(
-              (a: any) =>
-                (a.assigned_dock_id &&
-                  (a.assigned_dock_id === d.id || String(a.assigned_dock_id) === String(d.id))) ||
-                (a.assigned_dock_code && a.assigned_dock_code === num) ||
-                (a.assigned_dock?.dock_number && a.assigned_dock?.dock_number === num) ||
-                (a.assigned_dock?.dock_code && a.assigned_dock?.dock_code === num),
-            );
+          const currentAlloc = d.current_allocation || null;
 
           return {
             id: d.id,
@@ -645,7 +635,8 @@ function GrnPageWorkflow() {
         // Auto-detect dock allocated to current shipment or gate pass
         setHeader((prev) => {
           if (prev.receiving_dock) return prev;
-          const matched = enrichedDocks.find((d: any) => {
+          const activeAllocations = enrichedDocks.filter((d: any) => d.current_allocation);
+          const matched = activeAllocations.find((d: any) => {
             const alloc = d.current_allocation;
             if (!alloc) return false;
             return (
@@ -663,15 +654,18 @@ function GrnPageWorkflow() {
                 alloc.vendor_reference &&
                 alloc.vendor_reference.toLowerCase().includes(prev.supplier_name.toLowerCase()))
             );
-          });
+          }) || (activeAllocations.length === 1 ? activeAllocations[0] : undefined);
           if (matched) {
             return { ...prev, receiving_dock: matched.dock_number };
           }
           return prev;
         });
+        return enrichedDocks;
       }
+      return [];
     } catch (err) {
       console.warn("Failed to load warehouse dock allocations:", err);
+      return [];
     }
   }, []);
 
@@ -699,7 +693,8 @@ function GrnPageWorkflow() {
       };
     }
 
-    const matched = dockOptions.find((d: any) => {
+    const activeAllocations = dockOptions.filter((d: any) => d.current_allocation);
+    const matched = activeAllocations.find((d: any) => {
       const alloc = d.current_allocation;
       if (!alloc) return false;
       const vMatch =
@@ -715,8 +710,12 @@ function GrnPageWorkflow() {
         header.po_number &&
         ((alloc.material_reference && alloc.material_reference.includes(header.po_number)) ||
           (alloc.po_number && alloc.po_number === header.po_number));
-      return Boolean(vMatch || gMatch || pMatch);
-    });
+      const supplierMatch =
+        header.supplier_name &&
+        alloc.vendor_reference &&
+        alloc.vendor_reference.trim().toLowerCase().includes(header.supplier_name.trim().toLowerCase());
+      return Boolean(vMatch || gMatch || pMatch || supplierMatch);
+    }) || (activeAllocations.length === 1 ? activeAllocations[0] : undefined);
 
     if (matched) {
       return {
@@ -1044,6 +1043,27 @@ function GrnPageWorkflow() {
         ctx.destinationWarehouse ||
         "";
 
+      // Refresh allocation data when resolving an ASN. The ASN response can
+      // predate dock assignment, and some older gate records lack their ASN FK.
+      const latestDocks = await loadWarehouseDocks();
+      const availableDocks = latestDocks.length ? latestDocks : dockOptions;
+      const activeAllocations = availableDocks.filter((dock: any) => dock.current_allocation);
+      const matchedAllocationDock = activeAllocations.find((dock: any) => {
+        const allocation = dock.current_allocation;
+        const norm = (value: unknown) => String(value || "").trim().toUpperCase();
+        const allocationMaterial = norm(allocation.material_reference);
+        return Boolean(
+          (vehicleNum && norm(allocation.vehicle_number) === norm(vehicleNum)) ||
+          (gateNum && norm(allocation.existing_gate_pass_id) === norm(gateNum)) ||
+          (resolvedPoNumber && allocationMaterial.includes(norm(resolvedPoNumber))) ||
+          (numToFetch && allocationMaterial.includes(norm(numToFetch))) ||
+          (supplierName && norm(allocation.vendor_reference).includes(norm(supplierName)))
+        );
+      }) || (activeAllocations.length === 1 ? activeAllocations[0] : undefined);
+      const allocationGateNumber =
+        matchedAllocationDock?.current_allocation?.existing_gate_pass_id || "";
+      const resolvedGateEntryNumber = gateNum || allocationGateNumber;
+
       // Auto-detect allocated dock from warehouse allocation, gate entry, or PO context
       let prefilledDock =
         resolvedContext.prefilled_dock_number ||
@@ -1051,30 +1071,8 @@ function GrnPageWorkflow() {
         resolvedContext.gate_entry?.dock_number ||
         resolvedContext.gate_entry?.dockNumber ||
         resolvedContext.assigned_dock_number ||
+        matchedAllocationDock?.dock_number ||
         "";
-      if (!prefilledDock && dockOptions.length > 0) {
-        const matchedDock = dockOptions.find((d: any) => {
-          const alloc = d.current_allocation;
-          if (!alloc) return false;
-          return (
-            (vehicleNum &&
-              alloc.vehicle_number &&
-              alloc.vehicle_number.toUpperCase() === vehicleNum.toUpperCase()) ||
-            (gateNum &&
-              alloc.existing_gate_pass_id &&
-              alloc.existing_gate_pass_id.toUpperCase() === gateNum.toUpperCase()) ||
-            (numToFetch &&
-              alloc.material_reference &&
-              alloc.material_reference.includes(numToFetch)) ||
-            (supplierName &&
-              alloc.vendor_reference &&
-              alloc.vendor_reference.toLowerCase().includes(supplierName.toLowerCase()))
-          );
-        });
-        if (matchedDock) {
-          prefilledDock = matchedDock.dock_number;
-        }
-      }
       const generatedGrnNum =
         resolvedContext.grn_number || resolvedContext.grnNumber || generateGrnNumber();
 
@@ -1085,7 +1083,7 @@ function GrnPageWorkflow() {
         supplier_company_name: supplierComp,
         supplier_email: supplierEmail,
         asn_number: asnNum,
-        gate_entry_number: gateNum,
+        gate_entry_number: resolvedGateEntryNumber,
         warehouse_name: warehouseName,
         grn_number: generatedGrnNum,
         vehicle_number: vehicleNum,
@@ -1643,7 +1641,31 @@ function GrnPageWorkflow() {
   }
 
   async function saveGrnHeader(): Promise<string> {
-    const receivingDock = header.receiving_dock.trim() || allocatedDockInfo?.dock_number || "";
+    // Refresh at save time: the GRN page may have been left open while
+    // Warehouse allocated the single receiving dock in another tab.
+    const latestDocks = await loadWarehouseDocks();
+    const activeAllocations = latestDocks.filter((dock: any) => dock.current_allocation);
+    const matchingAllocation = activeAllocations.find((dock: any) => {
+      const allocation = dock.current_allocation;
+      return Boolean(
+        (header.vehicle_number && allocation.vehicle_number &&
+          allocation.vehicle_number.trim().toUpperCase() === header.vehicle_number.trim().toUpperCase()) ||
+        (header.gate_entry_number && allocation.existing_gate_pass_id &&
+          allocation.existing_gate_pass_id.trim().toUpperCase() === header.gate_entry_number.trim().toUpperCase()) ||
+        (header.po_number && allocation.material_reference &&
+          allocation.material_reference.trim().toUpperCase().includes(header.po_number.trim().toUpperCase())) ||
+        (header.supplier_name && allocation.vendor_reference &&
+          allocation.vendor_reference.trim().toLowerCase().includes(header.supplier_name.trim().toLowerCase()))
+      );
+    }) || (activeAllocations.length === 1 ? activeAllocations[0] : undefined);
+    const receivingDock =
+      (grnId ? header.receiving_dock.trim() : "") ||
+      matchingAllocation?.dock_number ||
+      "";
+    const receivingGateEntryNumber =
+      header.gate_entry_number.trim() ||
+      matchingAllocation?.current_allocation?.existing_gate_pass_id ||
+      "";
     if (!receivingDock) {
       throw new Error(
         "No Receiving Dock assigned by warehouse dock allocation. Please ensure a dock is allocated before proceeding.",
@@ -1662,6 +1684,7 @@ function GrnPageWorkflow() {
       grn_id: grnId || undefined,
       receipt_type: "ASN_RECEIPT",
       asn_number: header.asn_number.trim(),
+      gate_entry_number: receivingGateEntryNumber || undefined,
       dock_number: receivingDock,
       invoice_number: header.invoice_number,
       supplier_name:

@@ -528,8 +528,28 @@ async def list_allocation_requests(
     )
     result = await uow.session.execute(query)
     reqs = result.scalars().all()
+    gate_result = await uow.session.execute(
+        select(GateEntryModel).order_by(GateEntryModel.created_at.desc())
+    )
+    gate_entries = gate_result.scalars().all()
+    gate_by_pass: dict[str, GateEntryModel] = {}
+    gate_by_id: dict[str, GateEntryModel] = {}
+    gate_by_vehicle: dict[str, GateEntryModel] = {}
+    for gate_entry in gate_entries:
+        if gate_entry.gate_entry_number:
+            gate_by_pass.setdefault(gate_entry.gate_entry_number.strip().upper(), gate_entry)
+        gate_by_id.setdefault(str(gate_entry.id).upper(), gate_entry)
+        if gate_entry.vehicle_number:
+            gate_by_vehicle.setdefault(gate_entry.vehicle_number.strip().upper(), gate_entry)
+
     res = []
     for r in reqs:
+        raw_gate_reference = (r.existing_gate_pass_id or "").strip()
+        ge = (
+            gate_by_pass.get(raw_gate_reference.upper())
+            or gate_by_id.get(raw_gate_reference.upper())
+            or gate_by_vehicle.get((r.vehicle_number or "").strip().upper())
+        )
         res.append(
             AllocationRequestResponse(
                 id=r.id,

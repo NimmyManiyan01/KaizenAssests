@@ -23,7 +23,7 @@ from typing import Optional
 import uuid
 
 from datetime import datetime, timezone
-from sqlalchemy import or_, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -42,6 +42,10 @@ from app.modules.gate.infrastructure.persistence.models import (
     DockModel,
     GateEntryModel,
     SupplierDamageClaimModel,
+)
+from app.modules.dock.infrastructure.persistence.models import (
+    DockAllocationRequestModel,
+    DockMasterModel,
 )
 from app.modules.store.infrastructure.persistence.models import StoreModel
 
@@ -518,7 +522,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
 
         result = await self._session.execute(
             select(GateEntryModel)
-            .where(GateEntryModel.po_number == normalized)
+            .where(func.upper(GateEntryModel.po_number) == normalized.upper())
             .order_by(
                 GateEntryModel.created_at.desc(),
                 GateEntryModel.id.desc(),
@@ -939,7 +943,152 @@ class SqlAlchemyGrnRepository(GrnRepository):
                 vehicle_number = vehicle_number or asn.vehicle_number
                 driver_name = driver_name or asn.driver_name
                 warehouse_id = warehouse_id or asn.warehouse_id
-                gate = await self.find_latest_gate_entry_for_asn(asn.id)
+
+                # Prefer the gate pass carried by the receiving context. Older
+                # records may have a valid GateEntry but a missing ASN FK, so
+                # also resolve against the ASN's PO/vehicle before rejecting.
+                gate_linked_by_assignment = False
+                if gate_entry_id:
+                    gate = await self.find_gate_entry_by_id(gate_entry_id)
+                if gate is None and gate_entry_number:
+                    gate_result = await self._session.execute(
+                        select(GateEntryModel)
+                        .where(func.upper(GateEntryModel.gate_entry_number) == gate_entry_number.strip().upper())
+                        .limit(1)
+                    )
+                    gate_model = gate_result.scalar_one_or_none()
+                    if gate_model is not None:
+                        gate = self._to_gate_entry_snapshot(gate_model)
+                if gate is None:
+                    gate = await self.find_latest_gate_entry_for_asn(asn.id)
+
+                # In migrated data the gate row's ASN FK can be empty while
+                # the dock assignment still retains the correct ASN link.
+                if gate is None:
+                    assigned_gate_result = await self._session.execute(
+                        select(GateEntryModel)
+                        .join(
+                            DockAssignmentModel,
+                            DockAssignmentModel.gate_entry_id == GateEntryModel.id,
+                        )
+                        .where(DockAssignmentModel.asn_id == asn.id)
+                        .order_by(DockAssignmentModel.assigned_at.desc())
+                        .limit(1)
+                    )
+                    assigned_gate = assigned_gate_result.scalars().first()
+                    if assigned_gate is not None:
+                        gate = self._to_gate_entry_snapshot(assigned_gate)
+                        # The dock assignment is an explicit ASN-to-gate link.
+                        if not gate.asn_id or _uuid_or_none(gate.asn_id) == _uuid_or_none(asn.id):
+                            gate_linked_by_assignment = True
+                            gate_id_val = _uuid_or_none(gate.id)
+                            gate_num_val = gate.gate_entry_number
+                        else:
+                            gate = None
+
+                def gate_matches_asn(candidate: GateEntrySnapshot) -> bool:
+                    if candidate.asn_id:
+                        return _uuid_or_none(candidate.asn_id) == _uuid_or_none(asn.id)
+                    po_matches = bool(
+                        candidate.po_number
+                        and asn.po_number
+                        and candidate.po_number.strip().upper() == asn.po_number.strip().upper()
+                    )
+                    gate_vehicle = (candidate.vehicle_number or "").replace(" ", "").upper()
+                    asn_vehicle = (asn.vehicle_number or "").replace(" ", "").upper()
+                    vehicle_matches = bool(gate_vehicle and asn_vehicle and gate_vehicle == asn_vehicle)
+                    if gate_vehicle and asn_vehicle:
+                        return vehicle_matches and (po_matches or not asn.po_number)
+                    return po_matches
+
+                if gate is not None and not gate_linked_by_assignment and not gate_matches_asn(gate):
+                    gate = None
+                # Prefer the explicit ASN-to-dock assignment when a legacy
+                # gate row carries a stale or missing ASN foreign key. The
+                # assignment is created during dock allocation and records
+                # which ASN is being received.
+                if gate is None:
+                    assigned_gate_result = await self._session.execute(
+                        select(GateEntryModel)
+                        .join(
+                            DockAssignmentModel,
+                            DockAssignmentModel.gate_entry_id == GateEntryModel.id,
+                        )
+                        .where(DockAssignmentModel.asn_id == asn.id)
+                        .order_by(DockAssignmentModel.assigned_at.desc())
+                        .limit(1)
+                    )
+                    assigned_gate = assigned_gate_result.scalars().first()
+                    if assigned_gate is not None:
+                        gate = self._to_gate_entry_snapshot(assigned_gate)
+                        gate_linked_by_assignment = True
+                if gate is None and asn.po_number:
+                    candidate = await self.find_latest_gate_entry_for_po(asn.po_number)
+                    if candidate and gate_matches_asn(candidate):
+                        gate = candidate
+                if gate is None and asn.vehicle_number:
+                    candidate = await self.find_latest_gate_entry_for_vehicle(asn.vehicle_number)
+                    if candidate and gate_matches_asn(candidate):
+                        gate = candidate
+
+                # Some legacy allocations have no ASN foreign key on either
+                # the gate row or the dock assignment. When this exact dock
+                # is actively allocated to the ASN vehicle, use that persisted
+                # allocation as the link to its gate entry.
+                active_allocation = None
+                if dock_number and (vehicle_number or gate_entry_number or gate_entry_id):
+                    allocation_links = []
+                    if vehicle_number:
+                        allocation_links.append(
+                            func.upper(DockAllocationRequestModel.vehicle_number)
+                            == vehicle_number.strip().upper()
+                        )
+                    if gate_entry_number:
+                        allocation_links.append(
+                            func.upper(DockAllocationRequestModel.existing_gate_pass_id)
+                            == gate_entry_number.strip().upper()
+                        )
+                    if gate_entry_id:
+                        allocation_links.append(
+                            func.upper(DockAllocationRequestModel.existing_gate_pass_id)
+                            == gate_entry_id.strip().upper()
+                        )
+                    allocation_result = await self._session.execute(
+                        select(DockAllocationRequestModel)
+                        .join(
+                            DockMasterModel,
+                            DockMasterModel.id == DockAllocationRequestModel.assigned_dock_id,
+                        )
+                        .where(
+                            func.upper(DockMasterModel.dock_code) == dock_number.strip().upper(),
+                            or_(*allocation_links),
+                            DockAllocationRequestModel.status.in_(
+                                ["DOCK_ASSIGNED", "RESERVED", "OCCUPIED", "AT_DOCK"]
+                            ),
+                        )
+                        .order_by(DockAllocationRequestModel.assigned_at.desc())
+                        .limit(1)
+                    )
+                    active_allocation = allocation_result.scalars().first()
+                    if gate is None and active_allocation and active_allocation.existing_gate_pass_id:
+                        allocation_gate = await self.find_gate_entry_by_id(
+                            active_allocation.existing_gate_pass_id
+                        )
+                        if allocation_gate is None:
+                            gate_result = await self._session.execute(
+                                select(GateEntryModel)
+                                .where(
+                                    func.upper(GateEntryModel.gate_entry_number)
+                                    == active_allocation.existing_gate_pass_id.strip().upper()
+                                )
+                                .limit(1)
+                            )
+                            gate_model = gate_result.scalar_one_or_none()
+                            if gate_model is not None:
+                                allocation_gate = self._to_gate_entry_snapshot(gate_model)
+                        if allocation_gate is not None:
+                            gate = allocation_gate
+                            gate_linked_by_assignment = True
                 if gate:
                     gate_id_val = _uuid_or_none(gate.id)
                     gate_num_val = gate.gate_entry_number
@@ -952,8 +1101,27 @@ class SqlAlchemyGrnRepository(GrnRepository):
                     )
                 )
                 assignment = assignment_result.scalars().first()
-                if assignment is None or assignment.dock_arrival_at is None:
-                    raise ValueError("Receiving can start only after dock check-in is completed")
+                # The configured warehouse workflow begins receiving as soon
+                # as the dock is allocated. Older installations may not
+                # record a separate arrival timestamp, so the assignment is
+                # the authoritative link for GRN eligibility.
+                if assignment is None and active_allocation is None:
+                    raise ValueError("Receiving can start only after a dock is allocated")
+                if assignment is None and active_allocation is not None:
+                    # Backfill the missing gate-side assignment for this
+                    # legacy warehouse allocation so GRN completion can
+                    # release the same dock through the normal workflow.
+                    assignment = DockAssignmentModel(
+                        gate_entry_id=_uuid_or_none(gate.id),
+                        asn_id=asn_id_val,
+                        po_id=_uuid_or_none(asn.po_id) if getattr(asn, "po_id", None) else None,
+                        vehicle_number=vehicle_number or asn.vehicle_number,
+                        dock_number=dock_number.strip(),
+                        assigned_by=active_allocation.assigned_by or "WAREHOUSE",
+                        assigned_at=active_allocation.assigned_at or now,
+                    )
+                    self._session.add(assignment)
+                    await self._session.flush()
 
                 duplicate_result = await self._session.execute(
                     select(GrnModel)
