@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
-import { isValidDateInput, isValidMobileNumber, isValidPersonName, isValidVehicleNumber, parsePositiveNumber, requiredText, sanitizeMobileNumber, sanitizePersonName, sanitizeVehicleNumber } from "@/lib/input-validation";
+import { isValidMobileNumber, isValidPersonName, isValidVehicleNumber, parsePositiveNumber, requiredText, sanitizeMobileNumber, sanitizePersonName, sanitizeVehicleNumber } from "@/lib/input-validation";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/supplier/dispatch")({
@@ -94,7 +94,10 @@ function SupplierDispatchPage() {
       toast.error("Use letters, numbers and spaces for vehicle, letters and spaces for driver, and exactly 10 digits for contact");
       return;
     }
-    if (!isValidDateInput(expectedPickupDate)) {
+    const pickupDate = /^\d{2}-\d{2}-\d{4}$/.test(expectedPickupDate)
+      ? expectedPickupDate.split("-").reverse().join("-")
+      : expectedPickupDate;
+    if (!pickupDate.trim()) {
       toast.error("Enter a valid expected pickup date");
       return;
     }
@@ -114,7 +117,7 @@ function SupplierDispatchPage() {
         vehicle_number: vehicle,
         driver_name: driver,
         driver_contact: contact,
-        expected_pickup_date: expectedPickupDate,
+        expected_pickup_date: pickupDate,
         /* request metadata is persisted by the supplier request endpoint */
         /* legacy dispatch fields below are intentionally ignored */
         order_number: `SUP-DISPATCH-${Date.now()}`,

@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
 import { requireRole } from "@/lib/auth-utils";
-import { isValidDateInput, parsePositiveNumber } from "@/lib/input-validation";
+import { parsePositiveNumber } from "@/lib/input-validation";
 import {
   api,
   type AssemblyMaterialRequest,
@@ -392,7 +392,10 @@ function AssemblyMaterialRequestsPage() {
       toast.error("Production quantity must be greater than 0.");
       return;
     }
-    if (!isValidDateInput(formData.required_date)) {
+    const requiredDate = /^\d{2}-\d{2}-\d{4}$/.test(formData.required_date)
+      ? formData.required_date.split("-").reverse().join("-")
+      : formData.required_date;
+    if (!requiredDate.trim()) {
       toast.error("Please specify a required completion date.");
       return;
     }
@@ -402,7 +405,7 @@ function AssemblyMaterialRequestsPage() {
       const newReq = await api.createAssemblyMaterialRequest({
         product_code: formData.product_code,
         target_quantity: Number(formData.target_quantity),
-        required_date: formData.required_date,
+        required_date: requiredDate,
         remarks: formData.remarks,
       });
 

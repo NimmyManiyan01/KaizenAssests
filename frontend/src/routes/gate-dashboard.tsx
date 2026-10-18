@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import QRCode from "qrcode";
@@ -15,7 +15,6 @@ import {
   Search,
   ShieldCheck,
   Truck,
-  Trash2,
   Warehouse,
 } from "lucide-react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
@@ -33,6 +32,7 @@ export const Route = createFileRoute("/gate-dashboard")({
 });
 
 function GateDashboard() {
+  const routeSearch = useSearch({ strict: false }) as { search?: string };
   const [loading, setLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -126,6 +126,17 @@ function GateDashboard() {
     },
   ]; */
 
+  useEffect(() => {
+    const query = routeSearch.search?.trim();
+    if (!query || !entries.length || selectedDetailsDrawer) return;
+    const match = entries.find((entry: any) =>
+      [entry.gate_entry_no, entry.gate_entry_number, entry.gate_pass_number, entry.vehicle_number, entry.id]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase() === query.toLowerCase()),
+    );
+    if (match) setSelectedDetailsDrawer(match);
+  }, [routeSearch.search, entries, selectedDetailsDrawer]);
+
   const filteredEntries = entries.filter((e: any) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
@@ -164,43 +175,16 @@ function GateDashboard() {
     window.print();
   };
 
-  const handleDeleteGateEntryData = async () => {
-    if (
-      !window.confirm(
-        "Delete all gate entry records and related gate activity? This cannot be undone.",
-      )
-    )
-      return;
-
-    try {
-      await api.resetGateEntries();
-      setSelectedPassModal(null);
-      setSelectedDetailsDrawer(null);
-      toast.success("Gate entry data deleted successfully");
-      await loadDashboard();
-    } catch (error: any) {
-      toast.error(error?.message || "Unable to delete gate entry data");
-    }
-  };
-
   return (
     <AppShell
       title="Gate Entry Security Dashboard"
-      subtitle="Live gate metrics, searchable recent gate pass activity, and vehicle tracking"
+      subtitle="Live gate metrics, searchable gate-pass activity and vehicle tracking."
       actions={
         <div className="flex flex-wrap justify-end gap-2">
           <Button asChild className="rounded-xl font-bold shadow-sm">
             <Link to="/vehicle-queue" search={{ action: "new" }}>
               <PlusCircle className="mr-2 size-4" /> New Gate Entry
             </Link>
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            className="rounded-xl font-bold text-destructive hover:bg-destructive/10"
-            onClick={() => void handleDeleteGateEntryData()}
-          >
-            <Trash2 className="mr-2 size-4" /> Delete Data
           </Button>
         </div>
       }
@@ -265,10 +249,10 @@ function GateDashboard() {
               <table className="w-full text-left text-xs">
                 <thead className="border-b bg-muted/40 font-bold uppercase text-muted-foreground">
                   <tr>
+                    <th className="px-4 py-3">ASN Number</th>
                     <th className="px-4 py-3">Gate Pass No</th>
                     <th className="px-4 py-3">Vehicle Number</th>
                     <th className="px-4 py-3">Supplier Name</th>
-                    <th className="px-4 py-3">ASN Number</th>
                     <th className="px-4 py-3">Entry Time</th>
                     <th className="px-4 py-3">Allocated Dock</th>
                     <th className="px-4 py-3">Current Status</th>
@@ -287,10 +271,10 @@ function GateDashboard() {
 
                     return (
                       <tr key={e.id || idx} className="hover:bg-muted/30 transition-colors">
+                        <td className="px-4 py-3 font-semibold">{asnNumber}</td>
                         <td className="px-4 py-3 font-mono font-bold text-primary">{passNo}</td>
                         <td className="px-4 py-3 font-bold">{vehNo}</td>
                         <td className="px-4 py-3 font-medium">{suppName}</td>
-                        <td className="px-4 py-3 font-semibold">{asnNumber}</td>
                         <td className="px-4 py-3 font-medium text-muted-foreground">{entryTime}</td>
                         <td className="px-4 py-3 font-bold text-emerald-600 dark:text-emerald-400">
                           {dockNo}

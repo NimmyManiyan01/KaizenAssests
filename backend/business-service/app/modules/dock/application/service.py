@@ -419,7 +419,25 @@ class DockAllocationService:
             session.add(gate_dock)
             await session.flush()
         elif gate_dock.status != DockStatus.AVAILABLE.value:
-            raise HTTPException(status_code=409, detail=f"Gate receiving dock {dock.dock_code} is not available")
+            # A dock can be released through the warehouse workflow while an
+            # older gate-side row still has OCCUPIED status. Reconcile that
+            # stale flag only when no active, unreleased gate assignment
+            # exists; never bypass a real active allocation.
+            from app.modules.gate.infrastructure.persistence.models import DockAssignmentModel
+            active_assignment = await session.execute(
+                select(DockAssignmentModel.id)
+                .join(GateEntryModel, DockAssignmentModel.gate_entry_id == GateEntryModel.id)
+                .where(
+                    DockAssignmentModel.dock_number == dock.dock_code,
+                    DockAssignmentModel.dock_released_at.is_(None),
+                    GateEntryModel.status.notin_(["RELEASED", "EXITED", "CANCELLED"]),
+                )
+                .limit(1)
+            )
+            if active_assignment.scalar_one_or_none() is not None:
+                raise HTTPException(status_code=409, detail=f"Gate receiving dock {dock.dock_code} is not available")
+            gate_dock.status = DockStatus.AVAILABLE.value
+            gate_dock.updated_at = datetime.now(timezone.utc)
         gate_dock.status = DockStatus.OCCUPIED.value
         existing_assignment = (await session.execute(
             select(DockAssignmentModel).where(DockAssignmentModel.gate_entry_id == gate_entry.id).with_for_update()
@@ -985,7 +1003,10 @@ class DockAllocationService:
         ).with_for_update())).scalar_one_or_none()
         if not gate_entry:
             raise HTTPException(status_code=409, detail="Linked Gate Entry is missing; dock release was not recorded")
-        gate_entry.status = "RELEASED"
+        # Keep the gate entry in the receiving-complete state until Security
+        # records the actual vehicle exit. Dock release is a prerequisite for
+        # exit, not the exit itself.
+        gate_entry.status = "RECEIVING_COMPLETED"
         from app.modules.gate.infrastructure.persistence.models import DockAssignmentModel
         assignment = (await session.execute(select(DockAssignmentModel).where(
             DockAssignmentModel.gate_entry_id == gate_entry.id

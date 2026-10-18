@@ -117,6 +117,43 @@ async def create_finished_goods_pickup_gate_entry(
         return {"gate_pass_number": gate_pass, "request_number": request.request_number, "status": visit.status, "arrived_at": now.isoformat(), "visit_purpose": "FINISHED_GOODS_PICKUP"}
 
 
+@router.get("/finished-goods-pickup/{gate_pass_number}")
+async def get_finished_goods_pickup_gate_pass(
+    gate_pass_number: str,
+    _user: CurrentUser = Depends(require_permission("gate:verify")),
+    uow: UnitOfWork = Depends(get_uow),
+):
+    async with uow:
+        visit = (await uow.session.execute(
+            select(FinishedGoodsPickupGateVisitModel).where(
+                FinishedGoodsPickupGateVisitModel.gate_pass_number == gate_pass_number.upper().strip()
+            )
+        )).scalar_one_or_none()
+        if not visit:
+            raise HTTPException(404, "Gate pass not found.")
+        request = await uow.session.get(FinishedGoodsRequestModel, visit.request_id)
+        if not request:
+            raise HTTPException(404, "Pickup request not found.")
+        return {
+            "gate_pass_number": visit.gate_pass_number,
+            "status": visit.status,
+            "request_number": request.request_number,
+            "supplier_name": visit.supplier_name,
+            "vehicle_number": visit.vehicle_number,
+            "driver_name": visit.driver_name,
+            "driver_contact": visit.driver_contact,
+            "security_officer": visit.security_officer,
+            "entered_at": visit.entered_at.isoformat() if visit.entered_at else None,
+            "expected_pickup_date": request.expected_pickup_date.isoformat() if request.expected_pickup_date else None,
+            "product_code": request.material_code,
+            "product_name": request.material_name,
+            "quantity": float(request.quantity),
+            "uom": request.uom,
+            "destination": request.warehouse,
+            "documents_verified": visit.documents_verified,
+        }
+
+
 @router.post("/finished-goods-pickup/{gate_pass_number}/exit")
 async def complete_finished_goods_pickup_gate_exit(
     gate_pass_number: str, payload: FinishedGoodsPickupGateExitPayload,
@@ -1780,6 +1817,7 @@ async def reset_dev_entries(
 
 @router.get("/inbound-arrivals")
 async def list_inbound_arrivals(
+    include_history: bool = False,
     user: CurrentUser = Depends(require_permission("gate:read")),
     uow: UnitOfWork = Depends(get_uow),
 ):
@@ -1809,36 +1847,26 @@ async def list_inbound_arrivals(
             if mgr:
                 scoped_store_id = str(mgr.store_id)
 
-    result = await uow.session.execute(
+    arrivals_query = (
         select(GateEntryModel, AsnModel, PurchaseOrderModel, DockAssignmentModel)
         .outerjoin(AsnModel, GateEntryModel.asn_id == AsnModel.id)
         .outerjoin(PurchaseOrderModel, PurchaseOrderModel.po_number == GateEntryModel.po_number)
         .outerjoin(DockAssignmentModel, DockAssignmentModel.gate_entry_id == GateEntryModel.id)
         .options(selectinload(AsnModel.lines))
         .options(selectinload(PurchaseOrderModel.items))
-        .where(GateEntryModel.status.in_([
-            GateEntryStatus.PO_VERIFIED.value,
-            GateEntryStatus.UNSCHEDULED_ARRIVAL.value,
-            GateEntryStatus.APPROVED.value,
-            GateEntryStatus.GATE_ENTRY_APPROVED.value,
-            GateEntryStatus.AWAITING_DOCK.value,
-            GateEntryStatus.DOCK_ASSIGNED.value,
-            GateEntryStatus.MOVING_TO_DOCK.value,
-            GateEntryStatus.INSIDE_FACILITY.value,
-            GateEntryStatus.AT_DOCK.value,
-            GateEntryStatus.UNLOADING_IN_PROGRESS.value,
-            GateEntryStatus.QUALITY_INSPECTION_REQUIRED.value,
-            GateEntryStatus.QUALITY_PASSED.value,
-            GateEntryStatus.QUALITY_FAILED.value,
-            GateEntryStatus.RECEIVING_COMPLETED.value,
-            GateEntryStatus.EXIT_APPROVED.value,
-            GateEntryStatus.GATE_EXIT_COMPLETED.value,
-        ]))
-        # A single ASN must resolve to one active gate entry in the warehouse
-        # queue. Newest-first ensures an older duplicate cannot surface a
-        # different gate-pass number in Arrival Details.
-        .order_by(GateEntryModel.created_at.desc())
     )
+    if not include_history:
+        arrivals_query = arrivals_query.where(GateEntryModel.status.notin_([
+            GateEntryStatus.REJECTED.value,
+            GateEntryStatus.DENIED_ENTRY.value,
+            GateEntryStatus.GATE_EXIT_COMPLETED.value,
+            GateEntryStatus.VEHICLE_EXITED.value,
+            GateEntryStatus.CHECKED_OUT.value,
+            GateEntryStatus.COMPLETED.value,
+        ]))
+    # A single ASN must resolve to one gate entry. Newest-first ensures an
+    # older duplicate cannot surface a different gate-pass number.
+    result = await uow.session.execute(arrivals_query.order_by(GateEntryModel.created_at.desc()))
     allocation_result = await uow.session.execute(select(DockAllocationRequestModel))
     allocations_by_gate_pass = {
         allocation.existing_gate_pass_id: allocation
@@ -3323,6 +3351,11 @@ async def release_dock(
     released_at = datetime.datetime.now(datetime.timezone.utc)
     dock.status = "AVAILABLE"
     dock.updated_at = released_at
+    # Dock release prepares the vehicle for security exit; it does not mean
+    # the vehicle has exited. Keep the gate entry in the receiving-complete
+    # state so the exit workflow can verify the original gate pass.
+    gate_entry.status = GateEntryStatus.RECEIVING_COMPLETED.value
+    gate_entry.updated_at = released_at
     assignment.dock_released_by = user.username
     assignment.dock_released_at = released_at
     uow.session.add(NotificationModel(user_role="WAREHOUSE", title="Dock Released", message=f"{dock.dock_number} released after receiving {assignment.vehicle_number} against {grn.grn_number}.", link="/dock-management"))
@@ -4142,7 +4175,12 @@ async def mark_inbound_vehicle_exited(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GRN must be prepared before inbound gate exit")
 
     grn = await uow.session.get(GrnModel, assignment.prepared_grn_id)
-    if grn is None or grn.status not in {"GRN_DRAFT", "GRN_COMPLETED", "GRN_POSTED"}:
+    if grn is None or (grn.status or "").upper().strip() not in {
+        "GRN_COMPLETED",
+        "GRN_POSTED",
+        "COMPLETED",
+        "RECEIVING_COMPLETE",
+    }:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Completed receiving GRN is required before inbound gate exit")
 
     now = datetime.datetime.now(datetime.timezone.utc)

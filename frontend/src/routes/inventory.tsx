@@ -931,31 +931,16 @@ function SimpleWarehouseModule() {
           toast.error("Please enter a warehouse name.");
           return;
         }
-        if (storeName.length > 100) {
-          toast.error("Warehouse name must be 100 characters or fewer.");
-          return;
-        }
         const nextCode = await api.getNextStoreCode();
-        const generatedStoreCode = nextCode?.suggested_store_code;
         const createdStore = await api.createStore({
           store_name: storeName,
-          store_code: generatedStoreCode,
-          description: undefined,
+          store_code: nextCode.suggested_store_code,
           store_type: newStoreForm.store_type,
           status: "ACTIVE",
           warehouse_id: newStoreForm.warehouse_id || "Main Warehouse",
         });
-        toast.success(
-          `Warehouse created: ${createdStore?.store_name || storeName} (${createdStore?.store_code || generatedStoreCode || "auto-generated"})`,
-        );
-        setNewStoreForm({
-          store_code: "",
-          store_name: "",
-          description: "",
-          store_type: "RAW_MATERIAL",
-          status: "ACTIVE",
-          warehouse_id: "",
-        });
+        toast.success(`Warehouse created: ${createdStore.store_name} (${createdStore.store_code})`);
+        setNewStoreForm({ store_code: "", store_name: "", description: "", store_type: "RAW_MATERIAL", status: "ACTIVE", warehouse_id: "" });
       } else if (createLocationType === "zone") {
         const targetStoreId = newZoneForm.store_id;
         if (!targetStoreId) {
@@ -1664,8 +1649,14 @@ function SimpleWarehouseModule() {
                               item.batch_details?.map((b: any) => b.batch_number).join(", ") ||
                               "-"}
                           </td>
-                          <td className="py-3 px-3 font-bold text-emerald-600">
-                            Available: {getInventoryDisplayQuantity(item)} {item.uom || ""}
+                          <td
+                            className={`py-3 px-3 font-bold ${
+                              Number(getInventoryDisplayQuantity(item)) > 0
+                                ? "text-emerald-600"
+                                : "text-red-600"
+                            }`}
+                          >
+                            {getInventoryDisplayQuantity(item)} {item.uom || ""}
                           </td>
                           <td className="py-3 px-3">
                             <Badge variant="outline" className="text-[10px] font-mono">

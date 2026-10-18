@@ -9,7 +9,6 @@ import {
   Eye,
   FileText,
   Loader2,
-  MoreVertical,
   Search,
   Trash2,
   Truck,
@@ -64,7 +63,6 @@ function SupplierDashboard() {
   const [asns, setAsns] = useState<any[]>([]);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<any>(null);
-  const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [trendDays, setTrendDays] = useState<7 | 30 | 90>(7);
 
   // Modal State
@@ -250,7 +248,7 @@ function SupplierDashboard() {
   const rows = useMemo(() => {
     return asns
       .filter((a) =>
-        `${a.asn_number || ""} ${a.vehicle_number || ""} ${a.status || ""}`
+        `${a.asn_number || ""} ${a.vehicle_number || ""} ${a.driver_name || ""} ${a.driver_contact || ""} ${a.status || ""} ${a.expected_arrival_at || ""} ${a.expected_arrival_date || ""} ${a.delivery_date || ""}`
           .toLowerCase()
           .includes(query.toLowerCase())
       )
@@ -274,7 +272,6 @@ function SupplierDashboard() {
 
   const showDetails = (asn: any) => {
     setSelected(asn);
-    setOpenMenu(null);
   };
 
   const trend = useMemo(() => {
@@ -381,6 +378,7 @@ function SupplierDashboard() {
                 <tr>
                   <th className="px-3.5 py-2.5">ASN Number</th>
                   <th className="px-3.5 py-2.5">Vehicle Number</th>
+                  <th className="px-3.5 py-2.5">Expected Arrival Date</th>
                   <th className="px-3.5 py-2.5">Status</th>
                   <th className="px-3.5 py-2.5">Submitted Date</th>
                   <th className="px-3.5 py-2.5 text-right">Actions</th>
@@ -397,6 +395,11 @@ function SupplierDashboard() {
                       </td>
                       <td className="px-3.5 py-2.5 font-mono font-bold text-slate-900">
                         {asn.vehicle_number || "—"}
+                      </td>
+                      <td className="px-3.5 py-2.5 text-slate-500">
+                        {asn.expected_arrival_at
+                          ? new Date(asn.expected_arrival_at).toLocaleDateString()
+                          : asn.expected_arrival_date || asn.delivery_date || "—"}
                       </td>
                       <td className="px-3.5 py-2.5">
                         <span
@@ -422,28 +425,6 @@ function SupplierDashboard() {
                           >
                             <Eye className="mr-1 size-3.5" /> View
                           </Button>
-                          <div className="relative">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 size-7 text-slate-400"
-                              aria-label="Open ASN actions"
-                              onClick={() => setOpenMenu(openMenu === key ? null : key)}
-                            >
-                              <MoreVertical className="size-3.5" />
-                            </Button>
-                            {openMenu === key && (
-                              <div className="absolute right-0 top-8 z-30 w-36 rounded-xl border border-slate-200 bg-white p-1 shadow-lg text-xs">
-                                <button
-                                  type="button"
-                                  className="w-full rounded-lg px-3 py-1.5 text-left font-semibold text-slate-700 hover:bg-slate-50"
-                                  onClick={() => showDetails(asn)}
-                                >
-                                  View Details
-                                </button>
-                              </div>
-                            )}
-                          </div>
                         </div>
                       </td>
                     </tr>

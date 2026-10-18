@@ -184,10 +184,8 @@ const managerNav: any[] = [];
 
 const gateSecurityNav = [
   { label: "Dashboard", to: "/gate-dashboard", icon: LayoutDashboard },
-  { label: "New Gate Entry", to: "/vehicle-queue", icon: PlusCircle },
-  { label: "Vehicle Exit", to: "/vehicle-exit", icon: LogOut },
-  { label: "FG Pickup Gate Entry", to: "/gate/finished-goods-pickup", icon: QrCode },
-  { label: "FG Pickup Gate Exit", to: "/gate/finished-goods-pickup-exit", icon: LogOut },
+  { label: "Vehicle Entry & Exit", to: "/vehicle-queue", icon: PlusCircle },
+  { label: "FG Pickup Entry & Exit", to: "/gate/finished-goods-pickup", icon: QrCode },
 ];
 
 
@@ -297,11 +295,13 @@ export function AppShell({
   title,
   subtitle,
   actions,
+  onSearchChange,
 }: {
   children: ReactNode;
   title: ReactNode;
   subtitle?: string;
   actions?: ReactNode;
+  onSearchChange?: (value: string) => void;
 }) {
   const [sidebarHovered, setSidebarHovered] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -779,7 +779,10 @@ export function AppShell({
                 }
                 className="h-10 w-full rounded-xl border border-border bg-muted/60 pl-9 pr-16 text-sm outline-none transition-shadow placeholder:text-muted-foreground focus:bg-card focus:ring-2 focus:ring-ring/40"
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  onSearchChange?.(e.target.value);
+                }}
                 onFocus={() => searchTerm.length >= 2 && setShowSearch(true)}
               />
               <kbd className="absolute right-3 hidden rounded-md border border-border bg-card px-1.5 py-0.5 text-[10px] text-muted-foreground lg:block">
@@ -796,12 +799,12 @@ export function AppShell({
                           {searchResults.map((result) => (
                             <Link
                               key={`${result.type}-${result.id}`}
-                              to={result.link}
+                              to={result.url}
                               onClick={() => {
                                 setShowSearch(false);
                                 setSearchTerm("");
                               }}
-                              className="flex flex-col gap-0.5 rounded-xl px-4 py-2.5 transition-colors hover:bg-accent"
+                              className="flex flex-col gap-0.5 rounded-xl px-4 py-2.5 text-left transition-colors hover:bg-accent"
                             >
                               <div className="flex items-center justify-between">
                                 <span className="text-sm font-bold tracking-tight">
@@ -833,6 +836,7 @@ export function AppShell({
                   </div>
                 </>
               )}
+
             </div>
 
             <div className="ml-auto flex items-center gap-1.5">
