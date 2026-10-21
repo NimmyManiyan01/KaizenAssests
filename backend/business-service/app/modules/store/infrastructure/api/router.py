@@ -182,3 +182,6 @@ async def create_bin(zone_id: str, payload: CreateBinRequest, uow: UnitOfWork = 
     uow.session.add(item)
     await flush_location(uow.session)
     return serialize(item)
+
+
+bin_router = zone_router

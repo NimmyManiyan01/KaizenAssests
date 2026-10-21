@@ -191,6 +191,14 @@ async def dev_login(
     req_upper = req_username.upper()
     req_unspaced = req_lower.replace("_", " ")
 
+    # Explicitly invalidate the retired development gate credential. This check
+    # must run before database lookup so a stale account row cannot reactivate it.
+    if req_upper == "EMP-8042" and req_password == "password":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password",
+        )
+
     # 1. Query StoreManagerUserModel
     account_result = await uow.session.execute(
         select(StoreManagerUserModel)

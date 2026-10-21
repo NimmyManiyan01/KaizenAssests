@@ -125,6 +125,9 @@ export interface OutboundDispatch {
   ready_time?: string;
   created_at: string;
   updated_at: string;
+  isInboundGateExit?: boolean;
+  gate_entry_number?: string;
+  gate_entry_id?: string;
   gate_exit?: {
     id: string;
     dispatch_id: string;
@@ -184,13 +187,18 @@ function VehicleExit() {
     async (quiet = false) => {
       if (!quiet) setLoading(true);
       try {
-        const data = await api.getOutboundDispatchQueue("ALL", searchTerm);
+        const data = await api.getVehicleExitQueue();
         // The queue is persisted in the business service. Normalize its dispatch
         // response here so the gate-exit view does not depend on seed/local data.
         setDispatches(
           (data || []).map((dispatch: any) => ({
             ...dispatch,
-            order_reference: dispatch.order_reference ?? dispatch.order_number ?? "",
+            isInboundGateExit: true,
+            id: dispatch.gate_entry_id,
+            dispatch_number: dispatch.gate_entry_number,
+            customer_name: dispatch.supplier_name ?? "Inbound vehicle",
+            status: dispatch.status === "RECEIVING_COMPLETED" ? "READY_FOR_GATE_EXIT" : dispatch.status,
+            order_reference: dispatch.asn_number ?? dispatch.order_reference ?? dispatch.order_number ?? "",
             destination_address:
               dispatch.destination_address ?? dispatch.delivery_address ?? dispatch.destination,
             loading_status:
@@ -198,7 +206,6 @@ function VehicleExit() {
               (dispatch.status === "READY_FOR_GATE_EXIT" ? "LOADING_COMPLETED" : dispatch.status),
             vehicle_number: dispatch.vehicle_number ?? "",
             driver_name: dispatch.driver_name ?? "",
-            customer_name: dispatch.customer_name ?? "",
           })),
         );
       } catch (error) {
@@ -320,7 +327,9 @@ function VehicleExit() {
       if (exitVehiclePhotoPreview) {
         localStorage.setItem(`gate_exit_proof_${selectedDispatch.id}`, exitVehiclePhotoPreview);
       }
-      const res = await api.confirmOutboundGateExit(selectedDispatch.id, {
+      const res = selectedDispatch.isInboundGateExit
+        ? await api.markInboundVehicleExited(selectedDispatch.id, gatePassId.trim())
+        : await api.confirmOutboundGateExit(selectedDispatch.id, {
         gate_pass_id: gatePassId.trim(),
         vehicle_verified: vehicleVerified,
         driver_verified: driverVerified,
@@ -447,61 +456,6 @@ function VehicleExit() {
         </div>
       }
     >
-      {/* Overview Banner */}
-      <Card className="mb-6 rounded-2xl border-primary/20 bg-primary-soft/30 p-4 shadow-soft">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary">
-              <LogOut className="size-5" />
-            </span>
-            <div>
-              <p className="font-semibold text-foreground">Inbound Gate Exit</p>
-              <p className="text-xs text-muted-foreground">
-                Enter the gate pass ID after GRN receiving and dock release to complete vehicle
-                exit.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-lg border border-warning/30 bg-warning-soft px-3 py-1 text-xs font-semibold text-warning">
-              <Clock3 className="size-3.5" /> {awaitingCount} Awaiting Gate Exit
-            </span>
-            {mismatchCount > 0 && (
-              <span className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-1 text-xs font-semibold text-destructive">
-                <AlertTriangle className="size-3.5" /> {mismatchCount} Action Required
-              </span>
-            )}
-            <span className="inline-flex items-center gap-1.5 rounded-lg border border-success/30 bg-success-soft px-3 py-1 text-xs font-semibold text-success">
-              <CheckCircle2 className="size-3.5" /> {completedCount} Exit Completed
-            </span>
-          </div>
-        </div>
-      </Card>
-
-      {/* Filter & Search Bar */}
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div className="relative min-w-[260px] flex-1 max-w-md">
-          <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search Dispatch #, Customer, Vehicle, Driver..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="rounded-xl pl-9"
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Filter className="size-4 text-muted-foreground" />
-          <Button
-            variant={statusFilter === "READY_FOR_GATE_EXIT" ? "default" : "outline"}
-            size="sm"
-            className="rounded-xl"
-            onClick={() => setStatusFilter("READY_FOR_GATE_EXIT")}
-          >
-            Awaiting Exit ({awaitingCount})
-          </Button>
-        </div>
-      </div>
-
       {/* Queue Listing */}
       <Card className="rounded-2xl border-border/60 shadow-soft">
         <CardHeader>

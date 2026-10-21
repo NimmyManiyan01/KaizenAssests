@@ -172,6 +172,9 @@ export const api = {
     mustChangePassword?: boolean;
     applications?: string[];
   }> {
+    if (username.trim().toUpperCase() === "EMP-8042" && password === "password") {
+      throw new Error("Invalid username or password");
+    }
     if (username.startsWith("supplier_") || username === "supplier") {
       const response = await request<any>(
         `${BUSINESS_API_URL}/api/v1/auth/supplier-login`,
@@ -217,7 +220,7 @@ export const api = {
       const uLower = username.toLowerCase();
       const isWarehouse = uLower.includes("warehouse");
       const isGate =
-        uLower.includes("gate") || uLower.includes("security") || uLower.includes("emp-8042");
+        uLower.includes("gate") || uLower.includes("security");
       const isGrn = uLower.includes("grn") || uLower.includes("receiving");
       const isAssembly = uLower.includes("assembly");
       const isStore = uLower.includes("store") || uLower.includes("keeper");
@@ -311,8 +314,10 @@ export const api = {
     return request<any[]>(url);
   },
 
-  async getInboundArrivals(): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/gate-entries/inbound-arrivals`);
+  async getInboundArrivals(includeHistory = false): Promise<any[]> {
+    return request<any[]>(
+      `${BUSINESS_API_URL}/api/gate-entries/inbound-arrivals${includeHistory ? "?include_history=true" : ""}`,
+    );
   },
   async createUnscheduledGateEntry(formData: FormData): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/gate-entries/unscheduled`, {
@@ -338,6 +343,11 @@ export const api = {
     return request<any>(
       `${BUSINESS_API_URL}/api/gate-entries/finished-goods-pickup/${encodeURIComponent(gatePassNumber)}/exit`,
       { method: "POST", body: JSON.stringify(payload) },
+    );
+  },
+  async getFinishedGoodsPickupGatePass(gatePassNumber: string): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/gate-entries/finished-goods-pickup/${encodeURIComponent(gatePassNumber)}`,
     );
   },
 
@@ -2049,7 +2059,7 @@ export const api = {
     if (params?.warehouse_id) query.set("warehouse_id", params.warehouse_id);
     if (params?.search) query.set("search", params.search);
     if (params?.status) query.set("status", params.status);
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/stores?${query.toString()}`);
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/stores${query.toString() ? `?${query}` : ""}`);
   },
   async getStoreMasterList(filters?: {
     search?: string;
@@ -2701,7 +2711,23 @@ export const api = {
     return request<any>(`${BUSINESS_API_URL}/api/receiving/grn/${grnId}/lines`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lines }),
+      body: JSON.stringify({
+        lines: lines.map((line) => ({
+          itemCode: line.itemCode ?? line.item_code,
+          materialName: line.materialName ?? line.material_name,
+          materialCategory: line.materialCategory ?? line.material_category,
+          variantCode: line.variantCode ?? line.variant_code,
+          uom: line.uom,
+          receivedQuantity: line.receivedQuantity ?? line.received_quantity,
+          goodQuantity: line.goodQuantity ?? line.good_quantity,
+          damagedQuantity: line.damagedQuantity ?? line.damaged_quantity,
+          rejectedQuantity: line.rejectedQuantity ?? line.rejected_quantity,
+          heldQuantity: line.heldQuantity ?? line.held_quantity,
+          rejectedReason: line.rejectedReason ?? line.rejected_reason,
+          damageReason: line.damageReason ?? line.damage_reason,
+          heldReason: line.heldReason ?? line.held_reason,
+        })),
+      }),
     });
   },
   async uploadDamageEvidence(grnLineId: string, formData: FormData): Promise<any> {

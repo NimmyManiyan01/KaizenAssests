@@ -276,6 +276,7 @@ function SupplierMaterials() {
                       "Material Code",
                       "Material Name",
                       "UOM",
+                      "Status",
                       "Actions",
                     ].map((title) => (
                       <th key={title} className="px-4 py-3">
@@ -287,13 +288,13 @@ function SupplierMaterials() {
                 <tbody className="divide-y">
                   {loading ? (
                     <tr>
-                        <td colSpan={4} className="px-4 py-10 text-center">
+                        <td colSpan={5} className="px-4 py-10 text-center">
                         <Loader2 className="mx-auto size-5 animate-spin" />
                       </td>
                     </tr>
                   ) : !filtered.length ? (
                     <tr>
-                      <td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">
+                      <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
                         {materials.length
                           ? "No materials match your filters."
                           : "No materials found."}
@@ -305,6 +306,17 @@ function SupplierMaterials() {
                         <td className="px-4 py-3 font-mono font-bold text-sky-700">{m.code}</td>
                         <td className="px-4 py-3 font-semibold">{m.name}</td>
                         <td className="px-4 py-3">{m.uom}</td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                              String(m.status).toUpperCase() === "ACTIVE"
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-slate-200 bg-slate-100 text-slate-600"
+                            }`}
+                          >
+                            {String(m.status).toUpperCase() === "ACTIVE" ? "Active" : "Inactive"}
+                          </span>
+                        </td>
                         <td className="px-4 py-3">
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>

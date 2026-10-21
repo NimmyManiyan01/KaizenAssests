@@ -91,7 +91,22 @@ async def create_supplier_finished_goods_dispatch_request(
         raise HTTPException(422, "Dispatch quantity must be a whole number.")
     async with uow:
         now = datetime.now()
-        request_number = f"FGD-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+        year = now.strftime("%Y")
+        prefix = f"FGD-{year}-"
+        existing_numbers = await uow.session.execute(
+            select(FinishedGoodsRequestModel.request_number).where(
+                FinishedGoodsRequestModel.request_number.like(f"{prefix}%")
+            )
+        )
+        used_numbers = {
+            int(number.removeprefix(prefix))
+            for number in existing_numbers.scalars().all()
+            if number and number.removeprefix(prefix).isdigit()
+        }
+        sequence = 1
+        while sequence in used_numbers:
+            sequence += 1
+        request_number = f"{prefix}{sequence:03d}"
         supplier_id = current_user.raw_claims.get("supplier_id") or current_user.subject
         row = FinishedGoodsRequestModel(
             request_number=request_number, material_code=payload.product_code, material_name=payload.product_name,

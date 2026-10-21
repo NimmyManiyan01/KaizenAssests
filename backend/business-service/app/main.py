@@ -31,6 +31,7 @@ from app.modules.returns.infrastructure.api.router import router as returns_rout
 from app.modules.storage.infrastructure.api.router import router as storage_router
 from app.modules.assembly.infrastructure.api.router import router as assembly_router
 from app.modules.dispatch.infrastructure.api.router import router as dispatch_router
+from app.modules.search_router import router as search_router
 from app.modules.storage.infrastructure.api.assembly_requisition_router import router as assembly_requisition_router
 from app.modules.storage.infrastructure.api.inventory_router import inventory_router, storage_req_router, v1_inventory_router
 from app.security.router import router as auth_router
@@ -1740,6 +1741,7 @@ def create_app() -> FastAPI:
     app.include_router(damage_claims_router)
     app.include_router(assembly_router)
     app.include_router(dispatch_router)
+    app.include_router(search_router)
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 
     @app.get("/api/debug-assembly")

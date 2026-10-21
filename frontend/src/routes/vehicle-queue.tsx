@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   AlertTriangle,
-  ArrowRight,
   Boxes,
   Eye,
   FileCheck2,
@@ -17,8 +16,9 @@ import {
 } from "lucide-react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
 
 export const Route = createFileRoute("/vehicle-queue")({
@@ -85,6 +85,12 @@ function InboundArrivals() {
   const [selectedArrival, setSelectedArrival] = useState<Arrival | null>(null);
   const [selectedDock, setSelectedDock] = useState<Record<string, string>>({});
   const [assigning, setAssigning] = useState<string | null>(null);
+  const [exitTarget, setExitTarget] = useState<Arrival | null>(null);
+  const [exitPass, setExitPass] = useState("");
+  const [exitVerified, setExitVerified] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [arrivalPage, setArrivalPage] = useState(1);
+  const arrivalsPerPage = 10;
 
   // FR-02 New Gate Entry Registration Modal State
   const [isNewRegistrationModalOpen, setIsNewRegistrationModalOpen] = useState(
@@ -120,9 +126,9 @@ function InboundArrivals() {
     "invoice_copy_inv9901.pdf",
   );
   const [asnDocumentFile, setAsnDocumentFile] = useState<File | null>(null);
-  const [uploadedVehiclePhoto, setUploadedVehiclePhoto] = useState<string | null>(
-    "truck_front_plate_ka01ab4582.jpg",
-  );
+  // Do not seed this with a demo filename: the gate pass must require a real
+  // photo captured/uploaded during the current registration.
+  const [uploadedVehiclePhoto, setUploadedVehiclePhoto] = useState<string | null>(null);
   const [vehiclePhotoPreview, setVehiclePhotoPreview] = useState<string | null>(null);
   const [vehiclePhotoBlob, setVehiclePhotoBlob] = useState<Blob | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -138,7 +144,7 @@ function InboundArrivals() {
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      const [arrivalRows, dockRows] = await Promise.all([api.getInboundArrivals(), api.getDocks()]);
+      const [arrivalRows, dockRows] = await Promise.all([api.getInboundArrivals(true), api.getDocks()]);
       setArrivals(arrivalRows);
       setDocks(dockRows);
     } catch (error) {
@@ -156,6 +162,29 @@ function InboundArrivals() {
     const timer = window.setInterval(() => void load(true), 5000);
     return () => window.clearInterval(timer);
   }, [load]);
+
+  const filteredArrivals = arrivals.filter((arrival) => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return true;
+    return [
+      arrival.asn_number,
+      arrival.gate_entry_number,
+      arrival.supplier_name,
+      arrival.vehicle_number,
+      arrival.driver_name,
+    ].some((value) => String(value || "").toLowerCase().includes(query));
+  });
+  const totalArrivalPages = Math.max(1, Math.ceil(filteredArrivals.length / arrivalsPerPage));
+  const visibleArrivals = filteredArrivals.slice(
+    (arrivalPage - 1) * arrivalsPerPage,
+    arrivalPage * arrivalsPerPage,
+  );
+  const firstVisibleArrival = filteredArrivals.length === 0 ? 0 : (arrivalPage - 1) * arrivalsPerPage + 1;
+  const lastVisibleArrival = Math.min(arrivalPage * arrivalsPerPage, filteredArrivals.length);
+
+  useEffect(() => {
+    setArrivalPage((page) => Math.min(page, totalArrivalPages));
+  }, [totalArrivalPages]);
 
   useEffect(() => {
     void api.getAsns().then((records) => {
@@ -362,33 +391,53 @@ function InboundArrivals() {
 
   const isEligibleForInboundExit = (statusStr: string) => {
     const upper = (statusStr || "").toUpperCase().trim();
+    // Security may release an inbound vehicle only after receiving/GRN is
+    // complete and the warehouse has released its dock assignment.
     return [
       "RECEIVING_COMPLETED",
-      "COMPLETED",
-      "RELEASED",
       "DOCK_RELEASED",
-      "GRN_POSTED",
-      "QUALITY_PASSED",
-      "UNLOADED",
     ].includes(upper);
   };
 
   async function approveGateExit(arrival: Arrival) {
-    const vehName = arrival.vehicle_number || "this vehicle";
-    const gatePassId = window.prompt(
-      `Enter gate pass ID for ${vehName}:`,
-      arrival.gate_entry_number || "",
+    setExitTarget(arrival);
+    setExitPass("");
+    setExitVerified(false);
+  }
+
+  function verifyGatePass() {
+    const normalized = exitPass.trim().toUpperCase();
+    const matchingArrival = arrivals.find(
+      (arrival) => arrival.gate_entry_number?.toUpperCase() === normalized,
     );
-    if (!gatePassId?.trim()) return;
-    if (
-      !confirm(
-        `Confirm gate exit approval for ${vehName}? Confirm that vehicle has completed unloading/receiving and is cleared to leave.`,
-      )
-    )
+    if (!matchingArrival) {
+      setExitVerified(false);
+      toast.error("Gate pass not found", { description: "Enter or scan the active gate pass for this vehicle." });
       return;
+    }
+    if (matchingArrival.id !== exitTarget?.id) {
+      setExitVerified(false);
+      toast.error("Wrong gate pass", { description: "This pass does not belong to the selected vehicle." });
+      return;
+    }
+    if (!isEligibleForInboundExit(matchingArrival.status)) {
+      setExitVerified(false);
+      toast.error("Vehicle is not ready for exit", { description: "GRN/receiving must be completed and the dock must be released first." });
+      return;
+    }
+    setExitTarget(matchingArrival);
+    setExitPass(normalized);
+    setExitVerified(true);
+    toast.success("Gate pass verified", { description: "Vehicle and active visit details match." });
+  }
+
+  async function confirmGateExit() {
+    if (!exitTarget || !exitPass.trim()) return;
+    const arrival = exitTarget;
+    const vehName = arrival.vehicle_number || "this vehicle";
     setAssigning(arrival.id);
     try {
-      const updated = await api.markInboundVehicleExited(arrival.id, gatePassId.trim());
+      const updated = await api.markInboundVehicleExited(arrival.id, exitPass.trim());
       toast.success(`Gate exit approved for ${vehName}`, {
         description: `Status updated to VEHICLE_EXITED by ${updated.exited_by || "Security"}.`,
       });
@@ -396,9 +445,12 @@ function InboundArrivals() {
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("gate-entries:refresh"));
       }
+      setExitTarget(null);
+      setExitPass("");
+      setExitVerified(false);
     } catch (error: any) {
       toast.error("Gate exit approval failed", {
-        description:
+          description:
           error?.message || "Ensure receiving/unloading is complete before approving vehicle exit.",
       });
     } finally {
@@ -408,8 +460,12 @@ function InboundArrivals() {
 
   return (
     <AppShell
-      title="Inbound Arrivals"
-      subtitle="Approved gate entries awaiting warehouse dock assignment"
+      title="Vehicle Entry & Exit Management"
+      subtitle="Create gate entries, generate gate passes, and securely manage vehicle exits."
+      onSearchChange={(value) => {
+        setSearchQuery(value);
+        setArrivalPage(1);
+      }}
       actions={
         <div className="flex flex-wrap justify-end gap-2">
           <Button
@@ -424,47 +480,35 @@ function InboundArrivals() {
         </div>
       }
     >
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Summary label="Arrivals in queue" value={arrivals.length} />
-        <Summary
-          label="Awaiting dock"
-          value={arrivals.filter((a) => a.status === "AWAITING_DOCK").length}
-        />
-        <Summary
-          label="Moving to dock"
-          value={arrivals.filter((a) => a.status === "MOVING_TO_DOCK").length}
-        />
-        <Summary
-          label="Available docks"
-          value={docks.filter((d) => d.status === "AVAILABLE").length}
-        />
-      </div>
-
-      <Card className="rounded-2xl p-0 shadow-soft overflow-hidden">
+      <div className="overflow-hidden rounded-2xl bg-card">
         {loading ? (
           <div className="grid h-64 place-items-center">
             <Loader2 className="size-6 animate-spin text-primary" />
           </div>
-        ) : arrivals.length === 0 ? (
+        ) : filteredArrivals.length === 0 ? (
           <div className="grid min-h-64 place-items-center p-8 text-center text-muted-foreground">
             <Truck className="size-10 stroke-1" />
-            <p className="mt-2 font-medium">No inbound vehicles in queue</p>
+            <p className="mt-2 font-medium">
+              {searchQuery.trim() ? "No matching inbound vehicles" : "No inbound vehicles in queue"}
+            </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="min-h-64 overflow-x-auto bg-card">
             <table className="w-full text-left text-sm">
               <thead className="border-b bg-muted/40 text-xs uppercase text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3">ASN Number</th>
+                  <th className="px-4 py-3">Gate Pass No.</th>
                   <th className="px-4 py-3">Supplier</th>
                   <th className="px-4 py-3">Vehicle / Driver</th>
-                  <th className="px-4 py-3">Arrival Time</th>
+                  <th className="px-4 py-3">Expected Arrival</th>
+                  <th className="px-4 py-3">Actual Arrival</th>
                   <th className="px-4 py-3">Status / Dock</th>
                   <th className="px-4 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {arrivals.map((arrival) => (
+                {visibleArrivals.map((arrival) => (
                   <ArrivalRows
                     key={arrival.id}
                     arrival={arrival}
@@ -486,8 +530,62 @@ function InboundArrivals() {
             </table>
           </div>
         )}
-      </Card>
+        <div className="flex flex-col gap-3 border-t px-4 py-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <p>
+            Showing {firstVisibleArrival}–{lastVisibleArrival} of {filteredArrivals.length} arrivals
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-label="Previous page"
+              disabled={arrivalPage === 1 || loading}
+              onClick={() => setArrivalPage((page) => Math.max(1, page - 1))}
+              className="focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              Previous
+            </Button>
+            <span aria-label="Current page" className="min-w-8 text-center font-medium text-foreground">
+              {arrivalPage}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-label="Next page"
+              disabled={arrivalPage >= totalArrivalPages || loading}
+              onClick={() => setArrivalPage((page) => Math.min(totalArrivalPages, page + 1))}
+              className="focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      </div>
 
+      <Dialog open={Boolean(exitTarget)} onOpenChange={(open) => !open && setExitTarget(null)}>
+        <DialogContent className="max-w-md rounded-2xl bg-card p-6 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle>Vehicle Gate Exit</DialogTitle>
+            <DialogDescription>Enter the gate pass generated during gate entry to complete vehicle exit.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-3">
+            <div>
+              <Label htmlFor="exit-gate-pass">Gate Pass Number *</Label>
+              <div className="flex gap-2">
+                <Input id="exit-gate-pass" value={exitPass} onChange={(e) => { setExitPass(e.target.value.toUpperCase()); setExitVerified(false); }} placeholder="Enter or scan gate pass number" autoFocus />
+                <Button type="button" variant="outline" disabled={!exitPass.trim()} onClick={verifyGatePass}>Verify</Button>
+              </div>
+            </div>
+            {exitVerified && exitTarget && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950"><p><b>Gate pass verified:</b> {exitTarget.gate_entry_number}</p><p><b>Vehicle:</b> {exitTarget.vehicle_number || "—"}</p><p><b>Driver:</b> {exitTarget.driver_name || "—"}</p><p><b>Status:</b> {exitTarget.status.replaceAll("_", " ")}</p></div>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExitTarget(null)}>Cancel</Button>
+            <Button disabled={!exitVerified || Boolean(assigning)} onClick={() => void confirmGateExit()}>{assigning ? "Processing…" : "Confirm Exit"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={Boolean(selectedArrival)}
         onOpenChange={(open) => !open && setSelectedArrival(null)}
@@ -505,8 +603,6 @@ function InboundArrivals() {
               onMove={() => void startMovement(selectedArrival)}
               onCheckIn={() => void confirmDockArrival(selectedArrival)}
               onDockCheckIn={() => void confirmPhysicalDockArrival(selectedArrival)}
-              onApproveExit={() => void approveGateExit(selectedArrival)}
-              isEligibleForInboundExit={isEligibleForInboundExit}
               busy={assigning === selectedArrival.id}
             />
           )}
@@ -604,7 +700,6 @@ function InboundArrivals() {
                     type="text"
                     value={selectedSupplier}
                     readOnly
-                    placeholder="Auto-filled from ASN"
                     className="h-9 w-full rounded-xl border bg-muted/50 px-3 font-semibold text-xs text-primary"
                   />
                 </div>
@@ -617,6 +712,7 @@ function InboundArrivals() {
                   <input
                     type="text"
                     value={selectedAsn}
+                    autoFocus
                     onChange={(e) => setSelectedAsn(e.target.value)}
                     onBlur={() => void lookupAsn(selectedAsn)}
                     onKeyDown={(e) => {
@@ -630,7 +726,6 @@ function InboundArrivals() {
                   />
                 </div>
 
-                {/* PO Number Auto-Filled */}
                 <div className="hidden">
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
                     PO Number (Auto-Filled)
@@ -751,7 +846,7 @@ function InboundArrivals() {
                       </div>
                     ))
                   ) : (
-                    <p className="text-muted-foreground">Enter an ASN number to load materials.</p>
+                    <div className="min-h-8" aria-hidden="true" />
                   )}
                 </div>
               </div>
@@ -872,7 +967,7 @@ function InboundArrivals() {
                   )}
                   {uploadedVehiclePhoto && (
                     <p className="mt-1 text-[10px] font-bold text-emerald-600">
-                      ✓ {uploadedVehiclePhoto}
+                      ✓ {uploadedVehiclePhoto.startsWith("vehicle-photo-") ? "vehicle-photo-captured" : uploadedVehiclePhoto}
                     </p>
                   )}
                   {vehiclePhotoPreview && (
@@ -1039,7 +1134,7 @@ function InboundArrivals() {
                   />
                   {uploadedVehiclePhoto && (
                     <p className="text-[10px] font-bold text-emerald-600 mt-1">
-                      ✓ {uploadedVehiclePhoto}
+                      ✓ {uploadedVehiclePhoto.startsWith("vehicle-photo-") ? "vehicle-photo-captured" : uploadedVehiclePhoto}
                     </p>
                   )}
                 </div>
@@ -1131,6 +1226,21 @@ function InboundArrivals() {
             >
               Done
             </Button>
+            <Button
+              className="w-full rounded-xl"
+              disabled={!arrivals.some((arrival) => arrival.gate_entry_number === generatedGatePass && isEligibleForInboundExit(arrival.status))}
+              title="Exit becomes available after GRN/receiving is complete and the dock is released"
+              onClick={async () => {
+                const rows = await api.getInboundArrivals();
+                const arrival = rows.find((row: Arrival) => row.gate_entry_number === generatedGatePass);
+                setGeneratedGatePass(null);
+                if (arrival && isEligibleForInboundExit(arrival.status)) setExitTarget(arrival);
+                else if (arrival) toast.error("Exit is not ready", { description: "GRN/receiving must be completed and the dock must be released first." });
+                else toast.error("Gate pass was created, but its active visit could not be loaded.");
+              }}
+            >
+              Exit Vehicle
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -1186,10 +1296,22 @@ function ArrivalRows({
             {arrival.asn_number}
           </button>
         </td>
+        <td className="px-4 py-4 font-mono font-semibold text-primary">
+          {arrival.gate_entry_number || "—"}
+        </td>
         <td className="px-4 py-4 font-medium">{arrival.supplier_name || "—"}</td>
         <td className="px-4 py-4">
           <p className="font-mono font-semibold">{arrival.vehicle_number}</p>
           <p className="text-xs text-muted-foreground">{arrival.driver_name || "—"}</p>
+        </td>
+        <td className="px-4 py-4">
+          {arrival.expected_arrival_at
+            ? new Date(arrival.expected_arrival_at).toLocaleDateString([], {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+              })
+            : "—"}
         </td>
         <td className="px-4 py-4">
           {new Date(arrival.arrival_time).toLocaleTimeString([], {
@@ -1210,25 +1332,27 @@ function ArrivalRows({
         </td>
         <td className="px-4 py-4">
           <div className="flex flex-wrap items-center gap-2">
-            {!isExited && isEligibleForInboundExit(arrival.status) && (
-              <Button
-                size="sm"
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg shadow-sm gap-1.5 text-xs px-3"
-                disabled={busy}
-                onClick={() => onApproveExit(arrival)}
-              >
-                <ShieldCheck className="size-3.5" /> Approve Gate Exit
-              </Button>
-            )}
-            <Button size="sm" variant="outline" className="rounded-lg" onClick={onToggle}>
+            <Button size="sm" variant="outline" className="rounded-lg whitespace-nowrap" onClick={onToggle} aria-label={`View details for ${arrival.gate_entry_number || arrival.asn_number}`}>
               <Eye className="size-3.5" /> Details
             </Button>
+            {!isExited && (
+              <Button
+                size="sm"
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm gap-1.5 text-xs px-3 whitespace-nowrap"
+                disabled={busy || !isEligibleForInboundExit(arrival.status)}
+                onClick={() => onApproveExit(arrival)}
+                aria-label={`Exit vehicle ${arrival.vehicle_number || ""}`}
+                title={isEligibleForInboundExit(arrival.status) ? "Enter and verify the gate pass to complete vehicle exit" : "Vehicle is not ready for exit"}
+              >
+                <ShieldCheck className="size-3.5" /> Exit
+              </Button>
+            )}
           </div>
         </td>
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={7} className="bg-muted/20 px-4 py-5">
+          <td colSpan={9} className="bg-muted/20 px-4 py-5">
             <ArrivalDetails
               arrival={arrival}
               docks={docks}
@@ -1244,15 +1368,6 @@ function ArrivalRows({
         </tr>
       )}
     </>
-  );
-}
-
-function Summary({ label, value }: { label: string; value: number }) {
-  return (
-    <Card className="rounded-2xl p-4">
-      <p className="text-xs uppercase text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-bold">{value}</p>
-    </Card>
   );
 }
 
@@ -1298,8 +1413,6 @@ function ArrivalDetails({
         </div>
         <dl className="grid gap-x-6 gap-y-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <Detail label="ASN number" value={arrival.asn_number} mono />
-          <Detail label="ASN ID" value={arrival.asn_id} mono />
-          <Detail label="PO number" value={arrival.po_number} mono />
           <Detail label="Supplier" value={arrival.supplier_name} />
           <Detail label="Current status" value={arrival.status.replaceAll("_", " ")} />
           <Detail label="Vehicle number" value={arrival.vehicle_number} mono />
@@ -1358,18 +1471,10 @@ function ArrivalDetails({
             <dd className="font-mono">{arrival.gate_entry_number}</dd>
             <dt className="text-muted-foreground">Entry time</dt>
             <dd>
-              {arrival.facility_entry_at
-                ? new Date(arrival.facility_entry_at).toLocaleString()
+              {arrival.facility_entry_at || arrival.arrival_time
+                ? new Date(arrival.facility_entry_at || arrival.arrival_time!).toLocaleString()
                 : "Not entered"}
             </dd>
-            <dt className="text-muted-foreground">Transporter</dt>
-            <dd>{arrival.shipment.transporter || "—"}</dd>
-            <dt className="text-muted-foreground">Packages</dt>
-            <dd>
-              {arrival.shipment.number_of_packages ?? "—"} {arrival.shipment.package_type || ""}
-            </dd>
-            <dt className="text-muted-foreground">Shipping method</dt>
-            <dd>{arrival.shipment.shipping_method || "—"}</dd>
             <dt className="text-muted-foreground">Expected arrival</dt>
             <dd>
               {arrival.expected_arrival_at

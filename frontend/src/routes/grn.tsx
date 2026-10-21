@@ -1130,7 +1130,7 @@ function GrnPageWorkflow() {
         const bal = Math.max(poQty - recQty, 0);
 
         return {
-          grn_line_id: l.grn_line_id || l.grnLineId,
+          grn_line_id: l.grn_line_id || l.grnLineId || l.line_id || l.uuid || l.id,
           material_name:
             l.material_name ||
             l.materialName ||
@@ -1413,7 +1413,7 @@ function GrnPageWorkflow() {
             l.balance_quantity ?? l.balanceQuantity ?? Math.max(poQty - recQty, 0),
           );
           return {
-            grn_line_id: l.grn_line_id || String(l.id),
+            grn_line_id: l.grn_line_id || l.grnLineId || l.line_id || l.uuid || l.id,
             item_code:
               l.item_code ||
               l.material_code ||
@@ -1457,14 +1457,14 @@ function GrnPageWorkflow() {
         persistedLines.forEach((l: any, idx: number) => {
           const itemTarget = rehydratedLines[idx] || (l as GrnLineItem);
           const rowKey = grnMaterialKey(itemTarget, idx);
-          qApp[rowKey] = Number(
-            l.quality_approved_quantity ??
-              (!["", "PENDING", "UNINSPECTED"].includes(
-                String(l.quality_result || "PENDING").toUpperCase(),
-              )
-                ? l.good_quantity || 0
-                : 0),
-          );
+          const persistedQualityResult = String(l.quality_result || "PENDING").toUpperCase();
+          const hasPersistedInspection =
+            l.quality_approved_quantity !== null &&
+            l.quality_approved_quantity !== undefined ||
+            !["", "PENDING", "UNINSPECTED"].includes(persistedQualityResult);
+          if (hasPersistedInspection) {
+            qApp[rowKey] = Number(l.quality_approved_quantity ?? l.good_quantity ?? 0);
+          }
           if (Array.isArray(l.batches) && l.batches.length > 0) {
             bMap[rowKey] = l.batches.map((b: any) => ({
               batch_id: b.id || b.batch_id,
@@ -1646,10 +1646,16 @@ function GrnPageWorkflow() {
   }
 
   async function saveGrnHeader(): Promise<string> {
-    const receivingDock = header.receiving_dock.trim() || allocatedDockInfo?.dock_number || "";
+    const receivingDock =
+      header.receiving_dock.trim() ||
+      allocatedDockInfo?.dock_number ||
+      dockOptions.find((dock: any) => String(dock.status || "").toUpperCase() === "AVAILABLE")
+        ?.dock_number ||
+      dockOptions[0]?.dock_number ||
+      "";
     if (!receivingDock) {
       throw new Error(
-        "No Receiving Dock assigned by warehouse dock allocation. Please ensure a dock is allocated before proceeding.",
+        "No receiving dock is available. Please configure a warehouse dock before proceeding.",
       );
     }
     if (!header.asn_number.trim()) throw new Error("Please enter an ASN on Step 1.");
@@ -1862,12 +1868,13 @@ function GrnPageWorkflow() {
       if (!Array.isArray(result?.lines)) throw new Error("Backend did not return saved GRN lines.");
       const lines = result.lines.map((line: any) => ({
         item_code: line.item_code || line.itemCode,
-        grn_line_id: line.grn_line_id || line.grnLineId || line.id,
+        grn_line_id: line.grn_line_id || line.grnLineId || line.line_id || line.uuid || line.id,
       })) as Array<{ item_code: string; grn_line_id: string }>;
 
       const updated = materials.map((m, idx) => {
         const savedLine = lines[idx] || lines.find((line) => line.item_code === m.item_code);
-        const grnLineId = savedLine?.grn_line_id || m.grn_line_id || `line-${idx}`;
+        const grnLineId =
+          savedLine?.grn_line_id || m.grn_line_id || `line-${idx}`;
         const rec = m.received_quantity !== undefined ? m.received_quantity : m.good_quantity;
         const currentTotal = (m.good_quantity || 0) + (m.damaged_quantity || 0);
         const good = currentTotal === rec ? m.good_quantity : rec;
@@ -2003,9 +2010,9 @@ function GrnPageWorkflow() {
   ]);
 
   async function handleProceedFromPage3() {
-    const invalidQcLine = materials.find((m) => {
+    const invalidQcLine = materials.find((m, idx) => {
       const received = Number(m.received_quantity || 0);
-      const accepted = Number(m.good_quantity || 0);
+      const accepted = Number(qualityApproved[grnMaterialKey(m, idx)] ?? 0);
       const rejected = Number(m.rejected_quantity || 0);
       const damaged = Number(m.damaged_quantity || 0);
       const held = Number(m.held_quantity || 0);
@@ -2128,10 +2135,10 @@ function GrnPageWorkflow() {
           currentMaterials.map((m, idx) => ({
             grn_line_id: m.grn_line_id,
             item_code: m.item_code,
-            accepted_quantity: qualityApproved[grnMaterialKey(m, idx)] ?? m.good_quantity ?? 0,
+            accepted_quantity: qualityApproved[grnMaterialKey(m, idx)] ?? 0,
             quality_approved_quantity:
-              qualityApproved[grnMaterialKey(m, idx)] ?? m.good_quantity ?? 0,
-            good_quantity: qualityApproved[grnMaterialKey(m, idx)] ?? m.good_quantity ?? 0,
+              qualityApproved[grnMaterialKey(m, idx)] ?? 0,
+            good_quantity: qualityApproved[grnMaterialKey(m, idx)] ?? 0,
             rejected_quantity: m.rejected_quantity || 0,
             damaged_quantity: m.damaged_quantity || 0,
             held_quantity: m.held_quantity || 0,
@@ -2166,6 +2173,11 @@ function GrnPageWorkflow() {
   }
 
   async function handleProceedFromPage4() {
+    const isUuid = (value: string | undefined) =>
+      Boolean(
+        value &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value),
+      );
     if (!allBatchesValid) {
       toast.error("Total batch quantity must match the approved good quantity for every material.");
       return;
@@ -2173,12 +2185,32 @@ function GrnPageWorkflow() {
     setBusyAction(true);
     setSaveStatus("saving");
     try {
-      for (const [idx, m] of materials.entries()) {
+      let batchMaterials = materials;
+      if (grnId && materials.some((m) => !isUuid(m.grn_line_id))) {
+        const detail = await api.getGrnDetail(grnId);
+        const persistedLines = Array.isArray(detail?.lines) ? detail.lines : [];
+        batchMaterials = materials.map((material) => {
+          const match = persistedLines.find(
+            (line: any) =>
+              (line.item_code || line.itemCode || line.material_code) === material.item_code,
+          );
+          const persistedId = match
+            ? match.grn_line_id || match.grnLineId || match.line_id || match.uuid || match.id
+            : undefined;
+          return persistedId ? { ...material, grn_line_id: String(persistedId) } : material;
+        });
+        setMaterials(batchMaterials);
+      }
+
+      for (const [idx, m] of batchMaterials.entries()) {
         const rowKey = grnMaterialKey(m, idx);
         const batchesForLine = materialBatches[rowKey] || materialBatches[m.item_code];
-        if (m.grn_line_id && batchesForLine) {
+        if (batchesForLine && !isUuid(m.grn_line_id)) {
+          throw new Error(`Missing valid GRN line ID for ${m.material_name || m.item_code}`);
+        }
+        if (isUuid(m.grn_line_id) && batchesForLine) {
           const savedBatches = await api.createGrnBatches(
-            m.grn_line_id,
+            m.grn_line_id as string,
             batchesForLine.map((b) => ({
               batch_quantity: Number(b.batch_quantity || 0),
             })),
@@ -3427,14 +3459,21 @@ function GrnPageWorkflow() {
 
     materials.forEach((m, idx) => {
       const rowKey = grnMaterialKey(m, idx);
+      const materialCode = resolveGrnMaterialCode(m) || "ITEM";
       const appQty = Number(
         qualityApproved[rowKey] !== undefined ? qualityApproved[rowKey] : (m.good_quantity ?? 0),
       );
-      const existing = effectiveBatches[rowKey] || effectiveBatches[m.item_code];
+      const existing = effectiveBatches[rowKey] || effectiveBatches[m.item_code] || effectiveBatches[materialCode];
       if (!existing || existing.length === 0) {
         effectiveBatches[rowKey] = [
-          { batch_number: `BATCH-${m.item_code}-001`, batch_quantity: appQty },
+          { batch_number: `BATCH-${materialCode}-001`, batch_quantity: appQty },
         ];
+        updated = true;
+      } else if (existing.some((batch) => String(batch.batch_number || "").includes("undefined"))) {
+        effectiveBatches[rowKey] = existing.map((batch, batchIndex) => ({
+          ...batch,
+          batch_number: `BATCH-${materialCode}-${String(batchIndex + 1).padStart(3, "0")}`,
+        }));
         updated = true;
       } else if (appQty === 0 && existing.length > 0 && (existing[0]?.batch_quantity ?? 0) > 0) {
         effectiveBatches[rowKey] = existing.map((b) => ({ ...b, batch_quantity: 0 }));
@@ -4904,7 +4943,7 @@ function GrnPageWorkflow() {
                   className="rounded-xl font-semibold"
                   onClick={() => handleStepClick(1)}
                 >
-                  <ArrowLeft className="mr-2 size-4" /> Back to Step 1
+                  <ArrowLeft className="mr-2 size-4" /> Back
                 </Button>
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-2 text-xs font-semibold">
@@ -4964,7 +5003,7 @@ function GrnPageWorkflow() {
                     <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
                       <tr>
                         <th className="px-4 py-3">Material</th>
-                        <th className="px-4 py-3 text-right">Received Qty (Step 2)</th>
+                        <th className="px-4 py-3 text-right">Received Qty</th>
                         <th className="px-4 py-3 text-right">Accepted Qty</th>
                         <th className="px-4 py-3 text-right">Damaged Qty</th>
                         <th className="px-4 py-3 text-center">Quality Status</th>
@@ -4977,11 +5016,11 @@ function GrnPageWorkflow() {
                           m.received_quantity !== undefined
                             ? m.received_quantity
                             : m.good_quantity + m.damaged_quantity;
-                        const acceptedVal =
-                          qualityApproved[rowKey] !== undefined
-                            ? qualityApproved[rowKey]
-                            : m.good_quantity;
-                        const damagedVal = m.damaged_quantity || 0;
+                        const hasInspectionInput = qualityApproved[rowKey] !== undefined;
+                        const acceptedVal = qualityApproved[rowKey] ?? 0;
+                        const damagedVal = hasInspectionInput
+                          ? Math.max(0, Number(recQty) - Number(acceptedVal || 0))
+                          : 0;
                         const hasInspection = !["", "PENDING", "UNINSPECTED"].includes(
                           String(m.quality_result || "PENDING").toUpperCase(),
                         );
@@ -5023,7 +5062,7 @@ function GrnPageWorkflow() {
                                         ? {
                                             ...item,
                                             good_quantity: val,
-                                            damaged_quantity: item.damaged_quantity || 0,
+                                            damaged_quantity: Math.max(0, Number(recQty) - val),
                                             rejected_quantity: item.rejected_quantity || 0,
                                             held_quantity: item.held_quantity || 0,
                                             quality_approved_quantity: val,
@@ -5042,7 +5081,7 @@ function GrnPageWorkflow() {
                                 min={0}
                                 max={recQty}
                                 placeholder="0"
-                                value={damagedVal === 0 ? "" : (damagedVal ?? "")}
+                                value={!hasInspectionInput || damagedVal === 0 ? "" : damagedVal}
                                 onChange={(e) => {
                                   const raw = e.target.value;
                                   const val =
@@ -5290,7 +5329,7 @@ function GrnPageWorkflow() {
 
               <div className="flex justify-between pt-4 border-t">
                 <Button variant="outline" className="rounded-xl" onClick={() => handleStepClick(2)}>
-                  <ArrowLeft className="mr-2 size-4" /> Back to Step 2
+                  <ArrowLeft className="mr-2 size-4" /> Back
                 </Button>
                 <Button
                   disabled={busyAction || !qcHasRequiredEvidence}
@@ -5468,7 +5507,7 @@ function GrnPageWorkflow() {
 
               <div className="flex justify-between pt-4 border-t">
                 <Button variant="outline" className="rounded-xl" onClick={() => handleStepClick(3)}>
-                  <ArrowLeft className="mr-2 size-4" /> Back to Step 3
+                  <ArrowLeft className="mr-2 size-4" /> Back
                 </Button>
                 <Button
                   onClick={() => void handleProceedFromPage4()}
@@ -5849,7 +5888,7 @@ function GrnPageWorkflow() {
 
               <div className="flex justify-between pt-4 border-t">
                 <Button variant="outline" className="rounded-xl" onClick={() => handleStepClick(4)}>
-                  <ArrowLeft className="mr-2 size-4" /> Back to Step 4
+                  <ArrowLeft className="mr-2 size-4" />Back
                 </Button>
                 <Button
                   disabled={

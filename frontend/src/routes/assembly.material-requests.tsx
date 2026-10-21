@@ -431,12 +431,16 @@ function AssemblyMaterialRequestsPage() {
     setRequiredDateError(dateError);
     if (dateError) return;
 
+    const requiredDate = /^\d{2}-\d{2}-\d{4}$/.test(formData.required_date)
+      ? formData.required_date.split("-").reverse().join("-")
+      : formData.required_date;
+
     try {
       setCreating(true);
       const newReq = await api.createAssemblyMaterialRequest({
         product_code: formData.product_code,
         target_quantity: Number(formData.target_quantity),
-        required_date: formData.required_date,
+        required_date: requiredDate,
         remarks: formData.remarks,
       });
 
