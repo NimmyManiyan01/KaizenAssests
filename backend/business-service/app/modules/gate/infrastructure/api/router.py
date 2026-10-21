@@ -19,7 +19,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import String, cast, delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -72,8 +72,6 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
-from reportlab.graphics.barcode import qr
-from reportlab.graphics.shapes import Drawing
 
 router = APIRouter(prefix="/api/gate-entries", tags=["gate"])
 preview_router = APIRouter(prefix="/api/gate", tags=["gate"])
@@ -485,11 +483,6 @@ async def download_supplier_asn_pdf(reference: str, uow: UnitOfWork = Depends(ge
         pdf.drawString(162 * mm, row_y, str(line.uom or "PCS"))
         row_y -= 7 * mm
 
-    qr_code = qr.QrCodeWidget(asn.asn_number)
-    bounds = qr_code.getBounds(); size = 34 * mm
-    drawing = Drawing(size, size, transform=[size / (bounds[2] - bounds[0]), 0, 0, size / (bounds[3] - bounds[1]), 0, 0])
-    drawing.add(qr_code); drawing.drawOn(pdf, width - 55 * mm, height - 102 * mm)
-    pdf.setFont("Helvetica-Bold", 8); pdf.drawCentredString(width - 37.5 * mm, height - 106 * mm, "SCAN ASN QR")
     pdf.setStrokeColor(colors.HexColor("#D1D5DB")); pdf.line(18 * mm, 24 * mm, width - 18 * mm, 24 * mm)
     pdf.setFillColor(colors.HexColor("#6B7280")); pdf.setFont("Helvetica", 8)
     pdf.drawString(18 * mm, 17 * mm, "KaizenAssests Warehouse Management System · This document is system generated.")
@@ -604,6 +597,62 @@ async def _authenticated_supplier_id(user: CurrentUser, uow: UnitOfWork) -> uuid
     return supplier_id
 
 
+_INTEGER_QUANTITY_UOMS = {
+    "EA", "EACH", "UNIT", "UNITS", "PCS", "PC", "PIECE", "PIECES",
+    "SET", "SETS", "BOX", "BOXES", "BAG", "BAGS", "PACK", "PACKS",
+    "PAIR", "PAIRS", "DOZEN",
+}
+_MAX_ASN_QUANTITY = Decimal("99999999999999.9999")
+
+
+def _normalize_asn_vehicle_number(value: str) -> str:
+    return re.sub(r"[\s-]+", "", value).upper()
+
+
+def _is_valid_asn_vehicle_number(value: str) -> bool:
+    normalized = _normalize_asn_vehicle_number(value)
+    return bool(
+        re.fullmatch(r"[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}", normalized)
+        or re.fullmatch(r"(?:2[1-9]|[3-9]\d)BH\d{4}[A-HJ-NP-Z]{1,2}", normalized)
+    )
+
+
+def _validate_asn_quantity(quantity: Decimal, uom: str) -> None:
+    if quantity > _MAX_ASN_QUANTITY:
+        raise HTTPException(status_code=422, detail="shipped_quantity exceeds the supported maximum")
+    fractional_places = max(0, -quantity.normalize().as_tuple().exponent)
+    if fractional_places > 4:
+        raise HTTPException(status_code=422, detail="shipped_quantity supports at most 4 decimal places")
+    if uom.strip().upper() in _INTEGER_QUANTITY_UOMS and quantity != quantity.to_integral_value():
+        raise HTTPException(
+            status_code=422,
+            detail=f"shipped_quantity must be a whole number for UOM '{uom}'",
+        )
+
+
+@preview_router.get("/supplier/warehouses")
+async def get_supplier_asn_warehouses(
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> list[dict]:
+    await _authenticated_supplier_id(user, uow)
+    result = await uow.session.execute(
+        select(StoreModel)
+        .where(func.upper(StoreModel.status) == "ACTIVE")
+        .order_by(StoreModel.store_name, StoreModel.store_code)
+    )
+    return [
+        {
+            "id": str(store.id),
+            "code": store.store_code,
+            "name": store.store_name,
+            "warehouse_id": store.warehouse_id,
+        }
+        for store in result.scalars().all()
+        if store.store_code and store.store_name and store.warehouse_id
+    ]
+
+
 @preview_router.post("/asns", status_code=status.HTTP_201_CREATED)
 async def create_supplier_asn(
     payload: dict = Body(...),
@@ -611,27 +660,12 @@ async def create_supplier_asn(
     uow: UnitOfWork = Depends(get_uow),
 ) -> dict:
     supplier_id = await _authenticated_supplier_id(user, uow)
-    # The server is authoritative for the document number.  The UI may reserve
-    # one for display, but a missing number must never prevent a valid ASN from
-    # being created and a caller must not be able to choose an arbitrary format.
-    asn_number = str(payload.get("asn_number") or "").strip().upper()
-    if not asn_number:
-        year = datetime.date.today().year
-        prefix = f"ASN-{year}-"
-        numbers = await uow.session.execute(
-            select(AsnModel.asn_number).where(AsnModel.asn_number.like(f"{prefix}%"))
-        )
-        highest = 0
-        for value in numbers.scalars().all():
-            match = re.fullmatch(rf"ASN-{year}-(\d+)", str(value).strip().upper())
-            if match:
-                highest = max(highest, int(match.group(1)))
-        asn_number = f"{prefix}{highest + 1:03d}"
-    if re.fullmatch(r"ASN-\d{4}-\d{3}", asn_number) is None:
-        raise HTTPException(status_code=422, detail="asn_number must use format ASN-YYYY-NNN, for example ASN-2026-001")
-    existing = await uow.session.execute(select(AsnModel).where(AsnModel.asn_number == asn_number))
-    if existing.scalars().first() is not None:
-        raise HTTPException(status_code=409, detail=f"ASN '{asn_number}' already exists")
+    client_request_id = str(payload.get("client_request_id") or "").strip()
+    if client_request_id:
+        try:
+            client_request_id = str(uuid.UUID(client_request_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="client_request_id must be a UUID") from exc
 
     po_number = str(payload.get("po_number") or "").strip()
     po_filters = []
@@ -654,28 +688,61 @@ async def create_supplier_asn(
         if po_model and not po_number:
             po_number = po_model.po_number
 
-    vehicle_number = str(payload.get("vehicle_number") or "").strip().upper()
+    vehicle_number = _normalize_asn_vehicle_number(str(payload.get("vehicle_number") or ""))
     driver_name = str(payload.get("driver_name") or "").strip()
     driver_contact = str(payload.get("driver_contact") or "").strip()
-    supplier_name = str(payload.get("supplier_name") or "").strip()
     if not vehicle_number or not driver_name or not driver_contact:
         raise HTTPException(status_code=422, detail="vehicle_number, driver_name and driver_contact are required")
-    if re.fullmatch(r"[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}", re.sub(r"\s+", "", vehicle_number)) is None:
-        raise HTTPException(status_code=422, detail="vehicle_number must use a valid format, for example KA42EH6948")
+    if not _is_valid_asn_vehicle_number(vehicle_number):
+        raise HTTPException(
+            status_code=422,
+            detail="vehicle_number must be a valid registration, such as KA42EH6948 or 22BH1234AA",
+        )
     if re.fullmatch(r"[A-Za-z .'-]{2,80}", driver_name) is None:
         raise HTTPException(status_code=422, detail="driver_name contains invalid characters")
     if re.fullmatch(r"[6-9]\d{9}", re.sub(r"[\s-]", "", driver_contact)) is None:
         raise HTTPException(status_code=422, detail="driver_contact must be a valid 10-digit mobile number")
-    if not supplier_name:
-        raise HTTPException(status_code=422, detail="supplier_name is required")
+
+    supplier_result = await uow.session.execute(
+        select(SupplierModel).where(SupplierModel.id == supplier_id)
+    )
+    supplier = supplier_result.scalars().first()
+    if supplier is None:
+        raise HTTPException(status_code=403, detail="Authenticated supplier could not be found")
+    raw_supplier_name = payload.get("supplier_name")
+    if raw_supplier_name is not None and not isinstance(raw_supplier_name, str):
+        raise HTTPException(status_code=422, detail="supplier_name must be text")
+    supplier_name = (
+        raw_supplier_name.strip()
+        if isinstance(raw_supplier_name, str) and raw_supplier_name.strip()
+        else supplier.registered_company_name or supplier.supplier_name
+    )
+    if len(supplier_name) > 200:
+        raise HTTPException(status_code=422, detail="supplier_name must be 200 characters or fewer")
+
+    destination_store = None
+    raw_store_id = str(payload.get("destination_warehouse_id") or "").strip()
+    if raw_store_id:
+        try:
+            store_uuid = uuid.UUID(raw_store_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Selected destination warehouse is invalid") from exc
+        destination_store = await uow.session.get(StoreModel, store_uuid)
+        if (
+            destination_store is None
+            or str(destination_store.status or "").upper() != "ACTIVE"
+            or not destination_store.warehouse_id
+        ):
+            raise HTTPException(status_code=422, detail="Selected destination warehouse is unavailable")
+    destination_warehouse = destination_store.store_name if destination_store else None
 
     submitted_lines = payload.get("lines") or []
     if not isinstance(submitted_lines, list):
         raise HTTPException(status_code=422, detail="lines must be a list")
     if not submitted_lines:
         raise HTTPException(status_code=422, detail="at least one material line is required")
-    validated_lines: list[tuple[dict, Decimal]] = []
-    submitted_material_ids: set[str] = set()
+    validated_lines: list[tuple[dict, Decimal, uuid.UUID]] = []
+    submitted_material_ids: set[uuid.UUID] = set()
     for raw_line in submitted_lines:
         if not isinstance(raw_line, dict):
             raise HTTPException(status_code=422, detail="each ASN line must be an object")
@@ -688,20 +755,58 @@ async def create_supplier_asn(
             raise HTTPException(status_code=422, detail="shipped_quantity must be a finite number")
         if validated_quantity <= 0:
             raise HTTPException(status_code=422, detail="shipped_quantity must be greater than zero")
-        if not str(raw_line.get("item_code") or raw_line.get("material_code") or "").strip():
+        if validated_quantity > _MAX_ASN_QUANTITY:
+            raise HTTPException(status_code=422, detail="shipped_quantity exceeds the supported maximum")
+        item_code = str(raw_line.get("item_code") or raw_line.get("material_code") or "").strip()
+        if not item_code:
             raise HTTPException(status_code=422, detail="item_code is required for every material line")
         if not str(raw_line.get("material_name") or raw_line.get("material_description") or "").strip():
             raise HTTPException(status_code=422, detail="material_name is required for every material line")
         material_id = str(raw_line.get("material_id") or "").strip()
-        if material_id:
-            if material_id in submitted_material_ids:
-                raise HTTPException(status_code=422, detail="A material cannot be selected more than once in the same ASN")
-            try:
-                uuid.UUID(material_id)
-            except ValueError as exc:
-                raise HTTPException(status_code=422, detail="material_id must be a valid material identifier") from exc
-            submitted_material_ids.add(material_id)
-        validated_lines.append((raw_line, validated_quantity))
+        if not material_id:
+            raise HTTPException(status_code=422, detail="Select a valid Material Master record for every line")
+        try:
+            material_uuid = uuid.UUID(material_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="material_id must be a valid material identifier") from exc
+        if material_uuid in submitted_material_ids:
+            raise HTTPException(status_code=422, detail="A material cannot be selected more than once in the same ASN")
+        submitted_material_ids.add(material_uuid)
+        validated_lines.append((raw_line, validated_quantity, material_uuid))
+
+    material_result = await uow.session.execute(
+        select(MaterialModel).where(MaterialModel.id.in_(submitted_material_ids))
+    )
+    materials_by_id = {material.id: material for material in material_result.scalars().all()}
+    canonical_lines: list[tuple[dict, Decimal]] = []
+    for raw_line, quantity, material_id in validated_lines:
+        material = materials_by_id.get(material_id)
+        if material is None or str(material.status or "").upper() != "ACTIVE":
+            raise HTTPException(status_code=422, detail="Selected material is not active in Material Master")
+        item_code = str(raw_line.get("item_code") or raw_line.get("material_code") or "").strip()
+        item_name = str(raw_line.get("material_name") or raw_line.get("material_description") or "").strip()
+        supplied_uom = str(raw_line.get("uom") or "").strip()
+        canonical_uom = material.base_uom.strip()
+        if item_code.casefold() != material.material_code.strip().casefold():
+            raise HTTPException(status_code=422, detail="Material code does not match Material Master")
+        if item_name.casefold() != material.material_name.strip().casefold():
+            raise HTTPException(status_code=422, detail="Material name does not match Material Master")
+        if supplied_uom and supplied_uom.casefold() != canonical_uom.casefold():
+            raise HTTPException(status_code=422, detail="Material UOM does not match Material Master")
+        _validate_asn_quantity(quantity, canonical_uom)
+        canonical_lines.append(
+            (
+                {
+                    **raw_line,
+                    "material_id": str(material.id),
+                    "item_code": material.material_code,
+                    "material_name": material.material_name,
+                    "uom": canonical_uom,
+                },
+                quantity,
+            )
+        )
+    validated_lines = canonical_lines
 
     if po_model and validated_lines:
         ordered_by_code: dict[str, Decimal] = {}
@@ -755,12 +860,13 @@ async def create_supplier_asn(
         raise HTTPException(status_code=422, detail="expected_arrival_at is required")
     if expected_raw:
         try:
-            expected_arrival_at = datetime.datetime.fromisoformat(str(expected_raw).replace("Z", "+00:00"))
+            expected_value = str(expected_raw).strip()
+            expected_arrival_at = datetime.datetime.fromisoformat(expected_value.replace("Z", "+00:00"))
             # The UI sends a date-only value. Store it at midnight while the
             # API continues to expose the date separately to consumers.
-            if isinstance(expected_raw, str) and len(expected_raw) == 10:
+            if len(expected_value) == 10:
                 expected_arrival_at = datetime.datetime.combine(
-                    datetime.date.fromisoformat(expected_raw), datetime.time.min
+                    datetime.date.fromisoformat(expected_value), datetime.time.min
                 )
             # The ASN column is TIMESTAMP WITHOUT TIME ZONE. Normalize browser
             # ISO timestamps before binding them through asyncpg.
@@ -768,6 +874,45 @@ async def create_supplier_asn(
                 expected_arrival_at = expected_arrival_at.astimezone(datetime.timezone.utc).replace(tzinfo=None)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="expected_arrival_at must be an ISO datetime") from exc
+        if expected_arrival_at.date() < datetime.date.today():
+            raise HTTPException(status_code=422, detail="expected_arrival_at cannot be before today")
+
+    year = datetime.date.today().year
+    if uow.session.get_bind().dialect.name == "postgresql":
+        await uow.session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": f"supplier-asn-number:{year}"},
+        )
+
+    if client_request_id:
+        replay_result = await uow.session.execute(
+            select(AsnModel)
+            .options(
+                selectinload(AsnModel.lines),
+                selectinload(AsnModel.documents),
+                selectinload(AsnModel.supplier),
+            )
+            .where(
+                AsnModel.supplier_id == supplier_id,
+                cast(AsnModel.logistics, String).ilike(f'%"{client_request_id}"%'),
+            )
+            .limit(1)
+        )
+        replay = replay_result.scalars().first()
+        if replay is not None:
+            return _asn_response(replay)
+
+    number_result = await uow.session.execute(
+        select(AsnModel.asn_number).where(
+            func.upper(AsnModel.asn_number).like(f"ASN-{year}-%")
+        )
+    )
+    highest = 0
+    for value in number_result.scalars().all():
+        match = re.fullmatch(rf"ASN-{year}-(\d+)", str(value).strip().upper())
+        if match:
+            highest = max(highest, int(match.group(1)))
+    asn_number = f"ASN-{year}-{highest + 1:03d}"
 
     asn = AsnModel(
         asn_number=asn_number,
@@ -775,6 +920,7 @@ async def create_supplier_asn(
         po_id=str(payload.get("po_id")) if payload.get("po_id") else None,
         po_number=po_model.po_number if po_model else (po_number or None),
         status=str(payload.get("status") or "SUBMITTED").upper(),
+        warehouse_id=destination_store.warehouse_id if destination_store else None,
         vehicle_number=vehicle_number,
         driver_name=driver_name,
         driver_contact=driver_contact,
@@ -789,8 +935,9 @@ async def create_supplier_asn(
         logistics=(payload.get("logistics") if isinstance(payload.get("logistics"), list) else []) + [{
             "type": "asn_details",
             "supplier_name": supplier_name,
-            "destination_warehouse": str(payload.get("destination_warehouse") or "").strip(),
-            "destination_warehouse_id": str(payload.get("destination_warehouse_id") or "").strip() or None,
+            "destination_warehouse": destination_warehouse,
+            "destination_warehouse_id": str(destination_store.id) if destination_store else None,
+            "client_request_id": client_request_id or None,
         }],
     )
     uow.session.add(asn)
@@ -2270,6 +2417,28 @@ async def assign_arrival_dock(
         assigned_at=assigned_at,
     )
     uow.session.add(assignment)
+    if model.asn_id:
+        asn = await uow.session.get(AsnModel, model.asn_id)
+        if asn and not asn.warehouse_id:
+            asn.warehouse_id = store.warehouse_id
+            logistics = list(asn.logistics or [])
+            for index, item in enumerate(logistics):
+                if isinstance(item, dict) and item.get("type") == "asn_details":
+                    logistics[index] = {
+                        **item,
+                        "destination_warehouse": store.store_name,
+                        "destination_warehouse_id": str(store.id),
+                    }
+                    break
+            else:
+                logistics.append(
+                    {
+                        "type": "asn_details",
+                        "destination_warehouse": store.store_name,
+                        "destination_warehouse_id": str(store.id),
+                    }
+                )
+            asn.logistics = logistics
 
     # Dispatch targeted notification exclusively to the assigned Store
     notif_msg = (

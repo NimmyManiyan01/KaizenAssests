@@ -68,3 +68,7 @@ uploads/
 **/.env
 scratch/
 **/scratch/
+
+# Android & Gradle cache
+.gradle/
+**/.gradle/
