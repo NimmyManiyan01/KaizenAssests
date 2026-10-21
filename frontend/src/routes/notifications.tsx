@@ -675,7 +675,7 @@ function Notifications() {
         </Card>
       ) : (
         <div className="grid gap-4">
-          {notifications.map((n) => {
+          {notifications.map((n, index) => {
             const isGrnLinked = String(n.link || "").startsWith("/grn");
             const isDockAllocation =
               userRole !== "GRN" &&
@@ -684,7 +684,12 @@ function Notifications() {
                 n.title?.toUpperCase().includes("DOCK CONFIRMED"));
 
             if (isDockAllocation) {
-              return <DockAllocationNotificationCard key={n.id} notification={n} />;
+              return (
+                <DockAllocationNotificationCard
+                  key={`${n.type || n.notification_type || "dock"}-${n.id || "notification"}-${index}`}
+                  notification={n}
+                />
+              );
             }
 
             const isDamage =
@@ -702,7 +707,7 @@ function Notifications() {
 
             return (
               <Card
-                key={n.id}
+                key={`${n.type || n.notification_type || "workflow"}-${n.id || "notification"}-${index}`}
                 onClick={() => handleOpenNotificationDetails(n)}
                 className={cn(
                   "relative overflow-hidden border-border/50 p-5 cursor-pointer hover:border-primary/40 transition-all space-y-4",

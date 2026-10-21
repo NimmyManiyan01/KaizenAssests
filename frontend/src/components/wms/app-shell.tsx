@@ -115,6 +115,33 @@ function getUserRoleLabel(user: UserInfo | null): string {
   return roles[0]?.replace(/_/g, " ") ?? "User";
 }
 
+function getSearchPlaceholder(path: string, searchStr: string): string {
+  const route = `${path}${searchStr}`.toLowerCase();
+  if (route.startsWith("/supplier/asns")) return "Search ASN, vehicle, driver, or status...";
+  if (route.startsWith("/supplier-materials")) return "Search material code or name...";
+  if (route.startsWith("/supplier/dispatch")) return "Search dispatch request, product, or status...";
+  if (route.startsWith("/supplier-dashboard")) return "Search ASN, vehicle, or shipment status...";
+  if (route.startsWith("/dock-management")) return "Search vehicle, gate pass, or vendor...";
+  if (route.startsWith("/vehicle-queue")) return "Search gate pass, vehicle, supplier, or ASN...";
+  if (route.startsWith("/vehicle-exit")) return "Search vehicle, gate pass, or GRN...";
+  if (route.startsWith("/gate-dashboard")) return "Search gate pass, vehicle, or supplier...";
+  if (route.startsWith("/grn")) return "Search GRN, PO, supplier, vehicle, or material...";
+  if (route.startsWith("/inventory")) {
+    if (route.includes("tab=locations")) return "Search zone, bin, or location code...";
+    if (route.includes("tab=putaway")) return "Search putaway task, GRN, or material...";
+    if (route.includes("tab=picking")) return "Search pick task, request, or material...";
+    if (route.includes("tab=requests")) return "Search request, material, or status...";
+    return "Search material, SKU, batch, or location...";
+  }
+  if (route.startsWith("/assembly/material-requests") || route.startsWith("/warehouse/assembly-requisitions")) return "Search request, production order, or material...";
+  if (route.startsWith("/assembly/production") || route.startsWith("/assembly/orders") || route.startsWith("/assembly-dashboard")) return "Search production order, product, or work order...";
+  if (route.startsWith("/assembly/quality")) return "Search inspection, product, or serial number...";
+  if (route.startsWith("/assembly/finished-goods")) return "Search product, order, or serial number...";
+  if (route.startsWith("/dispatch")) return "Search dispatch order, customer, or vehicle...";
+  if (route.startsWith("/notifications")) return "Search notifications by title or message...";
+  return "Search ASN, vehicle, vendor, gate pass, or material...";
+}
+
 type NavItem = {
   label: string;
   to: string;
@@ -302,7 +329,7 @@ export function AppShell({
   onSearchChange,
 }: {
   children: ReactNode;
-  title: ReactNode;
+  title?: ReactNode;
   subtitle?: string;
   actions?: ReactNode;
   onSearchChange?: (value: string) => void;
@@ -521,6 +548,10 @@ export function AppShell({
     ["/inventory", "/dock-management", "/receiving", "/putaway-tasks", "/reports"].some((p) =>
       path.startsWith(p),
     );
+  const isWarehouseWorkspace =
+    path === "/inventory" ||
+    path.startsWith("/warehouse") ||
+    ["/dock-management", "/receiving", "/putaway-tasks"].some((p) => path.startsWith(p));
   const isGateSecurityRoute =
     [
       "/vehicle-queue",
@@ -774,8 +805,8 @@ export function AppShell({
 
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 glass-strong">
+      <div className={cn("flex min-w-0 flex-1 flex-col", isWarehouseWorkspace && "bg-[#eef5fd] dark:bg-[#151d2a]")}>
+        <header className={cn("sticky top-0 z-30 glass-strong", isWarehouseWorkspace && "border-b border-[#d7e5f7] bg-white/95 dark:border-slate-700 dark:bg-slate-900/95")}>
           <div className="flex h-16 items-center gap-3 px-4 lg:px-7">
             <button
               type="button"
@@ -988,15 +1019,17 @@ export function AppShell({
             </div>
           </div>
         )}
-        <main className="page-enter flex-1 px-4 py-6 lg:px-7">
-          <div className="mx-auto w-full max-w-[1360px]">
-            <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">{title}</h1>
-                {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
+        <main className={cn("page-enter flex-1 px-4 py-6 lg:px-7", isWarehouseWorkspace && "px-5 py-5 lg:px-8 lg:py-6")}>
+          <div className={cn("mx-auto w-full max-w-[1360px]", isWarehouseWorkspace && "max-w-[1680px]")}>
+            {(title || subtitle || actions) && (
+              <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+                <div>
+                  {title && <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">{title}</h1>}
+                  {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
+                </div>
+                {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
               </div>
-              {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
-            </div>
+            )}
             {children}
           </div>
         </main>

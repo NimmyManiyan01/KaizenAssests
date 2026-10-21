@@ -29,7 +29,11 @@ from app.modules.assembly.infrastructure.persistence.models import (
     BillOfMaterialsModel,
 )
 from app.modules.store.infrastructure.persistence.models import StoreBinModel
-from app.modules.storage.infrastructure.persistence.models import InventoryLocationBalanceModel, StorageLocationModel
+from app.modules.storage.infrastructure.persistence.models import (
+    InventoryLocationBalanceModel,
+    InventoryMovementHistoryModel,
+    StorageLocationModel,
+)
 from app.common.persistence.models import (
     MaterialIssueModel,
     MaterialRequestItemModel,
@@ -1303,12 +1307,25 @@ async def complete_assembly_picking_task(
         ).strip()
         if scanned_material_code:
             material_scan_upper = scanned_material_code.upper()
-        if not any(str(item.get("material_code") or "").upper() in material_scan_upper for item in items):
-            raise HTTPException(status_code=422, detail="Material QR does not match this Assembly picking task.")
-        matched_item = next(
+        scanned_batch_number = (
+            material_payload_fields.get("batch_number")
+            or material_payload_fields.get("batch_lot")
+            or material_payload_fields.get("batch")
+            or ""
+        ).strip()
+        if not scanned_batch_number:
+            batch_match = re.search(r"(?:QR-)?BATCH[-:]([A-Z0-9._/-]+)", material_scan, re.IGNORECASE)
+            if batch_match:
+                scanned_batch_number = batch_match.group(1).strip()
+        matched_items = [
             item for item in items
-            if str(item.get("material_code") or "").upper() in material_scan.upper()
-        )
+            if str(item.get("material_code") or "").upper() in material_scan_upper
+        ]
+        if not matched_items and scanned_batch_number and len(items) == 1:
+            matched_items = items
+        if not matched_items:
+            raise HTTPException(status_code=422, detail="Material QR does not match this Assembly picking task.")
+        matched_item = matched_items[0]
         material_code = str(matched_item.get("material_code") or "").strip()
         now = datetime.utcnow()
 
@@ -1343,15 +1360,85 @@ async def complete_assembly_picking_task(
         else:
             location_filters.append(InventoryLocationBalanceModel.warehouse_id == (task.warehouse_id or "WH-01"))
         location_res = await uow.session.execute(
-            select(InventoryLocationBalanceModel)
+            select(InventoryLocationBalanceModel, StorageLocationModel)
             .join(StorageLocationModel, StorageLocationModel.id == InventoryLocationBalanceModel.storage_location_id)
             .where(*location_filters)
             .order_by(InventoryLocationBalanceModel.available_quantity.desc())
             .with_for_update()
         )
-        location_balance = location_res.scalars().first()
-        if not location_balance:
+        location_pair = location_res.first()
+        if not location_pair:
             raise HTTPException(status_code=409, detail=f"Insufficient inventory for {material_code}.")
+        location_balance, picked_location = location_pair
+
+        # Enforce FIFO against the actual batch movement ledger. Replaying
+        # movements keeps the rule compatible with existing putaway records.
+        movement_res = await uow.session.execute(
+            select(InventoryMovementHistoryModel)
+            .where(
+                func.lower(InventoryMovementHistoryModel.material_code) == material_code.lower(),
+                InventoryMovementHistoryModel.warehouse_id == location_balance.warehouse_id,
+                InventoryMovementHistoryModel.batch_lot.is_not(None),
+            )
+            .order_by(InventoryMovementHistoryModel.performed_at, InventoryMovementHistoryModel.id)
+        )
+        batch_balances: dict[str, Decimal] = {}
+        batch_first_seen: dict[str, datetime] = {}
+        for movement in movement_res.scalars().all():
+            lot = (movement.batch_lot or "").strip()
+            if not lot:
+                continue
+            movement_kind = movement.movement_type.upper()
+            if movement_kind in ("PUTAWAY", "RETURN"):
+                batch_balances[lot] = batch_balances.get(lot, Decimal("0")) + movement.quantity
+                batch_first_seen.setdefault(lot, movement.performed_at.replace(tzinfo=None))
+            elif movement_kind in ("TAKEAWAY", "DISPATCH"):
+                batch_balances[lot] = max(Decimal("0"), batch_balances.get(lot, Decimal("0")) - movement.quantity)
+        eligible_batches = [
+            (lot, quantity, batch_first_seen.get(lot, now))
+            for lot, quantity in batch_balances.items()
+            if quantity > 0
+        ]
+        eligible_batches.sort(key=lambda row: (row[2], row[0].casefold()))
+        # Location balances remain authoritative if old picks predate batch
+        # movement history; cap reconstructed lots to physically available stock.
+        available_total_res = await uow.session.execute(
+            select(func.coalesce(func.sum(InventoryLocationBalanceModel.available_quantity), Decimal("0")))
+            .where(
+                func.lower(InventoryLocationBalanceModel.material_code) == material_code.lower(),
+                InventoryLocationBalanceModel.warehouse_id == location_balance.warehouse_id,
+            )
+        )
+        remaining_total = Decimal(str(available_total_res.scalar() or 0))
+        capped_batches = []
+        for lot, quantity, first_seen in eligible_batches:
+            capped_quantity = min(quantity, remaining_total)
+            if capped_quantity > 0:
+                capped_batches.append((lot, capped_quantity, first_seen))
+                remaining_total -= capped_quantity
+        if capped_batches:
+            oldest_batch, oldest_quantity, _ = capped_batches[0]
+            if not scanned_batch_number:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"FIFO: Scan the batch label. Pick the oldest available batch {oldest_batch} first.",
+                )
+            selected_batch = next(
+                (row for row in capped_batches if row[0].casefold() == scanned_batch_number.casefold()),
+                None,
+            )
+            if selected_batch is None:
+                raise HTTPException(status_code=409, detail=f"FIFO: Batch {scanned_batch_number} has no eligible stock available.")
+            if selected_batch[0] != oldest_batch:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"FIFO: Older batch {oldest_batch} ({oldest_quantity} available) is still in stock. Clear it before picking batch {selected_batch[0]}.",
+                )
+            if payload.quantity > oldest_quantity:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"FIFO: Only {oldest_quantity} remains in oldest batch {oldest_batch}. Pick it before moving to a newer batch.",
+                )
         stock_res = await uow.session.execute(
             select(MaterialStockModel)
             .where(func.lower(MaterialStockModel.material_code) == material_code.lower())
@@ -1379,9 +1466,33 @@ async def complete_assembly_picking_task(
         updated_items = []
         for item in items:
             item_copy = dict(item)
-            if str(item_copy.get("material_code") or "").upper() in material_scan.upper():
-                item_copy.update(picked_quantity=float(payload.quantity), material_scan=material_scan, zone_scan=payload.zone_scan.strip())
+            if str(item_copy.get("material_code") or "").upper() in material_scan_upper:
+                item_copy.update(picked_quantity=float(payload.quantity), material_scan=material_scan, zone_scan=payload.zone_scan.strip(), batch_number=scanned_batch_number or (capped_batches[0][0] if capped_batches else None))
             updated_items.append(item_copy)
+        picked_batch = scanned_batch_number or (capped_batches[0][0] if capped_batches else None)
+        if picked_batch:
+            uow.session.add(InventoryMovementHistoryModel(
+                movement_type="TAKEAWAY",
+                material_code=material_code,
+                material_name=location_balance.material_name,
+                material_qr=material_scan[:128],
+                grn_number=location_balance.last_grn_number,
+                batch_lot=picked_batch,
+                from_location=picked_location.location_code,
+                to_location="ASSEMBLY",
+                from_bin_id=picked_location.bin_id,
+                to_bin_id=None,
+                quantity=payload.quantity,
+                uom=location_balance.uom,
+                stock_before=location_balance.available_quantity + payload.quantity,
+                stock_after=location_balance.available_quantity,
+                performed_by=current_user.username if current_user and current_user.username else "Warehouse Operator",
+                warehouse_id=location_balance.warehouse_id,
+                store_id=picked_location.store_id,
+                reference_document=task.task_number,
+                remarks="FIFO-checked Assembly pick",
+                performed_at=now,
+            ))
         # PickTaskModel.completed_at is stored as TIMESTAMP WITHOUT TIME ZONE.
         # Use a naive UTC application timestamp to match the existing schema.
         task.items = updated_items

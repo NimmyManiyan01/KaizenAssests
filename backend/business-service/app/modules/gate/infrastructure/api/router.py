@@ -442,6 +442,32 @@ async def get_expected_delivery(reference: str, uow: UnitOfWork = Depends(get_uo
         .limit(1)
     )
     gate_entry = gate_result.scalars().first()
+    # Legacy ASN/gate rows may be linked through the shipment's PO or vehicle
+    # even when the ASN foreign key was not persisted on the gate entry.
+    if gate_entry is None and asn.po_number:
+        gate_query = select(GateEntryModel).where(
+            func.upper(GateEntryModel.po_number) == asn.po_number.strip().upper()
+        )
+        if asn.vehicle_number:
+            gate_query = gate_query.where(
+                func.upper(GateEntryModel.vehicle_number)
+                == asn.vehicle_number.strip().upper()
+            )
+        gate_result = await uow.session.execute(
+            gate_query.order_by(GateEntryModel.created_at.desc()).limit(1)
+        )
+        gate_entry = gate_result.scalars().first()
+    if gate_entry is None and asn.vehicle_number and not asn.po_number:
+        gate_result = await uow.session.execute(
+            select(GateEntryModel)
+            .where(
+                func.upper(GateEntryModel.vehicle_number)
+                == asn.vehicle_number.strip().upper()
+            )
+            .order_by(GateEntryModel.created_at.desc())
+            .limit(1)
+        )
+        gate_entry = gate_result.scalars().first()
     if gate_entry:
         response["gate_entry_number"] = gate_entry.gate_entry_number
         response["gate_entry"] = {
