@@ -35,10 +35,17 @@ import {
   GitFork,
   Navigation,
   CheckCircle2,
+  X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { api } from "@/lib/api-client";
 import logoUrl from "@/assets/Logo.png";
 import { toast } from "sonner";
@@ -174,8 +181,8 @@ const supplierNav = [
   { label: "Dashboard", to: "/supplier-dashboard", icon: LayoutDashboard },
   { label: "Material Master", to: "/supplier-materials", icon: Database },
   { label: "ASN Management", to: "/supplier/asns", icon: Truck },
+  { label: "Damage Claims", to: "/damage-claims", icon: ShieldAlert },
   { label: "FG Dispatch Requests", to: "/supplier/dispatch", icon: PackageCheck },
-  { label: "Damage Returns", to: "/damage-claims", icon: ShieldAlert },
 ];
 
 const managerNav: any[] = [];
@@ -316,30 +323,64 @@ export function AppShell({
   const [user, setUser] = useState<UserInfo | null>(null);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [notificationAlert, setNotificationAlert] = useState<any | null>(null);
-  const knownNotificationIds = useRef<Set<string> | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const executeSearch = async (term: string) => {
+    if (!term || !term.trim()) {
+      setSearchResults([]);
+      setShowSearch(false);
+      return;
+    }
+    setIsSearching(true);
+    try {
+      const data = await api.globalSearch(term.trim());
+      setSearchResults(data?.results || []);
+      setShowSearch(true);
+    } catch (e) {
+      console.error("Search failed", e);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
   useEffect(() => {
-    const delayDebounceFn = setTimeout(async () => {
-      if (searchTerm.length >= 2) {
-        setIsSearching(true);
-        try {
-          const data = await api.globalSearch(searchTerm);
-          setSearchResults(data.results);
-          setShowSearch(true);
-        } catch (e) {
-          console.error("Search failed", e);
-        } finally {
-          setIsSearching(false);
-        }
+    const delayDebounceFn = setTimeout(() => {
+      if (searchTerm.length >= 1) {
+        void executeSearch(searchTerm);
       } else {
         setSearchResults([]);
         setShowSearch(false);
       }
-    }, 300);
+    }, 200);
     return () => clearTimeout(delayDebounceFn);
+  }, [searchTerm]);
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchTerm.trim()) {
+      void executeSearch(searchTerm);
+      window.dispatchEvent(new CustomEvent("app:search", { detail: searchTerm.trim() }));
+      setShowSearch(true);
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        if (searchTerm.length >= 1) {
+          setShowSearch(true);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [searchTerm]);
   const isGrnUser =
     mounted &&
@@ -647,16 +688,7 @@ export function AppShell({
               })}
             </nav>
 
-            <div className="border-t border-sidebar-border p-3">
-              <button
-                suppressHydrationWarning
-                onClick={handleLogout}
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-destructive transition-colors hover:bg-danger-soft"
-              >
-                <LogOut className="size-[18px]" />
-                <span>Logout</span>
-              </button>
-            </div>
+
           </aside>
         </div>
       )}
@@ -740,16 +772,6 @@ export function AppShell({
           })}
         </nav>
 
-        <div className="border-t border-sidebar-border p-3 space-y-1">
-          <button
-            suppressHydrationWarning
-            onClick={handleLogout}
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-destructive transition-colors hover:bg-danger-soft"
-          >
-            <LogOut className="size-[18px]" />
-            {!desktopSidebarCollapsed && <span>Logout</span>}
-          </button>
-        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -764,26 +786,77 @@ export function AppShell({
               <Warehouse className="size-4 transition-opacity duration-150 group-hover:opacity-0 group-focus-visible:opacity-0" />
               <Menu className="absolute size-4 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100" />
             </button>
-            <div className="relative hidden max-w-md flex-1 items-center sm:flex">
-              <Search className="pointer-events-none absolute left-3 size-4 text-muted-foreground" />
+            <form
+              onSubmit={handleSearchSubmit}
+              className="relative hidden max-w-md flex-1 items-center sm:flex"
+            >
+              <button
+                type="submit"
+                aria-label="Search"
+                title="Search"
+                className="absolute left-2.5 grid size-6 place-items-center rounded-lg text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+              >
+                <Search className="size-4" />
+              </button>
               <input
+                ref={searchInputRef}
                 suppressHydrationWarning
+                type="text"
+                inputMode="search"
                 placeholder={
                   hasUserRole(user, "SUPPLIER") || path.startsWith("/supplier")
                     ? "Search ASN, vehicle number, status..."
                     : "Search ASN, truck no, vendor, gate entry…"
                 }
-                className="h-10 w-full rounded-xl border border-border bg-muted/60 pl-9 pr-16 text-sm outline-none transition-shadow placeholder:text-muted-foreground focus:bg-card focus:ring-2 focus:ring-ring/40"
+                className="h-10 w-full rounded-xl border border-border bg-muted/60 pl-9 pr-16 text-sm outline-none transition-shadow placeholder:text-muted-foreground focus:bg-card focus:ring-2 focus:ring-ring/40 [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
                 value={searchTerm}
                 onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  onSearchChange?.(e.target.value);
+                  const val = e.target.value;
+                  setSearchTerm(val);
+                  onSearchChange?.(val);
+                  window.dispatchEvent(new CustomEvent("app:search", { detail: val }));
                 }}
-                onFocus={() => searchTerm.length >= 2 && setShowSearch(true)}
+                onFocus={() => {
+                  if (searchTerm.length >= 1 || searchResults.length > 0) setShowSearch(true);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setShowSearch(false);
+                  }
+                }}
               />
-              <kbd className="absolute right-3 hidden rounded-md border border-border bg-card px-1.5 py-0.5 text-[10px] text-muted-foreground lg:block">
-                {isSearching ? <Loader2 className="size-3 animate-spin" /> : "⌘K"}
-              </kbd>
+              <div className="absolute right-2 flex items-center gap-1">
+                {searchTerm && (
+                  <button
+                    type="button"
+                    aria-label="Clear search"
+                    onClick={() => {
+                      setSearchTerm("");
+                      setSearchResults([]);
+                      setShowSearch(false);
+                      window.dispatchEvent(new CustomEvent("app:search", { detail: "" }));
+                      searchInputRef.current?.focus();
+                    }}
+                    className="grid size-5 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    searchInputRef.current?.focus();
+                    if (searchTerm.trim()) {
+                      void executeSearch(searchTerm);
+                    }
+                  }}
+                  aria-label="Search shortcut (⌘K or Ctrl+K)"
+                  title="Search shortcut (⌘K or Ctrl+K)"
+                  className="hidden rounded-md border border-border bg-card px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground hover:text-foreground hover:border-slate-400 transition-colors cursor-pointer lg:block"
+                >
+                  {isSearching ? <Loader2 className="size-3 animate-spin" /> : "⌘K"}
+                </button>
+              </div>
 
               {showSearch && (
                 <>
@@ -799,6 +872,14 @@ export function AppShell({
                               onClick={() => {
                                 setShowSearch(false);
                                 setSearchTerm("");
+                                window.dispatchEvent(
+                                  new CustomEvent("app:search", { detail: result.title }),
+                                );
+                                if (result.type === "ASN") {
+                                  window.dispatchEvent(
+                                    new CustomEvent("app:open-asn", { detail: result }),
+                                  );
+                                }
                               }}
                               className="flex flex-col gap-0.5 rounded-xl px-4 py-2.5 text-left transition-colors hover:bg-accent"
                             >
@@ -820,11 +901,11 @@ export function AppShell({
                           ))}
                         </div>
                       ) : (
-                        <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                        <div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground">
                           <Search className="mb-2 size-8 opacity-20" />
                           <p className="text-sm font-medium">No results found for "{searchTerm}"</p>
                           <p className="text-xs">
-                            Try searching for a different ASN, truck, or vendor
+                            Try searching for a different ASN, vehicle number, or status
                           </p>
                         </div>
                       )}
@@ -832,22 +913,30 @@ export function AppShell({
                   </div>
                 </>
               )}
-
-            </div>
+            </form>
 
             <div className="ml-auto flex items-center gap-1.5">
-              <Link
-                to="/notifications"
-                aria-label="Notifications"
-                className="relative grid size-10 place-items-center rounded-xl bg-transparent text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus:bg-transparent focus-visible:outline-none"
-              >
-                <Bell className="size-[18px]" />
-                {unreadNotifications > 0 && (
-                  <span className="absolute right-2 top-2 grid size-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-white animate-pulse-ring">
-                    {unreadNotifications}
-                  </span>
-                )}
-              </Link>
+              <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Link
+                      to="/notifications"
+                      aria-label="Notifications"
+                      className="relative grid size-10 place-items-center rounded-xl bg-transparent text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus:bg-transparent focus-visible:outline-none"
+                    >
+                      <Bell className="size-[18px]" />
+                      {unreadNotifications > 0 && (
+                        <span className="absolute right-2 top-2 grid size-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-white animate-pulse-ring">
+                          {unreadNotifications}
+                        </span>
+                      )}
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-xs text-xs bg-slate-900 text-white shadow-lg border-slate-800">
+                    Notifications: View real-time gate arrivals, dock releases, and receiving alerts
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
               <div className="group relative ml-1 flex items-center gap-2.5 rounded-xl border border-border bg-card py-1.5 pl-1.5 pr-3 transition-colors hover:bg-accent/50">
                 <span
                   suppressHydrationWarning

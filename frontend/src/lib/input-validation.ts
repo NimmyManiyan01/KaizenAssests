@@ -41,6 +41,79 @@ export function isValidVehicleNumber(value: string): boolean {
   return /^[A-Za-z0-9 ]+$/.test(value.trim());
 }
 
+export function normalizeAsnVehicleNumber(value: string): string {
+  return value.toUpperCase().replace(/[\s-]+/g, "");
+}
+
+export function isValidAsnVehicleNumber(value: string): boolean {
+  const normalized = normalizeAsnVehicleNumber(value);
+  return (
+    /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/.test(normalized) ||
+    /^(?:2[1-9]|[3-9]\d)BH\d{4}[A-HJ-NP-Z]{1,2}$/.test(normalized)
+  );
+}
+
+const INTEGER_QUANTITY_UOMS = new Set([
+  "EA",
+  "EACH",
+  "UNIT",
+  "UNITS",
+  "PCS",
+  "PC",
+  "PIECE",
+  "PIECES",
+  "SET",
+  "SETS",
+  "BOX",
+  "BOXES",
+  "BAG",
+  "BAGS",
+  "PACK",
+  "PACKS",
+  "PAIR",
+  "PAIRS",
+  "DOZEN",
+]);
+
+export function isValidAsnQuantity(value: unknown, uom: string): boolean {
+  const raw = typeof value === "string" ? value.trim() : String(value ?? "");
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(raw);
+  if (!match) return false;
+
+  const wholePart = match[1];
+  if (wholePart === undefined) return false;
+  const whole = wholePart.replace(/^0+(?=\d)/, "");
+  const fraction = (match[2] || "").replace(/0+$/, "");
+  if (whole.length > 14 || fraction.length > 4) return false;
+  if (INTEGER_QUANTITY_UOMS.has(uom.trim().toUpperCase()) && /[1-9]/.test(fraction)) {
+    return false;
+  }
+
+  return BigInt(`${whole}${fraction}`) > 0n;
+}
+
+export function isIntegerQuantityUom(uom: string): boolean {
+  return INTEGER_QUANTITY_UOMS.has((uom || "").trim().toUpperCase());
+}
+
+export function sanitizeNumericQuantity(value: string, uom = ""): string {
+  if (typeof value !== "string") value = String(value ?? "");
+  const isInteger = isIntegerQuantityUom(uom);
+  if (isInteger) {
+    return value.replace(/[^0-9]/g, "");
+  }
+  let cleaned = value.replace(/[^0-9.]/g, "");
+  const parts = cleaned.split(".");
+  if (parts.length > 2) {
+    cleaned = parts[0] + "." + parts.slice(1).join("");
+  }
+  const [whole, decimal] = cleaned.split(".");
+  if (decimal !== undefined) {
+    return `${whole}.${decimal.slice(0, 4)}`;
+  }
+  return cleaned;
+}
+
 export function sanitizePersonName(value: string): string {
   return value.replace(/[^A-Za-z ]/g, "");
 }
@@ -55,6 +128,10 @@ export function sanitizeMobileNumber(value: string): string {
 
 export function isValidMobileNumber(value: string): boolean {
   return /^\d{10}$/.test(value.trim());
+}
+
+export function isValidAsnDriverMobileNumber(value: string): boolean {
+  return /^[6-9]\d{9}$/.test(value.trim());
 }
 
 export function isValidIdentifier(value: string, pattern = /^[A-Za-z0-9/_-]+$/): boolean {

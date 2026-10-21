@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
+  ArrowLeft,
   Truck,
   Inbox,
   Loader2,
@@ -634,15 +635,28 @@ function Notifications() {
       title="Notification centre"
       subtitle="Stay updated with procurement and supply chain alerts"
       actions={
-        <Button
-          variant="outline"
-          className="rounded-xl"
-          onClick={() => void handleMarkAllRead()}
-          disabled={markingAllRead || !notifications.some((notification) => !notification.is_read)}
-        >
-          <CheckCircle2 className="mr-2 size-4" />
-          {markingAllRead ? "Marking…" : "Mark all as read"}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="rounded-xl"
+            onClick={() => window.history.back()}
+          >
+            <ArrowLeft className="mr-2 size-4" />
+            Back
+          </Button>
+          <Button
+            variant="outline"
+            className="rounded-xl"
+            onClick={() => void handleMarkAllRead()}
+            disabled={
+              markingAllRead || !notifications.some((notification) => !notification.is_read)
+            }
+          >
+            <CheckCircle2 className="mr-2 size-4" />
+            {markingAllRead ? "Marking…" : "Mark all as read"}
+          </Button>
+        </div>
       }
     >
       {loading ? (

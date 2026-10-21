@@ -1105,12 +1105,22 @@ export const api = {
     const qs = params.toString() ? `?${params.toString()}` : "";
     return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions${qs}`);
   },
-  async getAssemblyMaterialRequests(search?: string, status?: string): Promise<any[]> {
+  async getAssemblyMaterialRequests(
+    searchOrParams?: string | { search?: string; status?: string },
+    status?: string,
+  ): Promise<any[]> {
     const params = new URLSearchParams();
-    if (search) params.set("search", search);
-    if (status) params.set("status", status);
+    if (typeof searchOrParams === "object" && searchOrParams !== null) {
+      if (searchOrParams.search) params.set("search", searchOrParams.search);
+      if (searchOrParams.status && searchOrParams.status !== "ALL") params.set("status", searchOrParams.status);
+    } else {
+      if (searchOrParams) params.set("search", searchOrParams);
+      if (status && status !== "ALL") params.set("status", status);
+    }
     const qs = params.toString() ? `?${params.toString()}` : "";
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/material-requests${qs}`);
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/material-requests${qs}`, {
+      cache: "no-store",
+    });
   },
   async getAssemblyRequisition(id: string): Promise<any> {
     return request<any>(
@@ -1497,6 +1507,14 @@ export const api = {
     }
   },
 
+  async getSupplierAsnWarehouses(): Promise<
+    Array<{ id: string; code: string; name: string; warehouse_id: string }>
+  > {
+    return request(`${BUSINESS_API_URL}/api/gate/supplier/warehouses`, {
+      cache: "no-store",
+    });
+  },
+
   async getMaterialComponents(status: string = "ACTIVE"): Promise<any[]> {
     return request<any[]>(`${BUSINESS_API_URL}/api/gate/materials?status=${encodeURIComponent(status)}`);
     /*
@@ -1764,9 +1782,96 @@ export const api = {
   },
 
   async globalSearch(q: string): Promise<{ results: any[] }> {
-    return request<any>(
-      `${BUSINESS_API_URL}/api/v1/procurement/global-search?q=${encodeURIComponent(q)}`,
-    );
+    const term = (q || "").trim().toLowerCase();
+    if (!term) return { results: [] };
+
+    try {
+      const res = await request<any>(
+        `${BUSINESS_API_URL}/api/v1/procurement/global-search?q=${encodeURIComponent(q)}`,
+      );
+      if (res && Array.isArray(res.results) && res.results.length > 0) return res;
+    } catch {
+      // Fallback to client-side multi-entity aggregator
+    }
+
+    try {
+      const [asns, vehicles, drivers, pos] = await Promise.all([
+        this.getAsns().catch(() => []),
+        this.getVehicles().catch(() => []),
+        this.getDrivers().catch(() => []),
+        this.getPurchaseOrders().catch(() => []),
+      ]);
+
+      const results: any[] = [];
+
+      // Search ASNs
+      if (Array.isArray(asns)) {
+        for (const a of asns) {
+          const matchStr = `${a.asn_number || ""} ${a.vehicle_number || ""} ${a.status || ""} ${a.supplier_name || ""} ${a.driver_name || ""}`.toLowerCase();
+          if (matchStr.includes(term)) {
+            results.push({
+              id: a.id || a.asn_number,
+              type: "ASN",
+              title: a.asn_number || "ASN Record",
+              subtitle: `Vehicle: ${a.vehicle_number || "—"} · Status: ${String(a.status || "").replaceAll("_", " ")}`,
+              link: "/supplier-dashboard",
+            });
+          }
+        }
+      }
+
+      // Search Vehicles
+      if (Array.isArray(vehicles)) {
+        for (const v of vehicles) {
+          const matchStr = `${v.vehicle_number || ""} ${v.vehicle_type || ""} ${v.status || ""}`.toLowerCase();
+          if (matchStr.includes(term)) {
+            results.push({
+              id: v.id || v.vehicle_number,
+              type: "VEHICLE",
+              title: v.vehicle_number || "Vehicle",
+              subtitle: `Type: ${v.vehicle_type || "Commercial"} · Status: ${v.status || "AVAILABLE"}`,
+              link: "/supplier-dashboard",
+            });
+          }
+        }
+      }
+
+      // Search Drivers
+      if (Array.isArray(drivers)) {
+        for (const d of drivers) {
+          const matchStr = `${d.driver_name || d.name || ""} ${d.phone || d.mobile_number || ""} ${d.license_number || ""}`.toLowerCase();
+          if (matchStr.includes(term)) {
+            results.push({
+              id: d.id || d.driver_name,
+              type: "DRIVER",
+              title: d.driver_name || d.name || "Driver",
+              subtitle: `Mobile: ${d.phone || d.mobile_number || "—"} · License: ${d.license_number || "Verified"}`,
+              link: "/supplier-dashboard",
+            });
+          }
+        }
+      }
+
+      // Search Purchase Orders
+      if (Array.isArray(pos)) {
+        for (const p of pos) {
+          const matchStr = `${p.po_number || p.purchase_order_number || ""} ${p.supplier_name || ""} ${p.status || ""}`.toLowerCase();
+          if (matchStr.includes(term)) {
+            results.push({
+              id: p.id || p.po_number,
+              type: "PURCHASE_ORDER",
+              title: p.po_number || p.purchase_order_number || "Purchase Order",
+              subtitle: `Supplier: ${p.supplier_name || "—"} · Status: ${p.status || "OPEN"}`,
+              link: "/supplier-dashboard",
+            });
+          }
+        }
+      }
+
+      return { results: results.slice(0, 10) };
+    } catch {
+      return { results: [] };
+    }
   },
 
   // ============================
@@ -3100,21 +3205,7 @@ export const api = {
       { cache: "no-store" },
     );
   },
-  async getAssemblyMaterialRequests(params?: {
-    search?: string;
-    status?: string;
-  }): Promise<AssemblyMaterialRequest[]> {
-    const q = new URLSearchParams();
-    if (params?.search) q.append("search", params.search);
-    if (params?.status && params.status !== "ALL") q.append("status", params.status);
-    const queryStr = q.toString() ? `?${q.toString()}` : "";
-    return request<AssemblyMaterialRequest[]>(
-      `${BUSINESS_API_URL}/api/v1/assembly/material-requests${queryStr}`,
-      {
-        cache: "no-store",
-      },
-    );
-  },
+
   async createAssemblyMaterialRequest(
     data: CreateAssemblyMaterialRequestPayload,
   ): Promise<AssemblyMaterialRequest> {
