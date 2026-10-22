@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
-from app.common.persistence.models import NotificationModel
+from app.modules.assembly.infrastructure.finished_goods import allocate_fifo, post_dispatch_stock
+from app.common.persistence.models import NotificationModel, FinishedGoodsRequestModel
 from app.modules.dispatch.application.commands import (
     CreateDispatchCommand,
     PickItemsCommand,
@@ -28,7 +29,7 @@ from app.modules.dispatch.infrastructure.persistence.repository_impl import (
 )
 from app.modules.dispatch.infrastructure.persistence.models import DispatchModel, DriverModel, VehicleModel
 from app.modules.assembly.infrastructure.persistence.models import AssemblyFinishedGoodsModel, AssemblyFinishedGoodsAllocationModel
-from app.modules.gate.infrastructure.persistence.models import GateEntryModel
+from app.modules.gate.infrastructure.persistence.models import GateEntryModel, FinishedGoodsPickupGateVisitModel
 from app.modules.dispatch.infrastructure.api.schemas import (
     DispatchOrderResponse,
     DispatchItemResponse,
@@ -324,6 +325,9 @@ async def reserve_dispatch_stock(
 ):
     uc = _get_use_cases(db)
     try:
+        dispatch = await db.scalar(select(DispatchModel).where(DispatchModel.id == uuid.UUID(dispatch_id)))
+        if dispatch and dispatch.warehouse_id in ("ASSEMBLY", "ASSEMBLY-WH"):
+            await allocate_fifo(db, uuid.UUID(dispatch_id))
         order = await uc.reserve_stock(dispatch_id)
         db.add(NotificationModel(
             id=uuid.uuid4(),
@@ -335,6 +339,9 @@ async def reserve_dispatch_stock(
         ))
         await db.commit()
         return _to_dispatch_dto(order)
+    except HTTPException:
+        await db.rollback()
+        raise
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -482,41 +489,60 @@ async def scan_dispatch_package(
 ):
     """Validate one persisted package QR and record its loading exactly once."""
     result = await db.execute(
-        select(DispatchModel).where(DispatchModel.id == uuid.UUID(dispatch_id)).options(selectinload(DispatchModel.items))
+        select(DispatchModel).where(DispatchModel.id == uuid.UUID(dispatch_id))
+        .options(selectinload(DispatchModel.items)).with_for_update()
     )
     order = result.scalar_one_or_none()
     if not order:
-        raise HTTPException(status_code=404, detail="Dispatch order not found")
-    qr = req.qr_code.strip()
-    item = next((candidate for candidate in order.items if candidate.package_number == qr), None)
-    # Loading now verifies the QC-approved finished-goods QR generated during
-    # assembly. Resolve that QR to the corresponding dispatch item so a
-    # separate package QR is no longer required.
-    if item is None:
-        fg_result = await db.execute(
-            select(AssemblyFinishedGoodsModel)
-            .join(AssemblyFinishedGoodsAllocationModel, AssemblyFinishedGoodsAllocationModel.finished_goods_id == AssemblyFinishedGoodsModel.id)
-            .where(
-                AssemblyFinishedGoodsAllocationModel.dispatch_order_id == order.id,
-                AssemblyFinishedGoodsAllocationModel.status == "ALLOCATED",
-                AssemblyFinishedGoodsModel.qr_code == qr,
-            )
-        )
-        finished_good = fg_result.scalar_one_or_none()
-        if finished_good:
-            item = next((candidate for candidate in order.items if candidate.material_code == finished_good.product_code), None)
-    if not item:
-        raise HTTPException(status_code=400, detail="Finished-goods QR is not registered for this dispatch")
+        raise HTTPException(404, detail="Dispatch order not found")
     if order.status not in {"PACKED", "ROUTE_ASSIGNED", "VEHICLE_ALLOCATED", "DRIVER_ALLOCATED", "LOADING_STARTED"}:
-        raise HTTPException(status_code=400, detail=f"Dispatch is not ready for loading: {order.status}")
-    if float(item.quantity_loaded or 0) > 0 or item.status == "LOADED":
-        raise HTTPException(status_code=409, detail="This package has already been loaded")
-    item.quantity_loaded = item.quantity_packed
-    item.status = "LOADED"
-    if order.status != "LOADING_STARTED":
-        order.status = "LOADING_STARTED"
+        raise HTTPException(409, detail=f"Dispatch is not ready for loading: {order.status}")
+    if order.dispatch_type == "SUPPLIER_FINISHED_GOODS":
+        pickup = (await db.execute(select(FinishedGoodsRequestModel).where(FinishedGoodsRequestModel.request_number == order.order_number))).scalar_one_or_none()
+        visit = (await db.execute(select(FinishedGoodsPickupGateVisitModel).where(
+            FinishedGoodsPickupGateVisitModel.request_id == pickup.id,
+            FinishedGoodsPickupGateVisitModel.status == "INSIDE_FACILITY",
+        ))).scalar_one_or_none() if pickup else None
+        if not visit:
+            raise HTTPException(409, detail="Supplier vehicle must complete Gate Entry before loading")
+        if visit.vehicle_number.strip().upper() != pickup.vehicle_number.strip().upper() or visit.driver_name.strip().lower() != pickup.driver_name.strip().lower():
+            raise HTTPException(409, detail="Gate Entry vehicle or driver does not match the supplier pickup request")
+    qr = req.qr_code.strip()
+    allocations = (await db.execute(select(AssemblyFinishedGoodsAllocationModel).where(
+        AssemblyFinishedGoodsAllocationModel.dispatch_order_id == order.id,
+        AssemblyFinishedGoodsAllocationModel.status.in_(["ALLOCATED", "LOADED"]),
+    ).with_for_update())).scalars().all()
+    package_items = [item for item in order.items if item.package_number == qr]
+    if package_items:
+        if all(item.quantity_loaded == item.quantity_packed for item in package_items):
+            raise HTTPException(409, detail="This package has already been loaded")
+        for item in package_items:
+            item.quantity_loaded = item.quantity_packed
+            item.status = "LOADED"
+            for allocation in allocations:
+                if allocation.dispatch_item_id == item.id:
+                    allocation.status = "LOADED"
+    else:
+        fg = (await db.execute(select(AssemblyFinishedGoodsModel).where(AssemblyFinishedGoodsModel.qr_code == qr))).scalar_one_or_none()
+        matches = [a for a in allocations if fg and a.finished_goods_id == fg.id]
+        if not matches:
+            raise HTTPException(422, detail="Finished-goods QR is not allocated to this dispatch")
+        if all(a.status == "LOADED" for a in matches):
+            raise HTTPException(409, detail="This finished-goods batch has already been loaded")
+        for allocation in matches:
+            if allocation.status == "LOADED":
+                continue
+            item = next(item for item in order.items if item.id == allocation.dispatch_item_id)
+            loaded = (item.quantity_loaded or 0) + allocation.quantity
+            if loaded > item.quantity_packed:
+                raise HTTPException(409, detail="Loaded quantity exceeds packed quantity")
+            item.quantity_loaded = loaded
+            if loaded == item.quantity_packed:
+                item.status = "LOADED"
+            allocation.status = "LOADED"
+    order.status = "LOADING_STARTED"
     await db.commit()
-    await db.refresh(order)
+    await db.refresh(order, attribute_names=["items"])
     return _to_dispatch_dto(order)
 
 
@@ -607,6 +633,7 @@ async def dispatch_order(
         # generated value, and it is persisted with the dispatch audit fields.
         gate_exit_completed_at = datetime.datetime.now(datetime.timezone.utc)
         order = await uc.dispatch_order(dispatch_id)
+        await post_dispatch_stock(db, dispatch_id=uuid.UUID(dispatch_id))
         order.gate_exit_vehicle_verified = payload.vehicle_verified
         order.gate_exit_driver_verified = payload.driver_verified
         order.gate_exit_loaded_goods_verified = payload.loaded_goods_verified
@@ -624,6 +651,9 @@ async def dispatch_order(
         ))
         await db.commit()
         return _to_dispatch_dto(order, vehicle_number=vehicle.vehicle_number if vehicle else None)
+    except HTTPException:
+        await db.rollback()
+        raise
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

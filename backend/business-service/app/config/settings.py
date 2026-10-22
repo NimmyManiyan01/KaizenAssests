@@ -75,6 +75,8 @@ class Settings(BaseSettings):
     # --- Role Credentials ---------------------------------------------------------
     warehouse_username: str = Field(default="warehouse")
     warehouse_password: str = Field(default="")
+    manager_username: str = Field(default="manager")
+    manager_password: str = Field(default="", description="Manager login secret.")
     assembly_manager_username: str = Field(default="assembly_manager")
     assembly_manager_password: str = Field(default="")
     gate_security_username: str = Field(default="gate_entry")

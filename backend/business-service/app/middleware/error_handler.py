@@ -54,6 +54,18 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def handle_not_found(request: Request, exc: NotFoundException):
         return JSONResponse(status_code=404, content=_error_body(str(exc)), headers=_cors_headers(request))
 
+    from sqlalchemy.exc import DBAPIError
+    import re
+
+    @app.exception_handler(DBAPIError)
+    async def handle_rack_database_rule(request: Request, exc: DBAPIError):
+        message = str(exc.orig)
+        match = re.search(r"Rack capacity exceeded\.[^\n]*|Rack capacity requires whole PCS quantities|Rack inventory quantity cannot be negative or over-available", message)
+        if match:
+            return JSONResponse(status_code=409, content=_error_body(match.group(0)), headers=_cors_headers(request))
+        logger.exception("Database operation failed")
+        return JSONResponse(status_code=500, content=_error_body("Internal server error"), headers=_cors_headers(request))
+
     @app.exception_handler(Exception)
     async def handle_unexpected(request: Request, exc: Exception):
         logger.exception("Unhandled exception", extra={"extra_fields": {"path": str(request.url)}})

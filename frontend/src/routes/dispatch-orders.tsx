@@ -1,3 +1,4 @@
+import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -1303,7 +1304,7 @@ function DispatchOrdersPage() {
                     <th className="px-4 py-3">Priority</th>
                     <th className="px-4 py-3">Warehouse</th>
                     <th className="px-4 py-3">Driver / Vehicle</th>
-                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Status<InformationTooltip help="workflowStatus" /></th>
                     <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>

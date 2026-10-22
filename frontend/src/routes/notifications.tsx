@@ -1,7 +1,9 @@
+import { acknowledgeVisibleNotifications, uniqueNotifications } from "@/lib/notification-state";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import {
+  ArrowLeft,
   Truck,
   Inbox,
   Loader2,
@@ -327,6 +329,7 @@ function Notifications() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [userRole, setUserRole] = useState("WAREHOUSE");
   const [markingAllRead, setMarkingAllRead] = useState(false);
+  const centerActive = useRef(false);
 
   // Modal State for Damaged Goods Details
   const [showDamageModal, setShowDamageModal] = useState(false);
@@ -341,6 +344,7 @@ function Notifications() {
   const [selectedGrnNotif, setSelectedGrnNotif] = useState<any | null>(null);
 
   useEffect(() => {
+    centerActive.current = true;
     const parsedUser = getUserInfo();
     const roles = parsedUser?.roles || [];
     const username = String(parsedUser?.username || "").toLowerCase();
@@ -369,9 +373,12 @@ function Notifications() {
     setUserRole(role);
     void fetchData(role, false);
     const refresh = () => void fetchData(role, true);
+    const poll = window.setInterval(refresh, 5000);
     window.addEventListener("focus", refresh);
     window.addEventListener("notifications:refresh", refresh);
     return () => {
+      centerActive.current = false;
+      window.clearInterval(poll);
       window.removeEventListener("focus", refresh);
       window.removeEventListener("notifications:refresh", refresh);
     };
@@ -438,35 +445,13 @@ function Notifications() {
   const fetchData = async (role: string, quiet = false) => {
     try {
       if (!quiet) setLoading(true);
-      if (role === "WAREHOUSE") {
-        const [arrivalData, workflowData] = await Promise.all([
-          api.getArrivalNotifications(),
-          api.getNotifications("WAREHOUSE"),
-        ]);
-        const arrivals = (Array.isArray(arrivalData) ? arrivalData : []).map((n: any) => ({
-          id: n?.id,
-          title: "Arrival Notification",
-          message:
-            n?.message ||
-            `Truck ${n?.vehicleNumber || n?.vehicle_number || "not assigned"} from ${n?.supplierName || n?.supplier_name || "supplier not available"} is arriving.`,
-          created_at:
-            n?.createdAt || n?.created_at || n?.expectedArrivalTime || n?.expected_arrival_time,
-          type: "arrival",
-          is_read: (n?.status || "").toUpperCase() === "ACKNOWLEDGED",
-          po_number: n?.poNumber || n?.po_number,
-          supplier_name: n?.supplierName || n?.supplier_name,
-        }));
-        const workflows = Array.isArray(workflowData) ? workflowData : [];
-        setNotifications(
-          [...workflows, ...arrivals].sort(
-            (a: any, b: any) =>
-              new Date(b.created_at || b.createdAt || 0).getTime() -
-              new Date(a.created_at || a.createdAt || 0).getTime(),
-          ),
-        );
-      } else {
-        const data = await api.getNotifications(role);
-        setNotifications(Array.isArray(data) ? data : []);
+      const data = await api.getNotifications(role);
+      if (!centerActive.current) return;
+      const rows = uniqueNotifications(Array.isArray(data) ? data : []);
+      setNotifications(rows);
+      if (document.visibilityState !== "hidden") {
+        const readRows = await acknowledgeVisibleNotifications(rows, (id) => api.markNotificationRead(id));
+        if (centerActive.current) setNotifications(readRows);
       }
     } catch (error) {
       if (!quiet) console.warn("Failed to fetch notifications", error);
@@ -479,17 +464,8 @@ function Notifications() {
     if (markingAllRead || !notifications.some((notification) => !notification.is_read)) return;
     setMarkingAllRead(true);
     try {
-      if (userRole === "WAREHOUSE") {
-        await Promise.all([
-          api.markAllNotificationsRead(userRole),
-          api.markAllArrivalNotificationsRead(),
-        ]);
-      } else {
-        await api.markAllNotificationsRead(userRole);
-      }
-      setNotifications((current) =>
-        current.map((notification) => ({ ...notification, is_read: true })),
-      );
+      const readRows = await acknowledgeVisibleNotifications(notifications, (id) => api.markNotificationRead(id));
+      setNotifications(readRows);
       toast.success("All notifications marked as read");
     } catch (error) {
       toast.error("Unable to mark all notifications as read", {
@@ -634,15 +610,28 @@ function Notifications() {
       title="Notification centre"
       subtitle="Stay updated with procurement and supply chain alerts"
       actions={
-        <Button
-          variant="outline"
-          className="rounded-xl"
-          onClick={() => void handleMarkAllRead()}
-          disabled={markingAllRead || !notifications.some((notification) => !notification.is_read)}
-        >
-          <CheckCircle2 className="mr-2 size-4" />
-          {markingAllRead ? "Marking…" : "Mark all as read"}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="rounded-xl"
+            onClick={() => window.history.back()}
+          >
+            <ArrowLeft className="mr-2 size-4" />
+            Back
+          </Button>
+          <Button
+            variant="outline"
+            className="rounded-xl"
+            onClick={() => void handleMarkAllRead()}
+            disabled={
+              markingAllRead || !notifications.some((notification) => !notification.is_read)
+            }
+          >
+            <CheckCircle2 className="mr-2 size-4" />
+            {markingAllRead ? "Marking…" : "Mark all as read"}
+          </Button>
+        </div>
       }
     >
       {loading ? (
@@ -661,7 +650,7 @@ function Notifications() {
         </Card>
       ) : (
         <div className="grid gap-4">
-          {notifications.map((n) => {
+          {notifications.map((n, index) => {
             const isGrnLinked = String(n.link || "").startsWith("/grn");
             const isDockAllocation =
               userRole !== "GRN" &&
@@ -670,7 +659,12 @@ function Notifications() {
                 n.title?.toUpperCase().includes("DOCK CONFIRMED"));
 
             if (isDockAllocation) {
-              return <DockAllocationNotificationCard key={n.id} notification={n} />;
+              return (
+                <DockAllocationNotificationCard
+                  key={`${n.type || n.notification_type || "dock"}-${n.id || "notification"}-${index}`}
+                  notification={n}
+                />
+              );
             }
 
             const isDamage =
@@ -688,7 +682,7 @@ function Notifications() {
 
             return (
               <Card
-                key={n.id}
+                key={`${n.type || n.notification_type || "workflow"}-${n.id || "notification"}-${index}`}
                 onClick={() => handleOpenNotificationDetails(n)}
                 className={cn(
                   "relative overflow-hidden border-border/50 p-5 cursor-pointer hover:border-primary/40 transition-all space-y-4",

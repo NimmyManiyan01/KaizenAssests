@@ -126,6 +126,8 @@ class PutawayMovementModel(Base):
     __tablename__ = "putaway_movement"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    confirmation_id: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
+    confirmation_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     putaway_task_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("putaway_task.id", ondelete="RESTRICT"), nullable=False, index=True)
     material_scan: Mapped[str] = mapped_column(String(64), nullable=False)
     location_scan: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -146,10 +148,13 @@ class PutawayMovementModel(Base):
 
 class InventoryLocationBalanceModel(Base):
     __tablename__ = "inventory_location_balance"
-    __table_args__ = (UniqueConstraint("material_code", "storage_location_id", name="uq_inventory_location_material_bin"),)
+    __table_args__ = (UniqueConstraint("material_code", "storage_location_id", "batch_number", name="uq_inventory_location_material_bin_batch"),)
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     material_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    # The migration labels pre-existing aggregate balances UNTRACKED. New stock
+    # records retain their physical GRN batch at each storage location.
+    batch_number: Mapped[str] = mapped_column(String(128), nullable=False, default="UNTRACKED", server_default="UNTRACKED", index=True)
     material_name: Mapped[str] = mapped_column(String(256), nullable=False)
     warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     storage_location_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("storage_location.id", ondelete="RESTRICT"), nullable=False, index=True)
@@ -279,14 +284,18 @@ class InventoryIssueTransactionModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     issue_number: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    confirmation_id: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
+    confirmation_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     requisition_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("assembly_requisition.id", ondelete="SET NULL"), nullable=True)
     requisition_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     pickup_task_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("pickup_task.id", ondelete="SET NULL"), nullable=True)
+    source_location_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("storage_location.id", ondelete="SET NULL"), nullable=True, index=True)
     store_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("store.id", ondelete="RESTRICT"), nullable=False)
     store_code: Mapped[str] = mapped_column(String(64), nullable=False)
     zone_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("store_zone.id", ondelete="SET NULL"), nullable=True)
     zone_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     material_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    batch_number: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     material_name: Mapped[str] = mapped_column(String(256), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
@@ -306,6 +315,8 @@ class InventoryMovementHistoryModel(Base):
     __tablename__ = "inventory_movement_history"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    confirmation_id: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
+    confirmation_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     movement_type: Mapped[str] = mapped_column(String(32), index=True, nullable=False)  # PUTAWAY, TAKEAWAY, TRANSFER
     material_code: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     material_name: Mapped[str] = mapped_column(String(256), nullable=False)

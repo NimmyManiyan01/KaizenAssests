@@ -1,8 +1,8 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
 import { requireRole } from "@/lib/auth-utils";
-import { parsePositiveNumber } from "@/lib/input-validation";
+import { completionDateError, localDateInput, parsePositiveNumber } from "@/lib/input-validation";
 import {
   api,
   type AssemblyMaterialRequest,
@@ -12,14 +12,12 @@ import {
 } from "@/lib/api-client";
 import {
   AlertTriangle,
-  ArrowRight,
   Boxes,
   Calendar,
   Check,
   CheckCircle2,
   Clock,
   Eye,
-  Factory,
   Layers,
   LayoutDashboard,
   Package,
@@ -28,11 +26,11 @@ import {
   PlusCircle,
   RefreshCw,
   Search,
-  ShieldCheck,
   Sparkles,
   Warehouse,
   X,
 } from "lucide-react";
+import { StatCard } from "@/components/wms/primitives";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,7 +65,7 @@ function formatDate(dateStr: string | null | undefined): string {
 
 function getStatusBadge(status: string) {
   const s = (status || "").toUpperCase();
-  if (s === "RECEIVED" || s === "COMPLETED") {
+  if (s === "RECEIVED" || s === "COMPLETED" || s === "MATERIAL_READY") {
     return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25">
         <span className="size-1.5 rounded-full bg-emerald-500" />
@@ -83,7 +81,16 @@ function getStatusBadge(status: string) {
       </span>
     );
   }
-  if (s === "PICKING" || s === "IN_PROGRESS" || s === "APPROVED") {
+  if (s === "APPROVED")
+    return (
+      <Badge
+        variant="outline"
+        className="border-teal-500/25 bg-teal-500/10 text-teal-700 dark:text-teal-300"
+      >
+        Approved
+      </Badge>
+    );
+  if (s === "PICKING" || s === "IN_PROGRESS") {
     return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/25">
         <span className="size-1.5 rounded-full bg-purple-500 animate-pulse" />
@@ -114,11 +121,30 @@ function getStatusBadge(status: string) {
   );
 }
 
+const statusGroups: Record<string, string[]> = {
+  PENDING: ["REQUESTED", "PENDING", "SUBMITTED", "PENDING_WAREHOUSE_APPROVAL"],
+  APPROVED: ["APPROVED"],
+  PICKING: ["PICKING", "IN_PROGRESS"],
+  ISSUED: ["ISSUED"],
+  RECEIVED: ["RECEIVED", "COMPLETED", "MATERIAL_READY"],
+  REJECTED: ["REJECTED", "CANCELLED"],
+};
+function issuedQuantity(request: AssemblyMaterialRequest, item: AssemblyMaterialRequestItem) {
+  if (item.issued_quantity != null) return item.issued_quantity;
+  const issuedItems = (request.issue_transaction || request.material_issue)?.items || [];
+  const matching = issuedItems.filter((issued) => issued.material_code === item.material_code);
+  if (matching.length && matching.every((issued) => issued.issued_quantity != null)) {
+    return matching.reduce((sum, issued) => sum + Number(issued.issued_quantity), 0);
+  }
+  return null;
+}
+
 function AssemblyMaterialRequestsPage() {
   const navigate = useNavigate();
   const [requests, setRequests] = useState<AssemblyMaterialRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
 
@@ -133,6 +159,8 @@ function AssemblyMaterialRequestsPage() {
     required_date: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
     remarks: "",
   });
+
+  const [requiredDateError, setRequiredDateError] = useState<string | null>(null);
 
   // Quick Add Product State
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
@@ -188,6 +216,27 @@ function AssemblyMaterialRequestsPage() {
   // Live BOM Preview
   const [bomPreview, setBomPreview] = useState<AssemblyProductBOMResponse | null>(null);
   const [loadingBOM, setLoadingBOM] = useState(false);
+  const [bomRevision, setBomRevision] = useState(0);
+  const [showBomMaterial, setShowBomMaterial] = useState(false);
+  const [savingBomMaterial, setSavingBomMaterial] = useState(false);
+  const [bomMaterialError, setBomMaterialError] = useState("");
+  const [bomMaterialDraft, setBomMaterialDraft] = useState({ material_code: "", quantity_per_unit: "1" });
+  useEffect(() => { setShowBomMaterial(false); setBomMaterialError(""); }, [formData.product_code]);
+  const addBomMaterial = async () => {
+    const quantity = Number(bomMaterialDraft.quantity_per_unit);
+    if (!bomMaterialDraft.material_code || !Number.isFinite(quantity) || quantity <= 0) {
+      setBomMaterialError("Select a material and enter a positive quantity per finished product."); return;
+    }
+    setSavingBomMaterial(true); setBomMaterialError("");
+    try {
+      await api.addProductBOMMaterial(formData.product_code, { material_code: bomMaterialDraft.material_code, quantity_per_unit: quantity });
+      setShowBomMaterial(false); setBomMaterialDraft({ material_code: "", quantity_per_unit: "1" });
+      setBomRevision(value => value + 1);
+      toast.success("Material added to the product BOM.");
+    } catch (err: any) { setBomMaterialError(err.message || "Unable to add the material."); }
+    finally { setSavingBomMaterial(false); }
+  };
+
   const [bomPreviewError, setBomPreviewError] = useState<string | null>(null);
 
   // Detail Modal State
@@ -202,27 +251,35 @@ function AssemblyMaterialRequestsPage() {
       material_name: string;
       issued_quantity: number;
       received_quantity: number;
-      material_scan: string;
       uom: string;
     }>
   >([]);
   const [receiptRemarks, setReceiptRemarks] = useState("");
   const [confirmingReceipt, setConfirmingReceipt] = useState(false);
 
-  const loadRequests = async (isManual = false) => {
+  const loadRequests = useCallback(async (isManual = false) => {
     if (isManual) setRefreshing(true);
     else setLoading(true);
     try {
-      const res = await api.getAssemblyMaterialRequests({
-        search: searchTerm,
-        status: statusFilter,
-      });
+      const res = await api.getAssemblyMaterialRequests();
       setRequests(res);
+      setLoadError(null);
     } catch (err: any) {
+      setLoadError(err?.message || "Failed to load material requests.");
       toast.error(err?.message || "Failed to load material requests.");
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  }, []);
+
+  const handleViewRequest = async (request: AssemblyMaterialRequest) => {
+    try {
+      setSelectedRequest(await api.getAssemblyMaterialRequestDetail(request.id));
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to load current request details.",
+      );
     }
   };
 
@@ -233,9 +290,10 @@ function AssemblyMaterialRequestsPage() {
       const items = (detail.items || []).map((it) => ({
         material_code: it.material_code,
         material_name: it.material_name || it.material_code,
-        issued_quantity: it.issued_quantity ?? it.quantity ?? 0,
-        received_quantity: it.received_quantity ?? it.issued_quantity ?? it.quantity ?? 0,
-        material_scan: "",
+        issued_quantity: it.issued_quantity ?? 0,
+        received_quantity: detail.material_received_at
+          ? (it.received_quantity ?? 0)
+          : (it.issued_quantity ?? 0),
         uom: it.uom || "PCS",
       }));
       setReceiptItems(items);
@@ -250,16 +308,15 @@ function AssemblyMaterialRequestsPage() {
     if (!receiptRequest) return;
     try {
       setConfirmingReceipt(true);
-      await api.confirmAssemblyMaterialReceipt(receiptRequest.id, {
+      const result = await api.confirmAssemblyMaterialReceipt(receiptRequest.id, {
         received_items: receiptItems.map((i) => ({
           material_code: i.material_code,
           received_quantity: Number(i.received_quantity),
-          material_scan: i.material_scan.trim() || undefined,
         })),
         remarks: receiptRemarks,
       });
       toast.success(
-        `Materials confirmed received for Order ${receiptRequest.order_number}! Order is now ready for production.`,
+        result.message || `Materials confirmed received for Order ${receiptRequest.order_number}.`,
       );
       setIsReceiptOpen(false);
       setReceiptRequest(null);
@@ -295,37 +352,29 @@ function AssemblyMaterialRequestsPage() {
   };
 
   useEffect(() => {
-    loadRequests();
     loadProducts();
   }, []);
 
   useEffect(() => {
     loadRequests();
-  }, [statusFilter]);
+  }, [loadRequests]);
 
-  // Load BOM preview whenever product or quantity changes in create modal
+  // Ignore responses for older product/quantity selections.
   useEffect(() => {
-    if (isCreateOpen && formData.product_code && formData.target_quantity > 0) {
-      loadBOMPreview(formData.product_code, formData.target_quantity);
-    } else {
-      setBomPreview(null);
-      setBomPreviewError(null);
-    }
-  }, [isCreateOpen, formData.product_code, formData.target_quantity]);
-
-  const loadBOMPreview = async (productCode: string, qty: number) => {
-    try {
-      setLoadingBOM(true);
-      setBomPreviewError(null);
-      const res = await api.getProductBOM(productCode, qty);
-      setBomPreview(res);
-    } catch (err: any) {
-      setBomPreview(null);
-      setBomPreviewError(err?.message || "Unable to load the selected product's BOM.");
-    } finally {
+    let active = true;
+    setBomPreview(null);
+    setBomPreviewError(null);
+    if (!isCreateOpen || !formData.product_code || formData.target_quantity <= 0) {
       setLoadingBOM(false);
+      return;
     }
-  };
+    setLoadingBOM(true);
+    void api.getProductBOM(formData.product_code, formData.target_quantity)
+      .then(result => { if (active) setBomPreview(result); })
+      .catch((err: Error) => { if (active) setBomPreviewError(err.message || "Unable to load the selected product's BOM."); })
+      .finally(() => { if (active) setLoadingBOM(false); });
+    return () => { active = false; };
+  }, [isCreateOpen, formData.product_code, formData.target_quantity, bomRevision]);
 
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -384,6 +433,11 @@ function AssemblyMaterialRequestsPage() {
       toast.error("Please select a product to manufacture.");
       return;
     }
+    if (showBomMaterial || savingBomMaterial) { toast.error("Save or cancel the new BOM material first."); return; }
+    if (loadingBOM || (bomPreview && (bomPreview.product_code !== formData.product_code || Number(bomPreview.target_quantity) !== Number(formData.target_quantity)))) {
+      toast.error("Wait for the material requirements to finish updating.");
+      return;
+    }
     if (!bomPreview?.materials?.length) {
       toast.error("An active BOM with components is required before submitting this request.");
       return;
@@ -392,13 +446,13 @@ function AssemblyMaterialRequestsPage() {
       toast.error("Production quantity must be greater than 0.");
       return;
     }
+    const dateError = completionDateError(formData.required_date);
+    setRequiredDateError(dateError);
+    if (dateError) return;
+
     const requiredDate = /^\d{2}-\d{2}-\d{4}$/.test(formData.required_date)
       ? formData.required_date.split("-").reverse().join("-")
       : formData.required_date;
-    if (!requiredDate.trim()) {
-      toast.error("Please specify a required completion date.");
-      return;
-    }
 
     try {
       setCreating(true);
@@ -427,66 +481,38 @@ function AssemblyMaterialRequestsPage() {
     }
   };
 
-  // KPI Calculations
   const kpiStats = useMemo(() => {
-    const total = requests.length;
-    const awaitingWH = requests.filter(
-      (r) => r.status === "PENDING" || r.status === "SUBMITTED",
-    ).length;
-    const inPicking = requests.filter(
-      (r) => r.status === "PICKING" || r.status === "IN_PROGRESS" || r.status === "APPROVED",
-    ).length;
-    const issued = requests.filter((r) => r.status === "ISSUED").length;
-    const received = requests.filter(
-      (r) => r.status === "RECEIVED" || r.status === "COMPLETED",
-    ).length;
-    return { total, awaitingWH, inPicking, issued, received };
+    const count = (group: string) =>
+      requests.filter((r) => statusGroups[group]?.includes(r.status.toUpperCase())).length;
+    return {
+      total: requests.length,
+      awaitingWH: count("PENDING"),
+      approved: count("APPROVED"),
+      inPicking: count("PICKING"),
+      issued: count("ISSUED"),
+      received: count("RECEIVED"),
+      rejected: count("REJECTED"),
+    };
   }, [requests]);
-
-  // Filtered requests for local search
   const filteredRequests = useMemo(() => {
-    if (!searchTerm.trim()) return requests;
     const query = searchTerm.toLowerCase().trim();
     return requests.filter((r) => {
-      const matchNum = r.request_number?.toLowerCase().includes(query);
-      const matchOrder = r.order_number?.toLowerCase().includes(query);
-      const matchProd = r.product_name?.toLowerCase().includes(query);
-      const matchCode = r.product_code?.toLowerCase().includes(query);
-      return matchNum || matchOrder || matchProd || matchCode;
+      if (statusFilter !== "ALL" && !statusGroups[statusFilter]?.includes(r.status.toUpperCase()))
+        return false;
+      return (
+        !query ||
+        [
+          r.request_number,
+          r.order_number,
+          r.product_name,
+          r.product_code,
+          ...r.items.flatMap((item) => [item.material_code, item.material_name]),
+        ].some((value) => value?.toLowerCase().includes(query))
+      );
     });
-  }, [requests, searchTerm]);
-
-  // Workflow navigation links
-  const workflowShortcuts = [
-    {
-      title: "Assembly Dashboard",
-      subtitle: "Floor monitoring & KPI metrics",
-      icon: LayoutDashboard,
-      to: "/assembly-dashboard",
-      tone: "blue",
-    },
-    {
-      title: "Work Orders",
-      subtitle: "Active manufacturing run pipeline",
-      icon: Layers,
-      to: "/assembly/orders",
-      tone: "amber",
-    },
-    {
-      title: "Production Lines",
-      subtitle: "Line build execution & stations",
-      icon: Factory,
-      to: "/assembly/production",
-      tone: "cyan",
-    },
-    {
-      title: "Quality Inspections",
-      subtitle: "Pre-dispatch batch auditing",
-      icon: ShieldCheck,
-      to: "/assembly/quality",
-      tone: "purple",
-    },
-  ];
+  }, [requests, searchTerm, statusFilter]);
+  const metricValue = (value: number) =>
+    loading ? "..." : loadError && !requests.length ? "Unavailable" : value.toLocaleString();
 
   return (
     <AppShell
@@ -494,10 +520,6 @@ function AssemblyMaterialRequestsPage() {
       subtitle="Raw material requisitions sent to Warehouse for production orders"
       actions={
         <div className="flex flex-wrap items-center gap-2.5">
-          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-card border border-border/80 shadow-2xs text-xs font-medium text-muted-foreground">
-            <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-            WH Integration Live
-          </div>
           <Button
             variant="outline"
             size="sm"
@@ -528,166 +550,57 @@ function AssemblyMaterialRequestsPage() {
         </div>
       }
     >
-      <div className="space-y-6">
-        {/* 5 Top KPI Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
-          {/* Card 1: Total Requisitions */}
-          <div className="group relative overflow-hidden rounded-2xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-blue-500/35 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                Total Requests
-              </span>
-              <div className="grid size-9 place-items-center rounded-xl bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20 shadow-2xs">
-                <Layers className="size-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-3xl font-black tracking-tight text-foreground tabular-nums">
-                {loading ? "..." : kpiStats.total}
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>All requisitions</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-blue-500/10 text-blue-700 dark:text-blue-300">
-                  Total
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 2: Awaiting Warehouse */}
-          <div className="group relative overflow-hidden rounded-2xl border border-amber-500/20 bg-gradient-to-br from-amber-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-amber-500/35 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                Awaiting WH
-              </span>
-              <div className="grid size-9 place-items-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20 shadow-2xs">
-                <Clock className="size-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-3xl font-black tracking-tight text-amber-600 dark:text-amber-400 tabular-nums">
-                {loading ? "..." : kpiStats.awaitingWH}
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Pending WH action</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-300">
-                  Action
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 3: In Picking */}
-          <div className="group relative overflow-hidden rounded-2xl border border-purple-500/20 bg-gradient-to-br from-purple-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-purple-500/35 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                In Picking
-              </span>
-              <div className="grid size-9 place-items-center rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/20 shadow-2xs">
-                <Boxes className="size-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-3xl font-black tracking-tight text-foreground tabular-nums">
-                {loading ? "..." : kpiStats.inPicking}
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>In warehouse queue</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-purple-500/10 text-purple-700 dark:text-purple-300">
-                  Picking
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 4: Issued by WH */}
-          <div className="group relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-cyan-500/35 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                Issued by WH
-              </span>
-              <div className="grid size-9 place-items-center rounded-xl bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 shadow-2xs">
-                <Warehouse className="size-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-3xl font-black tracking-tight text-cyan-600 dark:text-cyan-400 tabular-nums">
-                {loading ? "..." : kpiStats.issued}
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Awaiting floor receipt</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-cyan-500/10 text-cyan-700 dark:text-cyan-300">
-                  Ready
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 5: Received in Assembly */}
-          <div className="group relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-emerald-500/35 flex flex-col justify-between col-span-2 md:col-span-1">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                Received in Assembly
-              </span>
-              <div className="grid size-9 place-items-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shadow-2xs">
-                <CheckCircle2 className="size-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-3xl font-black tracking-tight text-emerald-600 dark:text-emerald-400 tabular-nums">
-                {loading ? "..." : kpiStats.received}
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Allocated to lines</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
-                  Ready for Line
-                </span>
-              </div>
-            </div>
-          </div>
+      <div className="min-w-0 space-y-5">
+        <div
+          className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
+          aria-busy={loading || refreshing}
+        >
+          <StatCard
+            compact
+            label="Total Requests"
+            value={metricValue(kpiStats.total)}
+            delta="All assembly material requisitions"
+            icon={Layers}
+            tone="primary"
+          />
+          <StatCard
+            compact
+            label="Awaiting Warehouse"
+            value={metricValue(kpiStats.awaitingWH)}
+            delta="Requests awaiting warehouse approval"
+            icon={Clock}
+            tone="warning"
+          />
+          <StatCard
+            compact
+            label="In Picking"
+            value={metricValue(kpiStats.inPicking)}
+            delta="Materials being picked by warehouse"
+            icon={Boxes}
+            tone="teal"
+          />
+          <StatCard
+            compact
+            label="Received in Assembly"
+            value={metricValue(kpiStats.received)}
+            delta="Requests received on the assembly floor"
+            icon={CheckCircle2}
+            tone="success"
+          />
         </div>
 
-        {/* Workflow Quick Links */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {workflowShortcuts.map((sc) => {
-            const Icon = sc.icon;
-            return (
-              <Link
-                key={sc.to}
-                to={sc.to as any}
-                className="group relative flex items-center justify-between p-3.5 rounded-xl border border-border/80 bg-card hover:border-primary/40 hover:bg-muted/40 transition-all duration-200 shadow-2xs"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className={cn(
-                      "grid size-9 shrink-0 place-items-center rounded-lg border",
-                      sc.tone === "blue" &&
-                        "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",
-                      sc.tone === "amber" &&
-                        "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20",
-                      sc.tone === "cyan" &&
-                        "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border-cyan-500/20",
-                      sc.tone === "purple" &&
-                        "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/20",
-                    )}
-                  >
-                    <Icon className="size-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-foreground group-hover:text-primary transition-colors">
-                      {sc.title}
-                    </div>
-                    <div className="text-[11px] text-muted-foreground truncate">{sc.subtitle}</div>
-                  </div>
-                </div>
-                <ArrowRight className="size-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary shrink-0 pl-1" />
-              </Link>
-            );
-          })}
-        </div>
+        {loadError && (
+          <div
+            role="alert"
+            className="rounded-xl border border-destructive/25 bg-destructive/5 p-4 text-xs text-destructive"
+          >
+            {loadError} Use Refresh to retry.
+            {requests.length > 0 && " Showing the last successful update."}
+          </div>
+        )}
 
         {/* Main Work Center Table Card */}
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-4">
+        <div className="min-w-0 rounded-2xl border border-border/70 bg-card p-5 shadow-soft space-y-4">
           {/* Header & Controls */}
           <div className="space-y-4 pb-4 border-b border-border/60">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -707,9 +620,9 @@ function AssemblyMaterialRequestsPage() {
             </div>
 
             {/* Filter & Search Toolbar */}
-            <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 pt-1">
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
               {/* Status Filter Tabs */}
-              <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-xl bg-muted/60 border border-border/60">
+              <div className="flex flex-wrap items-center gap-2">
                 {[
                   { key: "ALL", label: `All (${kpiStats.total})` },
                   { key: "PENDING", label: `Awaiting WH (${kpiStats.awaitingWH})` },
@@ -719,12 +632,13 @@ function AssemblyMaterialRequestsPage() {
                 ].map((tab) => (
                   <button
                     key={tab.key}
+                    aria-pressed={statusFilter === tab.key}
                     onClick={() => setStatusFilter(tab.key)}
                     className={cn(
-                      "px-2.5 py-1 text-xs font-semibold rounded-lg transition-all",
+                      "h-8 px-3 text-xs font-semibold rounded-xl border transition-all",
                       statusFilter === tab.key
-                        ? "bg-card text-foreground shadow-xs border border-border/50"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted",
+                        ? "bg-primary text-primary-foreground shadow-xs border-primary"
+                        : "border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted",
                     )}
                   >
                     {tab.label}
@@ -733,22 +647,20 @@ function AssemblyMaterialRequestsPage() {
               </div>
 
               {/* Search input */}
-              <div className="relative min-w-[240px]">
+              <div className="relative w-full sm:w-80 sm:shrink-0">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
                 <input
                   type="text"
-                  placeholder="Search request #, order #, product..."
+                  aria-label="Search requisitions and materials"
+                  placeholder="Search requests or materials..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && loadRequests()}
-                  className="h-8 w-full rounded-lg border border-border bg-card pl-8 pr-7 text-xs outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/40"
+                  className="h-8 w-full rounded-xl border border-border bg-card pl-8 pr-7 text-xs outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/40"
                 />
                 {searchTerm && (
                   <button
-                    onClick={() => {
-                      setSearchTerm("");
-                      loadRequests();
-                    }}
+                    aria-label="Clear search"
+                    onClick={() => setSearchTerm("")}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   >
                     <X className="size-3.5" />
@@ -807,18 +719,16 @@ function AssemblyMaterialRequestsPage() {
               </div>
             </div>
           ) : (
-            <div className="overflow-x-auto -mx-5 px-5">
-              <table className="w-full text-left text-sm mt-1">
-                <thead>
-                  <tr className="border-b border-border/60 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                    <th className="py-3 px-3">Request #</th>
-                    <th className="py-3 px-3">Production Order</th>
-                    <th className="py-3 px-3">Product to Manufacture</th>
-                    <th className="py-3 px-3">Production Qty</th>
-                    <th className="py-3 px-3 text-center">Components</th>
+            <div className="isolate overflow-x-auto rounded-xl border border-border/60">
+              <table className="w-full min-w-[900px] text-left text-xs [&_th]:align-middle [&_td]:align-middle">
+                <thead className="bg-muted/50">
+                  <tr className="border-b border-border/70 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <th className="py-3 px-3">Request ID</th>
+                    <th className="py-3 px-3">Product</th>
+                    <th className="py-3 px-3">Quantity</th>
                     <th className="py-3 px-3">Required Date</th>
-                    <th className="py-3 px-3">Warehouse Status</th>
-                    <th className="py-3 px-3 text-right">Action</th>
+                    <th className="py-3 px-3">Status</th>
+                    <th className="min-w-[240px] py-3 px-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
@@ -826,29 +736,16 @@ function AssemblyMaterialRequestsPage() {
                     <tr
                       key={r.id}
                       className="group hover:bg-muted/40 transition-colors cursor-pointer"
-                      onClick={() => setSelectedRequest(r)}
+                      onClick={() => void handleViewRequest(r)}
                     >
                       {/* Request Number */}
                       <td className="py-3.5 px-3">
-                        <div className="font-bold text-foreground text-xs font-mono group-hover:text-primary transition-colors">
+                        <div className="whitespace-nowrap font-bold text-foreground text-xs font-mono group-hover:text-primary transition-colors">
                           {r.request_number}
                         </div>
-                        <div className="text-[10px] text-muted-foreground mt-0.5">
-                          {r.created_at ? formatDate(r.created_at) : "Standard"}
+                        <div className="whitespace-nowrap text-[10px] text-muted-foreground mt-0.5">
+                          {formatDate(r.created_at)}
                         </div>
-                      </td>
-
-                      {/* Production Order */}
-                      <td className="py-3.5 px-3 whitespace-nowrap">
-                        {r.order_number ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-mono text-xs font-semibold text-foreground px-2 py-0.5 rounded-md bg-muted border border-border/60">
-                              {r.order_number}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground font-mono">—</span>
-                        )}
                       </td>
 
                       {/* Product to Manufacture */}
@@ -870,14 +767,6 @@ function AssemblyMaterialRequestsPage() {
                         </span>{" "}
                         <span className="text-[11px] text-muted-foreground font-medium">
                           {r.uom || "PCS"}
-                        </span>
-                      </td>
-
-                      {/* Components */}
-                      <td className="py-3.5 px-3 text-center whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-muted text-foreground border border-border/60">
-                          <Boxes className="size-3 text-muted-foreground" />
-                          {r.items_count} Items
                         </span>
                       </td>
 
@@ -918,7 +807,7 @@ function AssemblyMaterialRequestsPage() {
                             variant="ghost"
                             size="sm"
                             className="h-7 px-2 text-xs font-medium text-muted-foreground hover:text-foreground gap-1 rounded-lg"
-                            onClick={() => setSelectedRequest(r)}
+                            onClick={() => void handleViewRequest(r)}
                           >
                             <Eye className="size-3.5" />
                             Details
@@ -1000,16 +889,18 @@ function AssemblyMaterialRequestsPage() {
               </div>
 
               {/* Quantity & Required Date */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground">
-                    Production Quantity *
+                  <label htmlFor="production-target-quantity" className="text-xs font-semibold text-foreground">
+                    Production Quantity (finished products) *
                   </label>
                   <div className="relative">
                     <Input
                       type="number"
                       min="1"
                       step="1"
+                      id="production-target-quantity"
+                      aria-describedby="production-target-help"
                       value={formData.target_quantity}
                       onChange={(e) =>
                         setFormData({ ...formData, target_quantity: Number(e.target.value) })
@@ -1021,19 +912,51 @@ function AssemblyMaterialRequestsPage() {
                       PCS
                     </span>
                   </div>
+                  <p id="production-target-help" className="text-[11px] leading-5 text-muted-foreground">Number of finished products to make. Required material = this quantity multiplied by material quantity per product in the BOM.</p>
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground">
+                  <label
+                    htmlFor="required-completion-date"
+                    className="text-xs font-semibold text-foreground"
+                  >
                     Required Completion Date *
                   </label>
                   <Input
+                    id="required-completion-date"
                     type="date"
+                    min={localDateInput()}
                     value={formData.required_date}
-                    onChange={(e) => setFormData({ ...formData, required_date: e.target.value })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, required_date: e.target.value });
+                      setRequiredDateError(completionDateError(e.target.value));
+                    }}
+                    onBlur={(e) => setRequiredDateError(completionDateError(e.target.value))}
+                    onInvalid={(e) => {
+                      e.preventDefault();
+                      setRequiredDateError(
+                        e.currentTarget.validity.badInput
+                          ? "Enter a valid completion date."
+                          : completionDateError(e.currentTarget.value),
+                      );
+                      e.currentTarget.focus();
+                    }}
+                    aria-invalid={!!requiredDateError}
+                    aria-describedby={
+                      requiredDateError ? "required-completion-date-error" : undefined
+                    }
                     required
                     className="h-9 text-sm rounded-xl"
                   />
+                  {requiredDateError && (
+                    <p
+                      id="required-completion-date-error"
+                      role="alert"
+                      className="text-xs text-destructive"
+                    >
+                      {requiredDateError}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -1052,19 +975,33 @@ function AssemblyMaterialRequestsPage() {
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-1.5 font-semibold text-foreground">
                       <Layers className="size-3.5 text-primary" />
-                      <span>BOM Material Preview ({bomPreview.materials?.length || 0} Items)</span>
+                      <span>BOM Material Preview ({bomPreview.materials?.length || 0} {bomPreview.materials?.length === 1 ? "Item" : "Items"})</span>
+                      <Button type="button" size="sm" variant="outline" className="ml-2 h-7 gap-1 text-xs" disabled={savingBomMaterial} onClick={() => { setShowBomMaterial(true); setBomMaterialError(""); }}><Plus className="size-3.5" />Add Material</Button>
                     </div>
                     <span className="text-[11px] text-muted-foreground font-mono">
                       BOM: {bomPreview.bom_number}
                     </span>
                   </div>
 
+                  {showBomMaterial && <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
+                    <p className="text-xs text-muted-foreground">Add a component to this product's saved BOM. Its total requirement is calculated using the production quantity.</p>
+                    <div className="grid gap-3 sm:grid-cols-[1fr_160px_72px]">
+                      <div className="space-y-1.5"><label htmlFor="bom-add-material" className="text-xs font-semibold">Raw Material</label><select id="bom-add-material" disabled={savingBomMaterial} className="h-9 w-full rounded-xl border bg-card px-3 text-sm" value={bomMaterialDraft.material_code} onChange={e => setBomMaterialDraft({ ...bomMaterialDraft, material_code: e.target.value })}>
+                        <option value="">Select material...</option>{rawMaterials.filter(material => !bomPreview.materials?.some(item => item.material_code === material.code)).map(material => <option key={material.id || material.code} value={material.code}>{material.name} ({material.code})</option>)}
+                      </select></div>
+                      <div className="space-y-1.5"><label htmlFor="bom-add-quantity" className="text-xs font-semibold">Qty per Product</label><Input id="bom-add-quantity" disabled={savingBomMaterial} type="number" min="0.0001" step="0.0001" value={bomMaterialDraft.quantity_per_unit} onChange={e => setBomMaterialDraft({ ...bomMaterialDraft, quantity_per_unit: e.target.value })} className="h-9" /></div>
+                      <div className="space-y-1.5"><label className="text-xs font-semibold">UOM</label><div className="flex h-9 items-center rounded-xl border px-3 text-xs">{rawMaterials.find(material => material.code === bomMaterialDraft.material_code)?.uom || "-"}</div></div>
+                    </div>
+                    {bomMaterialError && <p role="alert" className="text-xs text-destructive">{bomMaterialError}</p>}
+                    <div className="flex justify-end gap-2"><Button type="button" size="sm" variant="outline" disabled={savingBomMaterial} onClick={() => setShowBomMaterial(false)}>Cancel Material</Button><Button type="button" size="sm" disabled={savingBomMaterial} onClick={() => void addBomMaterial()}>{savingBomMaterial ? "Saving..." : "Save Material"}</Button></div>
+                  </div>}
                   <div className="max-h-40 overflow-y-auto rounded-lg border border-border/60 text-[11px]">
                     <table className="w-full text-left">
                       <thead className="bg-muted/60 text-[10px] uppercase text-muted-foreground border-b border-border/60 sticky top-0">
                         <tr>
                           <th className="p-2 pl-3">Raw Material</th>
-                          <th className="p-2 text-right font-semibold">Required Qty</th>
+                          <th className="p-2 text-right">Qty per Product</th>
+                          <th className="p-2 text-right font-semibold">Total Required Qty</th>
                           <th className="p-2 text-right pr-3">UOM</th>
                         </tr>
                       </thead>
@@ -1081,6 +1018,7 @@ function AssemblyMaterialRequestsPage() {
                                   {item.material_name}
                                 </span>
                               </td>
+                              <td className="p-2 text-right">{item.quantity_per_unit}</td>
                               <td className="p-2 text-right font-bold text-foreground">
                                 {item.required_quantity}
                               </td>
@@ -1120,7 +1058,7 @@ function AssemblyMaterialRequestsPage() {
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={creating || loadingBOM || !bomPreview || !bomPreview.materials?.length}
+                  disabled={creating || showBomMaterial || savingBomMaterial || loadingBOM || !bomPreview || !bomPreview.materials?.length || bomPreview.product_code !== formData.product_code || Number(bomPreview.target_quantity) !== Number(formData.target_quantity)}
                   className="rounded-xl gap-2 bg-primary text-primary-foreground hover:bg-primary/90 font-semibold shadow-soft"
                 >
                   {creating && <RefreshCw className="size-3.5 animate-spin" />}
@@ -1224,7 +1162,7 @@ function AssemblyMaterialRequestsPage() {
                 </div>
                 <div className="grid grid-cols-[1fr_90px_80px_28px] gap-2 text-[10px] font-semibold uppercase text-muted-foreground">
                   <span>Raw Material</span>
-                  <span>Qty / Unit</span>
+                  <span>Qty per Product</span>
                   <span>UOM</span>
                   <span />
                 </div>
@@ -1356,7 +1294,7 @@ function AssemblyMaterialRequestsPage() {
             open={Boolean(selectedRequest)}
             onOpenChange={(open) => !open && setSelectedRequest(null)}
           >
-            <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto p-6 rounded-2xl">
+            <DialogContent className="w-[calc(100vw-2rem)] max-w-4xl max-h-[85vh] overflow-y-auto p-4 sm:p-6 rounded-2xl">
               <DialogHeader className="border-b border-border/60 pb-3">
                 <div className="flex items-center justify-between">
                   <div>
@@ -1375,7 +1313,7 @@ function AssemblyMaterialRequestsPage() {
               </DialogHeader>
 
               <div className="space-y-4 pt-3">
-                <div className="grid grid-cols-3 gap-3 p-3.5 rounded-xl bg-muted/30 border border-border text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 rounded-xl bg-muted/30 border border-border text-xs">
                   <div>
                     <span className="text-muted-foreground">Product to Manufacture</span>
                     <p className="font-semibold text-foreground mt-0.5">
@@ -1455,13 +1393,16 @@ function AssemblyMaterialRequestsPage() {
 
                   <div className="overflow-x-auto rounded-xl border border-border bg-card">
                     <table className="w-full text-left text-xs">
+                      <caption className="sr-only">
+                        Material quantities for {selectedRequest.request_number}
+                      </caption>
                       <thead>
                         <tr className="border-b border-border bg-muted/40 text-[11px] font-semibold text-muted-foreground">
                           <th className="py-2.5 px-3">Material Code</th>
                           <th className="py-2.5 px-3">Material Name</th>
-                          <th className="py-2.5 px-3 text-right">Required Qty</th>
-                          <th className="py-2.5 px-3 text-center">UOM</th>
-                          <th className="py-2.5 px-3">Material QR / Manual Scan</th>
+                          <th className="py-2.5 px-3 text-right">Required</th>
+                          <th className="py-2.5 px-3 text-right">Issued</th>
+                          <th className="py-2.5 px-3 text-right">Received</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/40">
@@ -1474,22 +1415,17 @@ function AssemblyMaterialRequestsPage() {
                               {item.material_name}
                             </td>
                             <td className="py-2.5 px-3 text-right font-bold text-foreground">
-                              {item.quantity}
+                              {Number(item.quantity).toLocaleString()} {item.uom}
                             </td>
-                            <td className="py-2.5 px-3 text-center text-muted-foreground">
-                              {item.uom}
+                            <td className="py-2.5 px-3 text-right whitespace-nowrap tabular-nums">
+                              {issuedQuantity(selectedRequest, item) == null
+                                ? "Unavailable"
+                                : `${Number(issuedQuantity(selectedRequest, item)).toLocaleString()} ${item.uom}`}
                             </td>
-                            <td className="py-1.5 px-3">
-                              <Input
-                                value={item.material_scan}
-                                placeholder="Scan or enter QR"
-                                onChange={(e) => {
-                                  const updated = [...receiptItems];
-                                  updated[idx].material_scan = e.target.value;
-                                  setReceiptItems(updated);
-                                }}
-                                className="h-7 text-xs font-mono rounded-lg"
-                              />
+                            <td className="py-2.5 px-3 text-right whitespace-nowrap tabular-nums">
+                              {item.received_quantity == null
+                                ? "Unavailable"
+                                : `${Number(item.received_quantity).toLocaleString()} ${item.uom}`}
                             </td>
                           </tr>
                         ))}

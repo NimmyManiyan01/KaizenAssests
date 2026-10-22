@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Loader2, Plus, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, LogOut, Plus, RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/gate/finished-goods-pickup")({
   component: FinishedGoodsPickupGatePage,
@@ -195,7 +195,7 @@ function FinishedGoodsPickupGatePage() {
             <Plus className="mr-2 size-4" /> FG Entry
           </Button>
           <Button variant="outline" onClick={() => setExitOpen(true)}>
-            <RefreshCw className="mr-2 size-4" /> Exit Vehicle
+            <LogOut className="mr-2 size-4" /> Exit Vehicle
           </Button>
           <Button variant="outline" onClick={() => void load()}>
             <RefreshCw className="mr-2 size-4" /> Refresh

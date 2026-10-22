@@ -151,6 +151,8 @@ class AssemblyQualityInspectionModel(Base):
     held_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0"))
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING_INSPECTION")
     inspected_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    inspected_by_user_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    authorized_person_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     inspected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)

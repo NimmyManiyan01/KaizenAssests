@@ -31,6 +31,10 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
   const [activeIndex, setActiveIndex] = useState(0);
   const [scrollProgress, setScrollProgress] = useState(0);
   const [overviewProgress, setOverviewProgress] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playSpeed, setPlaySpeed] = useState(1);
+  const [isFreeOrbit, setIsFreeOrbit] = useState(false);
+
   const mouseOffset = useRef({ x: 0, y: 0 }).current;
   const targetProgress = useRef(0);
   const displayedProgress = useRef(0);
@@ -179,21 +183,18 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
     return 7;
   }, [scrollProgress]);
 
-  // Mouse Parallax Lerp
-
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Automatic cinematic intro on page load:
-  // Starts with the front warehouse top view (val = 0), holds briefly, then smoothly swoops down to Gate Entry (val = 1).
+  // Automatic cinematic intro on page load
   useEffect(() => {
     if (!mounted) return;
 
     introTweenRef.current = gsap.to(overviewRef.current, {
       val: 1,
       duration: 2.4,
-      delay: 1.0,
+      delay: 0.8,
       ease: "power2.inOut",
       onUpdate: () => {
         setOverviewProgress(overviewRef.current.val);
@@ -205,7 +206,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
     };
   }, [mounted]);
 
-  // Read pointer targets in the camera without rerendering the entire scene.
+  // Read pointer targets in the camera without rerendering the entire scene
   useEffect(() => {
     if (!mounted) return;
     const move = (event: MouseEvent) => {
@@ -216,7 +217,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
     return () => window.removeEventListener("mousemove", move);
   }, [mounted, mouseOffset]);
 
-  // Native-refresh scroll damping. No React frame updates while scroll is idle.
+  // Native-refresh scroll damping
   useEffect(() => {
     if (!mounted) return;
     let frame: number | null = null;
@@ -253,6 +254,50 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
     };
   }, [mounted, stages.length]);
 
+  // Smooth continuous Play animation loop
+  useEffect(() => {
+    if (!isPlaying || !mounted) return;
+
+    introTweenRef.current?.kill();
+    overviewRef.current.val = 1;
+    setOverviewProgress(1);
+
+    let frame: number | null = null;
+    let lastTime = performance.now();
+
+    const playTick = (now: number) => {
+      const delta = Math.min((now - lastTime) / 1000, 0.05);
+      lastTime = now;
+
+      // Complete 16-stage tour in ~36 seconds at 1x speed
+      const advanceRate = (1 / 36) * playSpeed;
+      let nextProgress = targetProgress.current + advanceRate * delta;
+
+      if (nextProgress >= 1.0) {
+        nextProgress = 0.0;
+      }
+
+      targetProgress.current = nextProgress;
+
+      // Synchronize document scroll position without abrupt behavior:"smooth"
+      const trigger = scrollTriggerRef.current;
+      if (trigger) {
+        const targetFraction =
+          OVERVIEW_SCROLL_FRACTION + nextProgress * (1 - OVERVIEW_SCROLL_FRACTION);
+        const targetScroll = trigger.start + targetFraction * (trigger.end - trigger.start);
+        window.scrollTo(0, targetScroll);
+      }
+
+      wakeScrollRef.current?.();
+      frame = requestAnimationFrame(playTick);
+    };
+
+    frame = requestAnimationFrame(playTick);
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [isPlaying, playSpeed, mounted]);
+
   // GSAP ScrollTrigger pinning and scrub tracking
   useEffect(() => {
     if (!mounted || !pinRef.current) return;
@@ -263,12 +308,10 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
         start: "top top",
         end: "+=7800",
         pin: true,
-
         anticipatePin: 1,
         onUpdate: (self) => {
           const rawProgress = self.progress;
 
-          // If user starts scrolling, kill the intro animation so scroll takes control
           if (rawProgress > 0.002 && introTweenRef.current?.isActive()) {
             introTweenRef.current.kill();
           }
@@ -339,7 +382,6 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
     [stages.length],
   );
 
-  // Toggle between front warehouse top view and gate entry
   const handleToggleTopView = useCallback(() => {
     introTweenRef.current?.kill();
     const targetVal = overviewProgress < 0.5 ? 1 : 0;
@@ -358,6 +400,22 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
     });
   }, [overviewProgress]);
 
+  const handleTogglePlay = useCallback(() => {
+    setIsPlaying((prev) => !prev);
+  }, []);
+
+  const handleChangeSpeed = useCallback((speed: number) => {
+    setPlaySpeed(speed);
+  }, []);
+
+  const handleToggleFreeOrbit = useCallback(() => {
+    setIsFreeOrbit((prev) => !prev);
+  }, []);
+
+  const handleRestart = useCallback(() => {
+    handleSelectStage(0);
+  }, [handleSelectStage]);
+
   return (
     <section
       id="wms-flow-journey"
@@ -374,13 +432,13 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
           selectedAsn={asnRecords.find((asn) => String(asn.id || asn.asn_number) === selectedAsnId)}
           mouseOffset={mouseOffset}
           onSelectStage={handleSelectStage}
+          isFreeOrbit={isFreeOrbit}
         />
       ) : (
         <div className="absolute inset-0 bg-[#e7e9e5] flex items-center justify-center">
           <div className="size-8 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
         </div>
       )}
-
       {/* Cinematic tagline overlay replaces the operational landing HUD. */}
       {false ? (
         <div className="pointer-events-none absolute inset-x-0 top-24 sm:top-28 text-center transition-all duration-500">

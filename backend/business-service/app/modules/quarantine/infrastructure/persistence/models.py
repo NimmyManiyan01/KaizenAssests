@@ -45,7 +45,9 @@ class QuarantineRecordModel(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False)
 
-    audits: Mapped[list["QuarantineAuditModel"]] = relationship(back_populates="quarantine_record", cascade="all, delete-orphan")
+    audits: Mapped[list["QuarantineAuditModel"]] = relationship(
+        back_populates="quarantine_record", cascade="all, delete-orphan", order_by="QuarantineAuditModel.performed_at.desc()"
+    )
 
 
 class QuarantineAuditModel(Base):

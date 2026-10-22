@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type Props = {
   lineId?: string;
@@ -39,6 +40,7 @@ function PhotoEditor({
   const [ready, setReady] = useState(false);
   const [file, setFile] = useState<File | null>(initialFile || null);
   const [preview, setPreview] = useState(initialPreviewUrl || "");
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [saved, setSaved] = useState(!!initialPreviewUrl || !!initialFile);
@@ -343,11 +345,29 @@ function PhotoEditor({
       )}
 
       {preview && (
-        <img
-          src={preview}
-          alt="Selected damage evidence"
-          className="h-28 w-40 rounded-lg border object-contain"
-        />
+        <>
+          <button
+            type="button"
+            aria-label="View damage evidence photo"
+            onClick={() => setPreviewOpen(true)}
+            className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <img
+              src={preview}
+              alt="Selected damage evidence"
+              className="h-28 w-40 cursor-zoom-in rounded-lg border object-contain"
+            />
+          </button>
+          <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+            <DialogContent className="max-w-4xl">
+              <DialogHeader>
+                <DialogTitle>Damage evidence photo</DialogTitle>
+                <DialogDescription>{file?.name || "View the captured damage evidence."}</DialogDescription>
+              </DialogHeader>
+              <img src={preview} alt="Enlarged damage evidence" className="max-h-[75vh] w-full rounded-lg object-contain" />
+            </DialogContent>
+          </Dialog>
+        </>
       )}
 
       {file && (

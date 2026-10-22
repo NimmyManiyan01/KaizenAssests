@@ -1,8 +1,33 @@
-import { useEffect, useMemo, useState } from "react";
-import { Bot, ChevronRight, Search, Send, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertCircle,
+  Bot,
+  Boxes,
+  Building2,
+  ChevronRight,
+  ClipboardList,
+  LayoutDashboard,
+  Loader2,
+  PackageCheck,
+  RotateCcw,
+  Send,
+  Settings,
+  ShieldCheck,
+  Truck,
+  X,
+} from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { api } from "@/lib/api-client";
+import { api, type AssistantChatMessage } from "@/lib/api-client";
 import { getUserInfo } from "@/lib/auth-utils";
+
+const suggestedQuestions = [
+  "How many zones and bins are configured?",
+  "How many docks are in the warehouse?",
+  "Show available inventory",
+  "What does available stock mean?",
+  "How does FIFO picking work?",
+  "Show pending putaway tasks",
+];
 
 const roleModules: Record<string, { label: string; links: { label: string; to: string }[] }> = {
   WAREHOUSE: {
@@ -11,6 +36,7 @@ const roleModules: Record<string, { label: string; links: { label: string; to: s
       { label: "Warehouse dashboard", to: "/warehouse-dashboard" },
       { label: "Inventory", to: "/inventory" },
       { label: "Putaway tasks", to: "/putaway-tasks" },
+      { label: "Zones & bins", to: "/inventory?tab=locations" },
       { label: "Dock management", to: "/dock-management" },
     ],
   },
@@ -20,6 +46,7 @@ const roleModules: Record<string, { label: string; links: { label: string; to: s
       { label: "Warehouse dashboard", to: "/warehouse-dashboard" },
       { label: "Inventory", to: "/inventory" },
       { label: "Putaway tasks", to: "/putaway-tasks" },
+      { label: "Zones & bins", to: "/inventory?tab=locations" },
       { label: "Dock management", to: "/dock-management" },
     ],
   },
@@ -45,43 +72,93 @@ function getModule() {
   return roles.map((role) => roleModules[role]).find(Boolean) || roleModules.WAREHOUSE;
 }
 
+function getShortcutIcon(label: string) {
+  if (/dashboard/i.test(label)) return LayoutDashboard;
+  if (/inventory|material/i.test(label)) return Boxes;
+  if (/putaway/i.test(label)) return PackageCheck;
+  if (/dock|inbound/i.test(label)) return Truck;
+  if (/zone|bin|store/i.test(label)) return Building2;
+  if (/setting/i.test(label)) return Settings;
+  if (/request/i.test(label)) return ClipboardList;
+  return Boxes;
+}
+
+function getShortcutTone(label: string) {
+  if (/dashboard/i.test(label)) return "bg-blue-100 text-blue-700 group-hover:bg-blue-200";
+  if (/inventory|material/i.test(label)) return "bg-emerald-100 text-emerald-700 group-hover:bg-emerald-200";
+  if (/putaway/i.test(label)) return "bg-amber-100 text-amber-700 group-hover:bg-amber-200";
+  if (/dock|inbound/i.test(label)) return "bg-orange-100 text-orange-700 group-hover:bg-orange-200";
+  if (/zone|bin|store/i.test(label)) return "bg-indigo-100 text-indigo-700 group-hover:bg-indigo-200";
+  if (/setting/i.test(label)) return "bg-slate-200 text-slate-700 group-hover:bg-slate-300";
+  return "bg-violet-100 text-violet-700 group-hover:bg-violet-200";
+}
+
 export function SecureAssistant() {
   const navigate = useNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<any[]>([]);
+  const [messages, setMessages] = useState<AssistantChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
-  const [searchError, setSearchError] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const module = useMemo(getModule, [location.pathname]);
 
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
   useEffect(() => {
-    if (!open || query.trim().length < 2) {
-      setResults([]);
-      setSearchError("");
-      return;
+    if (open) {
+      scrollToBottom();
     }
-    const timer = window.setTimeout(() => {
-      setLoading(true);
-      void api
-        .globalSearch(query.trim())
-        .then((data) => {
-          setSearchError("");
-          setResults(data.results || []);
-        })
-        .catch((error: Error) => {
-          setResults([]);
-          setSearchError(error.message || "Search is unavailable");
-        })
-        .finally(() => setLoading(false));
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [open, query]);
+  }, [open, messages, loading, error]);
 
   const go = (to: string) => {
     setOpen(false);
-    setQuery("");
     void navigate({ to: to as any });
+  };
+
+  const handleSend = async (messageToSend?: string, customHistory?: AssistantChatMessage[]) => {
+    const text = (messageToSend ?? query).trim();
+    if (!text || loading) return;
+
+    setError(null);
+    const history = customHistory ?? messages;
+    const newMessages: AssistantChatMessage[] = [...history, { role: "user", content: text }];
+    setMessages(newMessages);
+    if (!messageToSend) {
+      setQuery("");
+    }
+    setLoading(true);
+
+    try {
+      const response = await api.assistantChat(text, history);
+      setMessages([...newMessages, { role: "assistant", content: response.reply }]);
+    } catch (err: any) {
+      const errorMsg =
+        err?.message ||
+        "The assistant service is currently unavailable. Please verify your connection or try again.";
+      setError(errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const retryLast = () => {
+    if (messages.length === 0) return;
+    const lastUserIdx = [...messages].reverse().findIndex((m) => m.role === "user");
+    if (lastUserIdx === -1) return;
+    const actualIdx = messages.length - 1 - lastUserIdx;
+    const lastUserMsg = messages[actualIdx];
+    const prevHistory = messages.slice(0, actualIdx);
+    void handleSend(lastUserMsg.content, prevHistory);
+  };
+
+  const clearChat = () => {
+    setMessages([]);
+    setError(null);
+    setQuery("");
   };
 
   return (
@@ -92,120 +169,175 @@ export function SecureAssistant() {
         aria-label="Open KaizenAssests assistant"
         title="KaizenAssests Assistant"
         onClick={() => setOpen(true)}
-        className="fixed bottom-5 right-5 z-40 grid size-12 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105"
+        className="fixed bottom-5 right-5 z-40 grid size-12 place-items-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white shadow-lg shadow-blue-900/20 transition duration-200 hover:-translate-y-0.5 hover:shadow-xl"
       >
         <Bot className="size-5" />
       </button>
       {open && (
-        <div className="fixed inset-0 z-50 bg-black/20" onClick={() => setOpen(false)}>
+        <div className="fixed inset-0 z-50 bg-slate-950/25 backdrop-blur-[2px]" onClick={() => setOpen(false)}>
           <section
             role="dialog"
             aria-label="KaizenAssests Assistant"
             onClick={(event) => event.stopPropagation()}
-            className="absolute bottom-5 right-5 flex h-[min(650px,calc(100vh-40px))] w-[min(420px,calc(100vw-32px))] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+            className="absolute bottom-4 right-4 flex h-[min(690px,calc(100vh-32px))] w-[min(440px,calc(100vw-32px))] flex-col overflow-hidden rounded-[26px] border border-blue-100 bg-white shadow-[0_24px_80px_-24px_rgba(15,23,42,0.45)]"
           >
-            <header className="flex items-center justify-between border-b border-border/60 bg-primary px-4 py-3 text-primary-foreground">
-              <div className="flex items-center gap-2">
-                <Bot className="size-5" />
+            <header className="flex items-center justify-between border-b border-white/15 bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-700 px-4 py-3.5 text-white">
+              <div className="flex items-center gap-3">
+                <span className="grid size-10 place-items-center rounded-xl border border-white/20 bg-white/15 shadow-inner"><Bot className="size-5" /></span>
                 <div>
-                  <p className="text-sm font-bold">KaizenAssests Assistant</p>
-                  <p className="text-[11px] text-primary-foreground/75">{module.label} workspace</p>
+                  <p className="text-sm font-bold tracking-tight">KaizenAssests Assistant</p>
+                  <p className="flex items-center gap-1.5 text-[11px] text-blue-100"><span className="size-1.5 rounded-full bg-emerald-300" />{module.label} workspace · Read-only help</p>
                 </div>
               </div>
-              <button
-                type="button"
-                aria-label="Close assistant"
-                onClick={() => setOpen(false)}
-                className="grid size-8 place-items-center rounded-lg hover:bg-white/15"
-              >
-                <X className="size-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                {messages.length > 0 && (
+                  <button
+                    type="button"
+                    aria-label="Clear chat history"
+                    title="Clear chat history"
+                    onClick={clearChat}
+                    className="grid size-8 place-items-center rounded-lg text-white transition-colors hover:bg-white/15"
+                  >
+                    <RotateCcw className="size-4" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  aria-label="Close assistant"
+                  onClick={() => setOpen(false)}
+                  className="grid size-8 place-items-center rounded-lg text-white transition-colors hover:bg-white/15"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
             </header>
-            <div className="flex-1 space-y-4 overflow-y-auto p-4">
-              <div className="rounded-xl bg-muted/40 p-3 text-sm text-foreground">
-                I can search records and open pages available to your current role. Try a PO,
-                supplier, ASN, material, or user name.
-              </div>
-              <div>
-                <p className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  {module.label} shortcuts
-                </p>
-                <div className="grid gap-2">
-                  {module.links.map((link) => (
-                    <button
-                      type="button"
-                      key={link.to}
-                      onClick={() => go(link.to)}
-                      className="flex items-center justify-between rounded-xl border border-border/60 px-3 py-2 text-left text-sm hover:bg-muted/40"
-                    >
-                      <span>{link.label}</span>
-                      <ChevronRight className="size-4 text-muted-foreground" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {query.trim().length >= 2 && (
-                <div>
-                  <p className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                    Search results
-                  </p>
-                  {loading ? (
-                    <p className="text-sm text-muted-foreground">Searching authorized records...</p>
-                  ) : searchError ? (
-                    <p className="text-sm text-destructive">{searchError}</p>
-                  ) : results.length ? (
-                    <div className="space-y-2">
-                      {results.map((result) => (
+
+            <div className="flex-1 space-y-4 overflow-y-auto bg-gradient-to-b from-slate-50/90 via-white to-blue-50/30 p-4 text-sm">
+              {messages.length === 0 ? (
+                <div className="space-y-5">
+                  <div className="relative overflow-hidden rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-4 shadow-sm">
+                    <div aria-hidden="true" className="absolute -right-8 -top-8 size-28 rounded-full bg-blue-100/60" />
+                    <div className="relative flex items-start gap-3">
+                      <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-900/20"><Bot className="size-4" /></span>
+                      <div>
+                        <p className="font-semibold tracking-tight text-slate-900">How can I help?</p>
+                        <p className="mt-1 text-xs leading-relaxed text-slate-600">Ask about stock, zones and bins, receiving, putaway, assembly, or dispatch. I can look up records you’re allowed to see and explain common workflows.</p>
+                      </div>
+                    </div>
+                    <div className="relative mt-3 flex items-center gap-1.5 text-[11px] font-medium text-blue-800"><ShieldCheck className="size-3.5" /> Permission-aware · Read-only</div>
+                  </div>
+                  <div>
+                    <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">Try asking</p>
+                    <div className="flex flex-wrap gap-2">
+                      {suggestedQuestions.map((suggestion) => (
                         <button
                           type="button"
-                          key={`${result.type}-${result.id}`}
-                          onClick={() => go(result.link)}
-                          className="w-full rounded-xl border border-border/60 p-3 text-left hover:bg-muted/40"
+                          key={suggestion}
+                          onClick={() => void handleSend(suggestion)}
+                          disabled={loading}
+                          className="rounded-full border border-blue-100 bg-white px-3 py-1.5 text-left text-[11px] font-medium text-slate-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-800 disabled:opacity-50"
                         >
-                          <p className="text-sm font-semibold">{result.title}</p>
-                          <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
-                            {result.subtitle}
-                          </p>
+                          {suggestion}
                         </button>
                       ))}
                     </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">No authorized records found.</p>
+                  </div>
+                  <div>
+                    <div className="mb-2.5 flex items-center justify-between">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">{module.label} shortcuts</p>
+                      <span className="text-[11px] text-slate-400">Quick access</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {module.links.map((link) => {
+                        const Icon = getShortcutIcon(link.label);
+                        const tone = getShortcutTone(link.label);
+                        return (
+                          <button
+                            type="button"
+                            key={link.to}
+                            onClick={() => go(link.to)}
+                            className="group flex min-h-[72px] items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-white px-3 py-2.5 text-left shadow-sm transition duration-150 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
+                          >
+                            <span className="flex min-w-0 items-center gap-2.5">
+                              <span className={`grid size-9 shrink-0 place-items-center rounded-lg transition-colors ${tone}`}><Icon className="size-4" /></span>
+                              <span className="text-xs font-semibold leading-snug text-slate-700">{link.label}</span>
+                            </span>
+                            <ChevronRight className="size-3.5 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5 group-hover:text-blue-600" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {messages.map((msg, index) => (
+                    <div
+                      key={index}
+                      className={`flex flex-col ${
+                        msg.role === "user" ? "items-end" : "items-start"
+                      }`}
+                    >
+                      <div
+                        className={`rounded-2xl px-3.5 py-2.5 max-w-[88%] text-sm whitespace-pre-wrap break-words leading-relaxed ${
+                          msg.role === "user"
+                            ? "bg-primary text-primary-foreground rounded-br-xs shadow-xs"
+                            : "bg-white text-slate-800 border border-slate-200/80 rounded-bl-xs shadow-sm"
+                        }`}
+                      >
+                        {msg.content}
+                      </div>
+                    </div>
+                  ))}
+                  {loading && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/30 border border-border/40 rounded-xl px-3 py-2 w-fit">
+                      <Loader2 className="size-3.5 animate-spin text-primary" />
+                      <span>Checking operations guidance and authorized records...</span>
+                    </div>
                   )}
+                  {error && (
+                    <div className="flex flex-col gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="size-4 shrink-0 mt-0.5" />
+                        <span>{error}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={retryLast}
+                        className="self-end rounded-md bg-destructive/20 px-2.5 py-1 font-semibold text-destructive hover:bg-destructive/30 transition-colors"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  )}
+                  <div ref={messagesEndRef} />
                 </div>
               )}
             </div>
+
             <form
-              className="border-t border-border/60 p-3"
+              className="border-t border-slate-200/80 bg-white p-3"
               onSubmit={(event) => {
                 event.preventDefault();
-                if (query.trim().length >= 2) {
-                  setSearchError("");
-                  setResults([]);
-                  setLoading(true);
-                  void api
-                    .globalSearch(query.trim())
-                    .then((data) => setResults(data.results || []))
-                    .catch((error: Error) =>
-                      setSearchError(error.message || "Search is unavailable"),
-                    )
-                    .finally(() => setLoading(false));
+                if (query.trim() && !loading) {
+                  void handleSend();
                 }
               }}
             >
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <div className="relative flex items-center">
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
+                  disabled={loading}
                   autoFocus
-                  placeholder="Ask or search records..."
-                  className="h-10 w-full rounded-xl border border-border bg-muted/40 pl-9 pr-10 text-sm outline-none focus:ring-2 focus:ring-ring/40"
+                  placeholder="Ask about stock, zones, bins, or tasks..."
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-3.5 pr-11 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-100 disabled:opacity-50"
                 />
                 <button
                   type="submit"
-                  aria-label="Search records"
-                  className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+                  disabled={!query.trim() || loading}
+                  aria-label="Send message"
+                  className="absolute right-2 grid size-8 place-items-center rounded-lg text-blue-600 transition-colors hover:bg-blue-100 hover:text-blue-800 disabled:opacity-35"
                 >
                   <Send className="size-4" />
                 </button>
@@ -217,3 +349,4 @@ export function SecureAssistant() {
     </>
   );
 }
+

@@ -23,7 +23,7 @@ from typing import Optional
 import uuid
 
 from datetime import datetime, timezone
-from sqlalchemy import or_, select, text
+from sqlalchemy import bindparam, func, insert, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -32,6 +32,7 @@ from app.events.outbox_repository import to_outbox_row
 from app.common.persistence.models import (
     AsnModel,
     MaterialModel,
+    MaterialStockModel,
     MaterialVariantModel,
     PurchaseOrderModel,
     SupplierModel,
@@ -42,6 +43,10 @@ from app.modules.gate.infrastructure.persistence.models import (
     DockModel,
     GateEntryModel,
     SupplierDamageClaimModel,
+)
+from app.modules.dock.infrastructure.persistence.models import (
+    DockAllocationRequestModel,
+    DockMasterModel,
 )
 from app.modules.store.infrastructure.persistence.models import StoreModel
 
@@ -74,7 +79,9 @@ from app.modules.receiving.infrastructure.persistence.models import (
     GrnDocumentModel,
     GrnLineModel,
     GrnModel,
+    InventoryReceiptPostingModel,
 )
+from app.modules.storage.infrastructure.persistence.models import PutawayTaskModel
 
 
 # ============================================================================
@@ -84,14 +91,20 @@ from app.modules.receiving.infrastructure.persistence.models import (
 def _uuid_or_none(value: str | uuid.UUID | None) -> uuid.UUID | None:
     if value is None:
         return None
-
     if isinstance(value, uuid.UUID):
         return value
-
     try:
         return uuid.UUID(str(value))
     except (ValueError, TypeError, AttributeError):
         return None
+
+
+def _qc_released_quantity(line: GrnLineModel) -> Decimal:
+    """Only explicitly released positive QC quantities may enter putaway."""
+    released_statuses = {"ACCEPTED", "APPROVED", "RELEASED", "PASS", "PASSED"}
+    if (line.quality_result or "").strip().upper() not in released_statuses:
+        return Decimal("0")
+    return max(Decimal("0"), Decimal(str(line.quality_approved_quantity or 0)))
 
 
 def _string_or_none(value: object | None) -> str | None:
@@ -172,6 +185,16 @@ async def _resolve_real_supplier_names(
 # ============================================================================
 # REPOSITORY
 # ============================================================================
+
+def next_grn_number(numbers, year):
+    prefix = f"GRN-{year}-"
+    sequence = max(
+        (int(number[len(prefix):]) for number in numbers
+         if number and number.startswith(prefix) and number[len(prefix):].isdigit()),
+        default=0,
+    ) + 1
+    return f"{prefix}{sequence:03d}"
+
 
 class SqlAlchemyGrnRepository(GrnRepository):
     def __init__(self, session: AsyncSession) -> None:
@@ -518,7 +541,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
 
         result = await self._session.execute(
             select(GateEntryModel)
-            .where(GateEntryModel.po_number == normalized)
+            .where(func.upper(GateEntryModel.po_number) == normalized.upper())
             .order_by(
                 GateEntryModel.created_at.desc(),
                 GateEntryModel.id.desc(),
@@ -828,7 +851,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
         warehouse_name: str | None = None,
         vehicle_number: str | None = None,
         driver_name: str | None = None,
-        received_by: str = "System User",
+        received_by: str,
         verification_notes: str | None = None,
     ) -> GrnModel:
         now = datetime.now(timezone.utc)
@@ -846,6 +869,15 @@ class SqlAlchemyGrnRepository(GrnRepository):
             is_unexpected=is_unexpected,
         )
 
+        if not grn_uuid and asn_receipt and asn_number:
+            # Repeated Fetch Details must resume the same persisted draft.
+            existing_id = await self._session.scalar(
+                select(GrnModel.id).where(GrnModel.asn_number == asn_number.strip())
+                .order_by(GrnModel.created_at.desc()).limit(1)
+            )
+            if existing_id:
+                grn_uuid = existing_id
+
         if not grn_uuid and (po_id or po_number):
             existing_snapshot = await self.find_grn_header_by_po(po_id=po_id, po_number=po_number)
             if existing_snapshot:
@@ -858,6 +890,8 @@ class SqlAlchemyGrnRepository(GrnRepository):
             existing = res.scalar_one_or_none()
 
         if existing:
+            if not grn_id and str(existing.status).upper() in {"COMPLETED", "PARTIALLY_COMPLETED", "PARTIALLY COMPLETED", "POSTED"}:
+                raise ValueError(f"ASN already received under {existing.grn_number}. Open GRN History to view it.")
             existing.dock_number = dock_number
             existing.receipt_type = receipt_type
             if receipt_type == "UNEXPECTED_DELIVERY":
@@ -912,11 +946,16 @@ class SqlAlchemyGrnRepository(GrnRepository):
 
         year = now.strftime("%Y")
         year_prefix = f"GRN-{year}-"
+        if self._session.get_bind().dialect.name == "postgresql":
+            await self._session.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"), {"key": 740000 + int(year)}
+            )
         count_res = await self._session.execute(
             select(GrnModel).where(GrnModel.grn_number.like(f"{year_prefix}%"))
         )
-        sequence = len(count_res.scalars().all()) + 1
-        grn_num = f"{year_prefix}{sequence:03d}"
+        grn_num = next_grn_number(
+            [row.grn_number for row in count_res.scalars().all()], year,
+        )
 
         po_uuid = None if is_unexpected or asn_receipt else _uuid_or_none(po_id)
         po_num_val = None if is_unexpected or asn_receipt else po_number
@@ -939,7 +978,152 @@ class SqlAlchemyGrnRepository(GrnRepository):
                 vehicle_number = vehicle_number or asn.vehicle_number
                 driver_name = driver_name or asn.driver_name
                 warehouse_id = warehouse_id or asn.warehouse_id
-                gate = await self.find_latest_gate_entry_for_asn(asn.id)
+
+                # Prefer the gate pass carried by the receiving context. Older
+                # records may have a valid GateEntry but a missing ASN FK, so
+                # also resolve against the ASN's PO/vehicle before rejecting.
+                gate_linked_by_assignment = False
+                if gate_entry_id:
+                    gate = await self.find_gate_entry_by_id(gate_entry_id)
+                if gate is None and gate_entry_number:
+                    gate_result = await self._session.execute(
+                        select(GateEntryModel)
+                        .where(func.upper(GateEntryModel.gate_entry_number) == gate_entry_number.strip().upper())
+                        .limit(1)
+                    )
+                    gate_model = gate_result.scalar_one_or_none()
+                    if gate_model is not None:
+                        gate = self._to_gate_entry_snapshot(gate_model)
+                if gate is None:
+                    gate = await self.find_latest_gate_entry_for_asn(asn.id)
+
+                # In migrated data the gate row's ASN FK can be empty while
+                # the dock assignment still retains the correct ASN link.
+                if gate is None:
+                    assigned_gate_result = await self._session.execute(
+                        select(GateEntryModel)
+                        .join(
+                            DockAssignmentModel,
+                            DockAssignmentModel.gate_entry_id == GateEntryModel.id,
+                        )
+                        .where(DockAssignmentModel.asn_id == asn.id)
+                        .order_by(DockAssignmentModel.assigned_at.desc())
+                        .limit(1)
+                    )
+                    assigned_gate = assigned_gate_result.scalars().first()
+                    if assigned_gate is not None:
+                        gate = self._to_gate_entry_snapshot(assigned_gate)
+                        # The dock assignment is an explicit ASN-to-gate link.
+                        if not gate.asn_id or _uuid_or_none(gate.asn_id) == _uuid_or_none(asn.id):
+                            gate_linked_by_assignment = True
+                            gate_id_val = _uuid_or_none(gate.id)
+                            gate_num_val = gate.gate_entry_number
+                        else:
+                            gate = None
+
+                def gate_matches_asn(candidate: GateEntrySnapshot) -> bool:
+                    if candidate.asn_id:
+                        return _uuid_or_none(candidate.asn_id) == _uuid_or_none(asn.id)
+                    po_matches = bool(
+                        candidate.po_number
+                        and asn.po_number
+                        and candidate.po_number.strip().upper() == asn.po_number.strip().upper()
+                    )
+                    gate_vehicle = (candidate.vehicle_number or "").replace(" ", "").upper()
+                    asn_vehicle = (asn.vehicle_number or "").replace(" ", "").upper()
+                    vehicle_matches = bool(gate_vehicle and asn_vehicle and gate_vehicle == asn_vehicle)
+                    if gate_vehicle and asn_vehicle:
+                        return vehicle_matches and (po_matches or not asn.po_number)
+                    return po_matches
+
+                if gate is not None and not gate_linked_by_assignment and not gate_matches_asn(gate):
+                    gate = None
+                # Prefer the explicit ASN-to-dock assignment when a legacy
+                # gate row carries a stale or missing ASN foreign key. The
+                # assignment is created during dock allocation and records
+                # which ASN is being received.
+                if gate is None:
+                    assigned_gate_result = await self._session.execute(
+                        select(GateEntryModel)
+                        .join(
+                            DockAssignmentModel,
+                            DockAssignmentModel.gate_entry_id == GateEntryModel.id,
+                        )
+                        .where(DockAssignmentModel.asn_id == asn.id)
+                        .order_by(DockAssignmentModel.assigned_at.desc())
+                        .limit(1)
+                    )
+                    assigned_gate = assigned_gate_result.scalars().first()
+                    if assigned_gate is not None:
+                        gate = self._to_gate_entry_snapshot(assigned_gate)
+                        gate_linked_by_assignment = True
+                if gate is None and asn.po_number:
+                    candidate = await self.find_latest_gate_entry_for_po(asn.po_number)
+                    if candidate and gate_matches_asn(candidate):
+                        gate = candidate
+                if gate is None and asn.vehicle_number:
+                    candidate = await self.find_latest_gate_entry_for_vehicle(asn.vehicle_number)
+                    if candidate and gate_matches_asn(candidate):
+                        gate = candidate
+
+                # Some legacy allocations have no ASN foreign key on either
+                # the gate row or the dock assignment. When this exact dock
+                # is actively allocated to the ASN vehicle, use that persisted
+                # allocation as the link to its gate entry.
+                active_allocation = None
+                if dock_number and (vehicle_number or gate_entry_number or gate_entry_id):
+                    allocation_links = []
+                    if vehicle_number:
+                        allocation_links.append(
+                            func.upper(DockAllocationRequestModel.vehicle_number)
+                            == vehicle_number.strip().upper()
+                        )
+                    if gate_entry_number:
+                        allocation_links.append(
+                            func.upper(DockAllocationRequestModel.existing_gate_pass_id)
+                            == gate_entry_number.strip().upper()
+                        )
+                    if gate_entry_id:
+                        allocation_links.append(
+                            func.upper(DockAllocationRequestModel.existing_gate_pass_id)
+                            == gate_entry_id.strip().upper()
+                        )
+                    allocation_result = await self._session.execute(
+                        select(DockAllocationRequestModel)
+                        .join(
+                            DockMasterModel,
+                            DockMasterModel.id == DockAllocationRequestModel.assigned_dock_id,
+                        )
+                        .where(
+                            func.upper(DockMasterModel.dock_code) == dock_number.strip().upper(),
+                            or_(*allocation_links),
+                            DockAllocationRequestModel.status.in_(
+                                ["DOCK_ASSIGNED", "RESERVED", "OCCUPIED", "AT_DOCK"]
+                            ),
+                        )
+                        .order_by(DockAllocationRequestModel.assigned_at.desc())
+                        .limit(1)
+                    )
+                    active_allocation = allocation_result.scalars().first()
+                    if gate is None and active_allocation and active_allocation.existing_gate_pass_id:
+                        allocation_gate = await self.find_gate_entry_by_id(
+                            active_allocation.existing_gate_pass_id
+                        )
+                        if allocation_gate is None:
+                            gate_result = await self._session.execute(
+                                select(GateEntryModel)
+                                .where(
+                                    func.upper(GateEntryModel.gate_entry_number)
+                                    == active_allocation.existing_gate_pass_id.strip().upper()
+                                )
+                                .limit(1)
+                            )
+                            gate_model = gate_result.scalar_one_or_none()
+                            if gate_model is not None:
+                                allocation_gate = self._to_gate_entry_snapshot(gate_model)
+                        if allocation_gate is not None:
+                            gate = allocation_gate
+                            gate_linked_by_assignment = True
                 if gate:
                     gate_id_val = _uuid_or_none(gate.id)
                     gate_num_val = gate.gate_entry_number
@@ -952,8 +1136,30 @@ class SqlAlchemyGrnRepository(GrnRepository):
                     )
                 )
                 assignment = assignment_result.scalars().first()
-                if assignment is None or assignment.dock_arrival_at is None:
-                    raise ValueError("Receiving can start only after dock check-in is completed")
+                # The configured warehouse workflow begins receiving as soon
+                # as the dock is allocated. Older installations may not
+                # record a separate arrival timestamp, so the assignment is
+                # the authoritative link for GRN eligibility.
+                if assignment is None and active_allocation is None:
+                    raise ValueError("Receiving can start only after a dock is allocated")
+                if assignment is None and active_allocation is not None:
+                    # Backfill the missing gate-side assignment for this
+                    # legacy warehouse allocation so GRN completion can
+                    # release the same dock through the normal workflow.
+                    assignment = DockAssignmentModel(
+                        gate_entry_id=_uuid_or_none(gate.id),
+                        asn_id=asn_id_val,
+                        po_id=_uuid_or_none(asn.po_id) if getattr(asn, "po_id", None) else None,
+                        vehicle_number=vehicle_number or asn.vehicle_number,
+                        dock_number=dock_number.strip(),
+                        assigned_by=active_allocation.assigned_by or "WAREHOUSE",
+                        assigned_at=active_allocation.assigned_at or now,
+                    )
+                    self._session.add(assignment)
+                    await self._session.flush()
+
+                if not (warehouse_id or "").strip():
+                    warehouse_id = await _warehouse_for_receiving_dock(self._session, assignment.dock_number)
 
                 duplicate_result = await self._session.execute(
                     select(GrnModel)
@@ -1005,6 +1211,13 @@ class SqlAlchemyGrnRepository(GrnRepository):
                 gate_id_val = _uuid_or_none(gate.id)
                 gate_num_val = gate.gate_entry_number
 
+        if not (warehouse_id or "").strip():
+            warehouse_id = await _warehouse_for_receiving_dock(self._session, dock_number)
+        if not (warehouse_id or "").strip():
+            raise ValueError("A configured warehouse must be selected before creating a GRN")
+        if not (received_by or "").strip():
+            raise ValueError("Authenticated receiving user is required to create a GRN")
+
         new_grn = GrnModel(
             id=uuid.uuid4(),
             po_id=po_uuid,
@@ -1016,8 +1229,8 @@ class SqlAlchemyGrnRepository(GrnRepository):
             gate_entry_number=gate_num_val,
             supplier_name=resolved_sup_name,
             supplier_company_name=resolved_sup_company,
-            warehouse_id=warehouse_id or "WH-MAIN",
-            warehouse_name=warehouse_name or "Main Warehouse",
+            warehouse_id=warehouse_id,
+            warehouse_name=warehouse_name,
             dock_number=dock_number,
             vehicle_number=vehicle_number,
             driver_name=driver_name,
@@ -1100,6 +1313,8 @@ class SqlAlchemyGrnRepository(GrnRepository):
         grn = res.scalar_one_or_none()
         if not grn:
             raise ValueError(f"GRN not found: {grn_id}")
+        if not (grn.warehouse_id or "").strip():
+            raise ValueError("GRN must be assigned to a warehouse before it can be posted")
 
         is_unexpected = grn.receipt_type == "UNEXPECTED_DELIVERY"
         line_map = {l.item_code: l for l in grn.lines}
@@ -1398,8 +1613,10 @@ class SqlAlchemyGrnRepository(GrnRepository):
         if not grn:
             raise ValueError(f"GRN not found: {grn_id}")
 
-        if grn.status == "COMPLETED":
-            raise ValueError("GRN is already completed")
+        if (grn.status or "").upper() in {"COMPLETED", "POSTED", "APPROVED", "ACCEPTED", "RECEIVING_COMPLETE", "GRN_POSTED"}:
+            # Opening saved labels is read-only for a finalized receipt.
+            # Never regenerate lots or change quantities after completion.
+            return [lot for line in grn.lines for lot in line.damage_lots]
         if not grn.lines:
             raise ValueError("GRN cannot be completed without material lines")
         for line in grn.lines:
@@ -1559,6 +1776,8 @@ class SqlAlchemyGrnRepository(GrnRepository):
         posted_by: str,
         verification_notes: str | None = None,
     ) -> GrnModel:
+        # Serialize GRN completion so two receiving operators cannot create
+        # duplicate receipt postings or putaway tasks for the same document.
         res = await self._session.execute(
             select(GrnModel)
             .options(
@@ -1566,10 +1785,16 @@ class SqlAlchemyGrnRepository(GrnRepository):
                 selectinload(GrnModel.documents),
             )
             .where(GrnModel.id == grn_id)
+            .with_for_update()
         )
         grn = res.scalar_one_or_none()
         if not grn:
             raise ValueError(f"GRN not found: {grn_id}")
+
+        # A completed GRN is immutable from the warehouse posting perspective.
+        # Return it on retries rather than posting stock/tasks a second time.
+        if (grn.status or "").upper() in {"COMPLETED", "POSTED", "RECEIVING_COMPLETE"}:
+            return grn
 
         # ASN is the authoritative inbound document for this project.  A GRN
         # cannot be completed until its ASN copy has been persisted.
@@ -1652,25 +1877,6 @@ class SqlAlchemyGrnRepository(GrnRepository):
             dest_store_id = base_dest_store_id
             assigned_to = base_assigned_to
 
-            # If no store assigned from dock, try to match by material category
-            if not dest_store_id and active_stores:
-                cat_lower = (line.material_category or "").lower().strip()
-                matched_store = None
-                if cat_lower:
-                    for st in active_stores:
-                        st_type = (st.store_type or "").lower()
-                        st_name = (st.store_name or "").lower()
-                        if cat_lower in st_type or cat_lower in st_name or st_type in cat_lower:
-                            matched_store = st
-                            break
-                
-                # Default to first active store if no match
-                if not matched_store:
-                    matched_store = active_stores[0]
-                
-                dest_store_id = matched_store.id
-                assigned_to = assigned_to or matched_store.store_manager_name or matched_store.store_manager_id
-
             if dest_store_id and not assigned_to:
                 for st in active_stores:
                     if st.id == dest_store_id:
@@ -1681,79 +1887,47 @@ class SqlAlchemyGrnRepository(GrnRepository):
             post_qty = line.quality_approved_quantity or line.good_quantity or Decimal("0")
 
             if post_qty > Decimal("0"):
-                # 1. Update material_stock
-                stock_res = await self._session.execute(
-                    text("SELECT id, on_hand, available FROM material_stock WHERE material_code = :code"),
-                    {"code": line.item_code},
-                )
-                stock_row = stock_res.fetchone()
-                on_hand_before = Decimal(str(stock_row[1])) if stock_row else Decimal("0")
-                # Receiving only creates the receipt record and putaway task.
-                # Authoritative stock is posted by the physical putaway
-                # transaction, so do not update material_stock here.
-                on_hand_after = on_hand_before
-
-                if stock_row:
-                    await self._session.execute(
-                        text("""
-                            UPDATE material_stock
-                            -- Receipt quantities remain pending put-away. The
-                            -- storage put-away transaction posts authoritative
-                            -- on-hand and available stock.
-                            SET on_hand = on_hand,
-                                available = available,
-                                updated_at = :now
-                            WHERE material_code = :code
-                        """),
-                        {"qty": post_qty, "now": now_naive, "code": line.item_code},
+                # Record accepted receipt quantity for traceability. The
+                # material stock balance remains unchanged until putaway is
+                # physically confirmed.
+                on_hand_before = await self._session.scalar(
+                    select(func.coalesce(func.sum(MaterialStockModel.on_hand_quantity), Decimal("0"))).where(
+                        MaterialStockModel.material_code == line.item_code,
+                        func.lower(MaterialStockModel.warehouse_id) == grn.warehouse_id.strip().lower(),
                     )
+                ) or Decimal("0")
+                receipt_posting = await self._session.scalar(
+                    select(InventoryReceiptPostingModel).where(
+                        InventoryReceiptPostingModel.grn_id == grn.id,
+                        InventoryReceiptPostingModel.item_code == line.item_code,
+                    ).with_for_update()
+                )
+                if receipt_posting:
+                    receipt_posting.posted_quantity += post_qty
+                    receipt_posting.posted_by = posted_by
+                    receipt_posting.posted_at = now
                 else:
-                    await self._session.execute(
-                        text("""
-                            INSERT INTO material_stock (id, material_code, material_name, category, on_hand, allocated, available, uom, warehouse_id, reorder_point, updated_at)
-                            VALUES (:id, :code, :name, :cat, 0, 0, 0, :uom, :wh, 10, :now)
-                        """),
-                        {
-                            "id": uuid.uuid4(),
-                            "code": line.item_code,
-                            "name": line.material_name or line.item_code,
-                            "cat": line.material_category or "General",
-                            "qty": post_qty,
-                            "uom": line.uom or "PCS",
-                            "wh": grn.warehouse_id or "WH-MAIN",
-                            "now": now_naive,
-                        },
-                    )
+                    self._session.add(InventoryReceiptPostingModel(
+                        id=uuid.uuid4(),
+                        grn_id=grn.id,
+                        grn_number=grn.grn_number,
+                        po_id=grn.po_id,
+                        po_number=grn.po_number,
+                        asn_id=grn.asn_id,
+                        asn_number=grn.asn_number,
+                        supplier_name=grn.supplier_name,
+                        item_code=line.item_code,
+                        material_name=line.material_name or line.item_code,
+                        uom=line.uom,
+                        warehouse_id=grn.warehouse_id,
+                        posted_quantity=post_qty,
+                        on_hand_before=on_hand_before,
+                        on_hand_after=on_hand_before,
+                        posted_by=posted_by,
+                        posted_at=now,
+                    ))
 
-                # 2. Add inventory_receipt_posting entry
-                await self._session.execute(
-                    text("""
-                        INSERT INTO inventory_receipt_posting
-                        (id, grn_id, grn_number, po_id, po_number, asn_id, asn_number, supplier_name, item_code, material_name, uom, warehouse_id, posted_quantity, on_hand_before, on_hand_after, posted_by, posted_at)
-                        VALUES (:id, :grn_id, :grn_num, :po_id, :po_num, :asn_id, :asn_num, :supplier, :code, :name, :uom, :wh, :qty, :before, :after, :user, :now)
-                    """),
-                    {
-                        "id": uuid.uuid4(),
-                        "grn_id": grn.id,
-                        "grn_num": grn.grn_number,
-                        "po_id": grn.po_id,
-                        "po_num": grn.po_number,
-                        "asn_id": grn.asn_id,
-                        "asn_num": grn.asn_number,
-                        "supplier": grn.supplier_name,
-                        "code": line.item_code,
-                        "name": line.material_name or line.item_code,
-                        "uom": line.uom or "PCS",
-                        "wh": grn.warehouse_id or "WH-MAIN",
-                        "qty": 0,
-                        "before": on_hand_before,
-                        "after": on_hand_after,
-                        "user": posted_by,
-                        "now": now,
-                    },
-                )
-
-                # 3. Create putaway task for line or batches
+                # Create putaway task for line or batches
                 if line.batches and len(line.batches) > 0:
                     eligible_remaining = post_qty
                     seen_batch_numbers: set[str] = set()
@@ -1765,14 +1939,12 @@ class SqlAlchemyGrnRepository(GrnRepository):
                         eligible_quantity = min(batch.batch_quantity or Decimal("0"), eligible_remaining)
                         if eligible_quantity > Decimal("0"):
                             existing_task = await self._session.execute(
-                                text("""
-                                    SELECT id FROM putaway_task
-                                    WHERE grn_id = :grn_id
-                                      AND item_code = :code
-                                      AND UPPER(TRIM(COALESCE(batch_number, ''))) = UPPER(TRIM(:batch_number))
-                                      AND status NOT IN ('CANCELLED', 'VOID')
-                                    LIMIT 1
-                                """),
+                                select(PutawayTaskModel.id).where(
+                                    PutawayTaskModel.grn_id == grn.id,
+                                    PutawayTaskModel.item_code == line.item_code,
+                                    func.upper(func.trim(func.coalesce(PutawayTaskModel.batch_number, ""))) == batch_key,
+                                    PutawayTaskModel.status.notin_(["CANCELLED", "VOID"]),
+                                ).limit(1),
                                 {
                                     "grn_id": grn.id,
                                     "code": line.item_code,
@@ -1784,11 +1956,26 @@ class SqlAlchemyGrnRepository(GrnRepository):
                                 continue
                             task_num = f"PT-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
                             await self._session.execute(
-                                text("""
-                                    INSERT INTO putaway_task
-                                    (id, task_number, grn_id, grn_number, item_code, material_name, quantity, uom, warehouse_id, source_location, destination_store_id, assigned_to, assigned_by, assigned_at, status, created_by, created_at, batch_number)
-                                    VALUES (:id, :task_num, :grn_id, :grn_num, :code, :name, :qty, :uom, :wh, :source, :dest_store_id, :assigned_to, :assigned_by, :assigned_at, 'PUTAWAY_PENDING', :user, :now, :batch_number)
-                                """),
+                                insert(PutawayTaskModel.__table__).values(
+                                    id=bindparam("id"),
+                                    task_number=bindparam("task_num"),
+                                    grn_id=bindparam("grn_id"),
+                                    grn_number=bindparam("grn_num"),
+                                    item_code=bindparam("code"),
+                                    material_name=bindparam("name"),
+                                    quantity=bindparam("qty"),
+                                    uom=bindparam("uom"),
+                                    warehouse_id=bindparam("wh"),
+                                    source_location=bindparam("source"),
+                                    destination_store_id=bindparam("dest_store_id"),
+                                    assigned_to=bindparam("assigned_to"),
+                                    assigned_by=bindparam("assigned_by"),
+                                    assigned_at=bindparam("assigned_at"),
+                                    status="PUTAWAY_PENDING",
+                                    created_by=bindparam("user"),
+                                    created_at=bindparam("now"),
+                                    batch_number=bindparam("batch_number")
+                                ),
                                 {
                                     "id": uuid.uuid4(),
                                     "task_num": task_num,
@@ -1798,8 +1985,8 @@ class SqlAlchemyGrnRepository(GrnRepository):
                                     "name": line.material_name or line.item_code,
                                     "qty": eligible_quantity,
                                     "uom": line.uom or "PCS",
-                                    "wh": grn.warehouse_id or "WH-MAIN",
-                                    "source": f"RECEIVING_DOCK_{grn.dock_number or '1'}",
+                                    "wh": grn.warehouse_id,
+                                    "source": f"RECEIVING_DOCK_{grn.dock_number}" if grn.dock_number else "RECEIVING_DOCK",
                                     "dest_store_id": dest_store_id,
                                     "assigned_to": assigned_to,
                                     "assigned_by": assigned_by,
@@ -1811,13 +1998,36 @@ class SqlAlchemyGrnRepository(GrnRepository):
                             )
                             eligible_remaining -= eligible_quantity
                 else:
+                    existing_task = await self._session.execute(
+                        select(PutawayTaskModel.id).where(
+                            PutawayTaskModel.grn_id == grn.id,
+                            PutawayTaskModel.item_code == line.item_code,
+                            PutawayTaskModel.batch_number.is_(None),
+                        ).limit(1)
+                    )
+                    if existing_task.scalar_one_or_none():
+                        continue
                     task_num = f"PT-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
                     await self._session.execute(
-                        text("""
-                            INSERT INTO putaway_task
-                            (id, task_number, grn_id, grn_number, item_code, material_name, quantity, uom, warehouse_id, source_location, destination_store_id, assigned_to, assigned_by, assigned_at, status, created_by, created_at)
-                            VALUES (:id, :task_num, :grn_id, :grn_num, :code, :name, :qty, :uom, :wh, :source, :dest_store_id, :assigned_to, :assigned_by, :assigned_at, 'PUTAWAY_PENDING', :user, :now)
-                        """),
+                        insert(PutawayTaskModel.__table__).values(
+                                    id=bindparam("id"),
+                                    task_number=bindparam("task_num"),
+                                    grn_id=bindparam("grn_id"),
+                                    grn_number=bindparam("grn_num"),
+                                    item_code=bindparam("code"),
+                                    material_name=bindparam("name"),
+                                    quantity=bindparam("qty"),
+                                    uom=bindparam("uom"),
+                                    warehouse_id=bindparam("wh"),
+                                    source_location=bindparam("source"),
+                                    destination_store_id=bindparam("dest_store_id"),
+                                    assigned_to=bindparam("assigned_to"),
+                                    assigned_by=bindparam("assigned_by"),
+                                    assigned_at=bindparam("assigned_at"),
+                                    status="PUTAWAY_PENDING",
+                                    created_by=bindparam("user"),
+                                    created_at=bindparam("now")
+                                ),
                         {
                             "id": uuid.uuid4(),
                             "task_num": task_num,
@@ -1827,8 +2037,8 @@ class SqlAlchemyGrnRepository(GrnRepository):
                             "name": line.material_name or line.item_code,
                             "qty": post_qty,
                             "uom": line.uom or "PCS",
-                            "wh": grn.warehouse_id or "WH-MAIN",
-                            "source": f"RECEIVING_DOCK_{grn.dock_number or '1'}",
+                            "wh": grn.warehouse_id,
+                            "source": f"RECEIVING_DOCK_{grn.dock_number}" if grn.dock_number else "RECEIVING_DOCK",
                             "dest_store_id": dest_store_id,
                             "assigned_to": assigned_to,
                             "assigned_by": assigned_by,
@@ -2024,3 +2234,14 @@ class SqlAlchemyGrnRepository(GrnRepository):
         await self._session.delete(grn)
         await self._session.flush()
         return True
+
+
+async def _warehouse_for_receiving_dock(session: AsyncSession, dock_number: str | None) -> str | None:
+    """Resolve a missing warehouse from the actual configured receiving dock."""
+    if not (dock_number or "").strip():
+        return None
+    result = await session.execute(
+        select(DockModel.warehouse_id).where(DockModel.dock_number == dock_number.strip())
+    )
+    warehouse_id = result.scalar_one_or_none()
+    return warehouse_id.strip() if warehouse_id and warehouse_id.strip() else None

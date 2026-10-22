@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+import hashlib
+import json
 from typing import Any, Dict, List, Optional
 import uuid
 
@@ -51,6 +53,7 @@ from app.modules.storage.infrastructure.persistence.models import (
     StockAdjustmentModel,
     StorageLocationModel,
 )
+from app.modules.storage.application.rack_capacity import validate_rack_capacity
 from app.modules.store.infrastructure.persistence.models import (
     StoreBinModel,
     StoreManagerUserModel,
@@ -98,11 +101,15 @@ ADJUSTMENT_REASONS: List[str] = [
 
 class BinTransferRequest(BaseModel):
     material_code: str
+    batch_number: Optional[str] = None
     source_bin_code: str
+    source_store_id: Optional[str] = None
     destination_bin_code: str
+    destination_store_id: Optional[str] = None
     quantity: Decimal
     reason: str
     remarks: Optional[str] = None
+    confirmation_id: Optional[str] = None
     mobile_controlled_mode: bool = False
     scanned_source_bin_qr: Optional[str] = None
     scanned_dest_bin_qr: Optional[str] = None
@@ -276,37 +283,96 @@ async def perform_bin_to_bin_transfer(
                 detail=f"Material physical QR validation failed! Scanned '{req.scanned_material_qr}' does not match Material '{req.material_code}'.",
             )
 
-    # 1. Resolve Source Bin
-    src_bin_res = await uow.session.execute(
-        select(StoreBinModel).where(func.upper(StoreBinModel.bin_code) == req.source_bin_code.strip().upper())
-    )
-    src_bin = src_bin_res.scalar_one_or_none()
-    if not src_bin:
+    # 1. Resolve bin codes in store scope. Codes are only unique within a
+    # store, so reject ambiguous legacy requests and accept optional store IDs
+    # for installations that reuse bin codes.
+    src_stmt = select(StoreBinModel).where(func.upper(StoreBinModel.bin_code) == req.source_bin_code.strip().upper())
+    if req.source_store_id:
+        try:
+            src_stmt = src_stmt.where(StoreBinModel.store_id == uuid.UUID(req.source_store_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid source store ID") from exc
+    src_candidates = (await uow.session.execute(src_stmt)).scalars().all()
+    if not src_candidates:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Source Bin '{req.source_bin_code}' not found.",
         )
+    if len(src_candidates) > 1:
+        raise HTTPException(status_code=422, detail="Source bin code exists in multiple stores; provide source_store_id")
 
     # 2. Resolve Destination Bin
-    dest_bin_res = await uow.session.execute(
-        select(StoreBinModel).where(func.upper(StoreBinModel.bin_code) == req.destination_bin_code.strip().upper())
-    )
-    dest_bin = dest_bin_res.scalar_one_or_none()
-    if not dest_bin:
+    dest_stmt = select(StoreBinModel).where(func.upper(StoreBinModel.bin_code) == req.destination_bin_code.strip().upper())
+    if req.destination_store_id:
+        try:
+            dest_stmt = dest_stmt.where(StoreBinModel.store_id == uuid.UUID(req.destination_store_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid destination store ID") from exc
+    dest_candidates = (await uow.session.execute(dest_stmt)).scalars().all()
+    if not dest_candidates:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Destination Bin '{req.destination_bin_code}' not found.",
         )
+    if len(dest_candidates) > 1:
+        raise HTTPException(status_code=422, detail="Destination bin code exists in multiple stores; provide destination_store_id")
 
-    if src_bin.id == dest_bin.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Source bin and destination bin must be different.",
+    src_candidate = src_candidates[0]
+    dest_candidate = dest_candidates[0]
+    if src_candidate.id == dest_candidate.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source bin and destination bin must be different.")
+
+    # Lock both physical bins in a stable order. This prevents capacity races
+    # and deadlocks when operators transfer in opposite directions.
+    locked_bins = (await uow.session.execute(
+        select(StoreBinModel)
+        .where(StoreBinModel.id.in_([src_candidate.id, dest_candidate.id]))
+        .order_by(StoreBinModel.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )).scalars().all()
+    locked_by_id = {bin_obj.id: bin_obj for bin_obj in locked_bins}
+    src_bin = locked_by_id.get(src_candidate.id)
+    dest_bin = locked_by_id.get(dest_candidate.id)
+    if not src_bin or not dest_bin:
+        raise HTTPException(status_code=404, detail="Source or destination bin no longer exists")
+
+    confirmation_id = (req.confirmation_id or "").strip() or None
+    confirmation_hash = hashlib.sha256(json.dumps({
+        "material": req.material_code.strip().upper(),
+        "batch": (req.batch_number or "").strip().upper(),
+        "source_bin": str(src_bin.id),
+        "destination_bin": str(dest_bin.id),
+        "quantity": str(req.quantity),
+        "reason": req.reason.strip(),
+    }, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if confirmation_id:
+        prior = await uow.session.scalar(
+            select(InventoryMovementHistoryModel).where(
+                InventoryMovementHistoryModel.confirmation_id == confirmation_id
+            )
         )
+        if prior:
+            if prior.confirmation_hash != confirmation_hash:
+                raise HTTPException(status_code=409, detail="Confirmation ID was already used for a different inventory transfer")
+            return {
+                "success": True,
+                "duplicate_confirmation": True,
+                "message": "This inventory transfer was already posted",
+                "movement_id": str(prior.id),
+                "material_code": prior.material_code,
+                "source_bin_code": req.source_bin_code,
+                "destination_bin_code": req.destination_bin_code,
+                "transferred_quantity": float(prior.quantity),
+                "uom": prior.uom,
+                "performed_at": prior.performed_at.isoformat(),
+            }
 
     # 3. Resolve Store context & authorization
     src_store = await uow.session.get(StoreModel, src_bin.store_id)
     dest_store = await uow.session.get(StoreModel, dest_bin.store_id)
+    if not src_store or not dest_store or not src_store.warehouse_id or not dest_store.warehouse_id:
+        raise HTTPException(status_code=409, detail="Both transfer bins must belong to stores with a configured warehouse")
 
     roles_upper = {r.upper() for r in (user.roles or [])}
     if ("STORE_MANAGER" in roles_upper or "STORE_KEEPER" in roles_upper) and not bool(roles_upper.intersection({"ADMIN", "SUPERUSER", "WAREHOUSE", "WAREHOUSE_MANAGER"})):
@@ -328,15 +394,22 @@ async def perform_bin_to_bin_transfer(
     )
     src_locs = src_loc_res.scalars().all()
     src_loc_ids = [l.id for l in src_locs]
+    if not src_loc_ids:
+        raise HTTPException(status_code=409, detail=f"Source bin '{src_bin.bin_code}' has no configured inventory location")
 
     src_bal_stmt = select(InventoryLocationBalanceModel).where(
         func.lower(InventoryLocationBalanceModel.material_code) == req.material_code.strip().lower()
     )
     if src_loc_ids:
         src_bal_stmt = src_bal_stmt.where(InventoryLocationBalanceModel.storage_location_id.in_(src_loc_ids))
+    if req.batch_number:
+        src_bal_stmt = src_bal_stmt.where(func.upper(InventoryLocationBalanceModel.batch_number) == req.batch_number.strip().upper())
 
     src_bal_res = await uow.session.execute(src_bal_stmt.with_for_update())
-    src_bal = src_bal_res.scalar_one_or_none()
+    src_balances = src_bal_res.scalars().all()
+    if len(src_balances) > 1:
+        raise HTTPException(status_code=422, detail="Specify a batch number when the source bin holds multiple batches")
+    src_bal = src_balances[0] if src_balances else None
 
     if not src_bal or src_bal.available_quantity < req.quantity:
         avail_val = float(src_bal.available_quantity) if src_bal else 0.0
@@ -344,6 +417,80 @@ async def perform_bin_to_bin_transfer(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Insufficient available quantity in Source Bin '{src_bin.bin_code}'. Available: {avail_val}, Requested: {float(req.quantity)}.",
         )
+
+    src_location = next((location for location in src_locs if location.id == src_bal.storage_location_id), None)
+    if not src_location:
+        raise HTTPException(status_code=409, detail="Source inventory location is no longer active")
+    active_reservations = (await uow.session.execute(
+        select(AssemblyStockReservationModel).where(
+            AssemblyStockReservationModel.material_code == src_bal.material_code,
+            func.upper(AssemblyStockReservationModel.status).in_(["RESERVED", "ACTIVE", "RESERVED FOR ASSEMBLY"]),
+        )
+    )).scalars().all()
+    reserved_here = Decimal("0")
+    for reservation in active_reservations:
+        allocations = reservation.allocations if isinstance(reservation.allocations, list) else []
+        for allocation in allocations:
+            if (
+                str(allocation.get("location_code") or "").strip().upper() == src_location.location_code.upper()
+                and str(allocation.get("batch_number") or allocation.get("batch") or "UNTRACKED").strip().upper() == src_bal.batch_number.upper()
+            ):
+                issued_here = await uow.session.scalar(
+                    select(func.coalesce(func.sum(InventoryIssueTransactionModel.quantity), Decimal("0"))).where(
+                        InventoryIssueTransactionModel.requisition_id == reservation.requisition_id,
+                        InventoryIssueTransactionModel.material_code == src_bal.material_code,
+                        InventoryIssueTransactionModel.batch_number == src_bal.batch_number,
+                        InventoryIssueTransactionModel.source_location_id == src_bal.storage_location_id,
+                    )
+                ) or Decimal("0")
+                reserved_here += max(Decimal("0"), Decimal(str(allocation.get("quantity") or 0)) - Decimal(str(issued_here)))
+    transferable = max(Decimal("0"), Decimal(str(src_bal.available_quantity or 0)) - reserved_here)
+    if req.quantity > transferable:
+        raise HTTPException(status_code=409, detail=f"Only {transferable} {src_bal.uom} is unreserved and transferable from this batch/location")
+
+    if src_bin.zone_id != dest_bin.zone_id or src_bin.rack != dest_bin.rack:
+        await validate_rack_capacity(uow.session, dest_bin, req.quantity, src_bal.uom)
+    if dest_bin.occupied_quantity + req.quantity > dest_bin.capacity:
+        raise HTTPException(status_code=409, detail=f"Destination Bin '{dest_bin.bin_code}' has insufficient capacity")
+
+    src_warehouse = src_store.warehouse_id
+    dest_warehouse = dest_store.warehouse_id
+    source_stock = destination_stock = None
+    if src_warehouse.strip().casefold() != dest_warehouse.strip().casefold():
+        material_row = await uow.session.scalar(
+            select(MaterialModel)
+            .where(MaterialModel.material_code == src_bal.material_code)
+            .with_for_update()
+        )
+        if material_row is None:
+            raise HTTPException(status_code=409, detail=f"Material master '{src_bal.material_code}' was not found")
+        # The material row serializes creation of the first destination stock
+        # aggregate when two transfers enter different bins in one warehouse.
+        source_stock = await uow.session.scalar(
+            select(MaterialStockModel).where(
+                MaterialStockModel.material_code == src_bal.material_code,
+                func.lower(MaterialStockModel.warehouse_id) == src_warehouse.strip().lower(),
+            ).with_for_update()
+        )
+        if not source_stock or source_stock.on_hand < req.quantity or source_stock.available < req.quantity:
+            raise HTTPException(status_code=409, detail="The source warehouse aggregate does not have enough unreserved stock for this transfer")
+        destination_stock = await uow.session.scalar(
+            select(MaterialStockModel).where(
+                MaterialStockModel.material_code == src_bal.material_code,
+                func.lower(MaterialStockModel.warehouse_id) == dest_warehouse.strip().lower(),
+            ).with_for_update()
+        )
+        if destination_stock is None:
+            destination_stock = MaterialStockModel(
+                material_id=material_row.id,
+                material_code=src_bal.material_code,
+                warehouse_id=dest_warehouse,
+                uom=src_bal.uom,
+                on_hand_quantity=Decimal("0"),
+                allocated_quantity=Decimal("0"),
+                available_quantity=Decimal("0"),
+            )
+            uow.session.add(destination_stock)
 
     # 5. Resolve Destination Storage Location & Location Balance
     dest_loc_res = await uow.session.execute(
@@ -355,22 +502,27 @@ async def perform_bin_to_bin_transfer(
         ).with_for_update()
     )
     dest_locs = dest_loc_res.scalars().all()
+    if len(dest_locs) > 1:
+        raise HTTPException(status_code=409, detail="Destination bin has multiple inventory location records; reconcile the location records before transferring")
     dest_loc = dest_locs[0] if dest_locs else None
 
     if not dest_loc:
+        if not dest_bin.zone_id:
+            raise HTTPException(status_code=409, detail="Destination Bin must belong to a configured Zone")
+        dest_zone = await uow.session.get(StoreZoneModel, dest_bin.zone_id)
+        if not dest_zone:
+            raise HTTPException(status_code=409, detail="Destination Bin Zone was not found")
         dest_loc = StorageLocationModel(
-            warehouse_id=dest_bin.warehouse_id or "MAIN",
+            warehouse_id=dest_warehouse,
             store_id=dest_bin.store_id,
             zone_id=dest_bin.zone_id,
             bin_id=dest_bin.id,
-            zone=dest_bin.zone_code or "ZONE",
-            rack=dest_bin.rack or "RACK",
-            shelf=dest_bin.shelf or "SHELF",
+            zone=dest_zone.zone_code,
+            rack=dest_bin.rack or "",
             bin=dest_bin.bin_code,
-            location_code=dest_bin.location_code or f"LOC-{dest_bin.bin_code}",
-            status="ACTIVE",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            location_code=f"LOC-{dest_store.store_code}-{dest_zone.zone_code}-{dest_bin.bin_code}",
+            active=True,
+            capacity=dest_bin.capacity, occupied_quantity=0,
         )
         uow.session.add(dest_loc)
         await uow.session.flush()
@@ -378,6 +530,7 @@ async def perform_bin_to_bin_transfer(
     dest_bal_stmt = select(InventoryLocationBalanceModel).where(
         (func.lower(InventoryLocationBalanceModel.material_code) == req.material_code.strip().lower())
         & (InventoryLocationBalanceModel.storage_location_id == dest_loc.id)
+        & (InventoryLocationBalanceModel.batch_number == src_bal.batch_number)
     )
     dest_bal_res = await uow.session.execute(dest_bal_stmt.with_for_update())
     dest_bal = dest_bal_res.scalar_one_or_none()
@@ -385,8 +538,9 @@ async def perform_bin_to_bin_transfer(
     if not dest_bal:
         dest_bal = InventoryLocationBalanceModel(
             material_code=src_bal.material_code,
+            batch_number=src_bal.batch_number,
             material_name=src_bal.material_name,
-            warehouse_id=dest_bin.warehouse_id or "MAIN",
+            warehouse_id=dest_warehouse,
             storage_location_id=dest_loc.id,
             quantity=Decimal("0.0"),
             available_quantity=Decimal("0.0"),
@@ -403,10 +557,19 @@ async def perform_bin_to_bin_transfer(
     src_bal.quantity -= req.quantity
     src_bal.available_quantity -= req.quantity
     src_bal.updated_at = now_utc
+    await uow.session.flush()  # Release source occupancy before crediting the destination rack.
 
     dest_bal.quantity += req.quantity
     dest_bal.available_quantity += req.quantity
     dest_bal.updated_at = now_utc
+
+    if source_stock and destination_stock:
+        source_stock.on_hand -= req.quantity
+        source_stock.available -= req.quantity
+        source_stock.updated_at = now_utc.replace(tzinfo=None)
+        destination_stock.on_hand += req.quantity
+        destination_stock.available += req.quantity
+        destination_stock.updated_at = now_utc.replace(tzinfo=None)
 
     src_bin.occupied_quantity = max(Decimal("0.0"), (src_bin.occupied_quantity or Decimal("0.0")) - req.quantity)
     src_bin.updated_at = now_utc
@@ -415,16 +578,19 @@ async def perform_bin_to_bin_transfer(
     dest_bin.updated_at = now_utc
 
     # 7. Record Immutable Movement Audit Entry (Section 25)
-    from_loc_str = f"{src_store.store_code if src_store else 'STORE'} / {src_bin.bin_code}"
-    to_loc_str = f"{dest_store.store_code if dest_store else 'STORE'} / {dest_bin.bin_code}"
+    from_loc_str = f"{src_store.store_code} / {src_bin.bin_code}"
+    to_loc_str = f"{dest_store.store_code} / {dest_bin.bin_code}"
     remarks_str = f"Reason: {req.reason}. {req.remarks or ''}".strip()
 
     movement_rec = InventoryMovementHistoryModel(
+        confirmation_id=confirmation_id,
+        confirmation_hash=confirmation_hash if confirmation_id else None,
         movement_type="TRANSFER",
         material_code=src_bal.material_code,
         material_name=src_bal.material_name,
-        material_qr=req.scanned_material_qr or f"QR-{src_bal.material_code}",
+        material_qr=req.scanned_material_qr,
         grn_number=src_bal.last_grn_number,
+        batch_lot=src_bal.batch_number,
         from_location=from_loc_str,
         to_location=to_loc_str,
         from_bin_id=src_bin.id,
@@ -435,7 +601,7 @@ async def perform_bin_to_bin_transfer(
         stock_after=src_bal.available_quantity,
         performed_by=user.username,
         user_role=",".join(user.roles or []),
-        warehouse_id=src_bin.warehouse_id or "MAIN",
+        warehouse_id=src_warehouse,
         store_id=src_bin.store_id,
         store_code=src_store.store_code if src_store else None,
         reference_document="BIN_TRANSFER",
@@ -488,14 +654,13 @@ async def get_material_inventory_detail(
     stk_res = await uow.session.execute(
         select(MaterialStockModel).where(func.lower(MaterialStockModel.material_code) == m_code.lower())
     )
-    stk_obj = stk_res.scalar_one_or_none()
+    stock_rows = stk_res.scalars().all()
+    stk_obj = stock_rows[0] if stock_rows else None
 
     material_name = mat_obj.material_name if mat_obj else (stk_obj.material_name if stk_obj else m_code)
     category = mat_obj.category if mat_obj else (stk_obj.category if stk_obj else "GENERAL")
-    # Material master does not define UOM in this schema; inventory stock is
-    # the authoritative source for the stored unit.
-    uom = getattr(mat_obj, "uom", None) or (stk_obj.uom if stk_obj else "PCS")
-    reorder_point = float(stk_obj.reorder_point) if stk_obj else (float(mat_obj.reorder_point) if mat_obj and hasattr(mat_obj, "reorder_point") else 10.0)
+    uom = getattr(mat_obj, "uom", None) or getattr(mat_obj, "base_uom", None) or (stk_obj.uom if stk_obj else "PCS")
+    reorder_point = sum(float(stock.reorder_point) for stock in stock_rows) if stock_rows else (float(getattr(mat_obj, "reorder_point", 0.0) or 0.0))
 
     # 2. Locations & Location Balances
     loc_bal_res = await uow.session.execute(
@@ -519,8 +684,8 @@ async def get_material_inventory_detail(
         tot_loc_on_hand += tot
         locations_list.append({
             "id": str(bal.id),
-            "store_code": store.store_code if store else "MAIN",
-            "store_name": store.store_name if store else "Main Store",
+            "store_code": store.store_code if store else None,
+            "store_name": store.store_name if store else None,
             "zone_code": zone.zone_code if zone else sloc.zone,
             "zone_name": zone.zone_name if zone else sloc.zone,
             "bin_code": bin_item.bin_code if bin_item else (sloc.bin if sloc.bin and sloc.bin != "DEFAULT" else sloc.location_code),
@@ -556,7 +721,7 @@ async def get_material_inventory_detail(
             "reserved_quantity": r_qty,
             "uom": r.uom,
             "status": r.status,
-            "store_code": r.store_code or "MAIN",
+            "store_code": r.store_code,
             "bin_code": r.bin_code,
             "reserved_by": r.reserved_by,
             "reserved_at": r.reserved_at.isoformat() if r.reserved_at else None,
@@ -566,7 +731,7 @@ async def get_material_inventory_detail(
     tot_hold = 0.0
 
     # Total Stock & Available Stock according to Stock Formula (Section 22)
-    total_stock = float(stk_obj.on_hand_quantity) if stk_obj else max(tot_loc_on_hand, tot_loc_avail + tot_hold)
+    total_stock = sum(float(stock.on_hand_quantity) for stock in stock_rows) if stock_rows else max(tot_loc_on_hand, tot_loc_avail + tot_hold)
     eligible_on_hand = max(0.0, total_stock - tot_hold)
     available_stock = max(0.0, eligible_on_hand - tot_reserved)
 
@@ -761,14 +926,27 @@ async def get_warehouse_inventory_summary(
 
     # Quarantine was removed; no quarantine-held stock is included.
     quar_by_mat: Dict[str, Decimal] = {}
+    quar_by_mat_batch: Dict[tuple[str, str], Decimal] = {}
 
     # 5. Fetch Reserved stock by material
     res_stmt = select(AssemblyStockReservationModel)
     res_db = await uow.session.execute(res_stmt)
     res_by_mat: Dict[str, Decimal] = {}
+    legacy_res_by_mat: Dict[str, Decimal] = {}
+    res_by_location_batch: Dict[tuple[str, str], Decimal] = {}
     for r in res_db.scalars().all():
         if (r.status or "").upper() in ("RESERVED", "ACTIVE", "RESERVED FOR ASSEMBLY"):
             res_by_mat[r.material_code] = res_by_mat.get(r.material_code, Decimal("0.0")) + r.reserved_quantity
+            allocations = r.allocations if isinstance(r.allocations, list) else []
+            if allocations:
+                for allocation in allocations:
+                    location_key = str(allocation.get("location_code") or "").strip().upper()
+                    batch_key = str(allocation.get("batch_number") or allocation.get("batch") or "UNTRACKED").strip().upper()
+                    if location_key:
+                        key = (location_key, batch_key)
+                        res_by_location_batch[key] = res_by_location_batch.get(key, Decimal("0.0")) + Decimal(str(allocation.get("quantity") or 0))
+            else:
+                legacy_res_by_mat[r.material_code] = legacy_res_by_mat.get(r.material_code, Decimal("0.0")) + r.reserved_quantity
 
     # 6. Fetch GRN Receipts / Batches for Supplier lookup
     rcpt_db = await uow.session.execute(select(InventoryReceiptPostingModel))
@@ -799,11 +977,13 @@ async def get_warehouse_inventory_summary(
         )
 
     loc_bal_res = await uow.session.execute(loc_bal_query)
-    balances = loc_bal_res.all()
+    balances = sorted(loc_bal_res.all(), key=lambda row: (row[1].location_code, row[0].material_code, row[0].batch_number))
 
     output: List[Dict[str, Any]] = []
     seen_mat_codes = set()
 
+    legacy_reserved_remaining = dict(legacy_res_by_mat)
+    legacy_quarantine_remaining = dict(quar_by_mat)
     for bal, loc in balances:
         m_code = bal.material_code
         seen_mat_codes.add(m_code)
@@ -815,14 +995,23 @@ async def get_warehouse_inventory_summary(
 
         # Apply Stock Formulas (Section 22)
         on_hand_qty = float(bal.quantity or bal.available_quantity)
-        quar_qty = float(quar_by_mat.get(m_code, Decimal("0.0")))
-        res_qty = float(res_by_mat.get(m_code, Decimal("0.0")))
+        batch_key = (m_code.upper(), (bal.batch_number or "UNTRACKED").upper())
+        exact_quarantine = quar_by_mat_batch.get(batch_key, Decimal("0.0"))
+        legacy_quarantine = min(legacy_quarantine_remaining.get(m_code, Decimal("0.0")), Decimal(str(bal.available_quantity or 0)))
+        legacy_quarantine_remaining[m_code] = max(Decimal("0.0"), legacy_quarantine_remaining.get(m_code, Decimal("0.0")) - legacy_quarantine)
+        quar_qty = float(exact_quarantine + legacy_quarantine)
+        reserve_key = (str(loc.location_code or "").upper(), (bal.batch_number or "UNTRACKED").upper())
+        res_for_location = res_by_location_batch.get(reserve_key)
+        if res_for_location is None:
+            res_for_location = min(legacy_reserved_remaining.get(m_code, Decimal("0.0")), Decimal(str(bal.available_quantity or 0)))
+            legacy_reserved_remaining[m_code] = max(Decimal("0.0"), legacy_reserved_remaining.get(m_code, Decimal("0.0")) - res_for_location)
+        res_qty = float(res_for_location)
         hold_qty = quar_qty
 
-        eligible_on_hand = max(0.0, on_hand_qty - hold_qty)
+        eligible_on_hand = max(0.0, float(bal.available_quantity or 0) - hold_qty)
         available_qty = max(0.0, eligible_on_hand - res_qty)
 
-        bin_code_val = b_obj.bin_code if b_obj else (loc.bin if loc.bin and loc.bin != "DEFAULT" else "A03-02-04")
+        bin_code_val = b_obj.bin_code if b_obj else (loc.bin if loc.bin and loc.bin != "DEFAULT" else None)
         loc_code_val = loc.location_code or bin_code_val
         batch_details: list[dict[str, Any]] = []
         try:
@@ -854,7 +1043,7 @@ async def get_warehouse_inventory_summary(
             ]
         except Exception:
             batch_details = []
-        batch_num = (batch_details[0]["batch_number"] if batch_details else None) or bal.last_grn_number or f"BT-{m_code.replace('MAT-', '')}-101"
+        batch_num = bal.batch_number or (batch_details[0]["batch_number"] if batch_details else None) or bal.last_grn_number or f"BT-{m_code.replace('MAT-', '')}-101"
         supp_name = supplier_by_mat.get(m_code, "Precision Metal Supplies")
         grn_num = bal.last_grn_number or grn_by_mat.get(m_code, f"GRN-2026-{m_code[-3:]}")
 
@@ -920,8 +1109,8 @@ async def get_warehouse_inventory_summary(
             "grn": grn_num,
             "grn_number": grn_num,
             "store_id": str(loc.store_id) if loc.store_id else None,
-            "store_code": s_obj.store_code if s_obj else "MAIN",
-            "store_name": s_obj.store_name if s_obj else "Main Store",
+            "store_code": s_obj.store_code if s_obj else None,
+            "store_name": s_obj.store_name if s_obj else None,
             "zone_id": str(loc.zone_id) if loc.zone_id else None,
             "zone_code": z_obj.zone_code if z_obj else loc.zone,
             "zone_name": z_obj.zone_name if z_obj else loc.zone,
@@ -930,8 +1119,8 @@ async def get_warehouse_inventory_summary(
             "bin_code": bin_code_val,
             "location": bin_code_val,
             "location_code": loc_code_val,
-            "warehouse_id": loc.warehouse_id or (s_obj.warehouse_id if s_obj else "Main Warehouse"),
-            "warehouse": loc.warehouse_id or (s_obj.warehouse_id if s_obj else "Main Warehouse"),
+            "warehouse_id": loc.warehouse_id or (s_obj.warehouse_id if s_obj else None),
+            "warehouse": loc.warehouse_id or (s_obj.warehouse_id if s_obj else None),
             "available": available_qty,
             "available_quantity": available_qty,
             "reserved": res_qty,
@@ -946,8 +1135,8 @@ async def get_warehouse_inventory_summary(
             "status": stk_status,
             "stock_status": stk_status,
             "qc_status": qc_stat,
-            "expiry": "2028-12-31",
-            "expiry_date": "2028-12-31",
+            "expiry": None,
+            "expiry_date": None,
             "last_grn_number": grn_num,
             "updated_at": bal.updated_at.isoformat() if bal.updated_at else datetime.now(timezone.utc).isoformat(),
         }
@@ -964,8 +1153,8 @@ async def get_warehouse_inventory_summary(
                 on_hand_qty = float(stk.on_hand_quantity)
                 eligible_on_hand = max(0.0, on_hand_qty - hold_qty)
                 available_qty = max(0.0, eligible_on_hand - res_qty)
-                batch_num = f"BT-{m_code.replace('MAT-', '')}-101"
-                grn_num = grn_by_mat.get(m_code, f"GRN-2026-{m_code[-3:]}")
+                batch_num = None
+                grn_num = grn_by_mat.get(m_code)
 
                 stk_status = "AVAILABLE" if available_qty > 0 else "OUT_OF_STOCK"
                 output.append({
@@ -976,8 +1165,8 @@ async def get_warehouse_inventory_summary(
                     "category": getattr(mat_obj, "category", None) or "General",
                     "batch": batch_num,
                     "batch_number": batch_num,
-                    "supplier": "Central Receiving Vendor",
-                    "supplier_name": "Central Receiving Vendor",
+                    "supplier": supplier_by_mat.get(m_code),
+                    "supplier_name": supplier_by_mat.get(m_code),
                     "grn": grn_num,
                     "grn_number": grn_num,
                     "store_id": None,
@@ -988,11 +1177,11 @@ async def get_warehouse_inventory_summary(
                     "zone_name": "Receiving Dock",
                     "zone": "RECEIVING_AREA",
                     "storage_location_id": None,
-                    "bin_code": "DOCK-01",
-                    "location": "DOCK-01",
+                    "bin_code": None,
+                    "location": None,
                     "location_code": "RECEIVING_AREA",
-                    "warehouse_id": "Main Warehouse",
-                    "warehouse": "Main Warehouse",
+                    "warehouse_id": stk.warehouse_id,
+                    "warehouse": stk.warehouse_id,
                     "available": available_qty,
                     "available_quantity": available_qty,
                     "reserved": res_qty,
@@ -1007,8 +1196,8 @@ async def get_warehouse_inventory_summary(
                     "status": stk_status,
                     "stock_status": stk_status,
                     "qc_status": "PASSED",
-                    "expiry": "2028-12-31",
-                    "expiry_date": "2028-12-31",
+                    "expiry": None,
+                    "expiry_date": None,
                     "last_grn_number": grn_num,
                     "updated_at": stk.updated_at.isoformat() if stk.updated_at else datetime.now(timezone.utc).isoformat(),
                 })
@@ -1364,13 +1553,19 @@ async def get_inventory_stats(
         total_skus = len(set(b[0].material_code for b in bals))
         total_available = sum(float(b[0].available_quantity) for b in bals)
         stock_codes = {b[0].material_code for b in bals}
-        stock_res = await uow.session.execute(select(MaterialStockModel).where(MaterialStockModel.material_code.in_(stock_codes))) if stock_codes else None
+        store_obj = await uow.session.get(StoreModel, user_store_id)
+        stock_res = await uow.session.execute(
+            select(MaterialStockModel).where(
+                MaterialStockModel.material_code.in_(stock_codes),
+                MaterialStockModel.warehouse_id == (store_obj.warehouse_id if store_obj else ""),
+            )
+        ) if stock_codes else None
         stock_by_code = {s.material_code: s for s in (stock_res.scalars().all() if stock_res else [])}
         by_material = {}
         for bal, loc in bals:
             by_material.setdefault(bal.material_code, 0.0)
             by_material[bal.material_code] += float(bal.available_quantity or 0)
-        low_codes = [code for code, qty in by_material.items() if qty < float(getattr(stock_by_code.get(code), "reorder_point", 10.0))]
+        low_codes = [code for code, qty in by_material.items() if qty < float(getattr(stock_by_code.get(code), "reorder_point", 0.0))]
         out_codes = [code for code, qty in by_material.items() if qty <= 0]
         return {
             "total_skus": total_skus,
@@ -1471,7 +1666,11 @@ async def get_warehouse_dashboard_metrics(
     loc_stock_res = await uow.session.execute(
         select(InventoryLocationBalanceModel, StorageLocationModel, MaterialStockModel)
         .join(StorageLocationModel, StorageLocationModel.id == InventoryLocationBalanceModel.storage_location_id)
-        .join(MaterialStockModel, MaterialStockModel.material_code == InventoryLocationBalanceModel.material_code)
+        .join(
+            MaterialStockModel,
+            (MaterialStockModel.material_code == InventoryLocationBalanceModel.material_code)
+            & (MaterialStockModel.warehouse_id == InventoryLocationBalanceModel.warehouse_id),
+        )
     )
     store_material_totals = {}
     store_material_meta = {}
@@ -1674,6 +1873,7 @@ async def get_warehouse_dashboard_metrics(
 class TakeawayRequest(BaseModel):
     bin_scan: str
     material_scan: str
+    batch_number: Optional[str] = None
     quantity: Decimal
     remarks: Optional[str] = None
     reference_document: Optional[str] = None
@@ -1727,7 +1927,7 @@ async def perform_takeaway(
 
     if bin_obj is None:
         bq = await uow.session.execute(
-            select(StoreBinModel).where(func.upper(StoreBinModel.bin_code) == str(bin_identifier).strip().upper())
+            select(StoreBinModel).where(or_(func.upper(StoreBinModel.bin_code) == str(bin_identifier).strip().upper(), func.upper(StoreBinModel.qr_identifier) == str(bin_identifier).strip().upper()))
         )
         bin_obj = bq.scalar_one_or_none()
 
@@ -1736,6 +1936,8 @@ async def perform_takeaway(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Scanned Bin '{bin_raw}' not found in any store.",
         )
+
+    bin_obj = await uow.session.scalar(select(StoreBinModel).where(StoreBinModel.id == bin_obj.id).with_for_update().execution_options(populate_existing=True))
 
     # 2. Store isolation & RBAC check
     target_store = await uow.session.get(StoreModel, bin_obj.store_id)
@@ -1765,13 +1967,25 @@ async def perform_takeaway(
     # 3. Resolve Material
     mat_raw = req.material_scan.strip()
     cleaned_mat_code = mat_raw
+    batch_number = req.batch_number.strip() if req.batch_number else None
     if mat_raw.startswith("{") and mat_raw.endswith("}"):
         try:
             import json as _json
             parsed = _json.loads(mat_raw)
             cleaned_mat_code = parsed.get("item_code") or parsed.get("material_code") or parsed.get("barcode_value") or mat_raw
+            batch_number = batch_number or parsed.get("batch_number") or parsed.get("batch")
         except Exception:
             cleaned_mat_code = mat_raw
+
+    # Downloaded GRN batch labels use readable key/value text as well as JSON.
+    for line in mat_raw.splitlines():
+        key, separator, value = line.partition(":")
+        if separator:
+            normalized = key.strip().lower().replace(" ", "_")
+            if normalized in {"material_code", "item_code"}:
+                cleaned_mat_code = value.strip()
+            elif normalized in {"batch", "batch_number"}:
+                batch_number = batch_number or value.strip()
 
     if cleaned_mat_code.upper().startswith("QR-MAT-"):
         cleaned_mat_code = cleaned_mat_code[7:]
@@ -1782,6 +1996,9 @@ async def perform_takeaway(
     qr_batch = await uow.session.scalar(select(GrnBatchQrModel).where(GrnBatchQrModel.qr_code == mat_raw))
     if qr_batch and qr_batch.item_code:
         cleaned_mat_code = qr_batch.item_code
+        if not batch_number:
+            from app.modules.receiving.infrastructure.persistence.models import GrnBatchModel
+            batch_number = await uow.session.scalar(select(GrnBatchModel.batch_number).where(GrnBatchModel.id == qr_batch.batch_id))
     else:
         hu_match = await uow.session.scalar(
             select(HandlingUnitModel).where(
@@ -1793,6 +2010,7 @@ async def perform_takeaway(
         )
         if hu_match and hu_match.item_code:
             cleaned_mat_code = hu_match.item_code
+            batch_number = batch_number or hu_match.batch_number
 
     # 4. Find Storage Location for this Bin
     loc_res = await uow.session.execute(
@@ -1808,6 +2026,8 @@ async def perform_takeaway(
     )
     storage_locs = loc_res.scalars().all()
     loc_ids = [loc.id for loc in storage_locs]
+    if not loc_ids:
+        raise HTTPException(409, "This rack has no stored inventory")
 
     # 5. Find Inventory Location Balance
     bal_query = select(InventoryLocationBalanceModel).where(
@@ -1815,8 +2035,13 @@ async def perform_takeaway(
     )
     if loc_ids:
         bal_query = bal_query.where(InventoryLocationBalanceModel.storage_location_id.in_(loc_ids))
+    if batch_number:
+        bal_query = bal_query.where(func.upper(InventoryLocationBalanceModel.batch_number) == batch_number.upper())
     bal_res = await uow.session.execute(bal_query.with_for_update())
-    balance = bal_res.scalar_one_or_none()
+    candidate_balances = bal_res.scalars().all()
+    if not batch_number and len(candidate_balances) > 1:
+        raise HTTPException(status_code=422, detail="Scan a batch-specific material label or provide a batch number")
+    balance = candidate_balances[0] if candidate_balances else None
 
     if balance is None or balance.available_quantity <= 0:
         raise HTTPException(
@@ -1830,9 +2055,33 @@ async def perform_takeaway(
             detail=f"Insufficient quantity available in Bin '{bin_obj.bin_code}'. Available: {balance.available_quantity} {balance.uom}, Requested: {req.quantity}.",
         )
 
+    reservations = (await uow.session.scalars(select(AssemblyStockReservationModel).where(
+        AssemblyStockReservationModel.material_code == balance.material_code,
+        func.upper(AssemblyStockReservationModel.status).in_(["RESERVED", "ACTIVE", "RESERVED FOR ASSEMBLY"])))).all()
+    reserved = Decimal("0")
+    for reservation in reservations:
+        for allocation in (reservation.allocations or []):
+            if not isinstance(allocation, dict):
+                continue
+            if (str(allocation.get("location_code") or "").upper() in {loc.location_code.upper() for loc in storage_locs}
+                and str(allocation.get("batch_number") or allocation.get("batch") or "UNTRACKED").upper() == balance.batch_number.upper()):
+                issued = await uow.session.scalar(select(func.coalesce(func.sum(InventoryIssueTransactionModel.quantity), 0)).where(
+                    InventoryIssueTransactionModel.requisition_id == reservation.requisition_id,
+                    InventoryIssueTransactionModel.material_code == balance.material_code,
+                    InventoryIssueTransactionModel.batch_number == balance.batch_number,
+                    InventoryIssueTransactionModel.source_location_id == balance.storage_location_id)) or 0
+                reserved += max(Decimal("0"), Decimal(str(allocation.get("quantity") or 0)) - issued)
+    if req.quantity > balance.available_quantity - reserved:
+        raise HTTPException(409, "Quantity is reserved for assembly. Use the approved picking task or release the reservation first.")
+
     # 6. Fetch MaterialStockModel
+    if not target_store.warehouse_id:
+        raise HTTPException(status_code=409, detail="Selected Store has no configured warehouse")
     stock_res = await uow.session.execute(
-        select(MaterialStockModel).where(MaterialStockModel.material_code == balance.material_code).with_for_update()
+        select(MaterialStockModel).where(
+            MaterialStockModel.material_code == balance.material_code,
+            MaterialStockModel.warehouse_id == target_store.warehouse_id,
+        ).with_for_update()
     )
     stock = stock_res.scalar_one_or_none()
     stock_before = stock.available if stock else balance.available_quantity
@@ -1859,12 +2108,12 @@ async def perform_takeaway(
 
     # 8. Record Inventory Movement History
     movement_rec = InventoryMovementHistoryModel(
-        movement_type="TAKEAWAY",
+        movement_type="ADJUSTMENT" if req.reference_document == "RACK_ADJUSTMENT" else "TAKEAWAY",
         material_code=balance.material_code,
         material_name=balance.material_name,
         material_qr=req.material_scan.strip(),
         grn_number=balance.last_grn_number,
-        batch_lot=None,
+        batch_lot=balance.batch_number,
         from_location=f"{target_store.store_code} / {bin_obj.bin_code}",
         to_location="OUTBOUND / TAKEAWAY",
         from_bin_id=bin_obj.id,
@@ -1875,7 +2124,7 @@ async def perform_takeaway(
         stock_after=stock_after,
         performed_by=user.username,
         user_role=",".join(user.roles or []),
-        warehouse_id=target_store.warehouse_id or "MAIN",
+        warehouse_id=target_store.warehouse_id,
         store_id=target_store.id,
         store_code=target_store.store_code,
         reference_document=req.reference_document or "TAKEAWAY",
@@ -1890,6 +2139,7 @@ async def perform_takeaway(
         "message": f"Successfully executed takeaway of {float(req.quantity)} {balance.uom} for {balance.material_name} ({balance.material_code})",
         "movement_id": str(movement_rec.id),
         "material_code": balance.material_code,
+        "batch_number": balance.batch_number,
         "material_name": balance.material_name,
         "bin_code": bin_obj.bin_code,
         "store_code": target_store.store_code,
@@ -2210,6 +2460,8 @@ async def get_material_issues(
             "requisition_number": r.requisition_number,
             "material_code": r.material_code,
             "material_name": r.material_name,
+            "batch_number": r.batch_number,
+            "source_location_id": str(r.source_location_id) if r.source_location_id else None,
             "quantity": float(r.quantity),
             "uom": r.uom,
             "issued_to": r.recipient_department,
@@ -2447,7 +2699,7 @@ async def create_cycle_count_task(
             bin_code=sloc.bin or sloc.location_code,
             material_code=bal.material_code,
             material_name=bal.material_name,
-            batch_number=bal.last_grn_number,
+            batch_number=bal.batch_number,
             system_quantity=bal.available_quantity,
             physical_quantity=None,
             variance_quantity=None,
@@ -2624,14 +2876,21 @@ async def create_stock_adjustment(
     adj_qty = req.adjustment_quantity
 
     # Fetch Location Balance & Stock
-    bal_res = await uow.session.execute(
+    balance_query = (
         select(InventoryLocationBalanceModel)
+        .join(StorageLocationModel, StorageLocationModel.id == InventoryLocationBalanceModel.storage_location_id)
         .where(
-            (func.lower(InventoryLocationBalanceModel.material_code) == m_code.lower())
+            func.lower(InventoryLocationBalanceModel.material_code) == m_code.lower(),
+            func.lower(StorageLocationModel.location_code) == loc_code.lower(),
         )
-        .with_for_update()
     )
-    bal_obj = bal_res.scalars().first()
+    if req.batch_number:
+        balance_query = balance_query.where(func.upper(InventoryLocationBalanceModel.batch_number) == req.batch_number.upper())
+    bal_res = await uow.session.execute(balance_query.with_for_update())
+    matching_balances = bal_res.scalars().all()
+    if not req.batch_number and len(matching_balances) > 1:
+        raise HTTPException(status_code=422, detail="Specify the batch number for a multi-batch location adjustment")
+    bal_obj = matching_balances[0] if matching_balances else None
 
     stk_res = await uow.session.execute(
         select(MaterialStockModel).where(func.lower(MaterialStockModel.material_code) == m_code.lower()).with_for_update()
@@ -2667,7 +2926,7 @@ async def create_stock_adjustment(
         adjustment_number=adjustment_number,
         material_code=m_code,
         material_name=bal_obj.material_name if bal_obj else (stk_obj.material_name if stk_obj else m_code),
-        batch_number=req.batch_number,
+        batch_number=bal_obj.batch_number if bal_obj else req.batch_number,
         location_code=loc_code,
         current_quantity=curr_qty,
         adjustment_quantity=adj_qty,
@@ -2689,6 +2948,7 @@ async def create_stock_adjustment(
             movement_type="ADJUSTMENT",
             material_code=m_code,
             material_name=adj_rec.material_name,
+            batch_lot=adj_rec.batch_number,
             from_location=loc_code,
             to_location=loc_code,
             quantity=adj_qty,
