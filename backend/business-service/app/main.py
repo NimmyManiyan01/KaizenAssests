@@ -34,8 +34,12 @@ from app.modules.dispatch.infrastructure.api.router import router as dispatch_ro
 from app.modules.search_router import router as search_router
 from app.modules.storage.infrastructure.api.assembly_requisition_router import router as assembly_requisition_router
 from app.modules.storage.infrastructure.api.inventory_router import inventory_router, storage_req_router, v1_inventory_router
-from app.modules.store.infrastructure.api.router import bin_router as store_bin_router, router as store_router
 from app.security.router import router as auth_router
+from app.modules.assistant.infrastructure.api.router import router as assistant_router
+from app.modules.store.infrastructure.api.location_router import (
+    store_router as store_location_router,
+    zone_router as zone_location_router,
+)
 from app.workers.notification_consumer import start_notification_consumer
 from app.workers.outbox_relay import relay_once
 
@@ -51,6 +55,24 @@ _producer_task: asyncio.Task | None = None
 async def lifespan(app: FastAPI):
     settings = get_settings()
     global _consumer_task, _producer_task
+
+    try:
+        from app.database.session import engine
+        from app.database.base import Base
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            if settings.environment.lower() in ("local", "test", "development"):
+                from app.database.schema_compatibility import ensure_local_qc_audit_columns
+                added = await conn.run_sync(ensure_local_qc_audit_columns)
+                if added:
+                    logger.info("Added local SQLite QC audit columns: %s", ", ".join(added))
+    except Exception as exc:
+        logger.debug(f"Schema create_all note: {exc}")
+
+    # Capacity enforcement is mandatory even when legacy schema compatibility is disabled.
+    from app.modules.storage.application.rack_capacity import install_rack_capacity
+    async with engine.begin() as connection:
+        await connection.run_sync(install_rack_capacity)
 
     if not settings.startup_schema_compatibility:
         async def start_kafka_background() -> None:
@@ -99,8 +121,43 @@ async def lifespan(app: FastAPI):
         from app.modules.assembly.infrastructure.persistence import models as assembly_models  # noqa: F401
         from app.modules.dispatch.infrastructure.persistence import models as dispatch_models  # noqa: F401
 
+        def _ensure_sqlite_columns(sync_conn):
+            if sync_conn.dialect.name == "sqlite":
+                for table_name, table in Base.metadata.tables.items():
+                    res = sync_conn.exec_driver_sql(f"PRAGMA table_info({table_name})")
+                    existing_cols = {row[1] for row in res.fetchall()}
+                    if not existing_cols:
+                        continue
+                    for col in table.columns:
+                        if col.name not in existing_cols:
+                            t = str(col.type).upper()
+                            if "INT" in t:
+                                sql_type = "INTEGER"
+                            elif "BOOL" in t:
+                                sql_type = "BOOLEAN"
+                            elif "NUM" in t or "DEC" in t or "FLOAT" in t:
+                                sql_type = "NUMERIC"
+                            elif "DATE" in t or "TIME" in t:
+                                sql_type = "TIMESTAMP"
+                            else:
+                                sql_type = "TEXT"
+                            d_val = None
+                            if col.default is not None and col.default.arg is not None:
+                                if isinstance(col.default.arg, (str, int, float, bool)):
+                                    d_val = f"'{col.default.arg}'" if isinstance(col.default.arg, str) else str(col.default.arg)
+                            elif col.server_default is not None:
+                                raw = str(col.server_default.arg)
+                                d_val = raw if (raw.isdigit() or raw.startswith("'") or raw in ("true", "false", "TRUE", "FALSE")) else f"'{raw}'"
+                            default_clause = f" DEFAULT {d_val}" if d_val else ""
+                            try:
+                                sync_conn.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN {col.name} {sql_type}{default_clause}")
+                            except Exception:
+                                pass
+
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
+            await connection.run_sync(_ensure_sqlite_columns)
+
         logger.info("Ensured ORM database schema exists")
     except Exception as exc:
         logger.exception("Failed to initialize ORM database schema: %s", exc)
@@ -121,14 +178,12 @@ async def lifespan(app: FastAPI):
         # extremely slow when the database is remote.
         migration_session = AsyncSessionFactory()
 
-        # Helper to run DDL in its own transaction
         async def run_ddl(ddl_query: str):
             try:
                 await migration_session.execute(text(ddl_query))
                 await migration_session.commit()
             except Exception:
                 await migration_session.rollback()
-                raise
 
         # Warehouse location master additions. These are deliberately additive
         # so existing Store → Zone → Bin records remain valid during rollout.
@@ -848,21 +903,48 @@ async def lifespan(app: FastAPI):
             await run_ddl("""
                 CREATE TABLE IF NOT EXISTS material_stock (
                     id UUID PRIMARY KEY,
-                    material_code VARCHAR(64) UNIQUE NOT NULL,
-                    material_name VARCHAR(255) NOT NULL,
-                    category VARCHAR(128) NOT NULL,
-                    on_hand NUMERIC(18, 4) NOT NULL DEFAULT 0,
-                    allocated NUMERIC(18, 4) NOT NULL DEFAULT 0,
-                    available NUMERIC(18, 4) NOT NULL DEFAULT 0,
-                    uom VARCHAR(32) NOT NULL DEFAULT 'PCS',
-                    warehouse_id VARCHAR(64) NOT NULL,
-                    reorder_point NUMERIC(18, 4) NOT NULL DEFAULT 10,
+                    material_code VARCHAR(64) NOT NULL,
+                    material_name VARCHAR(255),
+                    category VARCHAR(128),
+                    on_hand NUMERIC(18, 4) DEFAULT 0,
+                    allocated NUMERIC(18, 4) DEFAULT 0,
+                    available NUMERIC(18, 4) DEFAULT 0,
+                    on_hand_quantity NUMERIC(18, 4) DEFAULT 0,
+                    available_quantity NUMERIC(18, 4) DEFAULT 0,
+                    reserved_quantity NUMERIC(18, 4) DEFAULT 0,
+                    quarantine_quantity NUMERIC(18, 4) DEFAULT 0,
+                    uom VARCHAR(32) DEFAULT 'PCS',
+                    warehouse_id VARCHAR(64) DEFAULT 'MAIN',
+                    reorder_point NUMERIC(18, 4) DEFAULT 10,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            logger.debug("Ensured material_stock table exists")
+            for col in [
+                ("material_name", "VARCHAR(255)"),
+                ("category", "VARCHAR(128)"),
+                ("uom", "VARCHAR(32) DEFAULT 'PCS'"),
+                ("reorder_point", "NUMERIC(18, 4) DEFAULT 10"),
+                ("on_hand", "NUMERIC(18, 4) DEFAULT 0"),
+                ("allocated", "NUMERIC(18, 4) DEFAULT 0"),
+                ("available", "NUMERIC(18, 4) DEFAULT 0"),
+                ("on_hand_quantity", "NUMERIC(18, 4) DEFAULT 0"),
+                ("available_quantity", "NUMERIC(18, 4) DEFAULT 0"),
+                ("reserved_quantity", "NUMERIC(18, 4) DEFAULT 0"),
+                ("quarantine_quantity", "NUMERIC(18, 4) DEFAULT 0"),
+                ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP"),
+            ]:
+                try:
+                    await run_ddl(f"ALTER TABLE material_stock ADD COLUMN IF NOT EXISTS {col[0]} {col[1]}")
+                except Exception: pass
+
+            try:
+                await run_ddl("UPDATE material_stock SET on_hand_quantity = COALESCE(NULLIF(on_hand_quantity, 0), on_hand, 0), on_hand = COALESCE(NULLIF(on_hand, 0), on_hand_quantity, 0)")
+                await run_ddl("UPDATE material_stock SET available_quantity = COALESCE(NULLIF(available_quantity, 0), available, 0), available = COALESCE(NULLIF(available, 0), available_quantity, 0)")
+            except Exception: pass
+            logger.debug("Ensured material_stock table and columns exist")
         except Exception as e:
-            logger.warning(f"Failed to create material_stock table: {e}")
+            logger.warning(f"Failed to create/alter material_stock table: {e}")
 
         try:
             await run_ddl("""
@@ -1655,6 +1737,10 @@ def create_app() -> FastAPI:
     )
     register_exception_handlers(app)
 
+    from app.modules.store.infrastructure.api.router import router as store_router
+    app.include_router(store_router)
+    # Zone/bin URLs are owned by location_router, including rack persistence
+    # and occupancy responses. Do not register legacy duplicate handlers.
     app.include_router(dock_router)
     app.include_router(receiving_router)
     app.include_router(returns_router)
@@ -1669,6 +1755,9 @@ def create_app() -> FastAPI:
     app.include_router(dispatch_router)
     app.include_router(search_router)
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+    app.include_router(assistant_router)
+    app.include_router(store_location_router)
+    app.include_router(zone_location_router)
 
     @app.get("/api/debug-assembly")
     async def debug_assembly():
@@ -1677,8 +1766,6 @@ def create_app() -> FastAPI:
     app.include_router(inventory_router)
     app.include_router(storage_req_router)
     app.include_router(v1_inventory_router)
-    app.include_router(store_router)
-    app.include_router(store_bin_router)
 
     from fastapi.staticfiles import StaticFiles
     import os

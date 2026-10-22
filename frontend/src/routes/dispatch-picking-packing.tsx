@@ -1,4 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { hasRole } from "@/lib/auth-utils";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Package,
@@ -22,11 +23,15 @@ import QRCode from "qrcode";
 import jsQR from "jsqr";
 
 export const Route = createFileRoute("/dispatch-picking-packing")({
+  beforeLoad: () => {
+    if (hasRole(["ASSEMBLY", "ASSEMBLY_MANAGER"])) throw redirect({ to: "/assembly/dispatch" });
+  },
   component: DispatchPickingPackingPage,
 });
 
 function DispatchPickingPackingPage() {
   const [loading, setLoading] = useState(true);
+  const [dispatchSearch, setDispatchSearch] = useState("");
   const [dispatches, setDispatches] = useState<any[]>([]);
   const [selectedDispatchId, setSelectedDispatchId] = useState<string>("");
   const [selectedDispatch, setSelectedDispatch] = useState<any | null>(null);
@@ -378,14 +383,14 @@ function DispatchPickingPackingPage() {
           <Card className="rounded-2xl p-6 shadow-sm border-border/80 bg-card space-y-6">
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4">
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <div className="grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
                   <Package className="size-6" />
                 </div>
                 <div>
                   <h2 className="text-lg font-bold tracking-tight">PICKING & PACKING</h2>
                   <p className="text-xs text-muted-foreground font-mono">
-                    Unified Execution Terminal
+                    Select dispatch, pick materials, then record packing
                   </p>
                 </div>
               </div>
@@ -393,17 +398,35 @@ function DispatchPickingPackingPage() {
                 <Label className="text-xs font-bold uppercase text-muted-foreground">
                   Select Dispatch:
                 </Label>
+                <Input
+                  aria-label="Search dispatch selector"
+                  placeholder="Search dispatch or customer..."
+                  value={dispatchSearch}
+                  onChange={(event) => setDispatchSearch(event.target.value)}
+                  className="h-9 w-full rounded-xl text-xs sm:w-52"
+                />
                 <select
+                  aria-label="Select dispatch for picking and packing"
                   value={selectedDispatchId}
                   onChange={(e) => handleSelectDispatch(e.target.value)}
                   className="rounded-xl border border-input bg-background px-3 py-2 text-xs font-bold shadow-sm focus:ring-2 focus:ring-primary text-primary font-mono"
                 >
                   <option value="">-- Choose Dispatch --</option>
-                  {dispatches.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.dispatch_number} - {d.customer_name}
-                    </option>
-                  ))}
+                  {dispatches
+                    .filter(
+                      (d) =>
+                        d.id === selectedDispatchId ||
+                        [d.dispatch_number, d.customer_name].some((value) =>
+                          String(value || "")
+                            .toLowerCase()
+                            .includes(dispatchSearch.trim().toLowerCase()),
+                        ),
+                    )
+                    .map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.dispatch_number} - {d.customer_name}
+                      </option>
+                    ))}
                 </select>
               </div>
             </div>

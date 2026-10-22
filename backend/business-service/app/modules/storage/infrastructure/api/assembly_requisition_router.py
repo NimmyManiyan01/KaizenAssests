@@ -701,6 +701,10 @@ async def create_assembly_requisition(
 
     now_utc = datetime.now(timezone.utc)
     current_year = now_utc.year
+    if not (req.warehouse_id or "").strip():
+        raise HTTPException(status_code=422, detail="A warehouse is required to create a material request")
+    if not (user.username or "").strip():
+        raise HTTPException(status_code=422, detail="Authenticated requester identity is required")
 
     # Generate sequential requisition number AR-YYYY-XXXX
     count_stmt = select(func.count(AssemblyRequisitionModel.id)).where(
@@ -1222,7 +1226,10 @@ async def reserve_assembly_requisition_stock(
 
         # Check warehouse stock & location balances
         stk_res = await uow.session.execute(
-            select(MaterialStockModel).where(MaterialStockModel.material_code == it.material_code).with_for_update()
+            select(MaterialStockModel).where(
+                MaterialStockModel.material_code == it.material_code,
+                func.lower(MaterialStockModel.warehouse_id) == req.warehouse_id.strip().lower(),
+            ).with_for_update()
         )
         stk_obj = stk_res.scalar_one_or_none()
         stk_avail = Decimal(str(stk_obj.available or 0)) if stk_obj else Decimal("0.0")
@@ -1230,6 +1237,7 @@ async def reserve_assembly_requisition_stock(
         # Quarantined
         quar_stmt = select(func.coalesce(func.sum(QuarantineRecordModel.damaged_quantity), Decimal("0.0"))).where(
             QuarantineRecordModel.item_code == it.material_code,
+            func.lower(QuarantineRecordModel.warehouse_id) == req.warehouse_id.strip().lower(),
             QuarantineRecordModel.status.in_(["PENDING_REVIEW", "QUARANTINED"]),
         )
         quar_res = await uow.session.execute(quar_stmt)
@@ -1237,7 +1245,8 @@ async def reserve_assembly_requisition_stock(
 
         # Location balance
         loc_lock_stmt = select(InventoryLocationBalanceModel).where(
-            InventoryLocationBalanceModel.material_code == it.material_code
+            InventoryLocationBalanceModel.material_code == it.material_code,
+            func.lower(InventoryLocationBalanceModel.warehouse_id) == req.warehouse_id.strip().lower(),
         ).with_for_update()
         loc_balances = (await uow.session.execute(loc_lock_stmt)).scalars().all()
         loc_avail = sum((Decimal(str(row.available_quantity or 0)) for row in loc_balances), Decimal("0"))
@@ -1263,18 +1272,43 @@ async def reserve_assembly_requisition_stock(
 
         it.reserved_quantity = new_reserved
 
+        # Track reservations against their physical batch/location allocations
+        # so a second requisition cannot reuse the same shelf quantity.
+        other_reservations = (await uow.session.execute(
+            select(AssemblyStockReservationModel).where(
+                AssemblyStockReservationModel.material_code == it.material_code,
+                AssemblyStockReservationModel.requisition_id != req.id,
+                func.upper(AssemblyStockReservationModel.status).in_(["RESERVED", "ACTIVE", "RESERVED FOR ASSEMBLY"]),
+            )
+        )).scalars().all()
+        reserved_by_location_batch: dict[tuple[str, str], Decimal] = {}
+        for other_reservation in other_reservations:
+            allocations = other_reservation.allocations if isinstance(other_reservation.allocations, list) else []
+            if allocations:
+                for allocation in allocations:
+                    location_key = str(allocation.get("location_code") or "").strip().upper()
+                    batch_key = str(allocation.get("batch_number") or allocation.get("batch") or "UNTRACKED").strip().upper()
+                    if location_key:
+                        key = (location_key, batch_key)
+                        reserved_by_location_batch[key] = reserved_by_location_batch.get(key, Decimal("0")) + Decimal(str(allocation.get("quantity") or 0))
+            elif other_reservation.location_code:
+                key = (other_reservation.location_code.strip().upper(), "UNTRACKED")
+                reserved_by_location_batch[key] = reserved_by_location_batch.get(key, Decimal("0")) + Decimal(str(other_reservation.reserved_quantity or 0))
+
         # Find location details (store, zone, bin) for this material
         loc_stmt = (
             select(
                 StorageLocationModel,
                 StoreModel,
                 InventoryLocationBalanceModel.available_quantity,
+                InventoryLocationBalanceModel.batch_number,
             )
             .join(StorageLocationModel, InventoryLocationBalanceModel.storage_location_id == StorageLocationModel.id)
             .outerjoin(StoreModel, StorageLocationModel.store_id == StoreModel.id)
             .where(
                 InventoryLocationBalanceModel.material_code == it.material_code,
                 InventoryLocationBalanceModel.available_quantity > 0,
+                func.lower(StorageLocationModel.warehouse_id) == req.warehouse_id.strip().lower(),
             )
             # FIFO: oldest location balance first; availability is a
             # constraint, not the ordering policy.
@@ -1298,10 +1332,15 @@ async def reserve_assembly_requisition_stock(
         # be ordered by an explicit FEFO location policy in a later extension.
         remaining_to_allocate = new_reserved
         for row in loc_rows:
-            storage_loc, store_obj, available_qty = row
+            storage_loc, store_obj, available_qty, batch_number = row
             if remaining_to_allocate <= 0:
                 break
-            allocated_qty = min(remaining_to_allocate, Decimal(str(available_qty or 0)))
+            already_reserved = reserved_by_location_batch.get(
+                (storage_loc.location_code.strip().upper(), (batch_number or "UNTRACKED").upper()),
+                Decimal("0"),
+            )
+            free_qty = max(Decimal("0"), Decimal(str(available_qty or 0)) - already_reserved)
+            allocated_qty = min(remaining_to_allocate, free_qty)
             if allocated_qty <= 0:
                 continue
             allocations.append({
@@ -1312,13 +1351,14 @@ async def reserve_assembly_requisition_stock(
                 "zone_code": storage_loc.zone,
                 "rack": storage_loc.rack,
                 "bin_code": storage_loc.bin,
-                "batch": None,
+                "batch_number": batch_number or "UNTRACKED",
+                "batch": batch_number or "UNTRACKED",
                 "strategy": "FIFO",
             })
             remaining_to_allocate -= allocated_qty
 
         if loc_row:
-            storage_loc, store_obj, _ = loc_row
+            storage_loc, store_obj, _, _ = loc_row
             storage_loc_id = storage_loc.id
             location_code = storage_loc.location_code
             zone_code = storage_loc.zone
@@ -1521,9 +1561,9 @@ async def create_material_request_for_shortage(
     mr = MaterialRequestModel(
         id=uuid.uuid4(),
         request_number=req_no,
-        warehouse_id=req.warehouse_id or "MAIN",
+        warehouse_id=req.warehouse_id,
         department=req.department or "Assembly",
-        requested_by=user.username or req.requested_by or "Warehouse",
+        requested_by=user.username,
         status="Submitted",
         priority=(req.priority or "HIGH").strip().upper(),
         required_date=req.required_date or now_utc.date(),

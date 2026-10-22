@@ -1,3 +1,4 @@
+import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, RefreshCw, Loader2, RotateCcw } from "lucide-react";
@@ -75,7 +76,7 @@ function DispatchExceptionsPage() {
                   <th className="px-4 py-3">Order #</th>
                   <th className="px-4 py-3">Customer</th>
                   <th className="px-4 py-3">Destination</th>
-                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Status<InformationTooltip help="workflowStatus" /></th>
                   <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>

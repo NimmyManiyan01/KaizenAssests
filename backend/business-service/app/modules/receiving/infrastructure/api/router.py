@@ -7,7 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import selectinload
 
 from app.common.email_utils import render_premium_email, send_email
@@ -152,6 +152,15 @@ async def list_grns(
 # ============================================================================
 # PAGE 1 - CONTEXT
 # ============================================================================
+
+def next_damage_claim_sequence(numbers):
+    """Claim dates can be backdated to receipt dates; scan numeric suffixes."""
+    return max(
+        (int(number[3:]) for number in numbers
+         if number and number.startswith("DC-") and number[3:].isdigit()),
+        default=0,
+    ) + 1
+
 
 @router.get("/context", response_model=GrnContextResponse)
 async def get_grn_context(
@@ -1310,17 +1319,12 @@ async def complete_grn(
             )
         ).scalar_one_or_none()
         if supplier_id:
-            last_claim = (
-                await uow.session.execute(
-                    select(SupplierDamageClaimModel.claim_number)
-                    .order_by(SupplierDamageClaimModel.created_at.desc())
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            try:
-                claim_sequence = int(last_claim.rsplit("-", 1)[1]) + 1 if last_claim else 1
-            except (ValueError, IndexError):
-                claim_sequence = 1
+            if uow.session.get_bind().dialect.name == "postgresql":
+                await uow.session.execute(text("SELECT pg_advisory_xact_lock(740100)"))
+            claim_numbers = (await uow.session.scalars(
+                select(SupplierDamageClaimModel.claim_number)
+            )).all()
+            claim_sequence = next_damage_claim_sequence(claim_numbers)
 
             for line in grn.lines or []:
                 damaged = line.damaged_quantity or Decimal("0")

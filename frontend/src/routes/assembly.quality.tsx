@@ -1,3 +1,4 @@
+import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
@@ -6,10 +7,7 @@ import { api, type AssemblyQualityInspectionItem } from "@/lib/api-client";
 import {
   AlertTriangle,
   ArrowRight,
-  Boxes,
   CheckCircle2,
-  Clock,
-  ExternalLink,
   Factory,
   Filter,
   Layers,
@@ -19,11 +17,8 @@ import {
   QrCode,
   RefreshCw,
   Search,
-  ShieldAlert,
   ShieldCheck,
-  ShieldX,
   User,
-  Wrench,
   X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -39,7 +34,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { parseNonNegativeNumber } from "@/lib/input-validation";
+import { isValidInspectorName, parseNonNegativeNumber } from "@/lib/input-validation";
 
 export const Route = createFileRoute("/assembly/quality")({
   beforeLoad: () =>
@@ -47,6 +42,22 @@ export const Route = createFileRoute("/assembly/quality")({
   head: () => ({ meta: [{ title: "Quality Inspection · KaizenAssests" }] }),
   component: AssemblyQualityPage,
 });
+
+function qualityGroup(item: AssemblyQualityInspectionItem): string {
+  const status = item.qc_status.toUpperCase();
+  if (status === "PARTIALLY_APPROVED")
+    return item.rework_quantity > 0 ? "REWORK" : item.held_quantity > 0 ? "HELD" : status;
+  return (
+    (
+      {
+        QC_APPROVED: "PASSED",
+        REJECTED: "FAILED",
+        PENDING: "PENDING_INSPECTION",
+        REWORK_REQUIRED: "REWORK",
+      } as Record<string, string>
+    )[status] || status
+  );
+}
 
 function getQcStatusBadge(status: string) {
   const s = (status || "").toUpperCase();
@@ -58,11 +69,11 @@ function getQcStatusBadge(status: string) {
       </span>
     );
   }
-  if (s === "REWORK" || s === "PARTIALLY_APPROVED") {
+  if (["REWORK", "PARTIALLY_APPROVED", "HELD"].includes(s)) {
     return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/25">
         <span className="size-1.5 rounded-full bg-amber-500" />
-        Rework Required
+        {s === "REWORK" ? "Rework Required" : s === "HELD" ? "QC Held" : "Partially Approved"}
       </span>
     );
   }
@@ -93,19 +104,16 @@ function AssemblyQualityPage() {
   // Inspection Modal State
   const [inspectItem, setInspectItem] = useState<AssemblyQualityInspectionItem | null>(null);
   const [passedQty, setPassedQty] = useState<number>(0);
-  const [failedQty, setFailedQty] = useState<number>(0);
-  const [reworkQty, setReworkQty] = useState<number>(0);
-  const [heldQty, setHeldQty] = useState<number>(0);
+  const [authorizedPersonConfirmed, setAuthorizedPersonConfirmed] = useState(false);
+  const [inspectorName, setInspectorName] = useState("");
+  const [inspectorTouched, setInspectorTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const fetchInspections = async (isManual = false) => {
     if (isManual) setRefreshing(true);
     else setLoading(true);
     try {
-      const res = await api.getAssemblyQualityInspections({
-        search: search || undefined,
-        status: statusFilter !== "ALL" ? statusFilter : undefined,
-      });
+      const res = await api.getAssemblyQualityInspections();
       setInspections(res || []);
     } catch (err: any) {
       toast.error("Failed to load quality inspections: " + (err.message || "Unknown error"));
@@ -117,35 +125,27 @@ function AssemblyQualityPage() {
 
   useEffect(() => {
     fetchInspections();
-  }, [statusFilter]);
+  }, []);
 
   const handleOpenInspectModal = (item: AssemblyQualityInspectionItem) => {
     setInspectItem(item);
+    setAuthorizedPersonConfirmed(false);
+    setInspectorName("");
+    setInspectorTouched(false);
     setPassedQty(item.produced_quantity);
-    setFailedQty(0);
-    setReworkQty(0);
-    setHeldQty(0);
   };
 
   const parsedPassedQty = parseNonNegativeNumber(passedQty);
-  const parsedFailedQty = parseNonNegativeNumber(failedQty);
-  const parsedReworkQty = parseNonNegativeNumber(reworkQty);
-  const parsedHeldQty = parseNonNegativeNumber(heldQty);
-  const totalInspected =
-    (parsedPassedQty ?? Number.NaN) +
-    (parsedFailedQty ?? Number.NaN) +
-    (parsedReworkQty ?? Number.NaN) +
-    (parsedHeldQty ?? Number.NaN);
+  const totalInspected = parsedPassedQty ?? Number.NaN;
   const expectedProduced = inspectItem ? inspectItem.produced_quantity : 0;
   const isQuantityValid =
     parsedPassedQty !== null &&
-    parsedFailedQty !== null &&
-    parsedReworkQty !== null &&
-    parsedHeldQty !== null &&
     totalInspected === expectedProduced;
 
   const handleInspectSubmit = async () => {
     if (!inspectItem) return;
+    setInspectorTouched(true);
+    if (!authorizedPersonConfirmed || !isValidInspectorName(inspectorName)) return;
 
     if (!isQuantityValid) {
       toast.error(
@@ -158,10 +158,12 @@ function AssemblyQualityPage() {
       setSubmitting(true);
       const res = await api.performAssemblyQualityInspection({
         order_id: inspectItem.order_id,
+        authorized_person_confirmed: authorizedPersonConfirmed,
+        inspector_name: inspectorName.trim(),
         passed_quantity: parsedPassedQty,
-        failed_quantity: parsedFailedQty,
-        rework_quantity: parsedReworkQty,
-        held_quantity: parsedHeldQty,
+        failed_quantity: 0,
+        rework_quantity: 0,
+        held_quantity: 0,
       });
 
       toast.success(res.message || `Quality inspection completed for ${inspectItem.order_number}`);
@@ -176,60 +178,23 @@ function AssemblyQualityPage() {
 
   // Quick stats
   const totalOrders = inspections.length;
-  const awaitingQc = inspections.filter((i) => i.qc_status === "PENDING_INSPECTION").length;
-  const passedQc = inspections.filter((i) => i.qc_status === "PASSED").length;
-  const reworkQc = inspections.filter((i) => i.qc_status === "REWORK").length;
-  const failedQc = inspections.filter((i) => i.qc_status === "FAILED").length;
-  const completedQc = inspections.filter(
-    (i) => i.qc_status && i.qc_status !== "PENDING_INSPECTION",
-  ).length;
-
-  const passRate = completedQc > 0 ? Math.round((passedQc / completedQc) * 100) : undefined;
-
+  const awaitingQc = inspections.filter((i) => qualityGroup(i) === "PENDING_INSPECTION").length;
+  const passedQc = inspections.filter((i) => qualityGroup(i) === "PASSED").length;
+  const reworkQc = inspections.filter((i) => qualityGroup(i) === "REWORK").length;
+  const failedQc = inspections.filter((i) => qualityGroup(i) === "FAILED").length;
   // Filtered list
   const filteredInspections = useMemo(() => {
-    if (!search.trim()) return inspections;
     const q = search.toLowerCase().trim();
     return inspections.filter(
       (i) =>
-        i.order_number?.toLowerCase().includes(q) ||
-        i.product_name?.toLowerCase().includes(q) ||
-        i.product_code?.toLowerCase().includes(q) ||
-        i.inspected_by?.toLowerCase().includes(q),
+        (statusFilter === "ALL" ||
+          qualityGroup(i) === (statusFilter === "PENDING" ? "PENDING_INSPECTION" : statusFilter)) &&
+        (!q ||
+          [i.order_number, i.product_name, i.product_code, i.inspected_by].some((value) =>
+            value?.toLowerCase().includes(q),
+          )),
     );
-  }, [inspections, search]);
-
-  // Workflow Quick Link Cards
-  const workflowShortcuts = [
-    {
-      title: "Assembly Dashboard",
-      subtitle: "Floor monitoring & KPI metrics",
-      icon: LayoutDashboard,
-      to: "/assembly-dashboard",
-      tone: "blue",
-    },
-    {
-      title: "Production Lines",
-      subtitle: "Bench assembly & work execution",
-      icon: Factory,
-      to: "/assembly/production",
-      tone: "amber",
-    },
-    {
-      title: "Material Requests",
-      subtitle: "Warehouse component staging",
-      icon: Boxes,
-      to: "/assembly/material-requests",
-      tone: "cyan",
-    },
-    {
-      title: "Finished Goods Store",
-      subtitle: "Inspected inventory & QR labels",
-      icon: PackageCheck,
-      to: "/assembly/finished-goods",
-      tone: "emerald",
-    },
-  ];
+  }, [inspections, search, statusFilter]);
 
   return (
     <AppShell
@@ -237,10 +202,6 @@ function AssemblyQualityPage() {
       subtitle="Final QC inspection, pass certification, rework routing, and finished goods generation"
       actions={
         <div className="flex flex-wrap items-center gap-2.5">
-          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-card border border-border/80 shadow-2xs text-xs font-medium text-muted-foreground">
-            <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-            QC Station Active
-          </div>
           <Button
             variant="outline"
             size="sm"
@@ -273,165 +234,12 @@ function AssemblyQualityPage() {
       }
     >
       <div className="space-y-6">
-        {/* 5 Top KPI Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
-          {/* Card 1: Total In Scope */}
-          <div className="group relative overflow-hidden rounded-2xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-blue-500/35 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                In QC Scope
-              </span>
-              <div className="grid size-9 place-items-center rounded-xl bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20 shadow-2xs">
-                <ShieldCheck className="size-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-3xl font-black tracking-tight text-foreground tabular-nums">
-                {loading ? "..." : totalOrders}
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Total produced batches</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-blue-500/10 text-blue-700 dark:text-blue-300">
-                  Total
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 2: Awaiting Inspection */}
-          <div className="group relative overflow-hidden rounded-2xl border border-purple-500/20 bg-gradient-to-br from-purple-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-purple-500/35 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                Awaiting QC
-              </span>
-              <div className="grid size-9 place-items-center rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/20 shadow-2xs">
-                <Clock className="size-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-3xl font-black tracking-tight text-purple-600 dark:text-purple-400 tabular-nums">
-                {loading ? "..." : awaitingQc}
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Ready for inspection</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-purple-500/10 text-purple-700 dark:text-purple-300">
-                  Audit
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 3: QC Passed */}
-          <div className="group relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-emerald-500/35 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                QC Passed (FG)
-              </span>
-              <div className="grid size-9 place-items-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shadow-2xs">
-                <CheckCircle2 className="size-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-3xl font-black tracking-tight text-emerald-600 dark:text-emerald-400 tabular-nums">
-                {loading ? "..." : passedQc}
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Stored in Assembly FG Area</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
-                  Certified
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 4: Rework Required */}
-          <div className="group relative overflow-hidden rounded-2xl border border-amber-500/20 bg-gradient-to-br from-amber-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-amber-500/35 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                Rework Flagged
-              </span>
-              <div className="grid size-9 place-items-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20 shadow-2xs">
-                <Wrench className="size-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-3xl font-black tracking-tight text-amber-600 dark:text-amber-400 tabular-nums">
-                {loading ? "..." : reworkQc}
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Flagged for touchup</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-300">
-                  Touchup
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 5: Pass Rate */}
-          <div className="group relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-cyan-500/35 flex flex-col justify-between col-span-2 md:col-span-1">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                First-Pass Yield
-              </span>
-              <div className="grid size-9 place-items-center rounded-xl bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 shadow-2xs">
-                <PackageCheck className="size-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-3xl font-black tracking-tight text-cyan-600 dark:text-cyan-400 tabular-nums">
-                {loading ? "..." : passRate == null ? "N/A" : `${passRate}%`}
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Inspection quality yield</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-cyan-500/10 text-cyan-700 dark:text-cyan-300">
-                  Yield
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Workflow Quick Links */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {workflowShortcuts.map((sc) => {
-            const Icon = sc.icon;
-            return (
-              <Link
-                key={sc.to}
-                to={sc.to as any}
-                className="group relative flex items-center justify-between p-3.5 rounded-xl border border-border/80 bg-card hover:border-primary/40 hover:bg-muted/40 transition-all duration-200 shadow-2xs"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className={cn(
-                      "grid size-9 shrink-0 place-items-center rounded-lg border",
-                      sc.tone === "blue" &&
-                        "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",
-                      sc.tone === "amber" &&
-                        "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20",
-                      sc.tone === "cyan" &&
-                        "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border-cyan-500/20",
-                      sc.tone === "emerald" &&
-                        "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-                    )}
-                  >
-                    <Icon className="size-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-foreground group-hover:text-primary transition-colors">
-                      {sc.title}
-                    </div>
-                    <div className="text-[11px] text-muted-foreground truncate">{sc.subtitle}</div>
-                  </div>
-                </div>
-                <ArrowRight className="size-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary shrink-0 pl-1" />
-              </Link>
-            );
-          })}
-        </div>
-
         {/* Main Work Center Table Card */}
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-4">
+        <div className="rounded-2xl border border-border/70 bg-card p-5 shadow-soft space-y-4">
+          <p className="text-xs text-muted-foreground" aria-label="Workflow">
+            Select batch &rarr; Inspect quantities &rarr; Record result &rarr; Release approved
+            goods
+          </p>
           {/* Header & Controls */}
           <div className="space-y-4 pb-4 border-b border-border/60">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -461,9 +269,18 @@ function AssemblyQualityPage() {
                   { key: "PASSED", label: `QC Passed (${passedQc})` },
                   { key: "REWORK", label: `Rework (${reworkQc})` },
                   { key: "FAILED", label: `Failed (${failedQc})` },
+                  {
+                    key: "PARTIALLY_APPROVED",
+                    label: `Partial (${inspections.filter((i) => qualityGroup(i) === "PARTIALLY_APPROVED").length})`,
+                  },
+                  {
+                    key: "HELD",
+                    label: `Held (${inspections.filter((i) => qualityGroup(i) === "HELD").length})`,
+                  },
                 ].map((tab) => (
                   <button
                     key={tab.key}
+                    aria-pressed={statusFilter === tab.key}
                     onClick={() => setStatusFilter(tab.key)}
                     className={cn(
                       "px-2.5 py-1 text-xs font-semibold rounded-lg transition-all",
@@ -482,6 +299,7 @@ function AssemblyQualityPage() {
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
                 <input
                   type="text"
+                  aria-label="Search this queue"
                   placeholder="Search order, product or inspector..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
@@ -489,6 +307,7 @@ function AssemblyQualityPage() {
                 />
                 {search && (
                   <button
+                    aria-label="Clear search"
                     onClick={() => setSearch("")}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   >
@@ -553,8 +372,8 @@ function AssemblyQualityPage() {
                     <th className="py-3 px-3">Order Number</th>
                     <th className="py-3 px-3">Product Details</th>
                     <th className="py-3 px-3">Produced Qty</th>
-                    <th className="py-3 px-3">QC Breakdown</th>
-                    <th className="py-3 px-3">QC Status</th>
+                    <th className="py-3 px-3">QC Breakdown<InformationTooltip help="qc" /></th>
+                    <th className="py-3 px-3">QC Status<InformationTooltip help="workflowStatus" /></th>
                     <th className="py-3 px-3">Inspector & Date</th>
                     <th className="py-3 px-3 text-right">Action</th>
                   </tr>
@@ -619,7 +438,7 @@ function AssemblyQualityPage() {
 
                       {/* QC Status */}
                       <td className="py-3.5 px-3 whitespace-nowrap">
-                        {getQcStatusBadge(item.qc_status)}
+                        {getQcStatusBadge(qualityGroup(item))}
                       </td>
 
                       {/* Inspector & Date */}
@@ -653,7 +472,7 @@ function AssemblyQualityPage() {
                               <ShieldCheck className="size-3.5" />
                               Perform QC
                             </Button>
-                          ) : item.qc_status === "PASSED" ? (
+                          ) : qualityGroup(item) === "PASSED" || item.passed_quantity > 0 ? (
                             <Link
                               to="/assembly/finished-goods"
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 transition-all shadow-2xs"
@@ -663,14 +482,11 @@ function AssemblyQualityPage() {
                               <ArrowRight className="size-3 ml-0.5" />
                             </Link>
                           ) : (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 px-2.5 text-xs font-medium rounded-lg"
-                              onClick={() => handleOpenInspectModal(item)}
-                            >
-                              Re-inspect
-                            </Button>
+                            <span className="text-xs text-muted-foreground">
+                              {qualityGroup(item) === "PENDING_INSPECTION"
+                                ? "Not available"
+                                : "Inspection recorded"}
+                            </span>
                           )}
                         </div>
                       </td>
@@ -719,9 +535,55 @@ function AssemblyQualityPage() {
                   </div>
                 </div>
 
+                <div className="space-y-3 rounded-xl border border-border/60 p-3.5">
+                  <label className="flex items-start gap-2 text-xs font-semibold text-foreground">
+                    <input
+                      type="checkbox"
+                      required
+                      checked={authorizedPersonConfirmed}
+                      onChange={(e) => setAuthorizedPersonConfirmed(e.target.checked)}
+                      className="mt-0.5 size-4 accent-primary"
+                    />
+                    Quality check performed by authorized person
+                  </label>
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="qc-inspector-name"
+                      className="text-xs font-semibold text-foreground"
+                    >
+                      Inspector Name *
+                    </label>
+                    <Input
+                      id="qc-inspector-name"
+                      value={inspectorName}
+                      onChange={(e) => setInspectorName(e.target.value)}
+                      onBlur={() => setInspectorTouched(true)}
+                      required
+                      maxLength={128}
+                      aria-invalid={inspectorTouched && !isValidInspectorName(inspectorName)}
+                      aria-describedby="qc-inspector-name-help"
+                      placeholder="Enter inspector name"
+                      className="h-9 text-sm rounded-xl"
+                    />
+                    <p
+                      id="qc-inspector-name-help"
+                      className={cn(
+                        "text-xs",
+                        inspectorTouched && !isValidInspectorName(inspectorName)
+                          ? "text-destructive"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {inspectorTouched && !isValidInspectorName(inspectorName)
+                        ? "Enter a valid inspector name (2-128 characters, at least two letters)."
+                        : "Required. Use letters, spaces, periods, apostrophes or hyphens."}
+                    </p>
+                  </div>
+                </div>
+
                 {/* Quantities breakdown */}
                 <div className="space-y-3">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-1 gap-3">
                     <div className="space-y-1">
                       <label className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                         <CheckCircle2 className="size-3" /> Passed Qty *
@@ -736,47 +598,6 @@ function AssemblyQualityPage() {
                       />
                     </div>
 
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                        <Wrench className="size-3" /> Rework Qty
-                      </label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={inspectItem.produced_quantity}
-                        value={reworkQty}
-                        onChange={(e) => setReworkQty(Number(e.target.value))}
-                        className="h-9 text-sm font-mono font-bold rounded-xl border-amber-500/30 focus:border-amber-500"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1">
-                        <ShieldX className="size-3" /> Failed / Scrap
-                      </label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={inspectItem.produced_quantity}
-                        value={failedQty}
-                        onChange={(e) => setFailedQty(Number(e.target.value))}
-                        className="h-9 text-sm font-mono font-bold rounded-xl border-rose-500/30 focus:border-rose-500"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-sky-600 dark:text-sky-400 flex items-center gap-1">
-                        <ShieldAlert className="size-3" /> Held Qty
-                      </label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={inspectItem.produced_quantity}
-                        value={heldQty}
-                        onChange={(e) => setHeldQty(Number(e.target.value))}
-                        className="h-9 text-sm font-mono font-bold rounded-xl border-sky-500/30 focus:border-sky-500"
-                      />
-                    </div>
                   </div>
 
                   {/* Validation balance warning */}
@@ -812,7 +633,12 @@ function AssemblyQualityPage() {
               <Button
                 size="sm"
                 onClick={handleInspectSubmit}
-                disabled={submitting || !isQuantityValid}
+                disabled={
+                  submitting ||
+                  !isQuantityValid ||
+                  !authorizedPersonConfirmed ||
+                  !isValidInspectorName(inspectorName)
+                }
                 className="rounded-xl bg-purple-600 hover:bg-purple-700 text-white gap-1.5 font-semibold shadow-soft"
               >
                 {submitting ? (

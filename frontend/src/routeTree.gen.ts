@@ -34,7 +34,6 @@ import { Route as WarehouseDashboardRouteImport } from './routes/warehouse-dashb
 import { Route as AssemblyDispatchRouteImport } from './routes/assembly.dispatch'
 import { Route as AssemblyFinishedGoodsRouteImport } from './routes/assembly.finished-goods'
 import { Route as AssemblyMaterialRequestsRouteImport } from './routes/assembly.material-requests'
-import { Route as AssemblyOrdersRouteImport } from './routes/assembly.orders'
 import { Route as AssemblyProductionRouteImport } from './routes/assembly.production'
 import { Route as AssemblyQualityRouteImport } from './routes/assembly.quality'
 import { Route as AssemblyRequestsRouteImport } from './routes/assembly.requests'
@@ -176,11 +175,6 @@ const AssemblyMaterialRequestsRoute =
     path: '/assembly/material-requests',
     getParentRoute: () => rootRouteImport,
   } as any)
-const AssemblyOrdersRoute = AssemblyOrdersRouteImport.update({
-  id: '/assembly/orders',
-  path: '/assembly/orders',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AssemblyProductionRoute = AssemblyProductionRouteImport.update({
   id: '/assembly/production',
   path: '/assembly/production',
@@ -283,7 +277,6 @@ export interface FileRoutesByFullPath {
   '/assembly/dispatch': typeof AssemblyDispatchRoute
   '/assembly/finished-goods': typeof AssemblyFinishedGoodsRoute
   '/assembly/material-requests': typeof AssemblyMaterialRequestsRoute
-  '/assembly/orders': typeof AssemblyOrdersRoute
   '/assembly/production': typeof AssemblyProductionRoute
   '/assembly/quality': typeof AssemblyQualityRoute
   '/assembly/requests': typeof AssemblyRequestsRoute
@@ -325,7 +318,6 @@ export interface FileRoutesByTo {
   '/assembly/dispatch': typeof AssemblyDispatchRoute
   '/assembly/finished-goods': typeof AssemblyFinishedGoodsRoute
   '/assembly/material-requests': typeof AssemblyMaterialRequestsRoute
-  '/assembly/orders': typeof AssemblyOrdersRoute
   '/assembly/production': typeof AssemblyProductionRoute
   '/assembly/quality': typeof AssemblyQualityRoute
   '/assembly/requests': typeof AssemblyRequestsRoute
@@ -368,7 +360,6 @@ export interface FileRoutesById {
   '/assembly/dispatch': typeof AssemblyDispatchRoute
   '/assembly/finished-goods': typeof AssemblyFinishedGoodsRoute
   '/assembly/material-requests': typeof AssemblyMaterialRequestsRoute
-  '/assembly/orders': typeof AssemblyOrdersRoute
   '/assembly/production': typeof AssemblyProductionRoute
   '/assembly/quality': typeof AssemblyQualityRoute
   '/assembly/requests': typeof AssemblyRequestsRoute
@@ -412,7 +403,6 @@ export interface FileRouteTypes {
     | '/assembly/dispatch'
     | '/assembly/finished-goods'
     | '/assembly/material-requests'
-    | '/assembly/orders'
     | '/assembly/production'
     | '/assembly/quality'
     | '/assembly/requests'
@@ -454,7 +444,6 @@ export interface FileRouteTypes {
     | '/assembly/dispatch'
     | '/assembly/finished-goods'
     | '/assembly/material-requests'
-    | '/assembly/orders'
     | '/assembly/production'
     | '/assembly/quality'
     | '/assembly/requests'
@@ -496,7 +485,6 @@ export interface FileRouteTypes {
     | '/assembly/dispatch'
     | '/assembly/finished-goods'
     | '/assembly/material-requests'
-    | '/assembly/orders'
     | '/assembly/production'
     | '/assembly/quality'
     | '/assembly/requests'
@@ -539,7 +527,6 @@ export interface RootRouteChildren {
   AssemblyDispatchRoute: typeof AssemblyDispatchRoute
   AssemblyFinishedGoodsRoute: typeof AssemblyFinishedGoodsRoute
   AssemblyMaterialRequestsRoute: typeof AssemblyMaterialRequestsRoute
-  AssemblyOrdersRoute: typeof AssemblyOrdersRoute
   AssemblyProductionRoute: typeof AssemblyProductionRoute
   AssemblyQualityRoute: typeof AssemblyQualityRoute
   AssemblyRequestsRoute: typeof AssemblyRequestsRoute
@@ -732,13 +719,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AssemblyMaterialRequestsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/assembly/orders': {
-      id: '/assembly/orders'
-      path: '/assembly/orders'
-      fullPath: '/assembly/orders'
-      preLoaderRoute: typeof AssemblyOrdersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/assembly/production': {
       id: '/assembly/production'
       path: '/assembly/production'
@@ -878,7 +858,6 @@ const rootRouteChildren: RootRouteChildren = {
   AssemblyDispatchRoute: AssemblyDispatchRoute,
   AssemblyFinishedGoodsRoute: AssemblyFinishedGoodsRoute,
   AssemblyMaterialRequestsRoute: AssemblyMaterialRequestsRoute,
-  AssemblyOrdersRoute: AssemblyOrdersRoute,
   AssemblyProductionRoute: AssemblyProductionRoute,
   AssemblyQualityRoute: AssemblyQualityRoute,
   AssemblyRequestsRoute: AssemblyRequestsRoute,

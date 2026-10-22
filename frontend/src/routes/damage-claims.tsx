@@ -6,6 +6,7 @@ import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { api, resolveMediaUrl } from "@/lib/api-client";
 import { getUserInfo } from "@/lib/auth-utils";
 import { isValidVehicleNumber } from "@/lib/input-validation";
@@ -17,6 +18,7 @@ const resolutions = [
   { value: "REFUND", label: "Refund" },
   { value: "RETURN_REPLACEMENT", label: "Return and Replace" },
 ];
+const actionButtonClass = "h-10 rounded-lg";
 function Page() {
   const [claims, setClaims] = useState<any[]>([]),
     [loading, setLoading] = useState(true),
@@ -75,27 +77,38 @@ function Page() {
       title="Damage Returns"
       subtitle="Review damaged or rejected goods sent from GRN, respond to the supplier claim, and track returns"
       actions={
-        <Button variant="outline" onClick={() => void load()}>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-10 rounded-lg"
+          onClick={() => void load()}
+        >
           <RefreshCw className="size-4" />
           Refresh
         </Button>
       }
     >
       {loading ? (
-        <div className="grid h-64 place-items-center">
-          <Loader2 className="size-6 animate-spin" />
+        <div
+          className="grid h-48 place-items-center rounded-xl border border-border bg-card text-sm text-muted-foreground"
+          role="status"
+        >
+          <span className="inline-flex items-center gap-2">
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            Loading damage returns…
+          </span>
         </div>
       ) : error ? (
-        <Card className="p-8 text-center">
+        <Card className="rounded-xl border-border bg-card p-6 text-center shadow-sm sm:p-8">
           <p className="font-medium text-destructive">Damage returns could not be loaded.</p>
           <p className="mt-2 text-sm text-muted-foreground">{error}</p>
-          <Button className="mt-4" onClick={() => void load()}>
+          <Button type="button" className="mt-4 h-10 rounded-lg" onClick={() => void load()}>
             Try again
           </Button>
         </Card>
       ) : claims.length === 0 ? (
-        <Card className="p-12 text-center">
-          <h3 className="text-lg font-semibold">No damage returns</h3>
+        <Card className="rounded-xl border-border bg-card p-6 text-center shadow-sm sm:p-10">
+          <h3 className="text-base font-semibold">No damage returns</h3>
           <p className="mt-2 text-sm text-muted-foreground">
             Completed GRNs with damaged or rejected quantities will appear here when published to
             this supplier.
@@ -107,22 +120,23 @@ function Page() {
             const f = forms[c.id] || {};
             const s = c.shipment;
             return (
-              <Card key={c.id} className="rounded-2xl p-5">
+              <Card key={c.id} className="rounded-xl border-border bg-card p-4 shadow-sm sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 className="font-mono text-lg font-bold">{c.claim_number}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {c.po_number} · {c.material} · Damaged {c.damaged_quantity || 0} {c.uom} ·
-                      Rejected {c.rejected_quantity || 0} {c.uom}
+                    <h3 className="font-mono text-base font-semibold text-foreground">
+                      {c.claim_number || "Claim —"}
+                    </h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {c.po_number || "—"} · {c.material || "Material not specified"} · Damaged{" "}
+                      {c.damaged_quantity ?? "—"} {c.uom || ""} · Rejected{" "}
+                      {c.rejected_quantity ?? "—"} {c.uom || ""}
                     </p>
                   </div>
                   <StatusBadge status={c.status} />
                 </div>
                 {(c.damage_reason || c.remarks || c.photos?.length) && (
-                  <div className="mt-4 rounded-xl border bg-muted/20 p-4">
-                    <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                      Damage Evidence
-                    </p>
+                  <div className="mt-4 rounded-lg border border-border bg-muted/30 p-4">
+                    <p className="text-sm font-semibold text-foreground">Damage evidence</p>
                     {c.damage_reason && (
                       <p className="mt-2 text-sm">
                         <span className="font-semibold">Reason:</span> {c.damage_reason}
@@ -147,15 +161,15 @@ function Page() {
                     )}
                   </div>
                 )}
-                <div className="mt-4 grid gap-2 text-sm sm:grid-cols-4">
+                <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
                   <div>
                     <span className="text-muted-foreground">Original GRN</span>
-                    <p className="font-medium">{c.grn_number || "Pending"}</p>
+                    <p className="font-medium">{c.grn_number || "—"}</p>
                   </div>
                   <div>
                     <span className="text-muted-foreground">Response</span>
                     <p className="font-medium">
-                      {c.response?.replaceAll("_", " ") || "Awaiting supplier"}
+                      {c.response?.replaceAll("_", " ") || "No response yet"}
                     </p>
                   </div>
                   <div>
@@ -164,40 +178,55 @@ function Page() {
                   </div>
                   <div>
                     <span className="text-muted-foreground">Quarantine</span>
-                    <p className="font-medium text-orange-600">Original goods retained</p>
+                    <p className="font-medium text-warning-foreground">Original goods retained</p>
                   </div>
                 </div>
                 {has("SUPPLIER") && !c.response && (
-                  <div className="mt-4 grid gap-3 rounded-xl border p-4 md:grid-cols-2">
-                    <select
-                      className="h-10 rounded-md border bg-background px-3"
-                      value={f.response || ""}
-                      onChange={(e) => patch(c.id, { response: e.target.value, validation: "" })}
-                    >
-                      <option value="">Select response</option>
-                      <option value="ACCEPT">Accept</option>
-                      <option value="REJECT">Reject</option>
-                      <option value="PARTIALLY_ACCEPT">Partially Accept</option>
-                      <option value="REQUEST_MORE_INFORMATION">Request More Information</option>
-                    </select>
-                    <select
-                      className="h-10 rounded-md border bg-background px-3"
-                      value={f.resolution || ""}
-                      onChange={(e) => patch(c.id, { resolution: e.target.value, validation: "" })}
-                    >
-                      <option value="">Select resolution</option>
-                      {resolutions.map((r) => (
-                        <option key={r.value} value={r.value}>
-                          {r.label}
-                        </option>
-                      ))}
-                    </select>
-                    <Input
-                      placeholder="Supplier remarks"
-                      value={f.remarks || ""}
-                      onChange={(e) => patch(c.id, { remarks: e.target.value })}
-                    />
-                    <label className="flex items-center gap-2 text-sm">
+                  <div className="mt-4 grid gap-4 rounded-lg border border-border bg-muted/20 p-4 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`claim-${c.id}-response`}>Your response *</Label>
+                      <select
+                        id={`claim-${c.id}-response`}
+                        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                        value={f.response || ""}
+                        onChange={(e) => patch(c.id, { response: e.target.value, validation: "" })}
+                      >
+                        <option value="">Select response</option>
+                        <option value="ACCEPT">Accept</option>
+                        <option value="REJECT">Reject</option>
+                        <option value="PARTIALLY_ACCEPT">Partially Accept</option>
+                        <option value="REQUEST_MORE_INFORMATION">Request More Information</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`claim-${c.id}-resolution`}>Resolution</Label>
+                      <select
+                        id={`claim-${c.id}-resolution`}
+                        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                        value={f.resolution || ""}
+                        onChange={(e) =>
+                          patch(c.id, { resolution: e.target.value, validation: "" })
+                        }
+                      >
+                        <option value="">Select resolution</option>
+                        {resolutions.map((r) => (
+                          <option key={r.value} value={r.value}>
+                            {r.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`claim-${c.id}-remarks`}>Supplier remarks</Label>
+                      <Input
+                        id={`claim-${c.id}-remarks`}
+                        className="h-10 rounded-lg text-sm"
+                        placeholder="Add a note (optional)"
+                        value={f.remarks || ""}
+                        onChange={(e) => patch(c.id, { remarks: e.target.value })}
+                      />
+                    </div>
+                    <label className="flex min-h-10 items-center gap-2 text-sm">
                       <input
                         type="checkbox"
                         checked={!!f.return_required}
@@ -213,7 +242,13 @@ function Page() {
                         {f.validation}
                       </p>
                     )}
-                    <Button disabled={busy === c.id} onClick={() => submitResponse(c, f)}>
+                    <Button
+                      type="button"
+                      className="h-10 rounded-lg"
+                      disabled={busy === c.id}
+                      onClick={() => submitResponse(c, f)}
+                    >
+                      {busy === c.id && <Loader2 className="size-4 animate-spin" />}
                       Submit Response
                     </Button>
                   </div>
@@ -221,13 +256,18 @@ function Page() {
                 {has("SUPPLIER") &&
                   ["REPLACEMENT", "RETURN_REPLACEMENT"].includes(c.resolution) &&
                   !s && (
-                    <div className="mt-4 flex gap-3 rounded-xl border p-4">
+                    <div className="mt-4 grid gap-3 rounded-lg border border-border bg-muted/20 p-4 sm:grid-cols-[minmax(0,1fr)_auto]">
                       <Input
+                        aria-label="Replacement vehicle number"
+                        className="h-10 rounded-lg"
                         placeholder="Replacement vehicle number"
                         value={f.vehicle || ""}
                         onChange={(e) => patch(c.id, { vehicle: e.target.value })}
                       />
                       <Button
+                        type="button"
+                        className={actionButtonClass}
+                        disabled={busy === c.id}
                         onClick={() =>
                           void run(
                             c.id,
@@ -237,24 +277,28 @@ function Page() {
                           )
                         }
                       >
+                        {busy === c.id && <Loader2 className="size-4 animate-spin" />}
                         Send Replacement
                       </Button>
                     </div>
                   )}
                 {s && (
-                  <div className="mt-4 rounded-xl border p-4">
-                    <div className="flex justify-between">
-                      <strong>{s.shipment_number}</strong>
+                  <div className="mt-4 rounded-lg border border-border bg-muted/20 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <strong>{s.shipment_number || "Replacement shipment"}</strong>
                       <StatusBadge status={s.status} />
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Vehicle {s.vehicle_number} · Expected {s.expected_quantity} {c.uom} · Gate{" "}
-                      {s.gate_entry_number || "pending"} · RGRN{" "}
-                      {s.replacement_grn_number || "pending"}
+                      Vehicle {s.vehicle_number || "—"} · Expected {s.expected_quantity ?? "—"}{" "}
+                      {c.uom || ""} · Gate {s.gate_entry_number || "Pending"} · RGRN{" "}
+                      {s.replacement_grn_number || "Pending"}
                     </p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {has("GATE_SECURITY") && s.status === "IN_TRANSIT" && (
                         <Button
+                          type="button"
+                          className={actionButtonClass}
+                          disabled={busy === s.id}
                           onClick={() =>
                             void run(
                               s.id,
@@ -263,11 +307,15 @@ function Page() {
                             )
                           }
                         >
+                          {busy === s.id && <Loader2 className="size-4 animate-spin" />}
                           Record Gate Entry
                         </Button>
                       )}
                       {has("WAREHOUSE") && s.status === "AT_RECEIVING" && (
                         <Button
+                          type="button"
+                          className={actionButtonClass}
+                          disabled={busy === s.id}
                           onClick={() =>
                             void run(
                               s.id,
@@ -276,11 +324,15 @@ function Page() {
                             )
                           }
                         >
-                          Receive {s.expected_quantity} & Create RGRN
+                          {busy === s.id && <Loader2 className="size-4 animate-spin" />}
+                          Receive {s.expected_quantity ?? "—"} & Create RGRN
                         </Button>
                       )}
                       {has("WAREHOUSE") && s.status === "AWAITING_INSPECTION" && (
                         <Button
+                          type="button"
+                          className={actionButtonClass}
+                          disabled={busy === s.id}
                           onClick={() =>
                             void run(
                               s.id,
@@ -289,18 +341,23 @@ function Page() {
                             )
                           }
                         >
-                          Accept All {s.received_quantity}
+                          {busy === s.id && <Loader2 className="size-4 animate-spin" />}
+                          Accept All {s.received_quantity ?? "—"}
                         </Button>
                       )}
                       {has("WAREHOUSE") && s.status === "INSPECTION_PASSED" && (
                         <>
                           <Input
-                            className="max-w-52"
+                            aria-label="Storage location"
+                            className="h-10 rounded-lg sm:max-w-52"
                             placeholder="Storage location"
                             value={f.location || ""}
                             onChange={(e) => patch(c.id, { location: e.target.value })}
                           />
                           <Button
+                            type="button"
+                            className={actionButtonClass}
+                            disabled={busy === s.id}
                             onClick={() =>
                               void run(
                                 s.id,
@@ -309,12 +366,16 @@ function Page() {
                               )
                             }
                           >
+                            {busy === s.id && <Loader2 className="size-4 animate-spin" />}
                             Complete Putaway
                           </Button>
                         </>
                       )}
                       {has("WAREHOUSE") && s.status === "PUTAWAY_COMPLETED" && (
                         <Button
+                          type="button"
+                          className={actionButtonClass}
+                          disabled={busy === s.id}
                           onClick={() =>
                             void run(
                               s.id,
@@ -323,6 +384,7 @@ function Page() {
                             )
                           }
                         >
+                          {busy === s.id && <Loader2 className="size-4 animate-spin" />}
                           Post to Inventory
                         </Button>
                       )}
@@ -330,8 +392,10 @@ function Page() {
                   </div>
                 )}
                 {c.return_required && has("WAREHOUSE") && !c.return && (
-                  <div className="mt-4 flex gap-3">
+                  <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
                     <Input
+                      aria-label="Return vehicle number"
+                      className="h-10 rounded-lg"
                       placeholder="Return vehicle number"
                       value={f.returnVehicle || ""}
                       onChange={(e) =>
@@ -339,7 +403,10 @@ function Page() {
                       }
                     />
                     <Button
+                      type="button"
+                      className={actionButtonClass}
                       variant="destructive"
+                      disabled={busy === c.id}
                       onClick={() => {
                         if (!isValidVehicleNumber(f.returnVehicle || "")) {
                           patch(c.id, { validation: "Enter a valid return vehicle number." });
@@ -352,17 +419,21 @@ function Page() {
                         );
                       }}
                     >
+                      {busy === c.id && <Loader2 className="size-4 animate-spin" />}
                       Create Supplier Return
                     </Button>
                   </div>
                 )}
                 {c.return && (
-                  <div className="mt-4 flex items-center justify-between rounded-xl border p-4">
-                    <span>
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 p-4">
+                    <span className="text-sm font-medium">
                       {c.return.return_number} · {c.return.status.replaceAll("_", " ")}
                     </span>
                     {has("GATE_SECURITY") && c.return.status === "AWAITING_GATE_EXIT" && (
                       <Button
+                        type="button"
+                        className={actionButtonClass}
+                        disabled={busy === c.return.id}
                         onClick={() =>
                           void run(
                             c.return.id,
@@ -371,6 +442,7 @@ function Page() {
                           )
                         }
                       >
+                        {busy === c.return.id && <Loader2 className="size-4 animate-spin" />}
                         Complete Gate Exit
                       </Button>
                     )}
@@ -378,12 +450,15 @@ function Page() {
                 )}
                 {has("PROCUREMENT") && c.status !== "CLOSED" && (
                   <Button
-                    className="mt-4"
+                    type="button"
+                    className={`mt-4 ${actionButtonClass}`}
                     variant="outline"
+                    disabled={busy === c.id}
                     onClick={() =>
                       void run(c.id, () => api.closeDamageClaim(c.id), "Damage claim closed")
                     }
                   >
+                    {busy === c.id && <Loader2 className="size-4 animate-spin" />}
                     Close Claim
                   </Button>
                 )}

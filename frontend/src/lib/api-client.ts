@@ -1,3 +1,4 @@
+import { normalizeGrnResponse } from "./grn-response";
 /**
  * Central API Client using native fetch.
  * Links frontend components to the backend python business-service (port 8000)
@@ -125,10 +126,24 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
     // Ignore if running in non-browser context
   }
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
+  const method = (options.method || "GET").toUpperCase();
+  let response: Response;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      response = await fetch(url, {
+        ...options,
+        headers,
+      });
+      break;
+    } catch (error) {
+      // Browser network changes briefly interrupt local API calls while the
+      // dev server or network adapter reconnects. Retry idempotent reads only.
+      if (!(error instanceof TypeError) || method !== "GET" || attempt >= 2) {
+        throw error;
+      }
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 300 * (attempt + 1)));
+    }
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -379,7 +394,9 @@ export const api = {
     return request<any[]>(`${BUSINESS_API_URL}/api/v1/warehouse/dock-allocation-requests/pending`);
   },
   async getDockAllocationRequests(): Promise<any[]> {
-    return this.getPendingAllocations();
+    // GRN needs the allocation already assigned to an inbound shipment.
+    // The pending endpoint deliberately omits those completed allocations.
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/warehouse/dock-allocation-requests`);
   },
   async allocateDock(
     allocationRequestId: string,
@@ -1101,12 +1118,22 @@ export const api = {
     const qs = params.toString() ? `?${params.toString()}` : "";
     return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions${qs}`);
   },
-  async getAssemblyMaterialRequests(search?: string, status?: string): Promise<any[]> {
+  async getAssemblyMaterialRequests(
+    searchOrParams?: string | { search?: string; status?: string },
+    status?: string,
+  ): Promise<any[]> {
     const params = new URLSearchParams();
-    if (search) params.set("search", search);
-    if (status) params.set("status", status);
+    if (typeof searchOrParams === "object" && searchOrParams !== null) {
+      if (searchOrParams.search) params.set("search", searchOrParams.search);
+      if (searchOrParams.status && searchOrParams.status !== "ALL") params.set("status", searchOrParams.status);
+    } else {
+      if (searchOrParams) params.set("search", searchOrParams);
+      if (status && status !== "ALL") params.set("status", status);
+    }
     const qs = params.toString() ? `?${params.toString()}` : "";
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/material-requests${qs}`);
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/material-requests${qs}`, {
+      cache: "no-store",
+    });
   },
   async getAssemblyRequisition(id: string): Promise<any> {
     return request<any>(
@@ -1497,6 +1524,14 @@ export const api = {
     }
   },
 
+  async getSupplierAsnWarehouses(): Promise<
+    Array<{ id: string; code: string; name: string; warehouse_id: string }>
+  > {
+    return request(`${BUSINESS_API_URL}/api/gate/supplier/warehouses`, {
+      cache: "no-store",
+    });
+  },
+
   async getMaterialComponents(status: string = "ACTIVE"): Promise<any[]> {
     return request<any[]>(
       `${BUSINESS_API_URL}/api/gate/materials?status=${encodeURIComponent(status)}`,
@@ -1753,14 +1788,16 @@ export const api = {
   },
 
   async markNotificationRead(_id: string): Promise<any> {
-    return { status: "OK" };
+    return request<any>(`${BUSINESS_API_URL}/api/v1/notifications/${encodeURIComponent(_id)}/read`, { method: "POST" });
   },
 
   async markAllNotificationsRead(
     _role: string,
     _filters?: { store_code?: string; store_id?: string },
   ): Promise<any> {
-    return { status: "OK" };
+    const query = new URLSearchParams({ role: _role });
+    if (_filters?.store_code) query.set("store_code", _filters.store_code);
+    return request<any>(`${BUSINESS_API_URL}/api/v1/notifications/read-all?${query}`, { method: "POST" });
   },
 
   async markArrivalNotificationRead(_id: string): Promise<any> {
@@ -1790,9 +1827,96 @@ export const api = {
   },
 
   async globalSearch(q: string): Promise<{ results: any[] }> {
-    return request<any>(
-      `${BUSINESS_API_URL}/api/v1/procurement/global-search?q=${encodeURIComponent(q)}`,
-    );
+    const term = (q || "").trim().toLowerCase();
+    if (!term) return { results: [] };
+
+    try {
+      const res = await request<any>(
+        `${BUSINESS_API_URL}/api/v1/procurement/global-search?q=${encodeURIComponent(q)}`,
+      );
+      if (res && Array.isArray(res.results) && res.results.length > 0) return res;
+    } catch {
+      // Fallback to client-side multi-entity aggregator
+    }
+
+    try {
+      const [asns, vehicles, drivers, pos] = await Promise.all([
+        this.getAsns().catch(() => []),
+        this.getVehicles().catch(() => []),
+        this.getDrivers().catch(() => []),
+        this.getPurchaseOrders().catch(() => []),
+      ]);
+
+      const results: any[] = [];
+
+      // Search ASNs
+      if (Array.isArray(asns)) {
+        for (const a of asns) {
+          const matchStr = `${a.asn_number || ""} ${a.vehicle_number || ""} ${a.status || ""} ${a.supplier_name || ""} ${a.driver_name || ""}`.toLowerCase();
+          if (matchStr.includes(term)) {
+            results.push({
+              id: a.id || a.asn_number,
+              type: "ASN",
+              title: a.asn_number || "ASN Record",
+              subtitle: `Vehicle: ${a.vehicle_number || "—"} · Status: ${String(a.status || "").replaceAll("_", " ")}`,
+              link: "/supplier-dashboard",
+            });
+          }
+        }
+      }
+
+      // Search Vehicles
+      if (Array.isArray(vehicles)) {
+        for (const v of vehicles) {
+          const matchStr = `${v.vehicle_number || ""} ${v.vehicle_type || ""} ${v.status || ""}`.toLowerCase();
+          if (matchStr.includes(term)) {
+            results.push({
+              id: v.id || v.vehicle_number,
+              type: "VEHICLE",
+              title: v.vehicle_number || "Vehicle",
+              subtitle: `Type: ${v.vehicle_type || "Commercial"} · Status: ${v.status || "AVAILABLE"}`,
+              link: "/supplier-dashboard",
+            });
+          }
+        }
+      }
+
+      // Search Drivers
+      if (Array.isArray(drivers)) {
+        for (const d of drivers) {
+          const matchStr = `${d.driver_name || d.name || ""} ${d.phone || d.mobile_number || ""} ${d.license_number || ""}`.toLowerCase();
+          if (matchStr.includes(term)) {
+            results.push({
+              id: d.id || d.driver_name,
+              type: "DRIVER",
+              title: d.driver_name || d.name || "Driver",
+              subtitle: `Mobile: ${d.phone || d.mobile_number || "—"} · License: ${d.license_number || "Verified"}`,
+              link: "/supplier-dashboard",
+            });
+          }
+        }
+      }
+
+      // Search Purchase Orders
+      if (Array.isArray(pos)) {
+        for (const p of pos) {
+          const matchStr = `${p.po_number || p.purchase_order_number || ""} ${p.supplier_name || ""} ${p.status || ""}`.toLowerCase();
+          if (matchStr.includes(term)) {
+            results.push({
+              id: p.id || p.po_number,
+              type: "PURCHASE_ORDER",
+              title: p.po_number || p.purchase_order_number || "Purchase Order",
+              subtitle: `Supplier: ${p.supplier_name || "—"} · Status: ${p.status || "OPEN"}`,
+              link: "/supplier-dashboard",
+            });
+          }
+        }
+      }
+
+      return { results: results.slice(0, 10) };
+    } catch {
+      return { results: [] };
+    }
   },
 
   // ============================
@@ -2034,12 +2158,6 @@ export const api = {
     });
   },
 
-  async requestShortageMaterials(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${id}/material-request`, {
-      method: "POST",
-    });
-  },
-
   async updateMaterialVariantStatus(
     materialId: string,
     variantId: string,
@@ -2082,18 +2200,25 @@ export const api = {
 
     return request<any>(`${BUSINESS_API_URL}/api/v1/materials/next-code${query}`);
   },
-  async getStores(filters?: {
+  async getStores(params?: {
+    warehouse_id?: string;
     search?: string;
     status?: string;
-    warehouse_id?: string;
   }): Promise<any[]> {
     const query = new URLSearchParams();
+<<<<<<< HEAD
     if (filters?.search) query.set("search", filters.search);
     if (filters?.status) query.set("status", filters.status);
     if (filters?.warehouse_id) query.set("warehouse_id", filters.warehouse_id);
     return request<any[]>(
       `${BUSINESS_API_URL}/api/v1/stores${query.toString() ? `?${query}` : ""}`,
     );
+=======
+    if (params?.warehouse_id) query.set("warehouse_id", params.warehouse_id);
+    if (params?.search) query.set("search", params.search);
+    if (params?.status) query.set("status", params.status);
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/stores${query.toString() ? `?${query}` : ""}`);
+>>>>>>> origin/Srujan_M_S
   },
   async getStoreMasterList(filters?: {
     search?: string;
@@ -2178,6 +2303,25 @@ export const api = {
     return request<any[]>(
       `${BUSINESS_API_URL}/api/v1/stores/${encodeURIComponent(storeIdOrCode)}/zones${query ? `?${query}` : ""}`,
     );
+  },
+  async getLocationZones(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/zones`);
+  },
+  async getNextLocationZoneCode(): Promise<{ suggested_zone_code: string }> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/next-code`);
+  },
+  async createLocationZone(data: {
+    zone_name: string;
+    description?: string;
+    zone_code?: string;
+    warehouse_name?: string;
+    warehouse_id?: string;
+  }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
   },
   async getNextZoneCode(storeIdOrCode: string): Promise<{ suggested_zone_code: string }> {
     return request<any>(
@@ -2300,19 +2444,44 @@ export const api = {
       `${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/bins${query ? `?${query}` : ""}`,
     );
   },
-  async getNextBinCode(zoneId: string): Promise<{ suggested_bin_code: string }> {
+  async getNextBinCode(zoneId: string): Promise<{ suggested_bin_code: string; suggested_rack_code: string }> {
     return request<any>(
       `${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/bins/next-code`,
     );
+  },
+  async moveRackMaterial(zoneId: string, rackId: string, data: {
+    source_scan: string; material_scan: string; quantity: number; reason: string; destination_scan?: string;
+  }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/racks/${encodeURIComponent(rackId)}/move`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+    });
+  },
+  async getRackMaterials(zoneId: string, rackId: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/racks/${encodeURIComponent(rackId)}/materials`);
+  },
+  async updateRackCapacity(zoneId: string, rackId: string, maximum_capacity: number, reason?: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/racks/${encodeURIComponent(rackId)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ maximum_capacity, reason }),
+    });
+  },
+  async emptyRack(zoneId: string, rackId: string, reason: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/racks/${encodeURIComponent(rackId)}/empty`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirm: true, reason }),
+    });
+  },
+  async getRackHistory(zoneId: string, rackId: string): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/racks/${encodeURIComponent(rackId)}/history`);
   },
   async createBin(
     zoneId: string,
     data: {
       bin_name: string;
+      qr_identifier?: string;
       bin_code?: string;
       rack?: string;
       shelf?: string;
       position?: string;
+      qr_identifier?: string;
       storage_type?: string;
       capacity?: number;
       maximum_weight?: number;
@@ -2375,6 +2544,7 @@ export const api = {
     material_scan: string;
     quantity: number;
     remarks?: string;
+    batch_number?: string;
     reference_document?: string;
   }): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/takeaway`, {
@@ -2463,6 +2633,7 @@ export const api = {
       material_scan: string;
       location_scan: string;
       quantity: number;
+      confirmation_id?: string;
     },
   ): Promise<any> {
     return request<any>(
@@ -2580,6 +2751,7 @@ export const api = {
   },
   async performBinTransfer(data: {
     material_code: string;
+    batch_number?: string;
     source_bin_code: string;
     destination_bin_code: string;
     quantity: number;
@@ -2653,7 +2825,14 @@ export const api = {
   },
   async completePickupTask(
     id: string,
-    data: { material_scan: string; zone_scan: string; quantity: number; notes?: string },
+    data: {
+      material_scan: string;
+      zone_scan: string;
+      quantity: number;
+      notes?: string;
+      batch_number?: string;
+      confirmation_id?: string;
+    },
   ): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/storage/pickup-tasks/${encodeURIComponent(id)}/complete`,
@@ -2663,6 +2842,45 @@ export const api = {
         body: JSON.stringify(data),
       },
     );
+  },
+  async createBulkRack(storeId: string, data: {
+    zone_id: string;
+    rack_code: string;
+    bin_code_prefix: string;
+    bin_code_start: number;
+    count: number;
+    position_prefix: string;
+    position_start: number;
+    code_width: number;
+    capacity: number;
+  }): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/stores/${encodeURIComponent(storeId)}/bins/bulk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  },
+  async getMaterialRequests(params?: { status?: string }): Promise<any[]> {
+    const q = new URLSearchParams();
+    if (params?.status && params.status !== "ALL") q.append("status_filter", params.status);
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions${qs}`);
+  },
+  async approveMaterialRequest(id: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+    });
+  },
+  async createMaterialIssue(data: {
+    requisition_number?: string;
+    assembly_order_number?: string;
+    issued_to?: string;
+  }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/material-issues`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
   },
   // ============================
   // GRN / RECEIVING
@@ -2741,11 +2959,11 @@ export const api = {
     });
   },
   async createGrnBatches(grnLineId: string, batches: { batch_quantity: number }[]): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/receiving/grn/lines/${grnLineId}/batches`, {
+    return normalizeGrnResponse(await request<any[]>(`${BUSINESS_API_URL}/api/receiving/grn/lines/${grnLineId}/batches`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(batches),
-    });
+    }));
   },
   async generateDamageQrs(grnId: string): Promise<any[]> {
     return request<any[]>(
@@ -2787,9 +3005,9 @@ export const api = {
   },
   async getGrnDetail(grnId: string): Promise<any> {
     try {
-      return await request<any>(
+      return normalizeGrnResponse(await request<any>(
         `${BUSINESS_API_URL}/api/receiving/grn/${encodeURIComponent(grnId)}`,
-      );
+      ));
     } catch (error) {
       // A deleted/stale local session is handled by the GRN screen. Do not
       // surface it as an unhandled console error or resume invalid data.
@@ -3059,44 +3277,30 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  async getAssemblyLines(): Promise<AssemblyLineOption[]> {
-    return request<AssemblyLineOption[]>(`${BUSINESS_API_URL}/api/v1/assembly/lines`, {
-      cache: "no-store",
-    });
+  async getAdjustmentReasons(): Promise<string[]> {
+    return request<string[]>(`${BUSINESS_API_URL}/api/v1/inventory/adjustment-reasons`);
   },
-  async getAssemblyOrders(params?: {
-    search?: string;
-    status?: string;
-    priority?: string;
-  }): Promise<AssemblyOrder[]> {
-    const q = new URLSearchParams();
-    if (params?.search) q.append("search", params.search);
-    if (params?.status && params.status !== "ALL") q.append("status", params.status);
-    if (params?.priority && params.priority !== "ALL") q.append("priority", params.priority);
-    const queryStr = q.toString() ? `?${q.toString()}` : "";
-    return request<AssemblyOrder[]>(`${BUSINESS_API_URL}/api/v1/assembly/orders${queryStr}`, {
-      cache: "no-store",
-    });
-  },
-  async createAssemblyOrder(data: CreateAssemblyOrderPayload): Promise<AssemblyOrder> {
-    return request<AssemblyOrder>(`${BUSINESS_API_URL}/api/v1/assembly/orders`, {
+  async performBinTransfer(payload: {
+    material_code: string;
+    batch_number?: string;
+    source_bin_code: string;
+    destination_bin_code: string;
+    quantity: number;
+    reason: string;
+    remarks?: string;
+    scanned_source_bin_qr?: string;
+    scanned_dest_bin_qr?: string;
+    scanned_material_qr?: string;
+  }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/inventory/bin-transfer`, {
       method: "POST",
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     });
   },
-  async getAssemblyOrderDetail(orderId: string): Promise<AssemblyOrder> {
-    return request<AssemblyOrder>(
-      `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}`,
-      {
-        cache: "no-store",
-      },
-    );
-  },
-  async getAssemblyOrderMaterials(orderId: string): Promise<AssemblyOrderMaterialsResponse> {
-    return request<AssemblyOrderMaterialsResponse>(
-      `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}/materials`,
-      { cache: "no-store" },
-    );
+  async addProductBOMMaterial(productCode: string, data: { material_code: string; quantity_per_unit: number }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/products/${encodeURIComponent(productCode)}/bom/materials`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+    });
   },
   async getProductBOM(productCode: string, quantity = 1): Promise<AssemblyProductBOMResponse> {
     return request<AssemblyProductBOMResponse>(
@@ -3104,21 +3308,7 @@ export const api = {
       { cache: "no-store" },
     );
   },
-  async getAssemblyMaterialRequests(params?: {
-    search?: string;
-    status?: string;
-  }): Promise<AssemblyMaterialRequest[]> {
-    const q = new URLSearchParams();
-    if (params?.search) q.append("search", params.search);
-    if (params?.status && params.status !== "ALL") q.append("status", params.status);
-    const queryStr = q.toString() ? `?${q.toString()}` : "";
-    return request<AssemblyMaterialRequest[]>(
-      `${BUSINESS_API_URL}/api/v1/assembly/material-requests${queryStr}`,
-      {
-        cache: "no-store",
-      },
-    );
-  },
+
   async createAssemblyMaterialRequest(
     data: CreateAssemblyMaterialRequestPayload,
   ): Promise<AssemblyMaterialRequest> {
@@ -3262,6 +3452,8 @@ export const api = {
   },
   async performAssemblyQualityInspection(payload: {
     order_id: string;
+    inspector_name: string;
+    authorized_person_confirmed: boolean;
     passed_quantity: number;
     failed_quantity?: number;
     rework_quantity?: number;
@@ -3275,9 +3467,11 @@ export const api = {
   },
   async getAssemblyFinishedGoods(params?: {
     search?: string;
+    group_by?: "product";
   }): Promise<AssemblyFinishedGoodItem[]> {
     const q = new URLSearchParams();
     if (params?.search) q.append("search", params.search);
+    if (params?.group_by) q.append("group_by", params.group_by);
     const queryStr = q.toString() ? `?${q.toString()}` : "";
     return request<AssemblyFinishedGoodItem[]>(
       `${BUSINESS_API_URL}/api/v1/assembly/finished-goods${queryStr}`,
@@ -3519,7 +3713,28 @@ export const api = {
     const qStr = role ? `?role=${encodeURIComponent(role)}` : "";
     return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/notifications${qStr}`);
   },
+  async assistantChat(
+    message: string,
+    history: AssistantChatMessage[] = [],
+  ): Promise<AssistantChatResponse> {
+    return request<AssistantChatResponse>(`${BUSINESS_API_URL}/api/v1/assistant/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, history }),
+    });
+  },
 };
+
+export interface AssistantChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AssistantChatResponse {
+  reply: string;
+  model: string;
+}
+
 
 export interface AssemblyQualityInspectionItem {
   order_id: string;
@@ -3543,11 +3758,20 @@ export interface AssemblyQualityInspectionItem {
 }
 
 export interface AssemblyFinishedGoodItem {
+  batches?: AssemblyFinishedGoodItem[];
   id: string;
   order_id: string;
   order_number: string;
   product_code: string;
   product_name: string;
+  produced_quantity?: number;
+  available_quantity?: number;
+  reserved_quantity?: number;
+  dispatched_quantity?: number;
+  manufacturing_date?: string | null;
+  qc_status?: string;
+  inspected_by?: string | null;
+  inspected_at?: string | null;
   quantity: number;
   uom: string;
   status: string;
@@ -3631,6 +3855,12 @@ export interface AssemblyMaterialRequest {
   created_at: string | null;
   material_received_by?: string | null;
   material_received_at?: string | null;
+  issue_transaction?: {
+    issue_number: string;
+    issued_at: string | null;
+    issued_by: string;
+    items: Array<{ material_code: string; issued_quantity?: number }>;
+  } | null;
   material_issue?: {
     id: string;
     issue_number: string;
@@ -3651,22 +3881,6 @@ export interface CreateAssemblyMaterialRequestPayload {
   priority?: string;
   assembly_line?: string;
   order_id?: string;
-}
-
-export interface AssemblyOrderMaterialsResponse {
-  order_id: string;
-  order_number: string;
-  product_code: string;
-  product_name: string;
-  target_quantity: number;
-  uom: string;
-  summary: {
-    total_components: number;
-    available_components: number;
-    shortage_components: number;
-    status: string;
-  };
-  materials: AssemblyOrderItem[];
 }
 
 export interface AssemblyProductBOMResponse {
@@ -3787,21 +4001,6 @@ export interface AssemblyProductOption {
   uom: string;
 }
 
-export interface AssemblyLineOption {
-  id: string;
-  code: string;
-  name: string;
-  status: string;
-}
 
-export interface CreateAssemblyOrderPayload {
-  product_code: string;
-  product_name?: string;
-  target_quantity: number;
-  required_date: string;
-  assembly_line?: string;
-  priority?: string;
-  notes?: string;
-}
 
 export const apiClient = api;

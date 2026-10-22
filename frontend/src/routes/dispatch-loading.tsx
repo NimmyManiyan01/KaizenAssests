@@ -1,4 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { InformationTooltip } from "@/components/ui/information-tooltip";
+import { hasRole } from "@/lib/auth-utils";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Navigation,
@@ -28,11 +30,15 @@ import { api } from "@/lib/api-client";
 import jsQR from "jsqr";
 
 export const Route = createFileRoute("/dispatch-loading")({
+  beforeLoad: () => {
+    if (hasRole(["ASSEMBLY", "ASSEMBLY_MANAGER"])) throw redirect({ to: "/assembly/dispatch" });
+  },
   component: DispatchLoadingPage,
 });
 
 function DispatchLoadingPage() {
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
   const [orders, setOrders] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
@@ -233,6 +239,25 @@ function DispatchLoadingPage() {
     }
   };
 
+  const visibleOrders = orders.filter(
+    (order) =>
+      !search.trim() ||
+      [
+        order.dispatch_number,
+        order.vehicle_number,
+        order.vehicleNumber,
+        order.driver_name,
+        order.driverName,
+        order.loading_bay,
+        order.bay_number,
+        order.status,
+      ].some((value) =>
+        String(value || "")
+          .toLowerCase()
+          .includes(search.trim().toLowerCase()),
+      ),
+  );
+
   return (
     <AppShell
       title="Dispatch Loading Bay & Package Scanning"
@@ -249,11 +274,24 @@ function DispatchLoadingPage() {
         </div>
       ) : (
         <Card className="rounded-2xl overflow-hidden shadow-sm">
-          <div className="p-4 border-b font-semibold flex items-center justify-between">
+          <div className="p-4 border-b font-semibold flex flex-wrap items-center justify-between gap-3">
             <span>Loading Bay Active Queue ({orders.length})</span>
             <span className="text-xs text-muted-foreground">
               Supplier vehicles awaiting package scanning & loading
             </span>
+          </div>
+          <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground">
+              Select dispatch &rarr; Verify bay and vehicle &rarr; Scan packages &rarr; Confirm
+              loading
+            </p>
+            <input
+              aria-label="Search loading queue"
+              placeholder="Search dispatch, vehicle or driver..."
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="h-9 w-full rounded-xl border border-input bg-background px-3 text-xs sm:max-w-xs"
+            />
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
@@ -263,19 +301,21 @@ function DispatchLoadingPage() {
                   <th className="px-4 py-3">Bay</th>
                   <th className="px-4 py-3">Vehicle</th>
                   <th className="px-4 py-3">Driver</th>
-                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Status<InformationTooltip help="loading" /></th>
                   <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {orders.length === 0 ? (
+                {visibleOrders.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="text-center py-12 text-muted-foreground">
-                      No orders pending loading. Complete packing tasks first.
+                      {search.trim()
+                        ? "No loading orders match your search."
+                        : "No orders pending loading. Complete packing tasks first."}
                     </td>
                   </tr>
                 ) : (
-                  orders.map((order) => {
+                  visibleOrders.map((order) => {
                     const bayNo =
                       order.loading_bay || order.loadingBay || order.bay_number || "Not assigned";
                     const vehNo =

@@ -1,3 +1,4 @@
+import { useNotificationAlerts } from "@/hooks/use-notification-alerts";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
   LayoutDashboard,
@@ -35,8 +36,11 @@ import {
   GitFork,
   Navigation,
   CheckCircle2,
+  X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { InformationTooltip } from "@/components/ui/information-tooltip";
+import { pageHelp } from "@/lib/information-help";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api-client";
@@ -108,6 +112,33 @@ function getUserRoleLabel(user: UserInfo | null): string {
   return roles[0]?.replace(/_/g, " ") ?? "User";
 }
 
+function getSearchPlaceholder(path: string, searchStr: string): string {
+  const route = `${path}${searchStr}`.toLowerCase();
+  if (route.startsWith("/supplier/asns")) return "Search ASN, vehicle, driver, or status...";
+  if (route.startsWith("/supplier-materials")) return "Search material code or name...";
+  if (route.startsWith("/supplier/dispatch")) return "Search dispatch request, product, or status...";
+  if (route.startsWith("/supplier-dashboard")) return "Search ASN, vehicle, or shipment status...";
+  if (route.startsWith("/dock-management")) return "Search vehicle, gate pass, or vendor...";
+  if (route.startsWith("/vehicle-queue")) return "Search gate pass, vehicle, supplier, or ASN...";
+  if (route.startsWith("/vehicle-exit")) return "Search vehicle, gate pass, or GRN...";
+  if (route.startsWith("/gate-dashboard")) return "Search gate pass, vehicle, or supplier...";
+  if (route.startsWith("/grn")) return "Search GRN, PO, supplier, vehicle, or material...";
+  if (route.startsWith("/inventory")) {
+    if (route.includes("tab=locations")) return "Search zone, bin, or location code...";
+    if (route.includes("tab=putaway")) return "Search putaway task, GRN, or material...";
+    if (route.includes("tab=picking")) return "Search pick task, request, or material...";
+    if (route.includes("tab=requests")) return "Search request, material, or status...";
+    return "Search material, SKU, batch, or location...";
+  }
+  if (route.startsWith("/assembly/material-requests") || route.startsWith("/warehouse/assembly-requisitions")) return "Search request, production order, or material...";
+  if (route.startsWith("/assembly/production") || route.startsWith("/assembly/orders") || route.startsWith("/assembly-dashboard")) return "Search production order, product, or work order...";
+  if (route.startsWith("/assembly/quality")) return "Search inspection, product, or serial number...";
+  if (route.startsWith("/assembly/finished-goods")) return "Search product, order, or serial number...";
+  if (route.startsWith("/dispatch")) return "Search dispatch order, customer, or vehicle...";
+  if (route.startsWith("/notifications")) return "Search notifications by title or message...";
+  return "Search ASN, vehicle, vendor, gate pass, or material...";
+}
+
 type NavItem = {
   label: string;
   to: string;
@@ -143,10 +174,8 @@ const assemblyNav = [
   { label: "Material Requests", to: "/assembly/material-requests", icon: Boxes },
   { label: "Production", to: "/assembly/production", icon: Factory },
   { label: "Quality Check", to: "/assembly/quality", icon: ShieldCheck },
-  { label: "Dispatch", to: "/assembly/dispatch", icon: Truck },
   { label: "Finished Goods Records", to: "/assembly/finished-goods", icon: PackageCheck },
-  { label: "Picking & Packing", to: "/dispatch-picking-packing", icon: PackageCheck },
-  { label: "Loading", to: "/dispatch-loading", icon: Navigation },
+  { label: "FG Dispatch", to: "/assembly/dispatch", icon: Truck },
 ];
 
 const warehouseOperatorNav = [
@@ -166,8 +195,7 @@ const warehouseNav = [
   { label: "Dashboard", to: "/inventory?tab=dashboard", icon: LayoutDashboard },
   { label: "Putaway", to: "/inventory?tab=putaway", icon: PackageCheck },
   { label: "Inventory", to: "/inventory?tab=inventory", icon: Boxes },
-  { label: "Assembly Requisitions", to: "/warehouse/assembly-requisitions", icon: ClipboardList },
-  { label: "Picking", to: "/inventory?tab=picking", icon: ListOrdered },
+  { label: "Requisitions & Picking", to: "/inventory?tab=picking", icon: ClipboardList },
   { label: "Locations", to: "/inventory?tab=locations", icon: Building2 },
   { label: "Dock Allocation", to: "/dock-management", icon: Warehouse },
 ];
@@ -176,8 +204,8 @@ const supplierNav = [
   { label: "Dashboard", to: "/supplier-dashboard", icon: LayoutDashboard },
   { label: "Material Master", to: "/supplier-materials", icon: Database },
   { label: "ASN Management", to: "/supplier/asns", icon: Truck },
+  { label: "Damage Claims", to: "/damage-claims", icon: ShieldAlert },
   { label: "FG Dispatch Requests", to: "/supplier/dispatch", icon: PackageCheck },
-  { label: "Damage Returns", to: "/damage-claims", icon: ShieldAlert },
 ];
 
 const managerNav: any[] = [];
@@ -297,7 +325,7 @@ export function AppShell({
   onSearchChange,
 }: {
   children: ReactNode;
-  title: ReactNode;
+  title?: ReactNode;
   subtitle?: string;
   actions?: ReactNode;
   onSearchChange?: (value: string) => void;
@@ -316,32 +344,65 @@ export function AppShell({
   const fullHref = path + searchStr;
   const navigate = useNavigate();
   const [user, setUser] = useState<UserInfo | null>(null);
-  const [unreadNotifications, setUnreadNotifications] = useState(0);
-  const [notificationAlert, setNotificationAlert] = useState<any | null>(null);
-  const knownNotificationIds = useRef<Set<string> | null>(null);
+  const { unreadCount: unreadNotifications, alert: notificationAlert, dismissAlert } = useNotificationAlerts(user ? getNotificationRole(user) : null, user?.username);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const executeSearch = async (term: string) => {
+    if (!term || !term.trim()) {
+      setSearchResults([]);
+      setShowSearch(false);
+      return;
+    }
+    setIsSearching(true);
+    try {
+      const data = await api.globalSearch(term.trim());
+      setSearchResults(data?.results || []);
+      setShowSearch(true);
+    } catch (e) {
+      console.error("Search failed", e);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
   useEffect(() => {
-    const delayDebounceFn = setTimeout(async () => {
-      if (searchTerm.length >= 2) {
-        setIsSearching(true);
-        try {
-          const data = await api.globalSearch(searchTerm);
-          setSearchResults(data.results);
-          setShowSearch(true);
-        } catch (e) {
-          console.error("Search failed", e);
-        } finally {
-          setIsSearching(false);
-        }
+    const delayDebounceFn = setTimeout(() => {
+      if (searchTerm.length >= 1) {
+        void executeSearch(searchTerm);
       } else {
         setSearchResults([]);
         setShowSearch(false);
       }
-    }, 300);
+    }, 200);
     return () => clearTimeout(delayDebounceFn);
+  }, [searchTerm]);
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchTerm.trim()) {
+      void executeSearch(searchTerm);
+      window.dispatchEvent(new CustomEvent("app:search", { detail: searchTerm.trim() }));
+      setShowSearch(true);
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        if (searchTerm.length >= 1) {
+          setShowSearch(true);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [searchTerm]);
   const isGrnUser =
     mounted &&
@@ -355,94 +416,7 @@ export function AppShell({
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
-    let cleanup: (() => void) | undefined;
-    try {
-      const u = getUserInfo();
-      setUser(u);
-      if (u) {
-        const notifRole = getNotificationRole(u);
-        const fetchNotifications = async () => {
-          try {
-            if (notifRole === "WAREHOUSE" || notifRole === "GRN" || isGrnUser) {
-              const [arrivals, general] = await Promise.all([
-                api.getArrivalNotifications().catch(() => []),
-                api.getNotifications("GRN").catch(() => []),
-              ]);
-              const unreadArrivals = Array.isArray(arrivals)
-                ? arrivals.filter((n) => String(n?.status || "").toUpperCase() !== "ACKNOWLEDGED")
-                    .length
-                : 0;
-              const unreadGeneral = Array.isArray(general)
-                ? general.filter((n) => !(n?.is_read ?? n?.isRead)).length
-                : 0;
-              setUnreadNotifications(unreadArrivals + unreadGeneral);
-              const allNotifications = [
-                ...(Array.isArray(arrivals) ? arrivals : []),
-                ...(Array.isArray(general) ? general : []),
-              ];
-              const ids = new Set(
-                allNotifications.map((n: any) =>
-                  String(n?.id || n?.notification_id || n?.created_at || ""),
-                ),
-              );
-              if (knownNotificationIds.current) {
-                const newest = allNotifications.find(
-                  (n: any) =>
-                    ids.has(String(n?.id || n?.notification_id || n?.created_at || "")) &&
-                    !knownNotificationIds.current?.has(
-                      String(n?.id || n?.notification_id || n?.created_at || ""),
-                    ),
-                );
-                if (newest) {
-                  setNotificationAlert(newest);
-                  window.setTimeout(() => setNotificationAlert(null), 7000);
-                }
-              }
-              knownNotificationIds.current = ids;
-            } else {
-              const data = await api.getNotifications(notifRole);
-              setUnreadNotifications(
-                Array.isArray(data) ? data.filter((n) => !(n?.is_read ?? n?.isRead)).length : 0,
-              );
-              const ids = new Set(
-                (Array.isArray(data) ? data : []).map((n: any) =>
-                  String(n?.id || n?.notification_id || n?.created_at || ""),
-                ),
-              );
-              if (knownNotificationIds.current) {
-                const newest = (Array.isArray(data) ? data : []).find(
-                  (n: any) =>
-                    !knownNotificationIds.current?.has(
-                      String(n?.id || n?.notification_id || n?.created_at || ""),
-                    ),
-                );
-                if (newest) {
-                  setNotificationAlert(newest);
-                  window.setTimeout(() => setNotificationAlert(null), 7000);
-                }
-              }
-              knownNotificationIds.current = ids;
-            }
-          } catch {
-            // Silently ignore during background polling
-          }
-        };
-        void fetchNotifications();
-        window.addEventListener("notifications:refresh", fetchNotifications);
-        window.addEventListener("focus", fetchNotifications);
-        cleanup = () => {
-          window.removeEventListener("notifications:refresh", fetchNotifications);
-          window.removeEventListener("focus", fetchNotifications);
-        };
-      }
-    } catch (e) {
-      console.error("Failed to parse user info", e);
-    }
-
-    return () => {
-      if (cleanup) cleanup();
-    };
-  }, [dark, isGrnUser]);
+  }, [dark]);
   const isAssemblyUser =
     mounted &&
     (user?.roles?.includes("ASSEMBLY") ||
@@ -482,6 +456,10 @@ export function AppShell({
     ["/inventory", "/dock-management", "/receiving", "/putaway-tasks", "/reports"].some((p) =>
       path.startsWith(p),
     );
+  const isWarehouseWorkspace =
+    path === "/inventory" ||
+    path.startsWith("/warehouse") ||
+    ["/dock-management", "/receiving", "/putaway-tasks"].some((p) => path.startsWith(p));
   const isGateSecurityRoute =
     [
       "/vehicle-queue",
@@ -630,7 +608,7 @@ export function AppShell({
                       setMobileSidebarOpen(false);
                       void navigate({ to: item.to as any });
                     }}
-                    title={item.label}
+
                     className={cn(
                       "group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-sidebar-foreground transition-all",
                       "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
@@ -649,16 +627,7 @@ export function AppShell({
               })}
             </nav>
 
-            <div className="border-t border-sidebar-border p-3">
-              <button
-                suppressHydrationWarning
-                onClick={handleLogout}
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-destructive transition-colors hover:bg-danger-soft"
-              >
-                <LogOut className="size-[18px]" />
-                <span>Logout</span>
-              </button>
-            </div>
+
           </aside>
         </div>
       )}
@@ -723,7 +692,7 @@ export function AppShell({
                   e.preventDefault();
                   void navigate({ to: item.to as any });
                 }}
-                title={item.label}
+
                 className={cn(
                   "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground transition-all",
                   "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
@@ -742,20 +711,10 @@ export function AppShell({
           })}
         </nav>
 
-        <div className="border-t border-sidebar-border p-3 space-y-1">
-          <button
-            suppressHydrationWarning
-            onClick={handleLogout}
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-destructive transition-colors hover:bg-danger-soft"
-          >
-            <LogOut className="size-[18px]" />
-            {!desktopSidebarCollapsed && <span>Logout</span>}
-          </button>
-        </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 glass-strong">
+      <div className={cn("flex min-w-0 flex-1 flex-col", isWarehouseWorkspace && "bg-[#eef5fd] dark:bg-[#151d2a]")}>
+        <header className={cn("sticky top-0 z-30 glass-strong", isWarehouseWorkspace && "border-b border-[#d7e5f7] bg-white/95 dark:border-slate-700 dark:bg-slate-900/95")}>
           <div className="flex h-16 items-center gap-3 px-4 lg:px-7">
             <button
               type="button"
@@ -766,26 +725,77 @@ export function AppShell({
               <Warehouse className="size-4 transition-opacity duration-150 group-hover:opacity-0 group-focus-visible:opacity-0" />
               <Menu className="absolute size-4 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100" />
             </button>
-            <div className="relative hidden max-w-md flex-1 items-center sm:flex">
-              <Search className="pointer-events-none absolute left-3 size-4 text-muted-foreground" />
+            <form
+              onSubmit={handleSearchSubmit}
+              className="relative hidden max-w-md flex-1 items-center sm:flex"
+            >
+              <button
+                type="submit"
+                aria-label="Search"
+
+                className="absolute left-2.5 grid size-6 place-items-center rounded-lg text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+              >
+                <Search className="size-4" />
+              </button>
               <input
+                ref={searchInputRef}
                 suppressHydrationWarning
+                type="text"
+                inputMode="search"
                 placeholder={
                   hasUserRole(user, "SUPPLIER") || path.startsWith("/supplier")
                     ? "Search ASN, vehicle number, status..."
                     : "Search ASN, truck no, vendor, gate entry…"
                 }
-                className="h-10 w-full rounded-xl border border-border bg-muted/60 pl-9 pr-16 text-sm outline-none transition-shadow placeholder:text-muted-foreground focus:bg-card focus:ring-2 focus:ring-ring/40"
+                className="h-10 w-full rounded-xl border border-border bg-muted/60 pl-9 pr-16 text-sm outline-none transition-shadow placeholder:text-muted-foreground focus:bg-card focus:ring-2 focus:ring-ring/40 [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
                 value={searchTerm}
                 onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  onSearchChange?.(e.target.value);
+                  const val = e.target.value;
+                  setSearchTerm(val);
+                  onSearchChange?.(val);
+                  window.dispatchEvent(new CustomEvent("app:search", { detail: val }));
                 }}
-                onFocus={() => searchTerm.length >= 2 && setShowSearch(true)}
+                onFocus={() => {
+                  if (searchTerm.length >= 1 || searchResults.length > 0) setShowSearch(true);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setShowSearch(false);
+                  }
+                }}
               />
-              <kbd className="absolute right-3 hidden rounded-md border border-border bg-card px-1.5 py-0.5 text-[10px] text-muted-foreground lg:block">
-                {isSearching ? <Loader2 className="size-3 animate-spin" /> : "⌘K"}
-              </kbd>
+              <div className="absolute right-2 flex items-center gap-1">
+                {searchTerm && (
+                  <button
+                    type="button"
+                    aria-label="Clear search"
+                    onClick={() => {
+                      setSearchTerm("");
+                      setSearchResults([]);
+                      setShowSearch(false);
+                      window.dispatchEvent(new CustomEvent("app:search", { detail: "" }));
+                      searchInputRef.current?.focus();
+                    }}
+                    className="grid size-5 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    searchInputRef.current?.focus();
+                    if (searchTerm.trim()) {
+                      void executeSearch(searchTerm);
+                    }
+                  }}
+                  aria-label="Search shortcut (⌘K or Ctrl+K)"
+
+                  className="hidden rounded-md border border-border bg-card px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground hover:text-foreground hover:border-slate-400 transition-colors cursor-pointer lg:block"
+                >
+                  {isSearching ? <Loader2 className="size-3 animate-spin" /> : "⌘K"}
+                </button>
+              </div>
 
               {showSearch && (
                 <>
@@ -801,6 +811,14 @@ export function AppShell({
                               onClick={() => {
                                 setShowSearch(false);
                                 setSearchTerm("");
+                                window.dispatchEvent(
+                                  new CustomEvent("app:search", { detail: result.title }),
+                                );
+                                if (result.type === "ASN") {
+                                  window.dispatchEvent(
+                                    new CustomEvent("app:open-asn", { detail: result }),
+                                  );
+                                }
                               }}
                               className="flex flex-col gap-0.5 rounded-xl px-4 py-2.5 text-left transition-colors hover:bg-accent"
                             >
@@ -822,11 +840,11 @@ export function AppShell({
                           ))}
                         </div>
                       ) : (
-                        <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                        <div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground">
                           <Search className="mb-2 size-8 opacity-20" />
                           <p className="text-sm font-medium">No results found for "{searchTerm}"</p>
                           <p className="text-xs">
-                            Try searching for a different ASN, truck, or vendor
+                            Try searching for a different ASN, vehicle number, or status
                           </p>
                         </div>
                       )}
@@ -834,21 +852,25 @@ export function AppShell({
                   </div>
                 </>
               )}
+<<<<<<< HEAD
             </div>
+=======
+            </form>
+>>>>>>> origin/Srujan_M_S
 
             <div className="ml-auto flex items-center gap-1.5">
-              <Link
-                to="/notifications"
-                aria-label="Notifications"
-                className="relative grid size-10 place-items-center rounded-xl bg-transparent text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus:bg-transparent focus-visible:outline-none"
-              >
-                <Bell className="size-[18px]" />
-                {unreadNotifications > 0 && (
-                  <span className="absolute right-2 top-2 grid size-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-white animate-pulse-ring">
-                    {unreadNotifications}
-                  </span>
-                )}
-              </Link>
+                    <Link
+                      to="/notifications"
+                      aria-label="Notifications"
+                      className="relative grid size-10 place-items-center rounded-xl bg-transparent text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus:bg-transparent focus-visible:outline-none"
+                    >
+                      <Bell className="size-[18px]" />
+                      {unreadNotifications > 0 && (
+                        <span className="absolute right-2 top-2 grid size-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-white">
+                          {unreadNotifications}
+                        </span>
+                      )}
+                    </Link>
               <div className="group relative ml-1 flex items-center gap-2.5 rounded-xl border border-border bg-card py-1.5 pl-1.5 pr-3 transition-colors hover:bg-accent/50">
                 <span
                   suppressHydrationWarning
@@ -868,7 +890,7 @@ export function AppShell({
                   suppressHydrationWarning
                   onClick={handleLogout}
                   className="ml-2 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                  title="Logout"
+
                 >
                   <LogOut className="size-4" />
                 </button>
@@ -878,21 +900,22 @@ export function AppShell({
         </header>
 
         {notificationAlert && (
-          <div className="fixed right-5 top-20 z-[80] w-[min(380px,calc(100vw-2rem))] rounded-xl border border-primary/20 bg-card p-4 shadow-xl">
+          <div role="status" aria-live="polite" className="fixed right-5 top-20 z-[80] w-[min(380px,calc(100vw-2rem))] rounded-xl border border-primary/20 bg-card p-4 shadow-xl">
             <div className="flex items-start gap-3">
               <Bell className="mt-0.5 size-5 text-primary" />
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-bold">{notificationAlert.title || "GRN Alert"}</p>
+                <p className="text-sm font-bold">{notificationAlert.title || "New notification"}</p>
                 <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">
                   {notificationAlert.message ||
                     notificationAlert.body ||
-                    "The dock is available. The next vehicle can enter."}
+                    "Open Notification Center to view this update."}
                 </p>
+                <Link to="/notifications" onClick={dismissAlert} className="mt-2 inline-block text-xs font-semibold text-primary">View notifications</Link>
               </div>
               <button
                 type="button"
                 aria-label="Dismiss notification"
-                onClick={() => setNotificationAlert(null)}
+                onClick={dismissAlert}
                 className="text-muted-foreground hover:text-foreground"
               >
                 ×
@@ -900,15 +923,17 @@ export function AppShell({
             </div>
           </div>
         )}
-        <main className="page-enter flex-1 px-4 py-6 lg:px-7">
-          <div className="mx-auto w-full max-w-[1360px]">
-            <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">{title}</h1>
-                {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
+        <main className={cn("page-enter flex-1 px-4 py-6 lg:px-7", isWarehouseWorkspace && "px-5 py-5 lg:px-8 lg:py-6")}>
+          <div className={cn("mx-auto w-full max-w-[1360px]", isWarehouseWorkspace && "max-w-[1680px]")}>
+            {(title || subtitle || actions) && (
+              <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+                <div>
+                  {title && <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">{title}{pageHelp[path] && <InformationTooltip help={pageHelp[path]} placement="title" />}</h1>}
+                  {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
+                </div>
+                {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
               </div>
-              {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
-            </div>
+            )}
             {children}
           </div>
         </main>

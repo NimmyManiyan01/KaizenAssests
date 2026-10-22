@@ -406,6 +406,20 @@ class GrnLineResponse(ApiModel):
     damage_lots: list[GrnDamageLotResponse] = Field(default_factory=list)
     damage_evidence: list[DamageEvidenceResponse] = Field(default_factory=list)
 
+    @field_validator(
+        "received_quantity",
+        "good_quantity",
+        "damaged_quantity",
+        "rejected_quantity",
+        "held_quantity",
+        "quality_approved_quantity",
+        "balance_quantity",
+        mode="before",
+    )
+    @classmethod
+    def clean_null_quantities(cls, value: Any) -> Any:
+        return Decimal("0") if value is None else value
+
 
 class UpdateGrnLinesResponse(ApiModel):
     grn_id: str

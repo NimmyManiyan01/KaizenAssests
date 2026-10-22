@@ -1,3 +1,4 @@
+import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
@@ -7,22 +8,17 @@ import {
   AlertTriangle,
   ArrowRight,
   Boxes,
-  Calendar,
   CheckCircle2,
-  Clock,
   Factory,
   Filter,
-  Layers,
   LayoutDashboard,
   Package,
-  PackageCheck,
   Play,
   PlusCircle,
   RefreshCw,
   Search,
   ShieldCheck,
   User,
-  Warehouse,
   X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -80,6 +76,9 @@ function getStatusBadge(status: string) {
       </span>
     );
   }
+  if (s === "REJECTED") {
+    return <Badge variant="outline" className="border-rose-300 bg-rose-50 text-rose-700">Request Rejected</Badge>;
+  }
   if (s === "MATERIAL_PENDING" || s === "PLANNED") {
     return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/25">
@@ -115,10 +114,7 @@ function AssemblyProductionPage() {
     if (isManual) setRefreshing(true);
     else setLoading(true);
     try {
-      const res = await api.getAssemblyProductionOrders({
-        search: search || undefined,
-        status: statusFilter !== "ALL" ? statusFilter : undefined,
-      });
+      const res = await api.getAssemblyProductionOrders();
       setOrders(res || []);
     } catch (err: any) {
       toast.error("Failed to load production orders: " + (err.message || "Unknown error"));
@@ -130,7 +126,7 @@ function AssemblyProductionPage() {
 
   useEffect(() => {
     fetchOrders();
-  }, [statusFilter]);
+  }, []);
 
   const handleStartProduction = async (order: AssemblyProductionOrder) => {
     if (!order.can_start) {
@@ -152,10 +148,6 @@ function AssemblyProductionPage() {
   const handleOpenCompleteModal = (order: AssemblyProductionOrder) => {
     setCompleteOrder(order);
     setProducedQuantity(order.target_quantity);
-    setProductionNotes("");
-    setWastageQuantity(0);
-    setWastageMaterialCode("");
-    setWastageReason("");
   };
 
   const handleCompleteSubmit = async () => {
@@ -196,48 +188,21 @@ function AssemblyProductionPage() {
 
   // Local text search
   const filteredOrders = useMemo(() => {
-    if (!search.trim()) return orders;
     const q = search.toLowerCase().trim();
     return orders.filter(
       (o) =>
-        o.order_number?.toLowerCase().includes(q) ||
-        o.product_name?.toLowerCase().includes(q) ||
-        o.product_code?.toLowerCase().includes(q) ||
-        o.material_request_number?.toLowerCase().includes(q),
+        (statusFilter === "ALL" ||
+          (statusFilter === "READY"
+            ? o.can_start
+            : statusFilter === "IN_PRODUCTION"
+              ? o.can_complete
+              : ["QC_PENDING", "COMPLETED", "CLOSED"].includes(o.status))) &&
+        (!q ||
+          [o.order_number, o.product_name, o.product_code, o.material_request_number].some(
+            (value) => value?.toLowerCase().includes(q),
+          )),
     );
-  }, [orders, search]);
-
-  // Workflow Quick Link Cards
-  const workflowShortcuts = [
-    {
-      title: "Assembly Dashboard",
-      subtitle: "Floor monitoring & KPI metrics",
-      icon: LayoutDashboard,
-      to: "/assembly-dashboard",
-      tone: "blue",
-    },
-    {
-      title: "Work Orders",
-      subtitle: "Manufacturing orders & BOM lines",
-      icon: Layers,
-      to: "/assembly/orders",
-      tone: "amber",
-    },
-    {
-      title: "Material Requests",
-      subtitle: "Warehouse component requisition",
-      icon: Boxes,
-      to: "/assembly/material-requests",
-      tone: "cyan",
-    },
-    {
-      title: "Quality Inspections",
-      subtitle: "Batch testing & QC pass signs",
-      icon: ShieldCheck,
-      to: "/assembly/quality",
-      tone: "purple",
-    },
-  ];
+  }, [orders, search, statusFilter]);
 
   return (
     <AppShell
@@ -245,10 +210,6 @@ function AssemblyProductionPage() {
       subtitle="Assembly work center operations, step execution, and production recording"
       actions={
         <div className="flex flex-wrap items-center gap-2.5">
-          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-card border border-border/80 shadow-2xs text-xs font-medium text-muted-foreground">
-            <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-            Lines Active & Synced
-          </div>
           <Button
             variant="outline"
             size="sm"
@@ -281,165 +242,11 @@ function AssemblyProductionPage() {
       }
     >
       <div className="space-y-6">
-        {/* 5 Top KPI Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
-          {/* Card 1: Total Orders */}
-          <div className="group relative overflow-hidden rounded-2xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-blue-500/35 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                Total Orders
-              </span>
-              <div className="grid size-9 place-items-center rounded-xl bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20 shadow-2xs">
-                <Factory className="size-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-3xl font-black tracking-tight text-foreground tabular-nums">
-                {loading ? "..." : totalOrders}
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Tracked in Assembly</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-blue-500/10 text-blue-700 dark:text-blue-300">
-                  Total
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 2: Ready to Start */}
-          <div className="group relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-emerald-500/35 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                Ready to Start
-              </span>
-              <div className="grid size-9 place-items-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shadow-2xs">
-                <Play className="size-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-3xl font-black tracking-tight text-emerald-600 dark:text-emerald-400 tabular-nums">
-                {loading ? "..." : readyToStart}
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Materials confirmed</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
-                  Ready
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 3: In Production */}
-          <div className="group relative overflow-hidden rounded-2xl border border-amber-500/20 bg-gradient-to-br from-amber-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-amber-500/35 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                In Production
-              </span>
-              <div className="grid size-9 place-items-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20 shadow-2xs">
-                <Clock className="size-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-3xl font-black tracking-tight text-amber-600 dark:text-amber-400 tabular-nums">
-                {loading ? "..." : inProduction}
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Active bench runs</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-300">
-                  Active
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 4: QC Pending */}
-          <div className="group relative overflow-hidden rounded-2xl border border-purple-500/20 bg-gradient-to-br from-purple-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-purple-500/35 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                QC Pending
-              </span>
-              <div className="grid size-9 place-items-center rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/20 shadow-2xs">
-                <ShieldCheck className="size-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-3xl font-black tracking-tight text-purple-600 dark:text-purple-400 tabular-nums">
-                {loading ? "..." : qcPending}
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Awaiting inspection</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-purple-500/10 text-purple-700 dark:text-purple-300">
-                  Audit
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 5: Completed */}
-          <div className="group relative overflow-hidden rounded-2xl border border-teal-500/20 bg-gradient-to-br from-teal-500/10 via-card to-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft hover:border-teal-500/35 flex flex-col justify-between col-span-2 md:col-span-1">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                Completed
-              </span>
-              <div className="grid size-9 place-items-center rounded-xl bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/20 shadow-2xs">
-                <CheckCircle2 className="size-4" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-3xl font-black tracking-tight text-teal-600 dark:text-teal-400 tabular-nums">
-                {loading ? "..." : completedCount}
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Finished & ready</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-teal-500/10 text-teal-700 dark:text-teal-300">
-                  Done
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Workflow Quick Links */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {workflowShortcuts.map((sc) => {
-            const Icon = sc.icon;
-            return (
-              <Link
-                key={sc.to}
-                to={sc.to as any}
-                className="group relative flex items-center justify-between p-3.5 rounded-xl border border-border/80 bg-card hover:border-primary/40 hover:bg-muted/40 transition-all duration-200 shadow-2xs"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className={cn(
-                      "grid size-9 shrink-0 place-items-center rounded-lg border",
-                      sc.tone === "blue" &&
-                        "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20",
-                      sc.tone === "amber" &&
-                        "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20",
-                      sc.tone === "cyan" &&
-                        "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border-cyan-500/20",
-                      sc.tone === "purple" &&
-                        "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/20",
-                    )}
-                  >
-                    <Icon className="size-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-foreground group-hover:text-primary transition-colors">
-                      {sc.title}
-                    </div>
-                    <div className="text-[11px] text-muted-foreground truncate">{sc.subtitle}</div>
-                  </div>
-                </div>
-                <ArrowRight className="size-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary shrink-0 pl-1" />
-              </Link>
-            );
-          })}
-        </div>
-
         {/* Main Work Center Table Card */}
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-4">
+        <div className="rounded-2xl border border-border/70 bg-card p-5 shadow-soft space-y-4">
+          <p className="text-xs text-muted-foreground" aria-label="Workflow">
+            Materials received &rarr; Start production &rarr; Record output &rarr; Quality check
+          </p>
           {/* Header & Controls */}
           <div className="space-y-4 pb-4 border-b border-border/60">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -471,6 +278,7 @@ function AssemblyProductionPage() {
                 ].map((tab) => (
                   <button
                     key={tab.key}
+                    aria-pressed={statusFilter === tab.key}
                     onClick={() => setStatusFilter(tab.key)}
                     className={cn(
                       "px-2.5 py-1 text-xs font-semibold rounded-lg transition-all",
@@ -489,6 +297,7 @@ function AssemblyProductionPage() {
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
                 <input
                   type="text"
+                  aria-label="Search this queue"
                   placeholder="Search order or product..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
@@ -496,6 +305,7 @@ function AssemblyProductionPage() {
                 />
                 {search && (
                   <button
+                    aria-label="Clear search"
                     onClick={() => setSearch("")}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   >
@@ -562,7 +372,7 @@ function AssemblyProductionPage() {
                     <th className="py-3 px-3">Order Number</th>
                     <th className="py-3 px-3">Product Details</th>
                     <th className="py-3 px-3">Target Qty</th>
-                    <th className="py-3 px-3 min-w-[140px]">Progress</th>
+                    <th className="py-3 px-3 min-w-[140px]">Progress<InformationTooltip help="production" /></th>
                     <th className="py-3 px-3">Status</th>
                     <th className="py-3 px-3">Line & Operator</th>
                     <th className="py-3 px-3 text-right">Production Actions</th>
@@ -722,9 +532,13 @@ function AssemblyProductionPage() {
                               </span>
                             )}
 
+                            {order.status === "REJECTED" && (
+                              <Link to="/assembly/material-requests" className="text-xs font-semibold text-rose-700">View Rejected Request</Link>
+                            )}
                             {/* Material Pending fallback action */}
                             {!order.can_start &&
                               !order.can_complete &&
+                              order.status !== "REJECTED" &&
                               order.status !== "QC_PENDING" &&
                               order.status !== "COMPLETED" && (
                                 <Link

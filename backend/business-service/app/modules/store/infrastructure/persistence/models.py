@@ -11,6 +11,8 @@ from typing import List
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from sqlalchemy import CheckConstraint, Integer, func
+
 from app.database.base import Base, GUID
 
 
@@ -22,7 +24,7 @@ class StoreModel(Base):
     store_code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     store_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False, default="Main Warehouse", index=True)
+    warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     store_manager_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     store_manager_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE", index=True)
@@ -181,3 +183,29 @@ class StoreManagerUserModel(Base):
     )
 
     store: Mapped[StoreModel] = relationship("StoreModel", back_populates="managers")
+
+
+class StoreRackModel(Base):
+    """One shared PCS capacity for every legacy bin belonging to a zone/rack."""
+    __tablename__ = "store_rack"
+    __table_args__ = (
+        UniqueConstraint("zone_id", "rack_code", name="uq_store_rack_zone_code"),
+        CheckConstraint("maximum_capacity > 0 AND maximum_capacity = CAST(maximum_capacity AS INTEGER)", name="rack_positive_capacity"),
+        CheckConstraint("occupied_quantity >= 0 AND occupied_quantity <= maximum_capacity", name="rack_occupancy_bounds"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    zone_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("store_zone.id", ondelete="RESTRICT"), nullable=False)
+    rack_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    maximum_capacity: Mapped[int] = mapped_column(Integer, nullable=False)
+    occupied_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0, server_default="0")
+
+
+class RackOccupancyEventModel(Base):
+    __tablename__ = "rack_occupancy_event"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    rack_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("store_rack.id", ondelete="RESTRICT"), nullable=False, index=True)
+    balance_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    quantity_delta: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    reason: Mapped[str] = mapped_column(String(1000), nullable=False)
+    actor: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

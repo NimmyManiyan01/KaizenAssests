@@ -48,48 +48,49 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    # Alembic must be able to record the repository's long revision IDs before
-    # any migration executes.  Older installations may have an
-    # alembic_version.version_num VARCHAR(32), so repair only that metadata
-    # column before Alembic reads or updates the current revision.
-    version_table_exists = connection.execute(
-        text("SELECT to_regclass('public.alembic_version')")
-    ).scalar_one_or_none()
-    if version_table_exists is None:
-        connection.execute(
-            text(
-                """
-                CREATE TABLE public.alembic_version (
-                    version_num VARCHAR(128) NOT NULL,
-                    CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
-                )
-                """
-            )
-        )
-    else:
-        version_length = connection.execute(
-            text(
-                """
-                SELECT character_maximum_length
-                FROM information_schema.columns
-                WHERE table_schema = 'public'
-                  AND table_name = 'alembic_version'
-                  AND column_name = 'version_num'
-                """
-            )
+    if connection.dialect.name == "postgresql":
+        # Alembic must be able to record the repository's long revision IDs before
+        # any migration executes.  Older installations may have an
+        # alembic_version.version_num VARCHAR(32), so repair only that metadata
+        # column before Alembic reads or updates the current revision.
+        version_table_exists = connection.execute(
+            text("SELECT to_regclass('public.alembic_version')")
         ).scalar_one_or_none()
-        if version_length is not None and version_length < 128:
+        if version_table_exists is None:
             connection.execute(
                 text(
-                    "ALTER TABLE public.alembic_version "
-                    "ALTER COLUMN version_num TYPE VARCHAR(128)"
+                    """
+                    CREATE TABLE public.alembic_version (
+                        version_num VARCHAR(128) NOT NULL,
+                        CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+                    )
+                    """
                 )
             )
+        else:
+            version_length = connection.execute(
+                text(
+                    """
+                    SELECT character_maximum_length
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'alembic_version'
+                      AND column_name = 'version_num'
+                    """
+                )
+            ).scalar_one_or_none()
+            if version_length is not None and version_length < 128:
+                connection.execute(
+                    text(
+                        "ALTER TABLE public.alembic_version "
+                        "ALTER COLUMN version_num TYPE VARCHAR(128)"
+                    )
+                )
 
-    # The preflight DDL must be committed separately.  It runs before
-    # Alembic's migration transaction and otherwise would be rolled back when
-    # the async connection is closed.
-    connection.commit()
+        # The preflight DDL must be committed separately.  It runs before
+        # Alembic's migration transaction and otherwise would be rolled back when
+        # the async connection is closed.
+        connection.commit()
 
     context.configure(
         connection=connection,

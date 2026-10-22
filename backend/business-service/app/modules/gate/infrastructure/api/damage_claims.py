@@ -21,7 +21,7 @@ async def supplier_id_for_user(user: CurrentUser, uow: UnitOfWork):
     mapped = (await uow.session.execute(
         select(SupplierUserModel.supplier_id).where(SupplierUserModel.username == user.username)
     )).scalar_one_or_none()
-    value = user.raw_claims.get("supplier_id")
+    value = (user.raw_claims or {}).get("supplier_id")
     claimed = None
     if value:
         try:
@@ -29,6 +29,20 @@ async def supplier_id_for_user(user: CurrentUser, uow: UnitOfWork):
         except ValueError:
             claimed = (await uow.session.execute(
                 select(SupplierModel.id).where(SupplierModel.supplier_code == str(value))
+            )).scalar_one_or_none()
+    # The legacy local supplier token carries sup-00001 while ASN creation
+    # binds that account to the persistent SUP-DEFAULT supplier. Resolve the
+    # same identity here for both listing claims and authorizing responses.
+    if (
+        mapped is None and claimed is None
+        and user.username in {"supplier", "supplier_partner"}
+        and value in {None, "sup-00001"}
+    ):
+        from app.config.settings import get_settings
+
+        if get_settings().environment.lower() in {"local", "test", "development"}:
+            claimed = (await uow.session.execute(
+                select(SupplierModel.id).where(SupplierModel.supplier_code == "SUP-DEFAULT")
             )).scalar_one_or_none()
     if mapped and claimed and mapped != claimed:
         raise HTTPException(403, "Authenticated supplier identity is inconsistent")

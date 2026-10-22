@@ -1,6 +1,6 @@
 import { memo, Suspense, useEffect, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { Html } from "@react-three/drei";
+import { Html, OrbitControls } from "@react-three/drei";
 import type { JourneyStage } from "./data/journeyStages";
 import { JourneyCamera } from "./JourneyCamera";
 import { JourneyRoadmap3D } from "./JourneyRoadmap3D";
@@ -57,6 +57,7 @@ interface JourneyCanvasProps {
   overviewProgress?: number;
   mouseOffset: { x: number; y: number };
   onSelectStage: (index: number) => void;
+  isFreeOrbit?: boolean;
   selectedAsn?: any;
 }
 
@@ -80,6 +81,7 @@ export function JourneyCanvas({
   overviewProgress = 1,
   mouseOffset,
   onSelectStage,
+  isFreeOrbit = false,
   selectedAsn,
 }: JourneyCanvasProps) {
   const supplierProgress = clamp(journeyProgress / 0.12, 0, 1);
@@ -418,14 +420,23 @@ export function JourneyCanvas({
             asn={selectedAsn}
           />
 
-          {/* Continuous Camera Trajectory Controller */}
-          <JourneyCamera
-            stages={stages}
-            scrollProgress={scrollProgress}
-            overviewProgress={overviewProgress}
-            supplierProgress={supplierProgress}
-            mouseOffset={mouseOffset}
-          />
+          {/* Camera Controller: Guided trajectory or Free 3D Orbit */}
+          {isFreeOrbit ? (
+            <OrbitControls
+              makeDefault
+              maxPolarAngle={Math.PI / 2.05}
+              minDistance={3}
+              maxDistance={250}
+            />
+          ) : (
+            <JourneyCamera
+              stages={stages}
+              scrollProgress={scrollProgress}
+              overviewProgress={overviewProgress}
+              supplierProgress={supplierProgress}
+              mouseOffset={mouseOffset}
+            />
+          )}
 
           {/* ─── 3D WAREHOUSE ENVIRONMENT OBJECTS ─── */}
           <WarehouseBuilding />

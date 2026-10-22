@@ -559,23 +559,47 @@ class MaterialStockModel(Base):
         GUID, ForeignKey("material_variant.id", ondelete="SET NULL"), nullable=True, index=True
     )
     material_code: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
-    material_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     variant_code: Mapped[Optional[str]] = mapped_column(String(128), index=True, nullable=True)
-    category: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    location_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     warehouse_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, default="Main Warehouse")
-    on_hand: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
-    allocated: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
-    available: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
-    reorder_point: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 4), nullable=True)
+    on_hand_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
+    allocated_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
+    available_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
     uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS")
+    # Synonyms map both vocabularies to the actual DB columns
+    on_hand = synonym("on_hand_quantity")
+    allocated = synonym("allocated_quantity")
+    available = synonym("available_quantity")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=datetime.now, onupdate=datetime.now)
+
+    @property
+    def material_name(self) -> str:
+        material = self.__dict__.get("material")
+        return self.__dict__.get("_material_name_cache") or (material.material_name if material else self.material_code)
+
+    @material_name.setter
+    def material_name(self, value: str | None) -> None:
+        self.__dict__["_material_name_cache"] = value
+
+    @property
+    def category(self) -> str | None:
+        return self.__dict__.get("_category_cache")
+
+    @category.setter
+    def category(self, value: str | None) -> None:
+        self.__dict__["_category_cache"] = value
+
+    @property
+    def reorder_point(self) -> Decimal:
+        return self.__dict__.get("_reorder_point_cache", Decimal("0"))
+
+    @reorder_point.setter
+    def reorder_point(self, value: Decimal | int | float) -> None:
+        self.__dict__["_reorder_point_cache"] = Decimal(str(value))
 
     material: Mapped[Optional["MaterialModel"]] = relationship("MaterialModel")
     variant: Mapped[Optional["MaterialVariantModel"]] = relationship("MaterialVariantModel")
-
-    available_quantity = synonym("available")
-    on_hand_quantity = synonym("on_hand")
-    allocated_quantity = synonym("allocated")
 
 
 class QuotationMagicLinkModel(Base):
