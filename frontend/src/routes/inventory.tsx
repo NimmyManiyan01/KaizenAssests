@@ -1008,7 +1008,7 @@ function SimpleWarehouseModule() {
     try {
       const nextCode = await api.getNextBinCode(zone.id);
       setNewBinForm({ zone_id: zone.id });
-      setNewBinRows([{ rack: "", position: "", capacity: "", bin_code: nextCode.suggested_bin_code }]);
+      setNewBinRows([{ rack: nextCode.suggested_rack_code, position: "", capacity: "", bin_code: nextCode.suggested_bin_code }]);
     } catch (err: any) {
       toast.error(err.message || "Unable to prepare the next bin code.");
       return;
@@ -3091,7 +3091,7 @@ function SimpleWarehouseModule() {
             <DialogDescription>
               {createLocationType === "zone" && (editingZone ? "Update the zone name. The generated zone code remains unchanged." : "Define a storage zone.")}
               {createLocationType === "bin" &&
-                "Configure the rack capacity and optional shelf / position. A bin code and QR code are generated automatically."}
+                "Set the maximum capacity. Rack code, bin code, and QR code are generated automatically."}
             </DialogDescription>
           </DialogHeader>
 
@@ -3134,16 +3134,12 @@ function SimpleWarehouseModule() {
                 </div>
                 <div className="grid grid-cols-1 items-start gap-x-4 gap-y-4 sm:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="new-rack-code" className="block text-sm leading-5">Rack Code *</Label>
-                    <Input id="new-rack-code" className="h-11 w-full" required maxLength={64} placeholder="RACK-001" value={newBinRows[0].rack} onChange={e => setNewBinRows([{ ...newBinRows[0], rack: e.target.value.toUpperCase() }])} />
+                    <Label htmlFor="new-rack-code" className="block text-sm leading-5">Rack Code (auto-generated)</Label>
+                    <Input id="new-rack-code" className="h-11 w-full bg-slate-50 font-mono" readOnly value={newBinRows[0].rack} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="new-rack-capacity" className="block text-sm leading-5">Maximum Capacity (PCS) *</Label>
                     <Input id="new-rack-capacity" className="h-11 w-full" type="number" min={1} max={2147483647} step={1} required placeholder="80" value={newBinRows[0].capacity} onChange={e => setNewBinRows([{ ...newBinRows[0], capacity: e.target.value }])} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="new-rack-position" className="block text-sm leading-5">Shelf / Position (optional)</Label>
-                    <Input id="new-rack-position" className="h-11 w-full" maxLength={64} placeholder="e.g. SHELF-001" value={newBinRows[0].position} onChange={e => setNewBinRows([{ ...newBinRows[0], position: e.target.value.toUpperCase() }])} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="new-rack-bin-code" className="block text-sm leading-5">Bin Code (auto-generated)</Label>
