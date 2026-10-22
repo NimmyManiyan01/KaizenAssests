@@ -67,7 +67,9 @@ function DispatchOrdersPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [drivers, setDrivers] = useState<any[]>([]);
   const [vehicles, setVehicles] = useState<any[]>([]);
-  const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, { driverId: string; vehicleId: string }>>({});
+  const [assignmentDrafts, setAssignmentDrafts] = useState<
+    Record<string, { driverId: string; vehicleId: string }>
+  >({});
   const [salesOrders, setSalesOrders] = useState<any[]>([]);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
@@ -284,7 +286,11 @@ function DispatchOrdersPage() {
   const updateAssignmentDraft = (id: string, field: "driverId" | "vehicleId", value: string) => {
     setAssignmentDrafts((current) => ({
       ...current,
-      [id]: { driverId: current[id]?.driverId || "", vehicleId: current[id]?.vehicleId || "", [field]: value },
+      [id]: {
+        driverId: current[id]?.driverId || "",
+        vehicleId: current[id]?.vehicleId || "",
+        [field]: value,
+      },
     }));
   };
 
@@ -304,7 +310,14 @@ function DispatchOrdersPage() {
       setOrders((current) =>
         current.map((item) =>
           item.id === order.id
-            ? { ...item, ...(withDriver || {}), driver_id: draft.driverId, vehicle_id: draft.vehicleId, driver_name: driver?.name || driver?.driver_name, vehicle_number: vehicle?.registration_number || vehicle?.vehicle_number }
+            ? {
+                ...item,
+                ...(withDriver || {}),
+                driver_id: draft.driverId,
+                vehicle_id: draft.vehicleId,
+                driver_name: driver?.name || driver?.driver_name,
+                vehicle_number: vehicle?.registration_number || vehicle?.vehicle_number,
+              }
             : item,
         ),
       );
@@ -361,11 +374,19 @@ function DispatchOrdersPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formItems.length || formItems.some((item) => parsePositiveNumber(item.dispatch_qty ?? item.quantity_ordered) === null)) {
+    if (
+      !formItems.length ||
+      formItems.some(
+        (item) => parsePositiveNumber(item.dispatch_qty ?? item.quantity_ordered) === null,
+      )
+    ) {
       toast.error("Every dispatch line must have a positive quantity");
       return;
     }
-    if (!isValidDateInput(dispatchDate) || (expectedDeliveryDate && !isValidDateInput(expectedDeliveryDate))) {
+    if (
+      !isValidDateInput(dispatchDate) ||
+      (expectedDeliveryDate && !isValidDateInput(expectedDeliveryDate))
+    ) {
       toast.error("Enter valid dispatch and delivery dates");
       return;
     }
@@ -1363,7 +1384,8 @@ function DispatchOrdersPage() {
                                   <option value="">Select driver</option>
                                   {drivers.map((driver) => (
                                     <option key={driver.id} value={driver.id}>
-                                      {driver.name || driver.driver_name} ({driver.phone || driver.contact_number || "no contact"})
+                                      {driver.name || driver.driver_name} (
+                                      {driver.phone || driver.contact_number || "no contact"})
                                     </option>
                                   ))}
                                 </select>
@@ -1377,7 +1399,9 @@ function DispatchOrdersPage() {
                                   <option value="">Select vehicle</option>
                                   {vehicles.map((vehicle) => (
                                     <option key={vehicle.id} value={vehicle.id}>
-                                      {vehicle.registration_number || vehicle.vehicle_number || vehicle.registration_no}
+                                      {vehicle.registration_number ||
+                                        vehicle.vehicle_number ||
+                                        vehicle.registration_no}
                                     </option>
                                   ))}
                                 </select>

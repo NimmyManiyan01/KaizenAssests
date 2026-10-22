@@ -19,12 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api-client";
 import { getUserInfo } from "@/lib/auth-utils";
 
@@ -97,12 +92,82 @@ function SupplierDashboard() {
 
   useEffect(() => {
     loadAsns();
-    void (currentUser?.supplierId ? api.getSupplier(currentUser.supplierId) : api.getSuppliers({ search: currentUser?.username })).then((result: any) => { const rows = Array.isArray(result) ? result : result?.items || result?.suppliers || []; const supplier = rows.length ? rows.find((item: any) => String(item.id) === String(currentUser?.supplierId) || String(item.username || item.supplier_name || "").toLowerCase() === String(currentUser?.username || "").toLowerCase()) || rows[0] : result; const companyName = supplier?.registered_company_name || supplier?.company_name || supplier?.supplier_name || ""; setSupplierCompanyName(companyName); if (companyName) setSupplierName(companyName); }).catch(() => undefined);
+    void (
+      currentUser?.supplierId
+        ? api.getSupplier(currentUser.supplierId)
+        : api.getSuppliers({ search: currentUser?.username })
+    )
+      .then((result: any) => {
+        const rows = Array.isArray(result) ? result : result?.items || result?.suppliers || [];
+        const supplier = rows.length
+          ? rows.find(
+              (item: any) =>
+                String(item.id) === String(currentUser?.supplierId) ||
+                String(item.username || item.supplier_name || "").toLowerCase() ===
+                  String(currentUser?.username || "").toLowerCase(),
+            ) || rows[0]
+          : result;
+        const companyName =
+          supplier?.registered_company_name ||
+          supplier?.company_name ||
+          supplier?.supplier_name ||
+          "";
+        setSupplierCompanyName(companyName);
+        if (companyName) setSupplierName(companyName);
+      })
+      .catch(() => undefined);
     setMaterialsLoading(true);
-    void api.getMaterialComponents().then((materials) => { setMaterialCatalog((materials || []).map((material: any) => ({ ...material, id: material.id || material.material_id, code: material.code || material.material_code, name: material.name || material.material_name, uom: material.uom || material.base_uom || material.unit_of_measure })).filter((material: any) => material.id && material.code && material.name && material.uom)); setMaterialsError(""); }).catch(() => { setMaterialCatalog([]); setMaterialsError("Unable to load Material Master records."); }).finally(() => setMaterialsLoading(false));
-    void Promise.all([api.getVehicles().catch(() => []), api.getDrivers().catch(() => [])]).then(([vehicles, drivers]) => { setRegisteredVehicles((vehicles || []).filter((v: any) => v.is_active !== false && String(v.status || "AVAILABLE").toUpperCase() === "AVAILABLE")); setRegisteredDrivers((drivers || []).filter((d: any) => d.is_active !== false && String(d.status || "ACTIVE").toUpperCase() === "ACTIVE")); });
-    void Promise.all([api.getPurchaseOrders({ supplierId: currentUser?.supplierId }).catch(() => []), api.getStores({ status: "ALL" }).catch(() => [])])
-      .then(([pos, stores]) => { setPurchaseOrders(pos || []); setWarehouses((stores || []).filter((store: any) => String(store.status || "ACTIVE").toUpperCase() === "ACTIVE")); });
+    void api
+      .getMaterialComponents()
+      .then((materials) => {
+        setMaterialCatalog(
+          (materials || [])
+            .map((material: any) => ({
+              ...material,
+              id: material.id || material.material_id,
+              code: material.code || material.material_code,
+              name: material.name || material.material_name,
+              uom: material.uom || material.base_uom || material.unit_of_measure,
+            }))
+            .filter(
+              (material: any) => material.id && material.code && material.name && material.uom,
+            ),
+        );
+        setMaterialsError("");
+      })
+      .catch(() => {
+        setMaterialCatalog([]);
+        setMaterialsError("Unable to load Material Master records.");
+      })
+      .finally(() => setMaterialsLoading(false));
+    void Promise.all([api.getVehicles().catch(() => []), api.getDrivers().catch(() => [])]).then(
+      ([vehicles, drivers]) => {
+        setRegisteredVehicles(
+          (vehicles || []).filter(
+            (v: any) =>
+              v.is_active !== false &&
+              String(v.status || "AVAILABLE").toUpperCase() === "AVAILABLE",
+          ),
+        );
+        setRegisteredDrivers(
+          (drivers || []).filter(
+            (d: any) =>
+              d.is_active !== false && String(d.status || "ACTIVE").toUpperCase() === "ACTIVE",
+          ),
+        );
+      },
+    );
+    void Promise.all([
+      api.getPurchaseOrders({ supplierId: currentUser?.supplierId }).catch(() => []),
+      api.getStores({ status: "ALL" }).catch(() => []),
+    ]).then(([pos, stores]) => {
+      setPurchaseOrders(pos || []);
+      setWarehouses(
+        (stores || []).filter(
+          (store: any) => String(store.status || "ACTIVE").toUpperCase() === "ACTIVE",
+        ),
+      );
+    });
   }, []);
 
   const handleAddNewCustomMaterial = async () => {
@@ -117,7 +182,12 @@ function SupplierDashboard() {
       });
       setLines((prev) => [
         ...prev,
-        { item_code: created.code, material_name: created.name, shipped_quantity: "1", uom: created.uom || "PCS" },
+        {
+          item_code: created.code,
+          material_name: created.name,
+          shipped_quantity: "1",
+          uom: created.uom || "PCS",
+        },
       ]);
     } catch {
       toast.error("Failed to save material to database");
@@ -127,12 +197,28 @@ function SupplierDashboard() {
   const loadAsns = async () => {
     try {
       const data = await api.getAsns();
-      setAsns((data || []).map((asn: any) => ({
-        ...asn,
-        expected_arrival_date: asn.expected_arrival_date || asn.delivery_date || asn.expected_arrival_at?.split("T")[0] || "",
-        supplier_name: asn.supplier_name || asn.supplierName || asn.supplier_company_name || asn.supplier?.supplier_name || "",
-        destination_warehouse: asn.destination_warehouse || asn.destinationWarehouse || asn.warehouse_name || asn.delivery_warehouse_name || "",
-      })));
+      setAsns(
+        (data || []).map((asn: any) => ({
+          ...asn,
+          expected_arrival_date:
+            asn.expected_arrival_date ||
+            asn.delivery_date ||
+            asn.expected_arrival_at?.split("T")[0] ||
+            "",
+          supplier_name:
+            asn.supplier_name ||
+            asn.supplierName ||
+            asn.supplier_company_name ||
+            asn.supplier?.supplier_name ||
+            "",
+          destination_warehouse:
+            asn.destination_warehouse ||
+            asn.destinationWarehouse ||
+            asn.warehouse_name ||
+            asn.delivery_warehouse_name ||
+            "",
+        })),
+      );
     } catch {
       setAsns([]);
     }
@@ -141,7 +227,7 @@ function SupplierDashboard() {
   const handleOpenCreateModal = async () => {
     try {
       const next = await api.getNextAsnNumber();
-    setAsnNumber(next.asnNumber);
+      setAsnNumber(next.asnNumber);
     } catch {
       setAsnNumber("");
     }
@@ -153,16 +239,37 @@ function SupplierDashboard() {
     setVehicleNumber("");
     setDriverName("");
     setDriverMobile("");
-    setLines([{ material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" }]);
+    setLines([
+      { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" },
+    ]);
     setIsModalOpen(true);
   };
 
   const selectPurchaseOrder = async (id: string) => {
-    if (!id) { setSelectedPo(null); setLines([]); return; }
+    if (!id) {
+      setSelectedPo(null);
+      setLines([]);
+      return;
+    }
     const po = await api.getPurchaseOrder(id);
     setSelectedPo(po);
     const poLines = po?.lines || po?.items || po?.materials || po?.purchase_order_lines || [];
-    setLines(poLines.map((line: any) => ({ item_code: line.item_code || line.material_code || line.code || "", material_name: line.material_name || line.material?.name || line.name || "", shipped_quantity: "", remaining_quantity: Number(line.remaining_quantity ?? line.remaining ?? line.balance_quantity ?? line.ordered_quantity ?? line.quantity ?? 0), uom: line.uom || line.unit_of_measure || "PCS" })));
+    setLines(
+      poLines.map((line: any) => ({
+        item_code: line.item_code || line.material_code || line.code || "",
+        material_name: line.material_name || line.material?.name || line.name || "",
+        shipped_quantity: "",
+        remaining_quantity: Number(
+          line.remaining_quantity ??
+            line.remaining ??
+            line.balance_quantity ??
+            line.ordered_quantity ??
+            line.quantity ??
+            0,
+        ),
+        uom: line.uom || line.unit_of_measure || "PCS",
+      })),
+    );
   };
 
   const handleFormSubmit = async (e: React.FormEvent) => {
@@ -172,7 +279,13 @@ function SupplierDashboard() {
       toast.error(transportError);
       return;
     }
-    if (!destinationWarehouse || !lines.length || lines.some((line) => !line.item_code || !line.material_name || Number(line.shipped_quantity) <= 0)) {
+    if (
+      !destinationWarehouse ||
+      !lines.length ||
+      lines.some(
+        (line) => !line.item_code || !line.material_name || Number(line.shipped_quantity) <= 0,
+      )
+    ) {
       toast.error("Select a warehouse and material; shipped quantities must be greater than zero");
       return;
     }
@@ -250,17 +363,17 @@ function SupplierDashboard() {
       .filter((a) =>
         `${a.asn_number || ""} ${a.vehicle_number || ""} ${a.driver_name || ""} ${a.driver_contact || ""} ${a.status || ""} ${a.expected_arrival_at || ""} ${a.expected_arrival_date || ""} ${a.delivery_date || ""}`
           .toLowerCase()
-          .includes(query.toLowerCase())
+          .includes(query.toLowerCase()),
       )
       .sort(
         (a, b) =>
           new Date(b.created_at || b.submitted_at || 0).getTime() -
-          new Date(a.created_at || a.submitted_at || 0).getTime()
+          new Date(a.created_at || a.submitted_at || 0).getTime(),
       );
   }, [asns, query]);
 
   const submitted = asns.filter(
-    (a) => String(a.status || "SUBMITTED").toUpperCase() === "SUBMITTED"
+    (a) => String(a.status || "SUBMITTED").toUpperCase() === "SUBMITTED",
   ).length;
   const vehicles = new Set(asns.map((a) => a.vehicle_number).filter(Boolean)).size;
 
@@ -294,7 +407,10 @@ function SupplierDashboard() {
       key: `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`,
       label: day.toLocaleDateString(undefined, { month: "short", day: "2-digit" }),
       count: asns.filter((a) => {
-        return toLocalDateKey(a.submitted_at || a.created_at || a.shipment_date) === `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+        return (
+          toLocalDateKey(a.submitted_at || a.created_at || a.shipment_date) ===
+          `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`
+        );
       }).length,
     }));
   }, [asns, trendDays]);
@@ -322,7 +438,6 @@ function SupplierDashboard() {
             <Truck className="mr-2 size-4" />
             Create ASN
           </Link>
-
         </div>
 
         {/* High-Density Metric Cards */}
@@ -368,7 +483,6 @@ function SupplierDashboard() {
                   className="h-8 pl-8 text-xs font-semibold rounded-xl"
                 />
               </div>
-
             </div>
           </div>
 
@@ -390,7 +504,10 @@ function SupplierDashboard() {
                   const status = String(asn.status || "SUBMITTED").toUpperCase();
                   return (
                     <tr key={key} className="hover:bg-slate-50/60 transition-colors">
-                      <td className="px-3.5 py-2.5 font-bold font-mono text-sky-600 cursor-pointer" onClick={() => showDetails(asn)}>
+                      <td
+                        className="px-3.5 py-2.5 font-bold font-mono text-sky-600 cursor-pointer"
+                        onClick={() => showDetails(asn)}
+                      >
                         {asn.asn_number || "—"}
                       </td>
                       <td className="px-3.5 py-2.5 font-mono font-bold text-slate-900">
@@ -413,7 +530,10 @@ function SupplierDashboard() {
                       <td className="px-3.5 py-2.5 text-slate-500">
                         {asn.created_at
                           ? new Date(asn.created_at).toLocaleDateString()
-                          : asn.delivery_date || asn.expected_arrival_date || asn.expected_arrival_at?.split("T")[0] || "—"}
+                          : asn.delivery_date ||
+                            asn.expected_arrival_date ||
+                            asn.expected_arrival_at?.split("T")[0] ||
+                            "—"}
                       </td>
                       <td className="px-3.5 py-2.5 text-right">
                         <div className="flex items-center justify-end gap-1">
@@ -466,8 +586,13 @@ function SupplierDashboard() {
                 </button>
               </div>
               <p className="mt-1 text-slate-600">
-                Vehicle: <span className="font-mono font-bold text-slate-900">{selected.vehicle_number || "—"}</span> · Driver:{" "}
-                <span className="font-bold text-slate-900">{selected.driver_name || "—"}</span> ({selected.driver_contact || "+91 98450 12345"})
+                Vehicle:{" "}
+                <span className="font-mono font-bold text-slate-900">
+                  {selected.vehicle_number || "—"}
+                </span>{" "}
+                · Driver:{" "}
+                <span className="font-bold text-slate-900">{selected.driver_name || "—"}</span> (
+                {selected.driver_contact || "+91 98450 12345"})
               </p>
             </div>
           )}
@@ -480,7 +605,12 @@ function SupplierDashboard() {
               ASN SUBMISSION TREND
             </h2>
             <label className="inline-flex items-center rounded-lg border bg-background px-2 text-xs font-bold">
-              <select aria-label="ASN submission trend range" className="h-7 bg-transparent outline-none" value={trendDays} onChange={(event) => setTrendDays(Number(event.target.value) as 7 | 30 | 90)}>
+              <select
+                aria-label="ASN submission trend range"
+                className="h-7 bg-transparent outline-none"
+                value={trendDays}
+                onChange={(event) => setTrendDays(Number(event.target.value) as 7 | 30 | 90)}
+              >
                 <option value={7}>Last 7 Days</option>
                 <option value={30}>Last 30 Days</option>
                 <option value={90}>Last 90 Days</option>
@@ -516,13 +646,70 @@ function SupplierDashboard() {
             </DialogHeader>
             {selected && (
               <div className="grid max-h-[70vh] gap-3 overflow-y-auto pr-1 text-xs sm:grid-cols-2">
-                <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">ASN Number</p><p className="mt-1 font-mono font-black text-sky-600">{selected.asn_number || "—"}</p></div>
-                <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Supplier Name</p><p className="mt-1 font-bold text-slate-900">{selected.supplier_name || selected.supplier_company_name || "—"}</p></div>
-                <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Vehicle Number</p><p className="mt-1 font-mono font-bold text-slate-900">{selected.vehicle_number || "—"}</p></div>
-                <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Driver Name & Mobile</p><p className="mt-1 font-bold text-slate-900">{selected.driver_name || "—"} · {selected.driver_contact || "—"}</p></div>
-                <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Expected Arrival Date</p><p className="mt-1 font-bold text-slate-900">{selected.expected_arrival_date || selected.expected_arrival_at?.split("T")[0] || selected.delivery_date || "—"}</p></div>
-                <div className="rounded-xl border bg-muted/30 p-3"><p className="font-bold uppercase text-muted-foreground">Status</p><p className="mt-1 font-black text-slate-900">{String(selected.status || "SUBMITTED").replaceAll("_", " ")}</p></div>
-                <div className="rounded-xl border bg-muted/30 p-3 sm:col-span-2"><p className="font-bold uppercase text-muted-foreground">Shipped Materials</p>{selected.lines?.length ? <div className="mt-2 divide-y">{selected.lines.map((line: any, index: number) => <div key={`${line.item_code || line.material_name}-${index}`} className="flex justify-between gap-3 py-2"><span className="font-semibold">{line.material_name || line.item_code} <span className="font-mono text-muted-foreground">({line.item_code || "—"})</span></span><span className="font-bold">{line.shipped_quantity ?? line.quantity ?? 0} {line.uom || ""}</span></div>)}</div> : <p className="mt-1 text-muted-foreground">No shipment materials recorded.</p>}</div>
+                <div className="rounded-xl border bg-muted/30 p-3">
+                  <p className="font-bold uppercase text-muted-foreground">ASN Number</p>
+                  <p className="mt-1 font-mono font-black text-sky-600">
+                    {selected.asn_number || "—"}
+                  </p>
+                </div>
+                <div className="rounded-xl border bg-muted/30 p-3">
+                  <p className="font-bold uppercase text-muted-foreground">Supplier Name</p>
+                  <p className="mt-1 font-bold text-slate-900">
+                    {selected.supplier_name || selected.supplier_company_name || "—"}
+                  </p>
+                </div>
+                <div className="rounded-xl border bg-muted/30 p-3">
+                  <p className="font-bold uppercase text-muted-foreground">Vehicle Number</p>
+                  <p className="mt-1 font-mono font-bold text-slate-900">
+                    {selected.vehicle_number || "—"}
+                  </p>
+                </div>
+                <div className="rounded-xl border bg-muted/30 p-3">
+                  <p className="font-bold uppercase text-muted-foreground">Driver Name & Mobile</p>
+                  <p className="mt-1 font-bold text-slate-900">
+                    {selected.driver_name || "—"} · {selected.driver_contact || "—"}
+                  </p>
+                </div>
+                <div className="rounded-xl border bg-muted/30 p-3">
+                  <p className="font-bold uppercase text-muted-foreground">Expected Arrival Date</p>
+                  <p className="mt-1 font-bold text-slate-900">
+                    {selected.expected_arrival_date ||
+                      selected.expected_arrival_at?.split("T")[0] ||
+                      selected.delivery_date ||
+                      "—"}
+                  </p>
+                </div>
+                <div className="rounded-xl border bg-muted/30 p-3">
+                  <p className="font-bold uppercase text-muted-foreground">Status</p>
+                  <p className="mt-1 font-black text-slate-900">
+                    {String(selected.status || "SUBMITTED").replaceAll("_", " ")}
+                  </p>
+                </div>
+                <div className="rounded-xl border bg-muted/30 p-3 sm:col-span-2">
+                  <p className="font-bold uppercase text-muted-foreground">Shipped Materials</p>
+                  {selected.lines?.length ? (
+                    <div className="mt-2 divide-y">
+                      {selected.lines.map((line: any, index: number) => (
+                        <div
+                          key={`${line.item_code || line.material_name}-${index}`}
+                          className="flex justify-between gap-3 py-2"
+                        >
+                          <span className="font-semibold">
+                            {line.material_name || line.item_code}{" "}
+                            <span className="font-mono text-muted-foreground">
+                              ({line.item_code || "—"})
+                            </span>
+                          </span>
+                          <span className="font-bold">
+                            {line.shipped_quantity ?? line.quantity ?? 0} {line.uom || ""}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-muted-foreground">No shipment materials recorded.</p>
+                  )}
+                </div>
               </div>
             )}
           </DialogContent>
@@ -532,27 +719,88 @@ function SupplierDashboard() {
         <Dialog open={isAssignmentOpen} onOpenChange={setIsAssignmentOpen}>
           <DialogContent className="max-w-xl rounded-2xl p-6">
             <DialogHeader>
-              <DialogTitle className="text-lg font-black text-primary">Assign vehicle and driver</DialogTitle>
+              <DialogTitle className="text-lg font-black text-primary">
+                Assign vehicle and driver
+              </DialogTitle>
             </DialogHeader>
             <div className="space-y-5 text-xs">
-              <p className="text-sm leading-6 text-muted-foreground">Enter the transport details first. The complete ASN form will open after you click Next.</p>
+              <p className="text-sm leading-6 text-muted-foreground">
+                Enter the transport details first. The complete ASN form will open after you click
+                Next.
+              </p>
               <div className="grid gap-4 md:grid-cols-3">
                 <div>
                   <Label htmlFor="dashboard-assignment-vehicle">Vehicle Number *</Label>
-                  <Input id="dashboard-assignment-vehicle" required placeholder="e.g. KA42EH6940" value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())} maxLength={13} pattern="[A-Za-z]{2}[0-9]{1,2}[A-Za-z]{1,3}[0-9]{4}" className={inputClass} />
+                  <Input
+                    id="dashboard-assignment-vehicle"
+                    required
+                    placeholder="e.g. KA42EH6940"
+                    value={vehicleNumber}
+                    onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())}
+                    maxLength={13}
+                    pattern="[A-Za-z]{2}[0-9]{1,2}[A-Za-z]{1,3}[0-9]{4}"
+                    className={inputClass}
+                  />
                 </div>
                 <div>
                   <Label htmlFor="dashboard-assignment-driver">Driver Name *</Label>
-                  <Input id="dashboard-assignment-driver" required placeholder="Enter driver name" value={driverName} onChange={(e) => setDriverName(e.target.value)} maxLength={50} className={inputClass} />
+                  <Input
+                    id="dashboard-assignment-driver"
+                    required
+                    placeholder="Enter driver name"
+                    value={driverName}
+                    onChange={(e) => setDriverName(e.target.value)}
+                    maxLength={50}
+                    className={inputClass}
+                  />
                 </div>
                 <div>
                   <Label htmlFor="dashboard-assignment-mobile">Driver Contact *</Label>
-                  <Input id="dashboard-assignment-mobile" required type="tel" inputMode="numeric" placeholder="10-digit mobile number" value={driverMobile} onChange={(e) => setDriverMobile(e.target.value.replace(/\D/g, "").slice(0, 10))} maxLength={10} pattern="[0-9]{10}" className={inputClass} />
+                  <Input
+                    id="dashboard-assignment-mobile"
+                    required
+                    type="tel"
+                    inputMode="numeric"
+                    placeholder="10-digit mobile number"
+                    value={driverMobile}
+                    onChange={(e) =>
+                      setDriverMobile(e.target.value.replace(/\D/g, "").slice(0, 10))
+                    }
+                    maxLength={10}
+                    pattern="[0-9]{10}"
+                    className={inputClass}
+                  />
                 </div>
               </div>
               <div className="flex justify-end gap-2 pt-1">
-                <Button type="button" variant="outline" className="rounded-xl" onClick={() => setIsAssignmentOpen(false)}>Cancel</Button>
-                <Button type="button" className="rounded-xl px-6" onClick={() => { const validationError = validateTransportDetails(vehicleNumber, driverName, driverMobile); if (validationError) { toast.error(validationError); return; } setVehicleNumber(vehicleNumber.replace(/\s+/g, "").toUpperCase()); setIsAssignmentOpen(false); setIsModalOpen(true); }}>Next</Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-xl"
+                  onClick={() => setIsAssignmentOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  className="rounded-xl px-6"
+                  onClick={() => {
+                    const validationError = validateTransportDetails(
+                      vehicleNumber,
+                      driverName,
+                      driverMobile,
+                    );
+                    if (validationError) {
+                      toast.error(validationError);
+                      return;
+                    }
+                    setVehicleNumber(vehicleNumber.replace(/\s+/g, "").toUpperCase());
+                    setIsAssignmentOpen(false);
+                    setIsModalOpen(true);
+                  }}
+                >
+                  Next
+                </Button>
               </div>
             </div>
           </DialogContent>
@@ -576,14 +824,21 @@ function SupplierDashboard() {
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
-                    <Label className="text-[10px] font-bold uppercase text-muted-foreground">ASN Number</Label>
+                    <Label className="text-[10px] font-bold uppercase text-muted-foreground">
+                      ASN Number
+                    </Label>
                     <div className="mt-1 flex h-10 items-center rounded-xl border bg-muted/60 px-3 font-mono font-bold text-primary">
                       {asnNumber}
                     </div>
                   </div>
 
                   <div>
-                    <Label htmlFor="dashboard-supplier-name" className="text-[10px] font-bold uppercase text-muted-foreground">Supplier Name</Label>
+                    <Label
+                      htmlFor="dashboard-supplier-name"
+                      className="text-[10px] font-bold uppercase text-muted-foreground"
+                    >
+                      Supplier Name
+                    </Label>
                     <Input
                       id="dashboard-supplier-name"
                       required
@@ -595,13 +850,41 @@ function SupplierDashboard() {
                   </div>
 
                   <div className="hidden">
-                    <Label htmlFor="dashboard-destination-warehouse" className="text-[10px] font-bold uppercase text-muted-foreground">Destination Warehouse</Label>
-                    <select id="dashboard-destination-warehouse" value={destinationWarehouseId} onChange={(e) => { const w = warehouses.find((item) => String(item.id) === e.target.value); setDestinationWarehouseId(e.target.value); setDestinationWarehouse(w?.store_name || w?.name || w?.store_code || ""); }} className={`${inputClass} w-full px-3`}><option value="">Select warehouse</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.store_name || w.name} ({w.store_code})</option>)}</select>{!warehouses.length && <p className="mt-1 text-[10px] font-semibold text-amber-600">No active warehouses exist in the Warehouse Master.</p>}
+                    <Label
+                      htmlFor="dashboard-destination-warehouse"
+                      className="text-[10px] font-bold uppercase text-muted-foreground"
+                    >
+                      Destination Warehouse
+                    </Label>
+                    <select
+                      id="dashboard-destination-warehouse"
+                      value={destinationWarehouseId}
+                      onChange={(e) => {
+                        const w = warehouses.find((item) => String(item.id) === e.target.value);
+                        setDestinationWarehouseId(e.target.value);
+                        setDestinationWarehouse(w?.store_name || w?.name || w?.store_code || "");
+                      }}
+                      className={`${inputClass} w-full px-3`}
+                    >
+                      <option value="">Select warehouse</option>
+                      {warehouses.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {w.store_name || w.name} ({w.store_code})
+                        </option>
+                      ))}
+                    </select>
+                    {!warehouses.length && (
+                      <p className="mt-1 text-[10px] font-semibold text-amber-600">
+                        No active warehouses exist in the Warehouse Master.
+                      </p>
+                    )}
                   </div>
 
-
                   <div>
-                    <Label htmlFor="dashboard-expected-arrival-date" className="text-[10px] font-bold uppercase text-muted-foreground">
+                    <Label
+                      htmlFor="dashboard-expected-arrival-date"
+                      className="text-[10px] font-bold uppercase text-muted-foreground"
+                    >
                       Expected Arrival Date *
                     </Label>
                     <Input
@@ -614,7 +897,6 @@ function SupplierDashboard() {
                       className={inputClass}
                     />
                   </div>
-
                 </div>
               </div>
 
@@ -626,21 +908,63 @@ function SupplierDashboard() {
 
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div>
-                    <Label htmlFor="dash-vehicle-number" className="text-[10px] font-bold uppercase text-muted-foreground">
+                    <Label
+                      htmlFor="dash-vehicle-number"
+                      className="text-[10px] font-bold uppercase text-muted-foreground"
+                    >
                       Vehicle Number *
                     </Label>
-                    <select id="dash-vehicle-number" required value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} className={`${inputClass} w-full px-3`}><option value="">Select registered vehicle</option>{registeredVehicles.map((v) => <option key={v.id} value={v.vehicle_number}>{v.vehicle_number} · {v.vehicle_type || "Vehicle"} · {v.capacity_tons ?? v.capacity ?? "—"}</option>)}</select>
+                    <select
+                      id="dash-vehicle-number"
+                      required
+                      value={vehicleNumber}
+                      onChange={(e) => setVehicleNumber(e.target.value)}
+                      className={`${inputClass} w-full px-3`}
+                    >
+                      <option value="">Select registered vehicle</option>
+                      {registeredVehicles.map((v) => (
+                        <option key={v.id} value={v.vehicle_number}>
+                          {v.vehicle_number} · {v.vehicle_type || "Vehicle"} ·{" "}
+                          {v.capacity_tons ?? v.capacity ?? "—"}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
-                    <Label htmlFor="dash-driver-name" className="text-[10px] font-bold uppercase text-muted-foreground">
+                    <Label
+                      htmlFor="dash-driver-name"
+                      className="text-[10px] font-bold uppercase text-muted-foreground"
+                    >
                       Driver Name *
                     </Label>
-                    <select id="dash-driver-name" required value={driverName} onChange={(e) => { const d = registeredDrivers.find((row) => (row.driver_name || row.name) === e.target.value); setDriverName(e.target.value); setDriverMobile(d?.phone || d?.mobile_number || d?.phone_number || ""); }} className={`${inputClass} w-full px-3`}><option value="">Select registered driver</option>{registeredDrivers.map((d) => <option key={d.id} value={d.driver_name || d.name}>{d.driver_name || d.name} · {d.license_number || "License pending"}</option>)}</select>
+                    <select
+                      id="dash-driver-name"
+                      required
+                      value={driverName}
+                      onChange={(e) => {
+                        const d = registeredDrivers.find(
+                          (row) => (row.driver_name || row.name) === e.target.value,
+                        );
+                        setDriverName(e.target.value);
+                        setDriverMobile(d?.phone || d?.mobile_number || d?.phone_number || "");
+                      }}
+                      className={`${inputClass} w-full px-3`}
+                    >
+                      <option value="">Select registered driver</option>
+                      {registeredDrivers.map((d) => (
+                        <option key={d.id} value={d.driver_name || d.name}>
+                          {d.driver_name || d.name} · {d.license_number || "License pending"}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
-                    <Label htmlFor="dash-driver-mobile" className="text-[10px] font-bold uppercase text-muted-foreground">
+                    <Label
+                      htmlFor="dash-driver-mobile"
+                      className="text-[10px] font-bold uppercase text-muted-foreground"
+                    >
                       Driver Mobile Number *
                     </Label>
                     <Input
@@ -663,7 +987,43 @@ function SupplierDashboard() {
                     2. SHIPPED MATERIALS & QUANTITIES
                   </h3>
                   <div className="flex items-center gap-2">
-                    <div className="flex gap-2"><Input placeholder="Search material name or code" value={materialSearch} onChange={(e) => setMaterialSearch(e.target.value)} className="h-8 w-56 text-[11px]" /><Button type="button" variant="outline" size="sm" className="h-8" onClick={() => setLines((rows) => [...rows, { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" }])}>+ Add Row</Button></div>{materialsLoading && <span className="text-[11px] text-muted-foreground">Loading materials…</span>}{materialsError && <span className="text-[11px] text-red-600">{materialsError}</span>}{!materialsLoading && !materialsError && materialCatalog.length === 0 && <span className="text-[11px] text-amber-600">No active materials found.</span>}
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Search material name or code"
+                        value={materialSearch}
+                        onChange={(e) => setMaterialSearch(e.target.value)}
+                        className="h-8 w-56 text-[11px]"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8"
+                        onClick={() =>
+                          setLines((rows) => [
+                            ...rows,
+                            {
+                              material_id: "",
+                              item_code: "",
+                              material_name: "",
+                              shipped_quantity: "",
+                              uom: "",
+                            },
+                          ])
+                        }
+                      >
+                        + Add Row
+                      </Button>
+                    </div>
+                    {materialsLoading && (
+                      <span className="text-[11px] text-muted-foreground">Loading materials…</span>
+                    )}
+                    {materialsError && (
+                      <span className="text-[11px] text-red-600">{materialsError}</span>
+                    )}
+                    {!materialsLoading && !materialsError && materialCatalog.length === 0 && (
+                      <span className="text-[11px] text-amber-600">No active materials found.</span>
+                    )}
                   </div>
                 </div>
 
@@ -686,25 +1046,36 @@ function SupplierDashboard() {
                               value={line.material_name}
                               onChange={(e) => {
                                 const val = e.target.value;
-                                const matched = materialCatalog.find((m) => m.name === val || m.material_name === val);
+                                const matched = materialCatalog.find(
+                                  (m) => m.name === val || m.material_name === val,
+                                );
                                 setLines((prev) =>
                                   prev.map((item, i) =>
                                     i === idx
                                       ? {
                                           ...item,
                                           material_name: val,
-                                          item_code: matched?.code || matched?.material_code || item.item_code,
-                                          uom: matched?.uom || matched?.base_uom || item.uom || "PCS",
+                                          item_code:
+                                            matched?.code ||
+                                            matched?.material_code ||
+                                            item.item_code,
+                                          uom:
+                                            matched?.uom || matched?.base_uom || item.uom || "PCS",
                                         }
-                                      : item
-                                  )
+                                      : item,
+                                  ),
                                 );
                               }}
                               className="h-8 w-full rounded-lg border bg-background px-2 text-xs font-semibold"
                             >
-                              <option value="">-- Select Material Component from Database --</option>
+                              <option value="">
+                                -- Select Material Component from Database --
+                              </option>
                               {materialCatalog.map((mat, mIdx) => (
-                                <option key={mat.code || mat.material_code || mIdx} value={mat.name || mat.material_name}>
+                                <option
+                                  key={mat.code || mat.material_code || mIdx}
+                                  value={mat.name || mat.material_name}
+                                >
                                   {mat.name || mat.material_name} ({mat.category || "Component"})
                                 </option>
                               ))}
@@ -718,14 +1089,22 @@ function SupplierDashboard() {
                               value={line.shipped_quantity}
                               onChange={(e) =>
                                 setLines((prev) =>
-                                  prev.map((item, i) => (i === idx ? { ...item, shipped_quantity: e.target.value } : item))
+                                  prev.map((item, i) =>
+                                    i === idx
+                                      ? { ...item, shipped_quantity: e.target.value }
+                                      : item,
+                                  ),
                                 )
                               }
                               className="h-8 text-xs font-bold text-right"
                             />
                           </td>
                           <td className="p-2">
-                            <Input readOnly value={line.uom} className="h-8 bg-muted text-xs font-semibold" />
+                            <Input
+                              readOnly
+                              value={line.uom}
+                              className="h-8 bg-muted text-xs font-semibold"
+                            />
                           </td>
                           <td className="p-2 text-center">
                             <Button
@@ -758,10 +1137,21 @@ function SupplierDashboard() {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={submitting || !lines.length || lines.some((line) => !line.material_id || !line.uom || Number(line.shipped_quantity) <= 0)}
+                  disabled={
+                    submitting ||
+                    !lines.length ||
+                    lines.some(
+                      (line) =>
+                        !line.material_id || !line.uom || Number(line.shipped_quantity) <= 0,
+                    )
+                  }
                   className="rounded-xl font-bold bg-sky-600 hover:bg-sky-700 text-white shadow-md"
                 >
-                  {submitting ? <Loader2 className="mr-2 size-4 animate-spin" /> : <CheckCircle2 className="mr-2 size-4" />}
+                  {submitting ? (
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="mr-2 size-4" />
+                  )}
                   Submit ASN
                 </Button>
               </div>

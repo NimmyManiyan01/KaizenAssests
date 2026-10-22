@@ -381,24 +381,6 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
         </div>
       )}
 
-      {/* Cinematic tagline overlay replaces the operational landing HUD. */}
-      {false ? (
-        <div className="pointer-events-none absolute inset-x-0 top-24 sm:top-28 text-center transition-all duration-500">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-950/70 border border-cyan-500/40 backdrop-blur-md mb-2.5 shadow-[0_0_15px_rgba(6,182,212,0.3)]">
-            <span className="size-2 rounded-full bg-cyan-400 animate-pulse" />
-            <span className="font-mono text-[11px] font-bold tracking-[0.2em] text-cyan-300 uppercase">
-              FACILITY FRONT • FULL PERSPECTIVE
-            </span>
-          </div>
-          <h2 className="text-2xl sm:text-4xl font-black text-white tracking-tight drop-shadow-[0_2px_16px_rgba(0,0,0,0.8)]">
-            Logistics Terminal & Inbound Gate
-          </h2>
-          <p className="mt-1.5 text-xs sm:text-sm text-slate-300 max-w-md mx-auto drop-shadow font-medium px-4">
-            Full view of warehouse front facade, security gate, and inbound approach
-          </p>
-        </div>
-      ) : null}
-
       <div
         hidden={scrollProgress < 0.12}
         className="pointer-events-none absolute inset-x-0 top-[17%] z-30 flex -translate-y-1/2 justify-center px-6 text-center"

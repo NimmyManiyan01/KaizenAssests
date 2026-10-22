@@ -49,6 +49,10 @@ export function isValidIdentifier(value: string, pattern = /^[A-Za-z0-9/_-]+$/):
   return pattern.test(value.trim());
 }
 
-export function isValidUpload(file: File, allowedTypes: readonly string[], maxBytes = 5 * 1024 * 1024): boolean {
+export function isValidUpload(
+  file: File,
+  allowedTypes: readonly string[],
+  maxBytes = 5 * 1024 * 1024,
+): boolean {
   return allowedTypes.includes(file.type) && file.size > 0 && file.size <= maxBytes;
 }

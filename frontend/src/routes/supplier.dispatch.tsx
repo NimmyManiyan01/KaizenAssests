@@ -8,7 +8,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
-import { isValidMobileNumber, isValidPersonName, isValidVehicleNumber, parsePositiveNumber, requiredText, sanitizeMobileNumber, sanitizePersonName, sanitizeVehicleNumber } from "@/lib/input-validation";
+import {
+  isValidMobileNumber,
+  isValidPersonName,
+  isValidVehicleNumber,
+  parsePositiveNumber,
+  requiredText,
+  sanitizeMobileNumber,
+  sanitizePersonName,
+  sanitizeVehicleNumber,
+} from "@/lib/input-validation";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/supplier/dispatch")({
@@ -90,8 +99,14 @@ function SupplierDispatchPage() {
       toast.error("Enter a finished good, positive quantity, vehicle, driver, and contact");
       return;
     }
-    if (!isValidVehicleNumber(vehicle) || !isValidPersonName(driver) || !isValidMobileNumber(contact)) {
-      toast.error("Use letters, numbers and spaces for vehicle, letters and spaces for driver, and exactly 10 digits for contact");
+    if (
+      !isValidVehicleNumber(vehicle) ||
+      !isValidPersonName(driver) ||
+      !isValidMobileNumber(contact)
+    ) {
+      toast.error(
+        "Use letters, numbers and spaces for vehicle, letters and spaces for driver, and exactly 10 digits for contact",
+      );
       return;
     }
     const pickupDate = /^\d{2}-\d{2}-\d{4}$/.test(expectedPickupDate)

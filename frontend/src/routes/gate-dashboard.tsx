@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import QRCode from "qrcode";
 import {
@@ -38,6 +38,7 @@ function GateDashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedPassModal, setSelectedPassModal] = useState<any | null>(null);
   const [selectedDetailsDrawer, setSelectedDetailsDrawer] = useState<any | null>(null);
+  const autoOpenedSearch = useRef<string | null>(null);
   const [gatePassQr, setGatePassQr] = useState<string | null>(null);
 
   const loadDashboard = async () => {
@@ -128,13 +129,31 @@ function GateDashboard() {
 
   useEffect(() => {
     const query = routeSearch.search?.trim();
-    if (!query || !entries.length || selectedDetailsDrawer) return;
+    if (
+      !query ||
+      !entries.length ||
+      selectedDetailsDrawer ||
+      autoOpenedSearch.current === query.toLowerCase()
+    )
+      return;
     const match = entries.find((entry: any) =>
-      [entry.gate_entry_no, entry.gate_entry_number, entry.gate_pass_number, entry.vehicle_number, entry.id]
+      [
+        entry.gate_entry_no,
+        entry.gate_entry_number,
+        entry.gate_pass_number,
+        entry.asn_number,
+        entry.vehicle_number,
+        entry.created_at,
+        entry.arrival_time,
+        entry.id,
+      ]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase() === query.toLowerCase()),
     );
-    if (match) setSelectedDetailsDrawer(match);
+    if (match) {
+      autoOpenedSearch.current = query.toLowerCase();
+      setSelectedDetailsDrawer(match);
+    }
   }, [routeSearch.search, entries, selectedDetailsDrawer]);
 
   const filteredEntries = entries.filter((e: any) => {
@@ -146,7 +165,8 @@ function GateDashboard() {
     const veh = String(e.vehicle_number || "").toLowerCase();
     const sup = String(e.supplier_name || e.vendor || "").toLowerCase();
     const asn = String(e.asn_number || "").toLowerCase();
-    return gp.includes(q) || veh.includes(q) || sup.includes(q) || asn.includes(q);
+    const entryDate = String(e.created_at || e.arrival_time || "").toLowerCase();
+    return gp.includes(q) || veh.includes(q) || asn.includes(q) || entryDate.includes(q);
   });
 
   const metrics = dashboardData?.stats || dashboardData?.metrics || dashboardData || {};
@@ -237,7 +257,7 @@ function GateDashboard() {
               <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
               <input
                 type="text"
-                placeholder="Search Gate Pass, Vehicle, Supplier, ASN..."
+                placeholder="Search ASN, gate pass, vehicle, date..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="h-9 w-full rounded-xl border bg-background pl-9 pr-3 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary"
@@ -436,12 +456,6 @@ function GateDashboard() {
                     <span className="font-bold text-foreground">
                       {selectedDetailsDrawer.driver_name || "Suresh Gowda"} (
                       {selectedDetailsDrawer.driver_contact || "+91 98450 12345"})
-                    </span>
-                  </p>
-                  <p className="flex justify-between">
-                    <span className="text-muted-foreground">Invoice Number:</span>{" "}
-                    <span className="font-bold text-foreground">
-                      {selectedDetailsDrawer.invoice_number || "INV-2026-9901"}
                     </span>
                   </p>
                   <p className="flex justify-between">

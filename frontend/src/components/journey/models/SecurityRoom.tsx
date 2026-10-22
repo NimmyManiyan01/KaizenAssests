@@ -52,7 +52,13 @@ export function SecurityRoom({
         {/* Large Security Glass Observation Window (Facing Road / Driveway) */}
         <mesh position={[0, 1.5, 1.41]}>
           <boxGeometry args={[2.0, 1.2, 0.08]} />
-          <meshStandardMaterial color="#38bdf8" roughness={0.1} metalness={0.8} transparent opacity={0.6} />
+          <meshStandardMaterial
+            color="#38bdf8"
+            roughness={0.1}
+            metalness={0.8}
+            transparent
+            opacity={0.6}
+          />
         </mesh>
         {/* Window Frame / Sill */}
         <mesh position={[0, 1.5, 1.44]}>
@@ -67,7 +73,13 @@ export function SecurityRoom({
         {/* Side Windows */}
         <mesh position={[1.41, 1.5, 0]} rotation={[0, Math.PI / 2, 0]}>
           <boxGeometry args={[1.4, 1.2, 0.08]} />
-          <meshStandardMaterial color="#38bdf8" roughness={0.1} metalness={0.8} transparent opacity={0.6} />
+          <meshStandardMaterial
+            color="#38bdf8"
+            roughness={0.1}
+            metalness={0.8}
+            transparent
+            opacity={0.6}
+          />
         </mesh>
 
         {/* Security Door on Side / Rear */}
@@ -111,11 +123,21 @@ export function SecurityRoom({
 
           <mesh position={[-0.75, 0.45, 0]} rotation={[0, 0, slopeAngle]} castShadow receiveShadow>
             <boxGeometry args={[slopeLength + 0.2, 0.08, 3.1]} />
-            <meshStandardMaterial color="#374151" roughness={0.65} metalness={0.35} side={THREE.DoubleSide} />
+            <meshStandardMaterial
+              color="#374151"
+              roughness={0.65}
+              metalness={0.35}
+              side={THREE.DoubleSide}
+            />
           </mesh>
           <mesh position={[0.75, 0.45, 0]} rotation={[0, 0, -slopeAngle]} castShadow receiveShadow>
             <boxGeometry args={[slopeLength + 0.2, 0.08, 3.1]} />
-            <meshStandardMaterial color="#374151" roughness={0.65} metalness={0.35} side={THREE.DoubleSide} />
+            <meshStandardMaterial
+              color="#374151"
+              roughness={0.65}
+              metalness={0.35}
+              side={THREE.DoubleSide}
+            />
           </mesh>
 
           <mesh position={[0, 0.94, 0]} castShadow>
@@ -133,7 +155,9 @@ export function SecurityRoom({
       <group position={[direction * 4.35, 3.8, 1.2]}>
         <Html center distanceFactor={16}>
           <div className="pointer-events-none whitespace-nowrap rounded-lg bg-blue-700 px-5 py-2 border-2 border-blue-400 shadow-[0_4px_25px_rgba(30,58,138,0.7)] flex items-center gap-2">
-            <span className="text-white text-xs font-black tracking-[0.2em] uppercase">{gateType === "exit" ? "GATE EXIT" : "GATE ENTRY"}</span>
+            <span className="text-white text-xs font-black tracking-[0.2em] uppercase">
+              {gateType === "exit" ? "GATE EXIT" : "GATE ENTRY"}
+            </span>
           </div>
         </Html>
       </group>

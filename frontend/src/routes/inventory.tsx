@@ -940,7 +940,14 @@ function SimpleWarehouseModule() {
           warehouse_id: newStoreForm.warehouse_id || "Main Warehouse",
         });
         toast.success(`Warehouse created: ${createdStore.store_name} (${createdStore.store_code})`);
-        setNewStoreForm({ store_code: "", store_name: "", description: "", store_type: "RAW_MATERIAL", status: "ACTIVE", warehouse_id: "" });
+        setNewStoreForm({
+          store_code: "",
+          store_name: "",
+          description: "",
+          store_type: "RAW_MATERIAL",
+          status: "ACTIVE",
+          warehouse_id: "",
+        });
       } else if (createLocationType === "zone") {
         const targetStoreId = newZoneForm.store_id;
         if (!targetStoreId) {
@@ -1032,8 +1039,14 @@ function SimpleWarehouseModule() {
           toast.error("Select warehouse, zone, rack, shelf/position, and bin code.");
           return;
         }
-        if (!isValidIdentifier(row.rack) || !isValidIdentifier(row.position) || !isValidIdentifier(row.bin_code)) {
-          toast.error("Rack, position, and bin codes may contain only letters, numbers, underscores, and hyphens.");
+        if (
+          !isValidIdentifier(row.rack) ||
+          !isValidIdentifier(row.position) ||
+          !isValidIdentifier(row.bin_code)
+        ) {
+          toast.error(
+            "Rack, position, and bin codes may contain only letters, numbers, underscores, and hyphens.",
+          );
           return;
         }
         const existingBins = await api.getZoneBins(newBinForm.zone_id);

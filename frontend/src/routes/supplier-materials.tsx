@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   Eye,
@@ -51,6 +51,7 @@ const UOMS = ["PCS", "BUNDLE", "SET", "KG", "LITER", "METER", "BOX"];
 const emptyForm = { code: "", name: "", category: "", description: "", uom: "PCS" };
 
 function SupplierMaterials() {
+  const routeSearch = useSearch({ strict: false }) as { search?: string };
   const [materials, setMaterials] = useState<any[]>([]);
   const [query, setQuery] = useState("");
   const [uomFilter, setUomFilter] = useState("ALL");
@@ -65,6 +66,10 @@ function SupplierMaterials() {
     type: "status" | "delete";
     material: any;
   } | null>(null);
+
+  useEffect(() => {
+    if (typeof routeSearch.search === "string") setQuery(routeSearch.search);
+  }, [routeSearch.search]);
 
   const loadMaterials = async () => {
     setLoading(true);
@@ -272,13 +277,7 @@ function SupplierMaterials() {
               <table className="w-full min-w-[800px] text-left text-sm">
                 <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
                   <tr>
-                    {[
-                      "Material Code",
-                      "Material Name",
-                      "UOM",
-                      "Status",
-                      "Actions",
-                    ].map((title) => (
+                    {["Material Code", "Material Name", "UOM", "Status", "Actions"].map((title) => (
                       <th key={title} className="px-4 py-3">
                         {title}
                       </th>
@@ -288,7 +287,7 @@ function SupplierMaterials() {
                 <tbody className="divide-y">
                   {loading ? (
                     <tr>
-                        <td colSpan={5} className="px-4 py-10 text-center">
+                      <td colSpan={5} className="px-4 py-10 text-center">
                         <Loader2 className="mx-auto size-5 animate-spin" />
                       </td>
                     </tr>

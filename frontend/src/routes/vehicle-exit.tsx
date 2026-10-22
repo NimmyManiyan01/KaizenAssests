@@ -30,7 +30,11 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { isValidUpload } from "@/lib/input-validation";
-import { isValidMobileNumber, isValidPersonName, isValidVehicleNumber } from "@/lib/input-validation";
+import {
+  isValidMobileNumber,
+  isValidPersonName,
+  isValidVehicleNumber,
+} from "@/lib/input-validation";
 
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
@@ -197,8 +201,10 @@ function VehicleExit() {
             id: dispatch.gate_entry_id,
             dispatch_number: dispatch.gate_entry_number,
             customer_name: dispatch.supplier_name ?? "Inbound vehicle",
-            status: dispatch.status === "RECEIVING_COMPLETED" ? "READY_FOR_GATE_EXIT" : dispatch.status,
-            order_reference: dispatch.asn_number ?? dispatch.order_reference ?? dispatch.order_number ?? "",
+            status:
+              dispatch.status === "RECEIVING_COMPLETED" ? "READY_FOR_GATE_EXIT" : dispatch.status,
+            order_reference:
+              dispatch.asn_number ?? dispatch.order_reference ?? dispatch.order_number ?? "",
             destination_address:
               dispatch.destination_address ?? dispatch.delivery_address ?? dispatch.destination,
             loading_status:
@@ -330,13 +336,13 @@ function VehicleExit() {
       const res = selectedDispatch.isInboundGateExit
         ? await api.markInboundVehicleExited(selectedDispatch.id, gatePassId.trim())
         : await api.confirmOutboundGateExit(selectedDispatch.id, {
-        gate_pass_id: gatePassId.trim(),
-        vehicle_verified: vehicleVerified,
-        driver_verified: driverVerified,
-        loaded_goods_verified: loadedGoodsVerified,
-        remarks: remarks.trim() || undefined,
-        vehicle_photo_base64: exitVehiclePhotoPreview || undefined,
-      });
+            gate_pass_id: gatePassId.trim(),
+            vehicle_verified: vehicleVerified,
+            driver_verified: driverVerified,
+            loaded_goods_verified: loadedGoodsVerified,
+            remarks: remarks.trim() || undefined,
+            vehicle_photo_base64: exitVehiclePhotoPreview || undefined,
+          });
 
       toast.success("Gate Exit Approved", {
         description: `Vehicle ${res.vehicle_number} cleared for exit. Dispatch ${res.dispatch_number} status updated to GATE_OUT.`,
@@ -404,11 +410,15 @@ function VehicleExit() {
       });
       return;
     }
-    if (resolutionAction === "UPDATE_MANIFEST" &&
-        (!isValidVehicleNumber(newVehicleInput) ||
-          !isValidPersonName(newDriverInput) ||
-          !isValidMobileNumber(newDriverPhoneInput))) {
-      toast.error("Updated manifest requires a valid vehicle, driver name, and exactly 10-digit contact");
+    if (
+      resolutionAction === "UPDATE_MANIFEST" &&
+      (!isValidVehicleNumber(newVehicleInput) ||
+        !isValidPersonName(newDriverInput) ||
+        !isValidMobileNumber(newDriverPhoneInput))
+    ) {
+      toast.error(
+        "Updated manifest requires a valid vehicle, driver name, and exactly 10-digit contact",
+      );
       return;
     }
 

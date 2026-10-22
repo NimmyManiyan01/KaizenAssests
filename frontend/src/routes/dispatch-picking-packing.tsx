@@ -504,7 +504,8 @@ function DispatchPickingPackingPage() {
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file && isValidUpload(file, ["image/png", "image/jpeg", "image/webp"])) handleUploadFinishedGoodsQr(file);
+                    if (file && isValidUpload(file, ["image/png", "image/jpeg", "image/webp"]))
+                      handleUploadFinishedGoodsQr(file);
                     else if (file) toast.error("Upload a PNG, JPEG, or WebP image up to 5 MB.");
                     e.currentTarget.value = "";
                   }}

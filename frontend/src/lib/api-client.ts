@@ -176,14 +176,11 @@ export const api = {
       throw new Error("Invalid username or password");
     }
     if (username.startsWith("supplier_") || username === "supplier") {
-      const response = await request<any>(
-        `${BUSINESS_API_URL}/api/v1/auth/supplier-login`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, password }),
-        },
-      );
+      const response = await request<any>(`${BUSINESS_API_URL}/api/v1/auth/supplier-login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
       const supplierUser = {
         token: response.token,
         username: response.username,
@@ -219,8 +216,7 @@ export const api = {
     } catch {
       const uLower = username.toLowerCase();
       const isWarehouse = uLower.includes("warehouse");
-      const isGate =
-        uLower.includes("gate") || uLower.includes("security");
+      const isGate = uLower.includes("gate") || uLower.includes("security");
       const isGrn = uLower.includes("grn") || uLower.includes("receiving");
       const isAssembly = uLower.includes("assembly");
       const isStore = uLower.includes("store") || uLower.includes("keeper");
@@ -969,7 +965,7 @@ export const api = {
         throw new Error("Failed to download gate pass");
       }
 
-      let passHtml = await response.text();
+      const passHtml = await response.text();
 
       passWindow.document.open();
       passWindow.document.write(passHtml);
@@ -1483,7 +1479,11 @@ export const api = {
   },
 
   async updateAsn(id: string, data: any): Promise<any> {
-    return { id, ...data };
+    return request<any>(`${BUSINESS_API_URL}/api/gate/asns/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
   },
 
   async getNextAsnNumber(): Promise<{ asnNumber: string }> {
@@ -1498,7 +1498,9 @@ export const api = {
   },
 
   async getMaterialComponents(status: string = "ACTIVE"): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/gate/materials?status=${encodeURIComponent(status)}`);
+    return request<any[]>(
+      `${BUSINESS_API_URL}/api/gate/materials?status=${encodeURIComponent(status)}`,
+    );
     /*
       { code: "MAT-RAD-001", name: "SKID MOUNTED RADIATOR", category: "Heavy Components", uom: "PCS" },
       { code: "MAT-ECP-002", name: "ENGINE CONTROL PANEL", category: "Control Systems", uom: "PCS" },
@@ -1525,7 +1527,13 @@ export const api = {
     ]; */
   },
 
-  async createMaterialComponent(name: string, uom: string = "PCS", materialCode?: string, category = "General", description = ""): Promise<any> {
+  async createMaterialComponent(
+    name: string,
+    uom: string = "PCS",
+    materialCode?: string,
+    category = "General",
+    description = "",
+  ): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/gate/materials`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1534,15 +1542,25 @@ export const api = {
   },
 
   async updateGateMaterial(id: string, data: any): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
   },
 
   async updateGateMaterialStatus(id: string, status: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
   },
 
   async deleteGateMaterial(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}`, { method: "DELETE" });
+    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
   },
 
   async getNextMaterialRequestNumber(): Promise<{
@@ -1584,11 +1602,16 @@ export const api = {
     searchOrParams?: string | { search?: string; supplierId?: string },
     signal?: AbortSignal,
   ): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/procurement/purchase-orders`, { cache: "no-store", signal }).catch(() => []);
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/procurement/purchase-orders`, {
+      cache: "no-store",
+      signal,
+    }).catch(() => []);
   },
 
   async getPurchaseOrder(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/purchase-orders/${id}`).catch(() => null);
+    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/purchase-orders/${id}`).catch(
+      () => null,
+    );
   },
   async getPurchaseOrderByNumber(poNumber: string): Promise<any> {
     return request<any>(
@@ -1641,7 +1664,10 @@ export const api = {
       try {
         window.URL.revokeObjectURL(url);
         if (a.parentNode) document.body.removeChild(a);
-      } catch {}
+      } catch (error) {
+        // The temporary download URL may already have been released.
+        void error;
+      }
     }, 2000);
   },
 
@@ -2065,7 +2091,9 @@ export const api = {
     if (filters?.search) query.set("search", filters.search);
     if (filters?.status) query.set("status", filters.status);
     if (filters?.warehouse_id) query.set("warehouse_id", filters.warehouse_id);
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/stores${query.toString() ? `?${query}` : ""}`);
+    return request<any[]>(
+      `${BUSINESS_API_URL}/api/v1/stores${query.toString() ? `?${query}` : ""}`,
+    );
   },
   async getStoreMasterList(filters?: {
     search?: string;

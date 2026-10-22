@@ -116,6 +116,11 @@ function NewAsnPage() {
   const [creatingMaterial, setCreatingMaterial] = useState(false);
   const [selectedAsn, setSelectedAsn] = useState<AsnRecord | null>(null);
   const [asnPendingDelete, setAsnPendingDelete] = useState<AsnRecord | null>(null);
+  const [editingAsnNumber, setEditingAsnNumber] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof search?.search === "string") setSearchQuery(search.search);
+  }, [search?.search]);
 
   // Modal Form Inputs
   const [asnNumber, setAsnNumber] = useState("");
@@ -249,6 +254,7 @@ function NewAsnPage() {
   };
 
   const handleOpenCreateModal = async () => {
+    setEditingAsnNumber(null);
     // Open the first dialog immediately; loading the next ASN number should
     // never make the user wait before seeing the popup.
     setIsAssignmentOpen(true);
@@ -454,7 +460,9 @@ function NewAsnPage() {
         status: "SUBMITTED",
       };
 
-      const createdAsn = await api.createAsn(payload);
+      const createdAsn = editingAsnNumber
+        ? await api.updateAsn(editingAsnNumber, payload)
+        : await api.createAsn(payload);
 
       const newRecord: AsnRecord = {
         // Keep the server identifier so the PDF endpoint can resolve this
@@ -474,13 +482,22 @@ function NewAsnPage() {
         lines: payload.lines,
       };
 
-      setAsnList((prev) => [newRecord, ...prev]);
+      setAsnList((prev) =>
+        editingAsnNumber
+          ? prev.map((row) =>
+              row.asn_number === editingAsnNumber ? { ...row, ...newRecord, id: row.id } : row,
+            )
+          : [newRecord, ...prev],
+      );
       setSubmitting(false);
       setAsnSubmitted(true);
       setIsModalOpen(false);
       setIsAssignmentOpen(false);
 
-      toast.success(`ASN ${asnNumber} submitted successfully`);
+      toast.success(
+        `ASN ${asnNumber} ${editingAsnNumber ? "updated and resubmitted" : "submitted successfully"}`,
+      );
+      setEditingAsnNumber(null);
     } catch (err: any) {
       setSubmitting(false);
       toast.error("ASN Creation Failed", { description: err?.message || "Could not create ASN." });
@@ -549,6 +566,7 @@ function NewAsnPage() {
       return;
     }
     setSelectedAsn(null);
+    setEditingAsnNumber(asn.asn_number);
     setAsnNumber(asn.asn_number);
     setSupplierName(asn.supplier_name || "");
     setDestinationWarehouse(asn.destination_warehouse || "");
@@ -875,7 +893,10 @@ function NewAsnPage() {
             )}
           </DialogContent>
         </Dialog>
-        <AlertDialog open={Boolean(asnPendingDelete)} onOpenChange={(open) => !open && setAsnPendingDelete(null)}>
+        <AlertDialog
+          open={Boolean(asnPendingDelete)}
+          onOpenChange={(open) => !open && setAsnPendingDelete(null)}
+        >
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Delete ASN?</AlertDialogTitle>
@@ -885,7 +906,10 @@ function NewAsnPage() {
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => void confirmDeleteAsn()}>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => void confirmDeleteAsn()}
+              >
                 Delete ASN
               </AlertDialogAction>
             </AlertDialogFooter>

@@ -334,7 +334,9 @@ function Page() {
                     <Input
                       placeholder="Return vehicle number"
                       value={f.returnVehicle || ""}
-                      onChange={(e) => patch(c.id, { returnVehicle: e.target.value.replace(/[^A-Za-z0-9 ]/g, "") })}
+                      onChange={(e) =>
+                        patch(c.id, { returnVehicle: e.target.value.replace(/[^A-Za-z0-9 ]/g, "") })
+                      }
                     />
                     <Button
                       variant="destructive"
@@ -343,7 +345,11 @@ function Page() {
                           patch(c.id, { validation: "Enter a valid return vehicle number." });
                           return;
                         }
-                        void run(c.id, () => api.createSupplierReturn(c.id, f.returnVehicle.trim()), "Supplier return created");
+                        void run(
+                          c.id,
+                          () => api.createSupplierReturn(c.id, f.returnVehicle.trim()),
+                          "Supplier return created",
+                        );
                       }}
                     >
                       Create Supplier Return

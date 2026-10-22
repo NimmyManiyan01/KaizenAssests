@@ -188,7 +188,6 @@ const gateSecurityNav = [
   { label: "FG Pickup Entry & Exit", to: "/gate/finished-goods-pickup", icon: QrCode },
 ];
 
-
 const ICON_MAP: Record<string, any> = {
   LayoutDashboard,
   Building2,
@@ -495,30 +494,29 @@ export function AppShell({
       "/arrival-success",
     ].some((route) => path.startsWith(route)) ||
     (isGateSecurityUser && (isSharedOperationsRoute || isNotificationsRoute));
-  const resolvedNav =
-    isSupplierRoute
-        ? supplierNav
-        : isAssemblyUser || isAssemblyRoute
-            ? assemblyNav
-            : isStoreUser || isStoreRoute
-              ? storeManagerNav
-              : isGrnUser || isGrnRoute
-                ? grnNav
-                : isSupplierRoute
-                  ? supplierNav
-                  : isGateSecurityRoute
-                    ? gateSecurityNav
-                    : isWarehouseRoute
-                      ? warehouseNav
-                      : mounted && user?.roles?.includes("DISPATCH")
-                        ? dispatchNav
-                        : mounted && user?.roles?.includes("ASSEMBLY")
-                          ? assemblyNav
-                          : mounted && user?.roles?.includes("SUPPLIER")
-                            ? supplierNav
-                            : isGateSecurityUser
-                              ? gateSecurityNav
-                              : warehouseNav;
+  const resolvedNav = isSupplierRoute
+    ? supplierNav
+    : isAssemblyUser || isAssemblyRoute
+      ? assemblyNav
+      : isStoreUser || isStoreRoute
+        ? storeManagerNav
+        : isGrnUser || isGrnRoute
+          ? grnNav
+          : isSupplierRoute
+            ? supplierNav
+            : isGateSecurityRoute
+              ? gateSecurityNav
+              : isWarehouseRoute
+                ? warehouseNav
+                : mounted && user?.roles?.includes("DISPATCH")
+                  ? dispatchNav
+                  : mounted && user?.roles?.includes("ASSEMBLY")
+                    ? assemblyNav
+                    : mounted && user?.roles?.includes("SUPPLIER")
+                      ? supplierNav
+                      : isGateSecurityUser
+                        ? gateSecurityNav
+                        : warehouseNav;
   const navigationPending = !mounted && isSharedOperationsRoute;
   const nav = navigationPending ? [] : resolvedNav;
   useEffect(() => {
@@ -836,7 +834,6 @@ export function AppShell({
                   </div>
                 </>
               )}
-
             </div>
 
             <div className="ml-auto flex items-center gap-1.5">

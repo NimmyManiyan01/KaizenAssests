@@ -69,11 +69,17 @@ function DispatchLoadingPage() {
           [],
       );
       const availableBays = (Array.isArray(bays) ? bays : []).filter((bay: any) => {
-        const status = String(bay.status || "AVAILABLE").trim().toUpperCase();
+        const status = String(bay.status || "AVAILABLE")
+          .trim()
+          .toUpperCase();
         const allocationStatus = String(
           bay.allocation_status || bay.current_allocation?.status || "",
-        ).trim().toUpperCase();
-        const direction = String(bay.direction || "BOTH").trim().toUpperCase();
+        )
+          .trim()
+          .toUpperCase();
+        const direction = String(bay.direction || "BOTH")
+          .trim()
+          .toUpperCase();
         return (
           bay.is_active !== false &&
           status === "AVAILABLE" &&
@@ -417,7 +423,8 @@ function DispatchLoadingPage() {
                     className="hidden"
                     onChange={(e) => {
                       const file = e.target.files?.[0];
-                      if (file && isValidUpload(file, ["image/png", "image/jpeg"])) void decodeImage(file);
+                      if (file && isValidUpload(file, ["image/png", "image/jpeg"]))
+                        void decodeImage(file);
                       else if (file) toast.error("Upload a PNG or JPEG image up to 5 MB.");
                       e.currentTarget.value = "";
                     }}

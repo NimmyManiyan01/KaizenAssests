@@ -185,7 +185,7 @@ function parseDamageNotificationMessage(msg?: string, notifObj?: any) {
 
   const poMatch =
     msg.match(/PO:\s*([^\s|\n]+)/i) ||
-    msg.match(/against PO\s+([^\s|\.\n]+)/i) ||
+    msg.match(/against PO\s+([^\s|.\n]+)/i) ||
     msg.match(/PO Reference\s*[:\n]\s*([^\s|\n]+)/i) ||
     msg.match(/(PO-[A-Za-z0-9-]+)/i);
 
@@ -347,25 +347,25 @@ function Notifications() {
     const role = roles.includes("SUPPLIER")
       ? "SUPPLIER"
       : roles.includes("GATE_SECURITY")
-            ? "GATE_SECURITY"
-            : roles.includes("ASSEMBLY") ||
-                roles.includes("ASSEMBLY_MANAGER") ||
-                roles.includes("ASSEMBLY_OPERATOR")
-              ? "ASSEMBLY_MANAGER"
-              : roles.includes("DISPATCH") ||
-                  roles.includes("DISPATCH_MANAGER") ||
-                  username === "dispatch" ||
-                  username.includes("dispatch")
-                ? "DISPATCH"
-                : roles.includes("GRN") ||
-                    roles.includes("GRN_MANAGER") ||
-                    roles.includes("OPERATIONS_MANAGER") ||
-                    roles.includes("OPERATIONS") ||
-                    roles.includes("RECEIVING") ||
-                    username === "grn" ||
-                    username.includes("grn")
-                  ? "GRN"
-                  : "WAREHOUSE";
+        ? "GATE_SECURITY"
+        : roles.includes("ASSEMBLY") ||
+            roles.includes("ASSEMBLY_MANAGER") ||
+            roles.includes("ASSEMBLY_OPERATOR")
+          ? "ASSEMBLY_MANAGER"
+          : roles.includes("DISPATCH") ||
+              roles.includes("DISPATCH_MANAGER") ||
+              username === "dispatch" ||
+              username.includes("dispatch")
+            ? "DISPATCH"
+            : roles.includes("GRN") ||
+                roles.includes("GRN_MANAGER") ||
+                roles.includes("OPERATIONS_MANAGER") ||
+                roles.includes("OPERATIONS") ||
+                roles.includes("RECEIVING") ||
+                username === "grn" ||
+                username.includes("grn")
+              ? "GRN"
+              : "WAREHOUSE";
     setUserRole(role);
     void fetchData(role, false);
     const refresh = () => void fetchData(role, true);
@@ -794,9 +794,7 @@ function Notifications() {
                           ) {
                             badgeText = "SHIPMENT DISPATCHED";
                             badgeColor = "bg-blue-100 text-blue-800 border-blue-300";
-                          } else if (
-                            titleUpper.includes("PO APPROVED")
-                          ) {
+                          } else if (titleUpper.includes("PO APPROVED")) {
                             badgeText = "PO APPROVED";
                             badgeColor = "bg-emerald-100 text-emerald-800 border-emerald-300";
                           } else if (

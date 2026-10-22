@@ -25,7 +25,8 @@ function Calendar({ className, classNames, ...props }: CalendarProps) {
         week: "flex w-full mt-2",
         day: "h-9 w-9 text-center text-sm p-0 relative [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
         day_button: "h-9 w-9 p-0 font-normal aria-selected:opacity-100",
-        selected: "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
+        selected:
+          "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
         today: "bg-accent text-accent-foreground",
         outside: "text-muted-foreground opacity-50",
         disabled: "text-muted-foreground opacity-50",
@@ -37,7 +38,11 @@ function Calendar({ className, classNames, ...props }: CalendarProps) {
       }}
       components={{
         Chevron: ({ orientation }) =>
-          orientation === "left" ? <ChevronLeft className="size-4" /> : <ChevronRight className="size-4" />,
+          orientation === "left" ? (
+            <ChevronLeft className="size-4" />
+          ) : (
+            <ChevronRight className="size-4" />
+          ),
       }}
       {...props}
     />

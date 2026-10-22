@@ -641,6 +641,66 @@ async def _authenticated_supplier_id(user: CurrentUser, uow: UnitOfWork) -> uuid
     return supplier_id
 
 
+@preview_router.put("/asns/{reference}")
+async def update_supplier_asn(
+    reference: str,
+    payload: dict = Body(...),
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> dict:
+    supplier_id = await _authenticated_supplier_id(user, uow)
+    async with uow:
+        result = await uow.session.execute(
+            select(AsnModel).options(
+                selectinload(AsnModel.lines),
+                selectinload(AsnModel.supplier),
+                selectinload(AsnModel.documents),
+            ).where(
+                func.upper(AsnModel.asn_number) == reference.strip().upper(),
+                AsnModel.supplier_id == supplier_id,
+            )
+        )
+        asn = result.scalars().first()
+        if asn is None:
+            raise HTTPException(404, "ASN not found")
+        created_at = asn.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=datetime.timezone.utc)
+        if datetime.datetime.now(datetime.timezone.utc) - created_at > datetime.timedelta(hours=1):
+            raise HTTPException(409, "ASN edit window expired; edits are allowed only within 1 hour of submission")
+        if str(asn.status).upper() == "CANCELLED":
+            raise HTTPException(409, "Cancelled ASNs cannot be edited")
+        asn.vehicle_number = str(payload.get("vehicle_number") or asn.vehicle_number).strip().upper()
+        asn.driver_name = str(payload.get("driver_name") or asn.driver_name).strip()
+        asn.driver_contact = str(payload.get("driver_contact") or asn.driver_contact).strip()
+        expected = payload.get("expected_arrival_at")
+        if expected:
+            asn.expected_arrival_at = datetime.datetime.fromisoformat(str(expected)).replace(tzinfo=None)
+        details = next((x for x in (asn.logistics or []) if isinstance(x, dict) and x.get("type") == "asn_details"), {})
+        details.update({"type": "asn_details", "supplier_name": payload.get("supplier_name") or details.get("supplier_name"), "destination_warehouse": payload.get("destination_warehouse") or details.get("destination_warehouse")})
+        asn.logistics = [details]
+        for line in list(asn.lines):
+            await uow.session.delete(line)
+        for raw in payload.get("lines") or []:
+            material_id = None
+            if raw.get("material_id"):
+                try:
+                    material_id = uuid.UUID(str(raw["material_id"]))
+                except (ValueError, TypeError) as exc:
+                    raise HTTPException(status_code=422, detail="material_id must be a valid material identifier") from exc
+            uow.session.add(AsnLineModel(asn_id=asn.id, material_id=material_id, item_code=str(raw.get("item_code") or ""), material_name=str(raw.get("material_name") or ""), shipped_quantity=Decimal(str(raw.get("shipped_quantity", raw.get("quantity", 0)))), uom=str(raw.get("uom") or "PCS")))
+        await uow.commit()
+        refreshed = await uow.session.execute(
+            select(AsnModel).options(
+                selectinload(AsnModel.lines),
+                selectinload(AsnModel.supplier),
+                selectinload(AsnModel.documents),
+            ).where(AsnModel.id == asn.id)
+        )
+        asn = refreshed.scalars().one()
+        return _asn_response(asn)
+
+
 @preview_router.post("/asns", status_code=status.HTTP_201_CREATED)
 async def create_supplier_asn(
     payload: dict = Body(...),
