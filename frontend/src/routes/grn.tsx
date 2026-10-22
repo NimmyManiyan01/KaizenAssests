@@ -1,9 +1,6 @@
-import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel } from "@/components/ui/alert-dialog";
-import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { loadGrnQrRecord } from "@/lib/grn-qr-record";
 import { DamagePhoto } from "@/components/wms/damage-photo";
 import { isValidPersonName, isValidVehicleNumber } from "@/lib/input-validation";
 import {
@@ -135,7 +132,6 @@ type UploadedDocument = {
 };
 
 type GrnHeaderState = {
-  warehouse_id?: string;
   po_number: string;
   supplier_name: string;
   supplier_company_name: string;
@@ -192,6 +188,12 @@ const PAGES = [
 ];
 
 const GRN_LOCAL_DRAFT_KEY = "grn_wizard_local_draft";
+
+function generateGrnNumber(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  return `GRN-${year}-001`;
+}
 
 function formatCardDate(dateVal?: string | null): string {
   if (!dateVal) return new Date().toISOString().slice(0, 10);
@@ -321,8 +323,6 @@ function GrnPageWorkflow() {
 
   // Records List State
   const [grnRecords, setGrnRecords] = useState<any[]>([]);
-  const [deleteGrnTarget, setDeleteGrnTarget] = useState<any | null>(null);
-  const [deletingGrn, setDeletingGrn] = useState(false);
   const [totalRecordCount, setTotalRecordCount] = useState<number>(0);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -604,17 +604,27 @@ function GrnPageWorkflow() {
   // Fetch All Docks & Allocations Created in Warehouse Module
   const loadWarehouseDocks = useCallback(async () => {
     try {
-      // The dock master response already includes its active allocation.
-      // Avoid a second legacy allocations endpoint that can fail on older
-      // databases and leave the GRN page without the assigned gate pass.
-      const docksRes = await api.getDocks();
+      const [docksRes, allocsRes] = await Promise.all([
+        api.getDocks().catch(() => []),
+        api.getDockAllocationRequests().catch(() => []),
+      ]);
 
       const docksList = Array.isArray(docksRes) ? docksRes : [];
+      const allocsList = Array.isArray(allocsRes) ? allocsRes : [];
 
-      if (docksList.length > 0) {
+      if (docksList.length > 0 || allocsList.length > 0) {
         const enrichedDocks = docksList.map((d: any) => {
           const num = d.dock_number || d.dock_code || d.name || `DOCK-${d.id}`;
-          const currentAlloc = d.current_allocation || null;
+          const currentAlloc =
+            d.current_allocation ||
+            allocsList.find(
+              (a: any) =>
+                (a.assigned_dock_id &&
+                  (a.assigned_dock_id === d.id || String(a.assigned_dock_id) === String(d.id))) ||
+                (a.assigned_dock_code && a.assigned_dock_code === num) ||
+                (a.assigned_dock?.dock_number && a.assigned_dock?.dock_number === num) ||
+                (a.assigned_dock?.dock_code && a.assigned_dock?.dock_code === num),
+            );
 
           return {
             id: d.id,
@@ -636,8 +646,7 @@ function GrnPageWorkflow() {
         // Auto-detect dock allocated to current shipment or gate pass
         setHeader((prev) => {
           if (prev.receiving_dock) return prev;
-          const activeAllocations = enrichedDocks.filter((d: any) => d.current_allocation);
-          const matched = activeAllocations.find((d: any) => {
+          const matched = enrichedDocks.find((d: any) => {
             const alloc = d.current_allocation;
             if (!alloc) return false;
             return (
@@ -655,18 +664,15 @@ function GrnPageWorkflow() {
                 alloc.vendor_reference &&
                 alloc.vendor_reference.toLowerCase().includes(prev.supplier_name.toLowerCase()))
             );
-          }) || (activeAllocations.length === 1 ? activeAllocations[0] : undefined);
+          });
           if (matched) {
             return { ...prev, receiving_dock: matched.dock_number };
           }
           return prev;
         });
-        return enrichedDocks;
       }
-      return [];
     } catch (err) {
       console.warn("Failed to load warehouse dock allocations:", err);
-      return [];
     }
   }, []);
 
@@ -694,8 +700,7 @@ function GrnPageWorkflow() {
       };
     }
 
-    const activeAllocations = dockOptions.filter((d: any) => d.current_allocation);
-    const matched = activeAllocations.find((d: any) => {
+    const matched = dockOptions.find((d: any) => {
       const alloc = d.current_allocation;
       if (!alloc) return false;
       const vMatch =
@@ -711,12 +716,8 @@ function GrnPageWorkflow() {
         header.po_number &&
         ((alloc.material_reference && alloc.material_reference.includes(header.po_number)) ||
           (alloc.po_number && alloc.po_number === header.po_number));
-      const supplierMatch =
-        header.supplier_name &&
-        alloc.vendor_reference &&
-        alloc.vendor_reference.trim().toLowerCase().includes(header.supplier_name.trim().toLowerCase());
-      return Boolean(vMatch || gMatch || pMatch || supplierMatch);
-    }) || (activeAllocations.length === 1 ? activeAllocations[0] : undefined);
+      return Boolean(vMatch || gMatch || pMatch);
+    });
 
     if (matched) {
       return {
@@ -1042,27 +1043,6 @@ function GrnPageWorkflow() {
         ctx.destinationWarehouse ||
         "";
 
-      // Refresh allocation data when resolving an ASN. The ASN response can
-      // predate dock assignment, and some older gate records lack their ASN FK.
-      const latestDocks = await loadWarehouseDocks();
-      const availableDocks = latestDocks.length ? latestDocks : dockOptions;
-      const activeAllocations = availableDocks.filter((dock: any) => dock.current_allocation);
-      const matchedAllocationDock = activeAllocations.find((dock: any) => {
-        const allocation = dock.current_allocation;
-        const norm = (value: unknown) => String(value || "").trim().toUpperCase();
-        const allocationMaterial = norm(allocation.material_reference);
-        return Boolean(
-          (vehicleNum && norm(allocation.vehicle_number) === norm(vehicleNum)) ||
-          (gateNum && norm(allocation.existing_gate_pass_id) === norm(gateNum)) ||
-          (resolvedPoNumber && allocationMaterial.includes(norm(resolvedPoNumber))) ||
-          (numToFetch && allocationMaterial.includes(norm(numToFetch))) ||
-          (supplierName && norm(allocation.vendor_reference).includes(norm(supplierName)))
-        );
-      }) || (activeAllocations.length === 1 ? activeAllocations[0] : undefined);
-      const allocationGateNumber =
-        matchedAllocationDock?.current_allocation?.existing_gate_pass_id || "";
-      const resolvedGateEntryNumber = gateNum || allocationGateNumber;
-
       // Auto-detect allocated dock from warehouse allocation, gate entry, or PO context
       let prefilledDock =
         resolvedContext.prefilled_dock_number ||
@@ -1070,10 +1050,32 @@ function GrnPageWorkflow() {
         resolvedContext.gate_entry?.dock_number ||
         resolvedContext.gate_entry?.dockNumber ||
         resolvedContext.assigned_dock_number ||
-        matchedAllocationDock?.dock_number ||
         "";
+      if (!prefilledDock && dockOptions.length > 0) {
+        const matchedDock = dockOptions.find((d: any) => {
+          const alloc = d.current_allocation;
+          if (!alloc) return false;
+          return (
+            (vehicleNum &&
+              alloc.vehicle_number &&
+              alloc.vehicle_number.toUpperCase() === vehicleNum.toUpperCase()) ||
+            (gateNum &&
+              alloc.existing_gate_pass_id &&
+              alloc.existing_gate_pass_id.toUpperCase() === gateNum.toUpperCase()) ||
+            (numToFetch &&
+              alloc.material_reference &&
+              alloc.material_reference.includes(numToFetch)) ||
+            (supplierName &&
+              alloc.vendor_reference &&
+              alloc.vendor_reference.toLowerCase().includes(supplierName.toLowerCase()))
+          );
+        });
+        if (matchedDock) {
+          prefilledDock = matchedDock.dock_number;
+        }
+      }
       const generatedGrnNum =
-        resolvedContext.grn_number || resolvedContext.grnNumber || "";
+        resolvedContext.grn_number || resolvedContext.grnNumber || generateGrnNumber();
 
       setHeader({
         receipt_type: resolvedContext.receipt_type || resolvedContext.receiptType || "",
@@ -1082,8 +1084,7 @@ function GrnPageWorkflow() {
         supplier_company_name: supplierComp,
         supplier_email: supplierEmail,
         asn_number: asnNum,
-        gate_entry_number: resolvedGateEntryNumber,
-        warehouse_id: resolvedContext.warehouse_id || resolvedContext.warehouseId || "",
+        gate_entry_number: gateNum,
         warehouse_name: warehouseName,
         grn_number: generatedGrnNum,
         vehicle_number: vehicleNum,
@@ -1181,31 +1182,6 @@ function GrnPageWorkflow() {
         setMaterialBatches(initBatches);
       }
 
-      // Persist the draft now so this screen displays an assigned number,
-      // not an unreserved preview. Save & Continue reuses this same draft.
-      if (!resolvedGrnId && prefilledDock) {
-        const draft = await api.createGrnHeader({
-          receipt_type: "ASN_RECEIPT",
-          asn_number: asnNum,
-          gate_entry_number: resolvedGateEntryNumber || undefined,
-          dock_number: prefilledDock,
-          supplier_name: supplierName,
-          supplier_company_name: supplierComp,
-          warehouse_id: resolvedContext.warehouse_id || resolvedContext.warehouseId || undefined,
-          warehouse_name: warehouseName,
-          vehicle_number: vehicleNum,
-          driver_name: driverName,
-        });
-        if (requestId !== contextRequest.current) return;
-        const draftId = draft.grn_id || draft.grnId;
-        if (!draftId || !(draft.grn_number || draft.grnNumber)) {
-          throw new Error("The backend did not assign a GRN number. Fetch the ASN details again.");
-        }
-        setGrnId(String(draftId));
-        localStorage.setItem("active_grn_id", String(draftId));
-        setHeader((previous) => ({ ...previous, grn_number: draft.grn_number || draft.grnNumber }));
-        setSaveStatus("saved");
-      }
       toast.success(`${asnNum} details fetched successfully`);
     } catch (err: any) {
       if (requestId !== contextRequest.current) return;
@@ -1223,13 +1199,7 @@ function GrnPageWorkflow() {
   async function handleReceiptTypeChange(newType: "PO_RECEIPT" | "UNEXPECTED_DELIVERY") {
     if (newType === header.receipt_type) return;
     if (newType === "UNEXPECTED_DELIVERY") {
-<<<<<<< HEAD
       const generatedGrn = header.grn_number || generateGrnNumber();
-=======
-      const generatedGrn =
-        header.grn_number ||
-        "";
->>>>>>> origin/Srujan_M_S
       setHeader((prev) => ({
         ...prev,
         receipt_type: "UNEXPECTED_DELIVERY",
@@ -1403,7 +1373,6 @@ function GrnPageWorkflow() {
           detail.asn?.asnNumber ||
           "",
         gate_entry_number: detail.gate_entry_number || "",
-        warehouse_id: detail.warehouse_id || "",
         warehouse_name: detail.warehouse_name || "",
         grn_number: detail.grn_number || "",
         vehicle_number: detail.vehicle_number || "",
@@ -1590,41 +1559,33 @@ function GrnPageWorkflow() {
     }
   }
 
-  function handleDeleteGrn(record: any) {
-    setDeleteGrnTarget(record);
-  }
-
-  async function confirmDeleteGrn() {
-    if (!deleteGrnTarget || deletingGrn) return;
-    const record = deleteGrnTarget;
+  async function handleDeleteGrn(record: any) {
     const grnId = String(record?.grn_id || record?.id || "").trim();
     if (!grnId) {
       toast.error("This GRN has no valid database ID.");
       return;
     }
     const label = record?.grn_number || grnId;
-    setDeletingGrn(true);
+    if (
+      !window.confirm(
+        `Delete GRN ${label}? This will remove its receiving data, lines, batches, and documents.`,
+      )
+    )
+      return;
     try {
       await api.deleteGrn(grnId);
-      setDeleteGrnTarget(null);
       toast.success(`GRN ${label} deleted.`);
       await loadRecords();
     } catch (error) {
       toast.error("Unable to delete GRN", {
         description: error instanceof Error ? error.message : "The backend rejected the deletion.",
       });
-    } finally {
-      setDeletingGrn(false);
     }
   }
 
-<<<<<<< HEAD
   function startNewGrn() {
     setActiveTab("wizard");
     setShowNewGrnModal(true);
-=======
-  function startNewGrn(openWizard = true) {
->>>>>>> origin/Srujan_M_S
     setGrnId(null);
     localStorage.removeItem("active_grn_id");
     localStorage.removeItem(GRN_LOCAL_DRAFT_KEY);
@@ -1652,13 +1613,8 @@ function GrnPageWorkflow() {
       invoice_number: "",
       received_by: loggedInUserName,
     });
-<<<<<<< HEAD
     void navigate({ to: "/grn", search: { tab: "wizard", page: 1 } });
     if (availablePos.length > 0) {
-=======
-    if (openWizard) navigate({ to: "/grn", search: { tab: "wizard", page: 1 } });
-    if (openWizard && availablePos.length > 0) {
->>>>>>> origin/Srujan_M_S
       const first = availablePos[0];
       const targetPo = first.poNumber || first.po_number;
       if (targetPo) {
@@ -1685,34 +1641,12 @@ function GrnPageWorkflow() {
   }
 
   async function saveGrnHeader(): Promise<string> {
-    // Refresh at save time: the GRN page may have been left open while
-    // Warehouse allocated the single receiving dock in another tab.
-    const latestDocks = await loadWarehouseDocks();
-    const activeAllocations = latestDocks.filter((dock: any) => dock.current_allocation);
-    const matchingAllocation = activeAllocations.find((dock: any) => {
-      const allocation = dock.current_allocation;
-      return Boolean(
-        (header.vehicle_number && allocation.vehicle_number &&
-          allocation.vehicle_number.trim().toUpperCase() === header.vehicle_number.trim().toUpperCase()) ||
-        (header.gate_entry_number && allocation.existing_gate_pass_id &&
-          allocation.existing_gate_pass_id.trim().toUpperCase() === header.gate_entry_number.trim().toUpperCase()) ||
-        (header.po_number && allocation.material_reference &&
-          allocation.material_reference.trim().toUpperCase().includes(header.po_number.trim().toUpperCase())) ||
-        (header.supplier_name && allocation.vendor_reference &&
-          allocation.vendor_reference.trim().toLowerCase().includes(header.supplier_name.trim().toLowerCase()))
-      );
-    }) || (activeAllocations.length === 1 ? activeAllocations[0] : undefined);
     const receivingDock =
-      (grnId ? header.receiving_dock.trim() : "") ||
-      matchingAllocation?.dock_number ||
       header.receiving_dock.trim() ||
       allocatedDockInfo?.dock_number ||
-      dockOptions.find((dock: any) => String(dock.status || "").toUpperCase() === "AVAILABLE")?.dock_number ||
+      dockOptions.find((dock: any) => String(dock.status || "").toUpperCase() === "AVAILABLE")
+        ?.dock_number ||
       dockOptions[0]?.dock_number ||
-      "";
-    const receivingGateEntryNumber =
-      header.gate_entry_number.trim() ||
-      matchingAllocation?.current_allocation?.existing_gate_pass_id ||
       "";
     if (!receivingDock) {
       throw new Error(
@@ -1732,7 +1666,6 @@ function GrnPageWorkflow() {
       grn_id: grnId || undefined,
       receipt_type: "ASN_RECEIPT",
       asn_number: header.asn_number.trim(),
-      gate_entry_number: receivingGateEntryNumber || undefined,
       dock_number: receivingDock,
       invoice_number: header.invoice_number,
       supplier_name:
@@ -1743,10 +1676,6 @@ function GrnPageWorkflow() {
         header.receipt_type === "PO_RECEIPT"
           ? header.supplier_company_name
           : header.supplier_company_name || header.supplier_name || "Unknown / Unexpected Supplier",
-      warehouse_id:
-        header.warehouse_id ||
-        dockOptions.find((dock: any) => dock.dock_number === receivingDock)?.warehouse_id ||
-        undefined,
       warehouse_name: header.warehouse_name,
       vehicle_number: header.vehicle_number,
       driver_name: header.driver_name,
@@ -2246,7 +2175,7 @@ function GrnPageWorkflow() {
     setSaveStatus("saving");
     try {
       let batchMaterials = materials;
-      if (grnId) {
+      if (grnId && materials.some((m) => !isUuid(m.grn_line_id))) {
         const detail = await api.getGrnDetail(grnId);
         const persistedLines = Array.isArray(detail?.lines) ? detail.lines : [];
         batchMaterials = materials.map((material) => {
@@ -2264,10 +2193,7 @@ function GrnPageWorkflow() {
 
       for (const [idx, m] of batchMaterials.entries()) {
         const rowKey = grnMaterialKey(m, idx);
-        const batchesForLine = materialBatches[rowKey] || materialBatches[grnMaterialKey(materials[idx], idx)] || materialBatches[m.item_code];
-        if (Number(m.good_quantity || 0) > 0 && (!batchesForLine?.length || batchesForLine.reduce((sum, batch) => sum + Number(batch.batch_quantity || 0), 0) !== Number(m.good_quantity))) {
-          throw new Error(`Save batches totaling the approved quantity for ${m.material_name || m.item_code} before continuing.`);
-        }
+        const batchesForLine = materialBatches[rowKey] || materialBatches[m.item_code];
         if (batchesForLine && !isUuid(m.grn_line_id)) {
           throw new Error(`Missing valid GRN line ID for ${m.material_name || m.item_code}`);
         }
@@ -2680,13 +2606,47 @@ function GrnPageWorkflow() {
 
   // Display the same batch QR labels from the GRN History record.
   async function viewGrnRecordBatchLabels(record: any) {
-    try {
-      record = await loadGrnQrRecord(record, (id) => api.getGrnDetail(id));
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not load saved GRN batches.");
-      return;
+    let linesToRender =
+      record.lines && record.lines.length > 0
+        ? record.lines
+        : record.materials && record.materials.length > 0
+          ? record.materials
+          : [];
+    const lookupIds = Array.from(
+      new Set(
+        [record.grn_id, record.id, record.grn_number, record.grnNumber].filter(Boolean).map(String),
+      ),
+    );
+    const hasBatchData = linesToRender.some(
+      (line: any) => Array.isArray(line?.batches) && line.batches.length > 0,
+    );
+    if ((!linesToRender.length || !hasBatchData) && lookupIds.length > 0) {
+      for (const lookupId of lookupIds) {
+        try {
+          const fullDetail = await api.getGrnDetail(lookupId);
+          if (fullDetail && (fullDetail.lines || fullDetail.materials)) {
+            const detailLines = fullDetail.lines || fullDetail.materials;
+            // Prefer the persisted detail because it contains the exact batch
+            // allocations created on the Batch-wise QR Code Generation page.
+            if (
+              detailLines.some(
+                (line: any) => Array.isArray(line?.batches) && line.batches.length > 0,
+              )
+            ) {
+              linesToRender = detailLines;
+              record = { ...record, ...fullDetail };
+              break;
+            }
+            if (!linesToRender.length) {
+              linesToRender = detailLines;
+              record = { ...record, ...fullDetail };
+            }
+          }
+        } catch {
+          // Try the next identifier (UUID, database id, or GRN number).
+        }
+      }
     }
-    const linesToRender = record.lines;
 
     const grnNum = record.grn_number || header.grn_number || "";
     const poNum = record.po_number || header.po_number || "";
@@ -2749,7 +2709,6 @@ function GrnPageWorkflow() {
               : (m.good_quantity ?? m.received_quantity ?? 0);
         const qrId = `QR-${grnNum}-${itemCode}-${batchNum}`;
         const payload = [
-          `GRN Number: ${grnNum}`,
           `Material Code: ${itemCode}`,
           `Material Name: ${matName}`,
           `Batch: ${batchNum}`,
@@ -3472,13 +3431,12 @@ function GrnPageWorkflow() {
               const savedBatches = Array.isArray(line.batches) ? line.batches : [];
               if (savedBatches.length > 0) {
                 next[key] = savedBatches.map((batch: any) => ({
-                  batch_id: batch.batch_id || batch.id,
                   batch_number: batch.batch_number,
                   batch_quantity: Number(batch.batch_quantity || 0),
                 }));
               }
             });
-            return JSON.stringify(next) === JSON.stringify(previous) ? previous : next;
+            return next;
           });
         })
         .catch(() => undefined);
@@ -3680,16 +3638,6 @@ function GrnPageWorkflow() {
       subtitle="Manage goods receipts, quality checks, and GRN records"
       actions={
         <>
-          <Button variant="outline" className="rounded-xl"
-            disabled={busyAction || loadingRecords || loadingContext}
-            onClick={async () => {
-              await Promise.all([loadRecords(), loadWarehouseDocks()]);
-              if (activeTab === "wizard" && grnId) await loadExistingGrnSession(grnId);
-              else if (activeTab === "wizard" && header.asn_number.trim()) await fetchPoContext(header.asn_number);
-            }}>
-            <RefreshCw className={`size-4 ${loadingRecords || loadingContext ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
           {activeTab === "dashboard" && (
             <>
               <Button
@@ -4059,7 +4007,7 @@ function GrnPageWorkflow() {
                   onClick={() => exportGrnRecordsCsv()}
                 >
                   <Download className="mr-1.5 size-3.5 text-primary" /> Export CSV
-                </Button><InformationTooltip help="reports" />
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -4309,7 +4257,6 @@ function GrnPageWorkflow() {
                 </div>
               </Card>
 
-<<<<<<< HEAD
               {/* PAGE 1 – GRN HEADER DETAILS */}
               {currentPage === 1 && (
                 <div className="space-y-4">
@@ -4319,168 +4266,6 @@ function GrnPageWorkflow() {
                       <h3 className="font-bold text-foreground text-sm uppercase tracking-wider">
                         Advance Shipping Notice (ASN)
                       </h3>
-=======
-              {/* C. WAREHOUSE & DOCK */}
-              <Card className="rounded-xl p-4 space-y-4 shadow-sm">
-                <div className="border-b pb-3">
-                  <h3 className="font-bold text-foreground text-sm uppercase tracking-wider">
-                    Warehouse & Dock
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Receiving dock bay allocation and internal receiving verification.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Receiving Dock */}
-                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-bold uppercase text-primary tracking-wide">
-                          Receiving Dock *
-                        </span>
-                        {header.receiving_dock ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                            <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            Allocated by Warehouse
-                          </span>
-                        ) : null}
-                      </div>
-
-                      <div className="mt-2 flex items-baseline gap-2">
-                        {header.receiving_dock ? (
-                          <>
-                            <p className="text-base font-black tracking-tight text-foreground font-mono">
-                              {header.receiving_dock}
-                            </p>
-                            {allocatedDockInfo?.dock_name &&
-                              allocatedDockInfo.dock_name !== header.receiving_dock && (
-                                <span className="text-xs font-medium text-muted-foreground">
-                                  ({allocatedDockInfo.dock_name})
-                                </span>
-                              )}
-                          </>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    {header.receiving_dock ? (
-                      <p className="text-[11px] text-muted-foreground mt-2 flex items-center gap-1 font-medium">
-                        <>
-                          <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
-                          Assigned via Warehouse Dock Allocation
-                        </>
-                      </p>
-                    ) : null}
-                  </div>
-
-                  {/* GRN Number */}
-                  <div className="rounded-xl border bg-muted/10 p-3">
-                    <span className="text-[11px] font-semibold uppercase text-muted-foreground">
-                      GRN Number
-                    </span>
-                    <p className="font-mono text-base font-bold text-success">
-                      {header.grn_number || "Assigning GRN number..."}
-                    </p>
-                  </div>
-
-                  {/* Received By */}
-                  <div className="rounded-xl border border-success/30 bg-success-soft/20 p-3">
-                    <span className="text-[11px] font-bold uppercase text-success block">
-                      Received By
-                    </span>
-                    <div className="flex items-center gap-2 mt-1">
-                      <User className="size-4 text-success" />
-                      <span className="text-sm font-bold text-foreground">
-                        {header.received_by}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-
-              {/* BOTTOM ACTION & AUTO-SAVE AREA */}
-              <div className="flex flex-wrap items-center justify-between pt-4 border-t gap-3">
-                <div className="flex items-center gap-2 text-xs font-semibold">
-                  {saveStatus === "saving" ? (
-                    <span className="flex items-center gap-1.5 text-amber-600 font-semibold">
-                      <Loader2 className="size-4 animate-spin" /> Saving...
-                    </span>
-                  ) : saveStatus === "error" ? (
-                    <span className="flex items-center gap-1.5 text-rose-600 font-semibold">
-                      <AlertTriangle className="size-4 text-rose-600" /> ⚠ Unable to save changes
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1.5 text-emerald-600 font-semibold">
-                      <CheckCircle2 className="size-4 text-emerald-600" /> ✓ All changes saved
-                    </span>
-                  )}
-                </div>
-                <Button
-                  onClick={() => void handleProceedFromPage1()}
-                  disabled={busyAction || loadingContext}
-                  className="rounded-xl font-bold px-6"
-                >
-                  {busyAction ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-                  Save & Continue <ArrowRight className="ml-2 size-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* PAGE 2 – ITEM RECEIVING DETAILS */}
-          {currentPage === 2 && (
-            <Card className="rounded-xl p-4 space-y-4 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between border-b pb-4 gap-3">
-                <div>
-                  <h3 className="font-bold text-foreground text-base flex items-center gap-2">
-                    <span>
-                      {header.receipt_type === "UNEXPECTED_DELIVERY"
-                        ? "Manual Material Receipt (Unexpected Delivery)"
-                        : "Material Line Items"}
-                    </span>
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {header.receipt_type === "UNEXPECTED_DELIVERY"
-                      ? "Add materials received in this shipment and enter their physical counts."
-                      : "Compare quantity with physically received quantity."}
-                  </p>
-                </div>
-                {header.receipt_type === "UNEXPECTED_DELIVERY" ? (
-                  <Button
-                    type="button"
-                    onClick={addManualMaterialRow}
-                    size="sm"
-                    className="rounded-xl font-bold text-xs"
-                  >
-                    <Plus className="mr-1.5 size-4" /> Add Material
-                  </Button>
-                ) : (
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-semibold text-muted-foreground">
-                      Receiving Status:
-                    </span>
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                        step2OverallStatus === "COMPLETED"
-                          ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                          : "bg-amber-100 text-amber-800 border-amber-300"
-                      }`}
-                    >
-                      {step2OverallStatus === "COMPLETED" ? "✓ COMPLETED" : "PENDING"}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {header.receipt_type === "UNEXPECTED_DELIVERY" ? (
-                /* UNEXPECTED DELIVERY MANUAL TABLE */
-                materials.length === 0 ? (
-                  <div className="rounded-2xl border-2 border-dashed p-8 text-center space-y-3 bg-muted/10">
-                    <Boxes className="mx-auto size-10 text-muted-foreground opacity-60" />
-                    <div>
-                      <h4 className="font-bold text-foreground text-sm">No Materials Added Yet</h4>
->>>>>>> origin/Srujan_M_S
                       <p className="text-xs text-muted-foreground mt-0.5">
                         Enter an ASN number to automatically populate supplier, gate, vehicle, and
                         material details.
@@ -5470,7 +5255,6 @@ function GrnPageWorkflow() {
                     )}
                   </div>
 
-<<<<<<< HEAD
                   <div className="pt-2 space-y-3">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                       <AlertTriangle className="size-4 text-amber-500" /> Exception Reasons
@@ -5553,20 +5337,6 @@ function GrnPageWorkflow() {
                       </table>
                     </div>
                   </div>
-=======
-          {/* PAGE 3 – QUALITY INSPECTION & DAMAGED GOODS */}
-          {currentPage === 3 && (
-            <Card className="rounded-xl p-4 space-y-4 shadow-sm">
-              <div className="border-b pb-4">
-                <h3 className="font-bold text-foreground text-base">
-                  Quality Inspection & Damage Breakdown
-                <InformationTooltip help="reconciliation" /></h3>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Inspect physically received materials into Accepted (Good) and Damaged quantities,
-                  then record photo evidence for damaged goods.
-                </p>
-              </div>
->>>>>>> origin/Srujan_M_S
 
                   <div className="flex justify-between pt-4 border-t">
                     <Button
@@ -5701,7 +5471,6 @@ function GrnPageWorkflow() {
                             </div>
                           </div>
 
-<<<<<<< HEAD
                           <div className="space-y-2">
                             {batches.map((b, bIdx) => (
                               <div
@@ -5752,24 +5521,6 @@ function GrnPageWorkflow() {
                         </Card>
                       );
                     })}
-=======
-              {/* Damaged Goods Photo Evidence Section */}
-              <div className="pt-2 space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                  <AlertTriangle className="size-4 text-rose-500" /> Damage Evidence & Remarks
-                <InformationTooltip help="damageEvidence" /></h4>
-
-                {damagedMaterialRows.length === 0 ? (
-                  <div className="rounded-xl border bg-emerald-50 p-4 text-center text-sm font-medium text-emerald-800 flex items-center justify-center gap-2">
-                    <CheckCircle2 className="size-5 text-emerald-600" />
-                    {materials.every(
-                      (m, idx) =>
-                        Number(qualityApproved[grnMaterialKey(m, idx)] ?? 0) ===
-                        Number(m.received_quantity || 0),
-                    )
-                      ? `${totalReceivedQty.toLocaleString()} ${materials[0]?.uom || "units"} recorded as accepted; QC confirmation pending.`
-                      : `${totalReceivedQty.toLocaleString()} ${materials[0]?.uom || "units"} received; enter QC quantities before confirmation.`}
->>>>>>> origin/Srujan_M_S
                   </div>
 
                   <div className="flex justify-between pt-4 border-t">
@@ -6159,313 +5910,7 @@ function GrnPageWorkflow() {
                     </table>
                   </div>
 
-<<<<<<< HEAD
                   <div className="flex justify-between pt-4 border-t">
-=======
-              <div className="pt-2 space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                  <AlertTriangle className="size-4 text-amber-500" /> Exception Reasons
-                </h4>
-                <div className="overflow-x-auto rounded-xl border">
-                  <table className="w-full text-sm text-left">
-                    <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
-                      <tr>
-                        <th className="px-4 py-3">Material</th>
-                        <th className="px-4 py-3">Exception</th>
-                        <th className="px-4 py-3 text-right">Quantity</th>
-                        <th className="px-4 py-3">Reason *</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {materials.flatMap((m, idx) => {
-                        const rows = [
-                          {
-                            kind: "Damaged",
-                            qty: Number(m.damaged_quantity || 0),
-                            field: "damage_reason" as const,
-                          },
-                          {
-                            kind: "Rejected",
-                            qty: Number(m.rejected_quantity || 0),
-                            field: "rejected_reason" as const,
-                          },
-                          {
-                            kind: "Held",
-                            qty: Number(m.held_quantity || 0),
-                            field: "held_reason" as const,
-                          },
-                        ].filter((row) => row.qty > 0);
-                        return rows.map((row) => (
-                          <tr key={`${grnMaterialKey(m, idx)}-${row.kind}`}>
-                            <td className="px-4 py-3 font-semibold">
-                              {resolveGrnMaterialCode(m) || "—"} — {m.material_name}
-                            </td>
-                            <td className="px-4 py-3 font-semibold">{row.kind}</td>
-                            <td className="px-4 py-3 text-right font-bold">
-                              {row.qty} {m.uom || "PCS"}
-                            </td>
-                            <td className="px-4 py-3">
-                              <Input
-                                placeholder={`${row.kind} reason *`}
-                                value={m[row.field] || ""}
-                                onChange={(e) =>
-                                  setMaterials((prev) =>
-                                    prev.map((item, i) =>
-                                      i === idx ? { ...item, [row.field]: e.target.value } : item,
-                                    ),
-                                  )
-                                }
-                                className="rounded-xl text-xs"
-                              />
-                            </td>
-                          </tr>
-                        ));
-                      })}
-                      {materials.every(
-                        (m) =>
-                          !(
-                            Number(m.damaged_quantity || 0) ||
-                            Number(m.rejected_quantity || 0) ||
-                            Number(m.held_quantity || 0)
-                          ),
-                      ) && (
-                        <tr>
-                          <td
-                            colSpan={4}
-                            className="px-4 py-4 text-center text-xs text-muted-foreground"
-                          >
-                            No exception quantities recorded.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="flex justify-between pt-4 border-t">
-                <Button variant="outline" className="rounded-xl" onClick={() => handleStepClick(2)}>
-                  <ArrowLeft className="mr-2 size-4" /> Back
-                </Button>
-                <Button
-                  disabled={busyAction || !qcHasRequiredEvidence}
-                  onClick={() => void handleProceedFromPage3()}
-                  className="rounded-xl font-bold px-6"
-                >
-                  Next <ArrowRight className="ml-2 size-4" />
-                </Button>
-              </div>
-            </Card>
-          )}
-
-          {/* PAGE 4 – BATCH CREATION */}
-          {currentPage === 4 && (
-            <Card className="rounded-xl p-4 space-y-4 shadow-sm">
-              <div className="border-b pb-4">
-                <h3 className="font-bold text-foreground text-base">Lot & Batch Creation<InformationTooltip help="batch" /></h3>
-                <p className="text-xs text-muted-foreground">
-                  Divide Quality-Approved materials into batches.{" "}
-                  <b>Rule: Total Batch Quantity MUST equal Quality-Approved Quantity.</b>
-                </p>
-              </div>
-
-              {!allBatchesValid && (
-                <div className="rounded-xl border border-rose-300 bg-rose-50 p-4 text-xs text-rose-800 font-bold flex items-center gap-2">
-                  <AlertTriangle className="size-5 shrink-0" />
-                  <span>
-                    Batch Quantity Mismatch! The sum of batch quantities for each material must
-                    strictly match the Quality-Approved Quantity before proceeding.
-                  </span>
-                </div>
-              )}
-
-              <div className="space-y-5">
-                {materials.map((m, idx) => {
-                  const rowKey = grnMaterialKey(m, idx);
-                  const { appQty, totalBatchQty, isValid } = getBatchValidation(m, idx);
-                  const batches = materialBatches[rowKey] || materialBatches[m.item_code] || [];
-
-                  return (
-                    <Card
-                      key={grnMaterialKey(m, idx)}
-                      className={`rounded-xl p-4 border ${isValid ? "border-emerald-300 bg-emerald-50/20" : "border-rose-300 bg-rose-50/20"}`}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-3 mb-3 border-b pb-2">
-                        <div className="flex items-center flex-wrap gap-4">
-                          <div>
-                            <span className="font-bold text-foreground">{m.material_name}</span>
-                            <span className="ml-2 font-mono text-xs text-primary font-bold">
-                              ({m.item_code})
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2 bg-background/50 px-3 py-1.5 rounded-lg border">
-                            <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">
-                              No. of Batches:
-                            </span>
-                            <Input
-                              type="number"
-                              min="1"
-                              placeholder="1"
-                              className="w-16 h-7 text-xs rounded border-border text-center font-bold"
-                              value={batches.length === 0 ? "" : batches.length}
-                              onChange={(e) => {
-                                const valStr = e.target.value;
-                                if (valStr === "") {
-                                  setMaterialBatches((prev) => ({ ...prev, [rowKey]: [] }));
-                                  return;
-                                }
-                                const num = parseInt(valStr, 10);
-                                if (!isNaN(num) && num > 0) {
-                                  const isFloat = appQty % 1 !== 0;
-                                  let newBatches = [];
-                                  if (isFloat) {
-                                    const baseQty = Number((appQty / num).toFixed(2));
-                                    let sum = 0;
-                                    for (let i = 0; i < num - 1; i++) {
-                                      newBatches.push({
-                                        batch_number: `BATCH-${m.item_code}-${(i + 1).toString().padStart(3, "0")}`,
-                                        batch_quantity: baseQty,
-                                      });
-                                      sum += baseQty;
-                                    }
-                                    newBatches.push({
-                                      batch_number: `BATCH-${m.item_code}-${num.toString().padStart(3, "0")}`,
-                                      batch_quantity: Number((appQty - sum).toFixed(2)),
-                                    });
-                                  } else {
-                                    const baseQty = Math.floor(appQty / num);
-                                    const remainder = appQty % num;
-                                    for (let i = 0; i < num; i++) {
-                                      newBatches.push({
-                                        batch_number: `BATCH-${m.item_code}-${(i + 1).toString().padStart(3, "0")}`,
-                                        batch_quantity:
-                                          i === num - 1 ? baseQty + remainder : baseQty,
-                                      });
-                                    }
-                                  }
-                                  setMaterialBatches((prev) => ({ ...prev, [rowKey]: newBatches }));
-                                }
-                              }}
-                            />
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-4 text-xs font-semibold">
-                          <span>
-                            Quality-Approved Qty: <b className="text-emerald-700">{appQty}</b>{" "}
-                            {m.uom}
-                          </span>
-                          <span>
-                            Total Batch Qty:{" "}
-                            <b className={isValid ? "text-emerald-700" : "text-rose-700"}>
-                              {totalBatchQty}
-                            </b>{" "}
-                            {m.uom}
-                          </span>
-                          <span
-                            className={`px-2 py-0.5 rounded text-[11px] font-bold ${isValid ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}
-                          >
-                            {isValid ? "VALID ✓" : "MISMATCH ✗"}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        {batches.map((b, bIdx) => (
-                          <div
-                            key={b.batch_number || `batch_${m.item_code}_${bIdx}`}
-                            className="flex items-center gap-3"
-                          >
-                            <span className="text-xs font-mono font-bold text-muted-foreground w-24">
-                              Batch #{bIdx + 1}
-                            </span>
-                            <Input
-                              placeholder="BATCH-001"
-                              value={b.batch_number}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setMaterialBatches((prev) => {
-                                  const list = [...(prev[rowKey] || prev[m.item_code] || [])];
-                                  if (list[bIdx]) {
-                                    list[bIdx] = { ...list[bIdx], batch_number: val };
-                                  }
-                                  return { ...prev, [rowKey]: list };
-                                });
-                              }}
-                              className="w-64 font-mono text-xs rounded-xl"
-                              title={b.batch_number}
-                            />
-                            <Input
-                              type="number"
-                              placeholder="0"
-                              value={b.batch_quantity === 0 ? "" : (b.batch_quantity ?? "")}
-                              onChange={(e) => {
-                                const val = e.target.value === "" ? 0 : Number(e.target.value);
-                                setMaterialBatches((prev) => {
-                                  const list = [...(prev[rowKey] || prev[m.item_code] || [])];
-                                  if (list[bIdx]) {
-                                    list[bIdx] = { ...list[bIdx], batch_quantity: val };
-                                  }
-                                  return { ...prev, [rowKey]: list };
-                                });
-                              }}
-                              className="w-32 text-right font-bold rounded-xl"
-                            />
-                            <span className="text-xs text-muted-foreground font-medium">
-                              {m.uom}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
-
-              <div className="flex justify-between pt-4 border-t">
-                <Button variant="outline" className="rounded-xl" onClick={() => handleStepClick(3)}>
-                  <ArrowLeft className="mr-2 size-4" /> Back
-                </Button>
-                <Button
-                  onClick={() => void handleProceedFromPage4()}
-                  disabled={!allBatchesValid || busyAction}
-                  className="rounded-xl font-bold px-6"
-                >
-                  Next <ArrowRight className="ml-2 size-4" />
-                </Button>
-              </div>
-            </Card>
-          )}
-
-          {/* PAGE 5 – DOCUMENT COMPLIANCE & ATTACHMENTS REPOSITORY */}
-          {currentPage === 5 && (
-            <Card className="rounded-xl p-4 space-y-4 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between border-b pb-4 gap-3">
-                <div>
-                  <h3 className="font-bold text-foreground text-base flex items-center gap-2">
-                    <span>Inbound Goods Document Repository</span>
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    <>
-                      <b>ASN Copy (Required)</b> must be captured and saved using the camera below.
-                    </>
-                  </p>
-                </div>
-              </div>
-
-              {/* INLINE CUSTOM DOCUMENT CATEGORY CREATION FORM */}
-              {false && showAddCustomTypeInput && (
-                <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
-                  <span className="text-xs font-bold text-primary block">
-                    Create Custom Document Category
-                  </span>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Input
-                      placeholder="e.g. Insurance Certificate, MSDS, Safety Audit Report..."
-                      value={newCustomCategoryInput}
-                      onChange={(e) => setNewCustomCategoryInput(e.target.value)}
-                      className="rounded-xl text-xs font-bold flex-1 min-w-[240px] bg-background"
-                    />
->>>>>>> origin/Srujan_M_S
                     <Button
                       variant="outline"
                       className="rounded-xl"
@@ -6845,244 +6290,10 @@ function GrnPageWorkflow() {
                                 <Printer className="mr-1 size-3" /> Print Label
                               </Button>
                             </div>
-<<<<<<< HEAD
                           </Card>
                         ))}
                       </div>
                     )}
-=======
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="flex justify-between pt-4 border-t">
-                <Button variant="outline" className="rounded-xl" onClick={() => handleStepClick(4)}>
-                  <ArrowLeft className="mr-2 size-4" />Back
-                </Button>
-                <Button
-                  disabled={
-                    busyAction ||
-                    !uploadedDocuments.some(
-                      (d) => isPersistedDocument(d) && d.category.toLowerCase().includes("asn"),
-                    )
-                  }
-                  onClick={() => void handleProceedFromPage5()}
-                  className="rounded-xl font-bold px-6"
-                >
-                  Next <ArrowRight className="ml-2 size-4" />
-                </Button>
-              </div>
-            </Card>
-          )}
-
-          {/* PAGE 6 – QR CODE GENERATION */}
-          {currentPage === 6 && (
-            <Card className="rounded-xl p-4 space-y-4 shadow-sm">
-              <div className="border-b pb-4">
-                <h3 className="font-bold text-foreground text-base">
-                  Batch-wise QR Code Generation
-                <InformationTooltip help="batch" /></h3>
-              </div>
-
-              <div className="hidden flex flex-wrap items-center justify-between gap-3 bg-muted/20 p-4 rounded-xl border">
-                <div className="flex-1 min-w-[280px]">
-                  <label className="text-xs font-bold text-foreground mb-1 block">
-                    Filter Material / View Option
-                  </label>
-                  <select
-                    value={selectedQrMaterialCode}
-                    onChange={(e) => setSelectedQrMaterialCode(e.target.value)}
-                    className="w-full rounded-xl border bg-background px-3 py-2 text-sm font-bold text-primary"
-                  >
-                    <option value="ALL">
-                      📦 All Materials in PO ({materials.length} Materials)
-                    </option>
-                    {materials.map((m, idx) => (
-                      <option key={grnMaterialKey(m, idx)} value={m.item_code}>
-                        {m.item_code} – {m.material_name} ({m.material_category || "General"})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    onClick={() => printAllPoQrLabels()}
-                    className="rounded-xl font-bold bg-primary text-white shadow-sm"
-                  >
-                    <Printer className="mr-2 size-4" /> Print All PO Batch QR Labels
-                  </Button>
-                </div>
-              </div>
-
-              {/* Material-wise Batch QR Labels Grid (Good Stock) */}
-              <div className="space-y-8">
-                {(() => {
-                  const goodMaterials =
-                    selectedQrMaterialCode === "ALL"
-                      ? materials.filter(
-                          (m, index, list) =>
-                            (m.good_quantity || 0) > 0 &&
-                            list.findIndex((item) => item.item_code === m.item_code) === index,
-                        )
-                      : materials.filter(
-                          (m, index, list) =>
-                            m.item_code === selectedQrMaterialCode &&
-                            (m.good_quantity || 0) > 0 &&
-                            list.findIndex((item) => item.item_code === m.item_code) === index,
-                        );
-                  if (goodMaterials.length === 0) {
-                    return (
-                      <div className="p-4 rounded-xl border border-blue-200 bg-blue-50/50 text-center text-xs text-blue-800 font-medium">
-                        No Good Quantity stock recorded for QR generation (Good Quantity = 0).
-                      </div>
-                    );
-                  }
-                  return goodMaterials.map((mat, matIdx) => {
-                    const materialIndex = materials.indexOf(mat);
-                    const rowKey =
-                      materialIndex >= 0
-                        ? grnMaterialKey(mat, materialIndex)
-                        : grnMaterialKey(mat, matIdx);
-                    const matBatches = materialBatches[rowKey] || materialBatches[mat.item_code];
-                    const bList =
-                      matBatches && matBatches.length > 0
-                        ? matBatches.filter((b) => (b.batch_quantity || 0) > 0)
-                        : [];
-                    return (
-                      <div key={rowKey} className="space-y-4 rounded-2xl border p-4 bg-muted/10">
-                        <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="grid size-6 place-items-center rounded-full bg-primary text-primary-foreground font-mono text-xs font-bold">
-                                {matIdx + 1}
-                              </span>
-                              <h4 className="font-bold text-base text-foreground">
-                                {mat.material_name}{" "}
-                                <span className="font-mono text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-full border border-primary/20">
-                                  {mat.item_code}
-                                </span>
-                              </h4>
-                            </div>
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              Category: <b>{mat.material_category || "General"}</b> | Total Batches:{" "}
-                              <b>{bList.length}</b> | UOM: <b>{mat.uom}</b> | Approved Qty:{" "}
-                              <b>
-                                {mat.good_quantity} {mat.uom}
-                              </b>
-                            </p>
-                          </div>
-                        </div>
-
-                        {bList.length === 0 ? (
-                          <p className="text-xs text-muted-foreground italic p-4 text-center">
-                            No batches created for this material yet.
-                          </p>
-                        ) : (
-                          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                            {bList.map((b, idx) => {
-                              const qrInfo = qrLabels[`${rowKey}:${b.batch_number}`] || {
-                                qr_id: `QR-MAT-${mat.item_code}-${b.batch_number}`,
-                                data_url: "",
-                                payload: buildMaterialQrPayload(mat.item_code, b, mat),
-                              };
-
-                              return (
-                                <Card
-                                  key={b.batch_number}
-                                  className="rounded-2xl p-5 border text-center space-y-3 bg-white text-black shadow-md relative overflow-hidden group"
-                                >
-                                  <div className="border-b pb-2 text-left">
-                                    <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
-                                      GRN Batch Label
-                                    </span>
-                                    <h4 className="font-mono text-base font-bold text-gray-900">
-                                      {b.batch_number}
-                                    </h4>
-                                  </div>
-
-                                  <div className="relative my-2">
-                                    {qrInfo.data_url ? (
-                                      <div className="relative inline-block rounded-2xl border border-gray-200 bg-white p-2 shadow-sm">
-                                        <img
-                                          src={qrInfo.data_url}
-                                          alt="Material QR Code"
-                                          className="size-48 mx-auto"
-                                        />
-                                      </div>
-                                    ) : (
-                                      <div className="grid size-48 place-items-center bg-gray-100 mx-auto rounded-2xl border border-dashed border-gray-300">
-                                        <Loader2 className="size-8 animate-spin text-primary" />
-                                        <span className="text-xs text-gray-500">
-                                          Generating QR...
-                                        </span>
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  <div className="text-xs text-left space-y-1 font-mono text-gray-800 border-t pt-2">
-                                    <p></p>
-                                    <p>
-                                      <b>GRN Number:</b> {header.grn_number || "Assigning GRN number..."}
-                                    </p>
-                                    <p>
-                                      <b>Material:</b> {mat.item_code} ({mat.material_name})
-                                    </p>
-                                    <p>
-                                      <b>Category:</b> {mat.material_category || "General"}
-                                    </p>
-                                    <p>
-                                      <b>Batch Qty:</b> {b.batch_quantity} {mat.uom}
-                                    </p>
-                                  </div>
-
-                                  <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-3">
-                                    {qrInfo.data_url ? (
-                                      <a
-                                        href={qrInfo.data_url}
-                                        download={`${b.batch_number}-QR.png`}
-                                        className="inline-flex h-9 w-full items-center justify-center rounded-xl bg-emerald-600 text-xs font-bold text-white hover:bg-emerald-700"
-                                      >
-                                        <Download className="mr-1 size-3" /> Download QR
-                                      </a>
-                                    ) : (
-                                      <Button
-                                        disabled
-                                        className="w-full rounded-xl text-xs font-bold"
-                                      >
-                                        <Download className="mr-1 size-3" /> Download QR
-                                      </Button>
-                                    )}
-                                  </div>
-                                </Card>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-
-              {/* ⚠️ DAMAGED & REJECTED GOODS QR LABELS (QUARANTINE) SECTION */}
-              <div className="hidden pt-6 border-t space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3 bg-rose-50/70 dark:bg-rose-950/30 p-4 rounded-2xl border border-rose-200 dark:border-rose-900">
-                  <div>
-                    <h4 className="font-bold text-base text-rose-900 dark:text-rose-200 flex items-center gap-2">
-                      <AlertTriangle className="size-5 text-rose-600 animate-pulse" />
-                      Quarantine QR Labels — Damaged, Rejected & QC Hold
-                    </h4>
-                    <p className="text-xs text-rose-700 dark:text-rose-300 mt-0.5">
-                      <b>
-                        Rule: Damaged/Rejected Goods → Damage Lot → Unique Damage QR → Quarantine
-                        Storage.
-                      </b>{" "}
-                      Damaged goods are excluded from available stock.
-                    </p>
->>>>>>> origin/Srujan_M_S
                   </div>
                   <div className="flex justify-between pt-6 border-t">
                     <Button
@@ -7213,272 +6424,11 @@ function GrnPageWorkflow() {
                       </Button>
                     </div>
                   </div>
-<<<<<<< HEAD
                 </Card>
               )}
             </div>
           </DialogContent>
         </Dialog>
-=======
-                ) : (
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {damageQrLabels.map((dEntry) => (
-                      <Card
-                        key={dEntry.damage_lot_number}
-                        className="rounded-2xl p-5 border-2 border-rose-300 dark:border-rose-800 text-center space-y-3 bg-rose-50/20 dark:bg-rose-950/20 text-foreground shadow-md relative overflow-hidden group"
-                      >
-                        <div className="border-b border-rose-200 dark:border-rose-900 pb-2 text-left">
-                          <span className="text-[10px] font-extrabold uppercase tracking-widest text-rose-700 dark:text-rose-400">
-                            {dEntry.exception_type === "REJECTED"
-                              ? "Rejected Lot QR"
-                              : dEntry.exception_type === "QC_HOLD"
-                                ? "QC Hold Lot QR"
-                                : "Damage Lot QR"}
-                          </span>
-                          <h4 className="font-mono text-sm font-bold text-rose-950 dark:text-rose-100">
-                            {dEntry.damage_lot_number}
-                          </h4>
-                        </div>
-
-                        <div
-                          className="relative group/qr cursor-pointer my-2"
-                          onClick={() =>
-                            setEnlargedQr({
-                              title: dEntry.damage_lot_number,
-                              qr_id: dEntry.qr_code,
-                              data_url: dEntry.qr_data_url,
-                              payload: dEntry.qr_payload,
-                              batch: {
-                                batch_number: dEntry.damage_lot_number,
-                                batch_quantity: dEntry.damaged_quantity,
-                              },
-                              itemCode: dEntry.item_code,
-                            })
-                          }
-                        >
-                          {dEntry.qr_data_url ? (
-                            <div className="relative inline-block p-2 bg-white rounded-2xl border border-rose-200 shadow-sm transition-transform group-hover/qr:scale-105">
-                              <img
-                                src={dEntry.qr_data_url}
-                                alt="Damage QR Code"
-                                className="size-44 mx-auto"
-                              />
-                              <div className="absolute inset-0 bg-rose-950/80 opacity-0 group-hover/qr:opacity-100 transition-opacity rounded-2xl flex flex-col items-center justify-center text-white text-xs font-bold gap-1 p-2">
-                                <Eye className="size-7 text-rose-300" />
-                                <span>Click to Enlarge / Scan</span>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="grid size-44 place-items-center bg-rose-100 mx-auto rounded-2xl border border-dashed border-rose-300">
-                              <Loader2 className="size-8 animate-spin text-rose-600" />
-                              <span className="text-xs text-rose-700">Generating Damage QR...</span>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="text-xs text-left space-y-1 font-mono text-foreground border-t border-rose-200 dark:border-rose-900 pt-2">
-                          <p>
-                            <b>GRN Number:</b> {header.grn_number || "Assigning GRN number..."}
-                          </p>
-                          <p>
-                            <b>Material:</b> {dEntry.item_code} ({dEntry.material_name})
-                          </p>
-                          <p>
-                            <b>{dEntry.quantity_label || "Damaged Qty"}:</b>{" "}
-                            <b className="text-rose-600 dark:text-rose-400">
-                              {dEntry.damaged_quantity} {dEntry.uom}
-                            </b>
-                          </p>
-                          <p>
-                            <b>Reason:</b> {dEntry.reason}
-                          </p>
-                          <p>
-                            <b>QA Status:</b>{" "}
-                            <span className="bg-rose-100 dark:bg-rose-900 text-rose-800 dark:text-rose-200 px-1.5 py-0.5 rounded text-[10px] font-bold">
-                              {dEntry.exception_type || dEntry.qa_status || "DAMAGED"}
-                            </span>
-                          </p>
-                          <p>
-                            <b>Quarantine Location:</b>{" "}
-                            <span className="text-amber-700 dark:text-amber-400 font-bold">
-                              {dEntry.quarantine_location}
-                            </span>
-                          </p>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2 pt-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="w-full rounded-xl text-xs font-bold border-rose-200 hover:bg-rose-100"
-                            onClick={() =>
-                              setEnlargedQr({
-                                title: dEntry.damage_lot_number,
-                                qr_id: dEntry.qr_code,
-                                data_url: dEntry.qr_data_url,
-                                payload: dEntry.qr_payload,
-                                batch: {
-                                  batch_number: dEntry.damage_lot_number,
-                                  batch_quantity: dEntry.damaged_quantity,
-                                },
-                                itemCode: dEntry.item_code,
-                              })
-                            }
-                          >
-                            <Eye className="mr-1 size-3 text-rose-600" /> Preview
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="w-full rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white"
-                            onClick={() => printSingleDamageQrLabel(dEntry)}
-                          >
-                            <Printer className="mr-1 size-3" /> Print Label
-                          </Button>
-                        </div>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="flex justify-between pt-6 border-t">
-                <Button variant="outline" className="rounded-xl" onClick={() => handleStepClick(5)}>
-                  <ArrowLeft className="mr-2 size-4" /> Back to Step 5
-                </Button>
-                <div className="flex items-center gap-2">
-                  <Button
-                  disabled={busyAction}
-                  onClick={async () => {
-                    setBusyAction(true);
-                    try {
-                      for (const [index, material] of materials.entries()) {
-                        const approved = Number(qualityApproved[grnMaterialKey(material, index)] ?? material.good_quantity ?? 0);
-                        if (approved <= 0) continue;
-                        const batches = materialBatches[grnMaterialKey(material, index)] || materialBatches[material.item_code] || [];
-                        const total = batches.reduce((sum, batch) => sum + Number(batch.batch_quantity || 0), 0);
-                        if (!batches.length || batches.some((batch) => !batch.batch_id) || total !== approved) {
-                          throw new Error(`Saved batches are missing or do not match ${approved} ${material.uom} for ${material.material_name}. Refresh the GRN or save Batch Creation before posting.`);
-                        }
-                      }
-                      // A GRN is complete only when every received quantity is
-                      // accounted for exactly once across all QC outcomes.
-                      const currentMaterials = materials;
-
-                      const processedMaterials = currentMaterials.map((m, idx) => {
-                        const rowKey = grnMaterialKey(m, idx);
-                        const good = Number(qualityApproved[rowKey] ?? m.good_quantity) || 0;
-                        const damaged = Number(m.damaged_quantity) || 0;
-                        const rejected = Number(m.rejected_quantity) || 0;
-                        const held = Number(m.held_quantity) || 0;
-                        const received = Number(m.received_quantity) || 0;
-                        const accounted = good + rejected + damaged + held;
-                        const balance = Math.max(0, received - accounted);
-                        return {
-                          ...m,
-                          good_quantity: good,
-                          damaged_quantity: damaged,
-                          rejected_quantity: rejected,
-                          held_quantity: held,
-                          combined_received: accounted,
-                          balance_quantity: balance,
-                          is_line_complete: received > 0 && accounted === received,
-                        };
-                      });
-
-                      const isAllFullyDelivered = processedMaterials.every(
-                        (m) => m.is_line_complete,
-                      );
-                      const computedStatus = isAllFullyDelivered
-                        ? "COMPLETED"
-                        : "PARTIALLY COMPLETED";
-
-                      const grnNumber =
-                        header.grn_number ||
-                        "";
-
-                      const newRecord = {
-                        grn_id: grnId || grnNumber,
-                        grn_number: grnNumber,
-                        po_number: header.po_number || "",
-                        supplier_name: header.supplier_name || header.supplier_company_name || "",
-                        supplier_company_name:
-                          header.supplier_company_name || header.supplier_name || "",
-                        supplier_email: header.supplier_email || "",
-                        vehicle_number: header.vehicle_number || "",
-                        driver_name: header.driver_name || "",
-                        dock_number: header.receiving_dock || "",
-                        status: computedStatus,
-                        receipt_date: new Date().toISOString().split("T")[0],
-                        created_at: new Date().toISOString(),
-                        received_by: loggedInUserName || "Warehouse Officer",
-                        allocation_id: allocatedDockInfo?.allocation_id || "",
-                        materials: processedMaterials,
-                      };
-
-                      let persistedStatus = computedStatus;
-                      if (grnId || grnNumber) {
-                        const postedGrn = await api.postGrn(
-                          grnId || grnNumber,
-                          `Status: ${computedStatus} - Posted from GRN Console`,
-                        );
-                        persistedStatus =
-                          postedGrn?.status || postedGrn?.grn?.status || computedStatus;
-                      }
-                      newRecord.status = persistedStatus;
-
-                      // Ask the GRN operator to release the dock after the
-                      // GRN has been successfully posted.
-                      if (allocatedDockInfo?.allocation_id) {
-                        setDockReleasePrompt(String(allocatedDockInfo.allocation_id));
-                      }
-
-                      // Update grnRecords state so it appears immediately on Dashboard & Records table
-                      setGrnRecords((prev) => [
-                        newRecord,
-                        ...prev.filter(
-                          (r) => r.grn_number !== grnNumber && r.grn_id !== newRecord.grn_id,
-                        ),
-                      ]);
-
-                      toast.success(`GOODS RECEIVING PROCESS COMPLETED!`, {
-                        description: `GRN ${grnNumber} saved with status: ${persistedStatus}. QC quantities are reconciled across accepted, rejected, damaged, and held categories.`,
-                      });
-
-                      startNewGrn(false);
-                      void loadRecords();
-                      void loadWarehouseDocks();
-                      window.dispatchEvent(new CustomEvent("notifications:refresh"));
-                      setActiveTab("records");
-                      navigate({ to: "/grn", search: { tab: "records", page: 1 } });
-                      setSearchTerm("");
-                    } catch (e: any) {
-                      console.error("GRN Posting error:", e);
-                      toast.error("Failed to post GRN", {
-                        description:
-                          e?.message || "An unexpected error occurred during GRN posting.",
-                      });
-                    } finally {
-                      setSaveStatus("idle");
-                      setBusyAction(false);
-                    }
-                  }}
-                  className="rounded-xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-8 text-sm shadow-md flex items-center gap-2"
-                >
-                  {busyAction ? (
-                    <>
-                      <Loader2 className="size-5 animate-spin" /> Saving & Posting GRN...
-                    </>
-                  ) : (
-                    <>
-                      <ShieldCheck className="size-5" /> COMPLETE & POST GOODS RECEIVING
-                    </>
-                  )}
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          )}
-        </div>
->>>>>>> origin/Srujan_M_S
       )}
 
       {historyQrLabels && (
@@ -7755,7 +6705,7 @@ function GrnPageWorkflow() {
                       <th className="p-2.5">Material Code & Name</th>
                       <th className="p-2.5">Good Qty</th>
                       <th className="p-2.5">Damaged Qty</th>
-                      <th className="p-2.5">Pass Rate<InformationTooltip help="qc" /></th>
+                      <th className="p-2.5">Pass Rate</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y font-medium">
@@ -8189,8 +7139,8 @@ function GrnPageWorkflow() {
                       <th className="p-2.5 text-right">Received Qty</th>
                       <th className="p-2.5 text-right text-emerald-600">Good Qty</th>
                       <th className="p-2.5 text-right text-rose-600">Damaged Qty</th>
-                      <th className="p-2.5 text-right font-black">Accounted Qty<InformationTooltip help="reconciliation" /></th>
-                      <th className="p-2.5 text-center">Item Status<InformationTooltip help="workflowStatus" /></th>
+                      <th className="p-2.5 text-right font-black">Accounted Qty</th>
+                      <th className="p-2.5 text-center">Item Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y font-mono font-medium">
@@ -8314,7 +7264,7 @@ function GrnPageWorkflow() {
 
             <div className="space-y-3 text-xs">
               <div>
-                <span className="inline-flex items-center"><label className="font-bold text-foreground block mb-1">Select Dock Bay</label><InformationTooltip help="dock" /></span>
+                <label className="font-bold text-foreground block mb-1">Select Dock Bay</label>
                 <select
                   value={assigningDockId}
                   onChange={(e) => setAssigningDockId(e.target.value)}
@@ -8348,9 +7298,9 @@ function GrnPageWorkflow() {
               </div>
 
               <div>
-                <span className="inline-flex items-center"><label className="font-bold text-foreground block mb-1">
+                <label className="font-bold text-foreground block mb-1">
                   PO Reference (Optional)
-                </label><InformationTooltip help="procurement" /></span>
+                </label>
                 <Input
                   placeholder="PO-2026-0007"
                   value={assigningPo}
@@ -8718,25 +7668,6 @@ function GrnPageWorkflow() {
           </div>
         </DialogContent>
       </Dialog>
-      <AlertDialog open={Boolean(deleteGrnTarget)} onOpenChange={(open) => {
-        if (!open && !deletingGrn) setDeleteGrnTarget(null);
-      }}>
-        <AlertDialogContent className="rounded-2xl">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete GRN {deleteGrnTarget?.grn_number}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will remove this GRN's receiving data, lines, batches, and documents.
-              This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deletingGrn}>Cancel</AlertDialogCancel>
-            <Button variant="destructive" disabled={deletingGrn} onClick={() => void confirmDeleteGrn()}>
-              {deletingGrn ? "Deleting..." : "Delete GRN"}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </AppShell>
   );
 }

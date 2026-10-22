@@ -376,39 +376,26 @@ function DockManagement() {
 
   const [actionBusy, setActionBusy] = useState(false);
 
-  const openEditDock = (dock: Dock) => {
-    setEditDockForm({
-      code: dock.dock_code,
-      name: dock.dock_name,
-      type: dock.dock_type,
-      direction: dock.direction || "INBOUND",
-      location: dock.location || "",
-      description: dock.description || "",
-    });
-    setEditDockModalDock(dock);
-  };
-
   const loadAll = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      const [docksRes, overviewRes, pendingRes, historyRes] = await Promise.all([
+      const [docksRes, overviewRes, pendingRes, historyRes, smRes, storesRes] = await Promise.all([
         api.getDocks(),
         api.getDockOverviewMetrics().catch(() => null),
         api.getPendingAllocations().catch(() => []),
         api.getDockHistory().catch(() => []),
+        api.getStoreManagers().catch(() => []),
+        api.getStores({ status: "ACTIVE" }).catch(() => []),
       ]);
 
       setDocks(docksRes);
       setPendingRequests(pendingRes);
       setHistory(historyRes);
-<<<<<<< HEAD
       if (Array.isArray(smRes)) {
         setStoreManagers(smRes);
       }
       setStores(Array.isArray(storesRes) ? storesRes : storesRes?.items || []);
 
-=======
->>>>>>> origin/Srujan_M_S
       if (overviewRes) {
         setMetrics(overviewRes);
       } else {
@@ -513,14 +500,6 @@ function DockManagement() {
   // Handle Edit Dock Update
   async function handleUpdateDock() {
     if (!editDockModalDock) return;
-    if (!editDockForm.name.trim()) {
-      toast.error("Enter a dock name before saving.");
-      return;
-    }
-    if (editDockForm.name.trim().length > 128 || editDockForm.location.trim().length > 128) {
-      toast.error("Dock name and location must be 128 characters or fewer.");
-      return;
-    }
     setActionBusy(true);
     try {
       await api.updateDock(editDockModalDock.id, {
@@ -528,8 +507,7 @@ function DockManagement() {
         dock_name: editDockForm.name.trim() || editDockModalDock.dock_name,
         dock_type: editDockForm.type,
         direction: editDockForm.direction,
-        location: editDockForm.location.trim(),
-        description: editDockForm.description.trim(),
+        description: editDockForm.description.trim() || undefined,
       });
       toast.success(`Dock ${editDockModalDock.dock_code} updated successfully`);
       setEditDockModalDock(null);
@@ -570,15 +548,14 @@ function DockManagement() {
   }
 
   // Action Handlers
-  async function handleAllocateDock(requestToAllocate?: AllocationRequest) {
+  async function handleAllocateDock() {
     let reqId = "";
     let dockId = "";
     let dockCode = "";
-    const pendingRequest = requestToAllocate || allocateModalPendingReq;
 
-    if (pendingRequest) {
-      reqId = pendingRequest.id;
-      dockId = docks.find((item) => item.is_active && item.status === "AVAILABLE")?.id || "";
+    if (allocateModalPendingReq) {
+      reqId = allocateModalPendingReq.id;
+      dockId = selectedDockIdToAllocate;
       const d = docks.find((item) => item.id === dockId);
       dockCode = d ? d.dock_code : "Dock";
     } else if (allocateModalDock) {
@@ -598,15 +575,11 @@ function DockManagement() {
       toast.error("Selected dock is not Available. Please choose an Available dock.");
       return;
     }
-<<<<<<< HEAD
     if (
       allocateModalPendingReq &&
       targetDock &&
       !isDockCompatible(allocateModalPendingReq, targetDock)
     ) {
-=======
-    if (pendingRequest && targetDock && !isDockCompatible(pendingRequest, targetDock)) {
->>>>>>> origin/Srujan_M_S
       toast.error("Selected dock is incompatible with this material.");
       return;
     }
@@ -738,8 +711,6 @@ function DockManagement() {
     return matchesTab && matchesCategory && matchesSearch;
   });
 
-  const warehouseDock = docks.find((dock) => dock.is_active) || docks[0];
-
   if (mounted && isStoreUser && !isWarehouseOrAdmin) {
     return (
       <AppShell title="Dock Management" subtitle="Global Dock Allocation & Management">
@@ -777,16 +748,18 @@ function DockManagement() {
   return (
     <AppShell
       title="Dock Management"
-      subtitle="One receiving dock. Allocate an approved vehicle, then GRN releases it when receiving is complete."
+      subtitle="Real-time dock allocation, vehicle arrival tracking, and operational status."
       actions={
         <div className="flex items-center gap-2.5">
-          <Button
-            variant="ghost"
-            className="h-9 rounded-full px-4 text-xs font-semibold"
-            onClick={() => setActiveTab(activeTab === "HISTORY" ? "ALL" : "HISTORY")}
-          >
-            {activeTab === "HISTORY" ? "Current dock" : "Allocation history"}
-          </Button>
+          {mounted && isWarehouseOrAdmin && (
+            <Button
+              className="h-9 rounded-full px-4 text-xs font-semibold shadow-glow gap-1.5"
+              onClick={() => setShowCreateDock(true)}
+            >
+              <Plus className="size-3.5" />
+              New Dock
+            </Button>
+          )}
           <Button
             variant="outline"
             className="h-9 rounded-full px-4 text-xs font-semibold border-border/80 bg-card hover:bg-muted/60 shadow-2xs text-muted-foreground hover:text-foreground gap-1.5"
@@ -798,10 +771,123 @@ function DockManagement() {
         </div>
       }
     >
+      {/* 1. Summary Cards (6 KPI Cards: Total, Available, Reserved, Occupied, Maintenance, Pending) */}
+      <div className="mb-6 grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3.5">
+        <SummaryCard
+          label="TOTAL DOCKS"
+          value={metrics.total_docks}
+          variant="total"
+          active={activeTab === "ALL"}
+          onClick={() => setActiveTab("ALL")}
+        />
+        <SummaryCard
+          label="AVAILABLE DOCKS"
+          value={metrics.available_docks}
+          variant="available"
+          active={activeTab === "AVAILABLE"}
+          onClick={() => setActiveTab("AVAILABLE")}
+        />
+        <SummaryCard
+          label="RESERVED DOCKS"
+          value={metrics.reserved_docks}
+          variant="reserved"
+          active={activeTab === "RESERVED"}
+          onClick={() => setActiveTab("RESERVED")}
+        />
+        <SummaryCard
+          label="OCCUPIED DOCKS"
+          value={metrics.occupied_docks}
+          variant="occupied"
+          active={activeTab === "OCCUPIED"}
+          onClick={() => setActiveTab("OCCUPIED")}
+        />
+        <SummaryCard
+          label="UNDER MAINTENANCE"
+          value={metrics.maintenance_docks}
+          variant="maintenance"
+          active={activeTab === "MAINTENANCE"}
+          onClick={() => setActiveTab("MAINTENANCE")}
+        />
+        <SummaryCard
+          label="PENDING ALLOCATIONS"
+          value={pendingRequests.length}
+          variant="pending"
+          active={activeTab === "PENDING"}
+          onClick={() => setActiveTab("PENDING")}
+        />
+      </div>
+
+      {/* 2. Filter Bar & Search Container */}
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-full border border-border/80 bg-card p-1.5 px-4 shadow-2xs">
+        <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[280px]">
+          {/* Search Box */}
+          <div className="relative flex items-center w-56 sm:w-64">
+            <Search className="size-4 text-muted-foreground/70 shrink-0 ml-1" />
+            <Input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search truck no, PO, vendor, gate entry..."
+              className="h-8 border-none bg-transparent pl-2.5 pr-2 text-xs focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/60"
+            />
+          </div>
+
+          {/* Filter Pills */}
+          <div className="flex flex-wrap items-center gap-1">
+            {(
+              [
+                { key: "ALL", label: "TOTAL DOCKS" },
+                { key: "AVAILABLE", label: "AVAILABLE" },
+                { key: "RESERVED", label: "RESERVED" },
+                { key: "OCCUPIED", label: "OCCUPIED" },
+                { key: "MAINTENANCE", label: "UNDER MAINTENANCE" },
+                { key: "PENDING", label: "PENDING ALLOCATIONS" },
+                { key: "HISTORY", label: "HISTORY" },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={cn(
+                  "rounded-full px-3.5 py-1.5 text-xs font-bold transition-all whitespace-nowrap",
+                  activeTab === tab.key
+                    ? "bg-blue-600 text-white shadow-xs"
+                    : "text-muted-foreground hover:text-foreground font-semibold hover:bg-muted/40",
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Dock Type Dropdown on Right */}
+        {activeTab !== "HISTORY" && activeTab !== "PENDING" && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground font-medium whitespace-nowrap">
+              Dock type:
+            </span>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="h-8 rounded-full border border-border/80 bg-background px-3 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
+            >
+              {PREDEFINED_CATEGORIES.map((cat) => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {/* 3. Main Content View */}
       {loading ? (
-        <div className="flex h-64 items-center justify-center gap-2 text-muted-foreground"><Loader2 className="size-6 animate-spin text-primary" /><p className="text-sm">Loading dock status...</p></div>
+        <div className="flex h-64 items-center justify-center gap-2 text-muted-foreground">
+          <Loader2 className="size-6 animate-spin text-primary" />
+          <p className="text-sm">Loading dock management data...</p>
+        </div>
       ) : activeTab === "HISTORY" ? (
-<<<<<<< HEAD
         /* History Section */
         <Card className="overflow-hidden rounded-2xl p-0 shadow-soft">
           <div className="overflow-x-auto">
@@ -978,52 +1064,11 @@ function DockManagement() {
             <div className="py-20 text-center text-muted-foreground">
               <Warehouse className="mx-auto mb-2 size-8 text-muted-foreground/50" />
               <p className="text-sm font-semibold">No docks found matching the criteria.</p>
-=======
-        <Card className="overflow-hidden rounded-2xl p-0 shadow-soft"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b bg-muted/50 text-[11px] uppercase tracking-wide text-muted-foreground font-semibold"><tr><th className="px-4 py-3">Timestamp</th><th className="px-4 py-3">Gate Pass</th><th className="px-4 py-3">Vehicle</th><th className="px-4 py-3">Action</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Performed By</th></tr></thead><tbody className="divide-y divide-border/60">{history.length ? history.map((item) => <tr key={item.id}><td className="px-4 py-3 text-xs">{new Date(item.performed_at).toLocaleString()}</td><td className="px-4 py-3 font-mono">{item.existing_gate_pass_id || "—"}</td><td className="px-4 py-3 font-mono">{item.vehicle_number || "—"}</td><td className="px-4 py-3">{item.action}</td><td className="px-4 py-3">{item.previous_status || "—"} → {item.new_status}</td><td className="px-4 py-3">{item.performed_by}</td></tr>) : <tr><td colSpan={6} className="py-12 text-center text-sm text-muted-foreground">No dock activity yet.</td></tr>}</tbody></table></div></Card>
-      ) : (
-        <div className="space-y-6">
-          <Card className={cn("overflow-hidden rounded-3xl border shadow-soft", warehouseDock?.status === "AVAILABLE" ? "border-emerald-200" : warehouseDock?.status === "MAINTENANCE" ? "border-amber-200" : "border-blue-200")}>
-            <div className="flex flex-col gap-6 p-6 lg:flex-row lg:items-center lg:justify-between lg:p-8">
-              <div className="min-w-0 flex-1 space-y-3"><div className="flex flex-wrap items-center gap-3"><span className={cn("size-3 rounded-full", warehouseDock?.status === "AVAILABLE" ? "bg-emerald-500" : warehouseDock?.status === "MAINTENANCE" ? "bg-amber-500" : "bg-blue-600")} /><span className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">Single receiving dock</span><span className={cn("rounded-full px-3 py-1 text-xs font-bold", warehouseDock?.status === "AVAILABLE" ? "bg-emerald-100 text-emerald-800" : warehouseDock?.status === "MAINTENANCE" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800")}>{warehouseDock?.status === "OCCUPIED" || warehouseDock?.status === "RESERVED" ? "ALLOCATED" : warehouseDock?.status || "NOT CONFIGURED"}</span></div><div><h2 className="text-3xl font-black tracking-tight">{warehouseDock?.dock_code || "Receiving dock"}</h2><p className="mt-1 text-sm text-muted-foreground">{warehouseDock?.dock_name || "The warehouse dock has not been configured yet."}</p></div></div>
-            <Button type="button" variant="outline" disabled={actionBusy} onClick={() => warehouseDock ? openEditDock(warehouseDock) : setShowCreateDock(true)} className="shrink-0 gap-2 rounded-xl border-blue-200 bg-white/80 text-blue-800 hover:bg-blue-50 dark:border-blue-900/60 dark:bg-slate-900 dark:text-blue-200 dark:hover:bg-blue-950/40"><SquarePen className="size-4" />{warehouseDock ? "Edit dock" : "Configure dock"}</Button>
-              <div className="grid min-w-[280px] grid-cols-2 gap-3 rounded-2xl bg-muted/40 p-4 text-sm"><div><p className="text-xs font-semibold uppercase text-muted-foreground">Dock status</p><p className="mt-1 font-bold">{warehouseDock?.status || "Unavailable"}</p></div><div><p className="text-xs font-semibold uppercase text-muted-foreground">Waiting vehicles</p><p className="mt-1 font-bold">{pendingRequests.length}</p></div>{warehouseDock?.current_allocation ? <><div><p className="text-xs font-semibold uppercase text-muted-foreground">Vehicle</p><p className="mt-1 font-mono font-bold">{warehouseDock.current_allocation.vehicle_number}</p></div><div><p className="text-xs font-semibold uppercase text-muted-foreground">Gate pass</p><p className="mt-1 font-mono font-bold">{warehouseDock.current_allocation.existing_gate_pass_id}</p></div></> : <div className="col-span-2 text-xs text-muted-foreground">GRN releases the dock automatically after receiving is complete.</div>}</div>
->>>>>>> origin/Srujan_M_S
             </div>
-            {warehouseDock?.current_allocation && <div className="border-t bg-blue-50/70 px-6 py-4 text-sm text-blue-900"><span className="font-semibold">Receiving in progress.</span> GRN releases this dock when receiving is completed. Status refreshes automatically.</div>}
-          </Card>
-          <section className="space-y-3"><div className="flex items-end justify-between gap-3"><div><h3 className="text-lg font-bold">Approved vehicles waiting</h3><p className="text-sm text-muted-foreground">Allocate the available dock to an approved gate entry.</p></div><span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold">{pendingRequests.length} waiting</span></div>
-            {pendingRequests.length === 0 ? <Card className="rounded-2xl border-dashed p-8 text-center text-sm text-muted-foreground">No approved vehicles are waiting for dock allocation.</Card> : <div className="space-y-3">{pendingRequests.map((req) => <Card key={req.id} className="rounded-2xl p-4 shadow-2xs"><div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div className="grid flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Gate pass</p><p className="mt-1 font-mono font-bold text-primary">{req.existing_gate_pass_id}</p></div><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Vehicle</p><p className="mt-1 font-mono font-bold">{req.vehicle_number}</p></div><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Vendor / material</p><p className="mt-1 text-sm font-semibold">{req.vendor_reference || req.material_reference || req.material_description || "—"}</p></div><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Approved</p><p className="mt-1 text-sm">{req.security_approved_at ? new Date(req.security_approved_at).toLocaleString() : "—"}</p></div></div><Button disabled={!warehouseDock || warehouseDock.status !== "AVAILABLE" || actionBusy} onClick={() => void handleAllocateDock(req)} className="shrink-0 rounded-xl"><ArrowRight className="mr-2 size-4" />{warehouseDock?.status === "AVAILABLE" ? "Allocate dock" : "Dock unavailable"}</Button></div></Card>)}</div>}
-          </section>
+          )}
         </div>
       )}
-      <Dialog open={showCreateDock} onOpenChange={(open) => !actionBusy && setShowCreateDock(open)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Configure receiving dock</DialogTitle>
-            <DialogDescription>Create the receiving dock before allocating an approved vehicle.</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleCreateDock} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="create-dock-code">Dock code</Label>
-              <Input id="create-dock-code" name="dock_code" required maxLength={32}
-                pattern={"[A-Za-z0-9_\\-]+"} value={createDockCode}
-                onChange={(event) => setCreateDockCode(event.target.value.toUpperCase())} disabled={actionBusy} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="create-dock-name">Dock name</Label>
-              <Input id="create-dock-name" name="dock_name" required maxLength={128}
-                value={createDockName} onChange={(event) => setCreateDockName(event.target.value)} disabled={actionBusy} />
-            </div>
-            <p className="text-xs text-muted-foreground">Inbound receiving dock. Initial status: Available.</p>
-            <DialogFooter>
-              <Button type="button" variant="outline" disabled={actionBusy} onClick={() => setShowCreateDock(false)}>Cancel</Button>
-              <Button type="submit" disabled={actionBusy || !createDockCode.trim() || !createDockName.trim()}>
-                {actionBusy && <Loader2 className="mr-2 size-4 animate-spin" />}Create dock
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+
       {/* 4. View Dock Details Modal */}
       {selectedDetailsDock && (
         <Dialog
@@ -1628,8 +1673,6 @@ function DockManagement() {
             <div>
               <Label className="text-xs font-semibold">Dock Name</Label>
               <Input
-                required
-                maxLength={128}
                 value={editDockForm.name}
                 onChange={(e) => setEditDockForm({ ...editDockForm, name: e.target.value })}
                 className="mt-1"
@@ -1643,7 +1686,20 @@ function DockManagement() {
               <Label className="text-xs font-semibold">Dock Category</Label>
               <select
                 value={editDockForm.type}
-                onChange={(e) => setEditDockForm({ ...editDockForm, type: e.target.value })}
+                onChange={(e) => {
+                  const type = e.target.value;
+                  const generated = generateDockCodeAndName(
+                    type,
+                    docks.filter((dock) => dock.id !== editDockModalDock?.id),
+                  );
+                  setEditDockForm({
+                    ...editDockForm,
+                    type,
+                    code: generated.code,
+                    name: generated.name,
+                    direction: type === "FINISHED_GOODS" ? "OUTBOUND" : editDockForm.direction,
+                  });
+                }}
                 className="mt-1 w-full h-9 rounded-md border border-input bg-background px-3 text-xs"
               >
                 <option value="CHEMICAL_HAZARDOUS">Chemical / Hazardous</option>
@@ -1668,24 +1724,6 @@ function DockManagement() {
                 <option value="OUTBOUND">OUTBOUND</option>
                 <option value="BOTH">BOTH</option>
               </select>
-            </div>
-            <div>
-              <Label className="text-xs font-semibold">Dock Location</Label>
-              <Input
-                value={editDockForm.location}
-                onChange={(e) => setEditDockForm({ ...editDockForm, location: e.target.value })}
-                className="mt-1"
-                maxLength={128}
-              />
-            </div>
-            <div>
-              <Label className="text-xs font-semibold">Description</Label>
-              <Input
-                value={editDockForm.description}
-                onChange={(e) => setEditDockForm({ ...editDockForm, description: e.target.value })}
-                className="mt-1"
-                maxLength={500}
-              />
             </div>
           </div>
 
@@ -1761,7 +1799,6 @@ function DockManagement() {
         </AlertDialogContent>
       </AlertDialog>
 
-<<<<<<< HEAD
       {/* 10. Create New Dock Modal */}
       <Dialog open={showCreateDock} onOpenChange={setShowCreateDock}>
         <DialogContent className="max-w-md rounded-2xl">
@@ -1883,8 +1920,6 @@ function DockManagement() {
           </form>
         </DialogContent>
       </Dialog>
-=======
->>>>>>> origin/Srujan_M_S
     </AppShell>
   );
 }
