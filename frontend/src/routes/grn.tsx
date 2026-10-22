@@ -1362,7 +1362,7 @@ function GrnPageWorkflow() {
     );
   }
 
-  async function loadExistingGrnSession(targetGrnId: string) {
+  async function loadExistingGrnSession(targetGrnId: string, resumePage?: number) {
     if (
       !targetGrnId ||
       targetGrnId === "undefined" ||
@@ -1563,7 +1563,7 @@ function GrnPageWorkflow() {
       }
 
       const effectiveMaxStep = Math.max(detail.max_completed_step || 0, computedStep - 1);
-      const targetStep = (search as any).page || detail.current_step || Math.min(computedStep, 6);
+      const targetStep = resumePage ?? ((search as any).page || detail.current_step || Math.min(computedStep, 6));
 
       setMaxCompletedStep(effectiveMaxStep);
       setCurrentPage(targetStep);
@@ -4176,6 +4176,19 @@ function GrnPageWorkflow() {
                           {/* REAL ACTION BUTTONS PER RECORD */}
                           <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                             <div className="flex items-center gap-2">
+                              {String(status).toUpperCase().replace(/ /g, "_") === "PARTIALLY_COMPLETED" && (
+                                <Button size="sm" className="rounded-xl text-xs font-semibold"
+                                  disabled={loadingContext || busyAction}
+                                  onClick={() => {
+                                    const id = String(r.grn_id || r.id || "");
+                                    if (!id) { toast.error("This GRN has no saved identifier."); return; }
+                                    setGrnId(id);
+                                    setActiveTab("wizard");
+                                    void loadExistingGrnSession(id, 2);
+                                  }}>
+                                  <ArrowRight className="mr-1.5 size-3.5" /> Complete GRN
+                                </Button>
+                              )}
                               <Button
                                 size="sm"
                                 variant="outline"
