@@ -103,7 +103,7 @@ class BinCreateRequest(BaseModel):
 
     bin_name: str = Field(min_length=1, max_length=128)
     bin_code: str = Field(min_length=1, max_length=64)
-    rack: str = Field(min_length=1, max_length=64)
+    rack: str | None = Field(default=None, min_length=1, max_length=64)
     position: str | None = Field(default=None, max_length=64)
     qr_identifier: str | None = Field(default=None, max_length=128)
     storage_type: str = Field(default="GENERAL", max_length=64)
@@ -461,6 +461,18 @@ async def list_zone_bins(
     return rows
 
 
+def next_rack_code(codes):
+    suffixes = [int(match.group(1)) for code in codes
+                if (match := re.fullmatch(r"RACK-(\d+)", str(code).upper()))]
+    return f"RACK-{max(suffixes, default=0) + 1:03d}"
+
+
+async def _suggest_rack_code(session, zone_id):
+    rack_codes = (await session.scalars(select(StoreRackModel.rack_code).where(StoreRackModel.zone_id == zone_id))).all()
+    bin_racks = (await session.scalars(select(StoreBinModel.rack).where(StoreBinModel.zone_id == zone_id))).all()
+    return next_rack_code([*rack_codes, *bin_racks])
+
+
 @zone_router.get("/{zone_id}/bins/next-code")
 async def next_bin_code(
     zone_id: str,
@@ -476,7 +488,8 @@ async def next_bin_code(
         match = re.search(r"(?:-BIN-|BIN-)(\d+)$", str(code).upper())
         if match:
             max_sequence = max(max_sequence, int(match.group(1)))
-    return {"suggested_bin_code": f"{zone.zone_code}-BIN-{max_sequence + 1:03d}"}
+    return {"suggested_bin_code": f"{zone.zone_code}-BIN-{max_sequence + 1:03d}",
+            "suggested_rack_code": await _suggest_rack_code(uow.session, zone.id)}
 
 
 @zone_router.post("/{zone_id}/bins", status_code=status.HTTP_201_CREATED)
@@ -499,6 +512,9 @@ async def create_zone_bin(
         )
     if payload.capacity <= 0:
         raise HTTPException(status_code=422, detail="Bin capacity must be greater than zero")
+
+    if not payload.rack:
+        payload.rack = await _suggest_rack_code(uow.session, zone.id)
 
     existing_rack = await uow.session.scalar(select(StoreRackModel).where(
         StoreRackModel.zone_id == zone.id, StoreRackModel.rack_code == payload.rack))
