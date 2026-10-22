@@ -69,6 +69,11 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.debug(f"Schema create_all note: {exc}")
 
+    # Capacity enforcement is mandatory even when legacy schema compatibility is disabled.
+    from app.modules.storage.application.rack_capacity import install_rack_capacity
+    async with engine.begin() as connection:
+        await connection.run_sync(install_rack_capacity)
+
     if not settings.startup_schema_compatibility:
         async def start_kafka_background() -> None:
             try:
@@ -152,6 +157,7 @@ async def lifespan(app: FastAPI):
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
             await connection.run_sync(_ensure_sqlite_columns)
+
         logger.info("Ensured ORM database schema exists")
     except Exception as exc:
         logger.exception("Failed to initialize ORM database schema: %s", exc)
@@ -1731,9 +1737,10 @@ def create_app() -> FastAPI:
     )
     register_exception_handlers(app)
 
-    from app.modules.store.infrastructure.api.router import router as store_router, zone_router
+    from app.modules.store.infrastructure.api.router import router as store_router
     app.include_router(store_router)
-    app.include_router(zone_router)
+    # Zone/bin URLs are owned by location_router, including rack persistence
+    # and occupancy responses. Do not register legacy duplicate handlers.
     app.include_router(dock_router)
     app.include_router(receiving_router)
     app.include_router(returns_router)

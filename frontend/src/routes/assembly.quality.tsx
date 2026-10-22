@@ -1,3 +1,4 @@
+import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
@@ -16,11 +17,8 @@ import {
   QrCode,
   RefreshCw,
   Search,
-  ShieldAlert,
   ShieldCheck,
-  ShieldX,
   User,
-  Wrench,
   X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -106,9 +104,6 @@ function AssemblyQualityPage() {
   // Inspection Modal State
   const [inspectItem, setInspectItem] = useState<AssemblyQualityInspectionItem | null>(null);
   const [passedQty, setPassedQty] = useState<number>(0);
-  const [failedQty, setFailedQty] = useState<number>(0);
-  const [reworkQty, setReworkQty] = useState<number>(0);
-  const [heldQty, setHeldQty] = useState<number>(0);
   const [authorizedPersonConfirmed, setAuthorizedPersonConfirmed] = useState(false);
   const [inspectorName, setInspectorName] = useState("");
   const [inspectorTouched, setInspectorTouched] = useState(false);
@@ -138,26 +133,13 @@ function AssemblyQualityPage() {
     setInspectorName("");
     setInspectorTouched(false);
     setPassedQty(item.produced_quantity);
-    setFailedQty(0);
-    setReworkQty(0);
-    setHeldQty(0);
   };
 
   const parsedPassedQty = parseNonNegativeNumber(passedQty);
-  const parsedFailedQty = parseNonNegativeNumber(failedQty);
-  const parsedReworkQty = parseNonNegativeNumber(reworkQty);
-  const parsedHeldQty = parseNonNegativeNumber(heldQty);
-  const totalInspected =
-    (parsedPassedQty ?? Number.NaN) +
-    (parsedFailedQty ?? Number.NaN) +
-    (parsedReworkQty ?? Number.NaN) +
-    (parsedHeldQty ?? Number.NaN);
+  const totalInspected = parsedPassedQty ?? Number.NaN;
   const expectedProduced = inspectItem ? inspectItem.produced_quantity : 0;
   const isQuantityValid =
     parsedPassedQty !== null &&
-    parsedFailedQty !== null &&
-    parsedReworkQty !== null &&
-    parsedHeldQty !== null &&
     totalInspected === expectedProduced;
 
   const handleInspectSubmit = async () => {
@@ -179,9 +161,9 @@ function AssemblyQualityPage() {
         authorized_person_confirmed: authorizedPersonConfirmed,
         inspector_name: inspectorName.trim(),
         passed_quantity: parsedPassedQty,
-        failed_quantity: parsedFailedQty,
-        rework_quantity: parsedReworkQty,
-        held_quantity: parsedHeldQty,
+        failed_quantity: 0,
+        rework_quantity: 0,
+        held_quantity: 0,
       });
 
       toast.success(res.message || `Quality inspection completed for ${inspectItem.order_number}`);
@@ -390,8 +372,8 @@ function AssemblyQualityPage() {
                     <th className="py-3 px-3">Order Number</th>
                     <th className="py-3 px-3">Product Details</th>
                     <th className="py-3 px-3">Produced Qty</th>
-                    <th className="py-3 px-3">QC Breakdown</th>
-                    <th className="py-3 px-3">QC Status</th>
+                    <th className="py-3 px-3">QC Breakdown<InformationTooltip help="qc" /></th>
+                    <th className="py-3 px-3">QC Status<InformationTooltip help="workflowStatus" /></th>
                     <th className="py-3 px-3">Inspector & Date</th>
                     <th className="py-3 px-3 text-right">Action</th>
                   </tr>
@@ -601,7 +583,7 @@ function AssemblyQualityPage() {
 
                 {/* Quantities breakdown */}
                 <div className="space-y-3">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-1 gap-3">
                     <div className="space-y-1">
                       <label className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                         <CheckCircle2 className="size-3" /> Passed Qty *
@@ -616,47 +598,6 @@ function AssemblyQualityPage() {
                       />
                     </div>
 
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                        <Wrench className="size-3" /> Rework Qty
-                      </label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={inspectItem.produced_quantity}
-                        value={reworkQty}
-                        onChange={(e) => setReworkQty(Number(e.target.value))}
-                        className="h-9 text-sm font-mono font-bold rounded-xl border-amber-500/30 focus:border-amber-500"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1">
-                        <ShieldX className="size-3" /> Failed / Scrap
-                      </label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={inspectItem.produced_quantity}
-                        value={failedQty}
-                        onChange={(e) => setFailedQty(Number(e.target.value))}
-                        className="h-9 text-sm font-mono font-bold rounded-xl border-rose-500/30 focus:border-rose-500"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-sky-600 dark:text-sky-400 flex items-center gap-1">
-                        <ShieldAlert className="size-3" /> Held Qty
-                      </label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={inspectItem.produced_quantity}
-                        value={heldQty}
-                        onChange={(e) => setHeldQty(Number(e.target.value))}
-                        className="h-9 text-sm font-mono font-bold rounded-xl border-sky-500/30 focus:border-sky-500"
-                      />
-                    </div>
                   </div>
 
                   {/* Validation balance warning */}

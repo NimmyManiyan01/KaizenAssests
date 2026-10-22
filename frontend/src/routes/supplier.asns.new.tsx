@@ -1,3 +1,4 @@
+import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { toast } from "sonner";
@@ -8,7 +9,6 @@ import {
   Download,
   Eye,
   FileText,
-  Info,
   Loader2,
   MoreHorizontal,
   Pencil,
@@ -54,11 +54,10 @@ import {
   isValidAsnVehicleNumber,
   isValidDateInput,
   isValidAsnDriverMobileNumber,
-  isValidPersonName,
+  isValidAsnDriverName,
   normalizeAsnVehicleNumber,
   sanitizeMobileNumber,
   sanitizeNumericQuantity,
-  sanitizePersonName,
 } from "@/lib/input-validation";
 
 export const Route = createFileRoute("/supplier/asns/new")({
@@ -124,27 +123,6 @@ const statusStyles: Record<string, string> = {
   CANCELLED: "border-destructive/25 bg-danger-soft text-destructive",
 };
 
-function InfoTooltip({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Tooltip open={open} onOpenChange={setOpen} delayDuration={150}>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-label={text}
-          onClick={() => setOpen((current) => !current)}
-          className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <Info className="size-3.5" aria-hidden="true" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-xs rounded-lg border border-border bg-popover px-3 py-2 text-left text-xs font-medium leading-5 text-popover-foreground shadow-soft">
-        {text}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
 
 function TapTooltip({ text, children }: { text: string; children: ReactElement }) {
   const [open, setOpen] = useState(false);
@@ -426,15 +404,15 @@ function NewAsnPage() {
     event.preventDefault();
     if (assignmentSubmitting) return;
     const normalizedVehicle = normalizeAsnVehicleNumber(vehicleNumber);
-    const normalizedDriver = sanitizePersonName(driverName).trim().replace(/\s+/g, " ");
-    const normalizedContact = sanitizeMobileNumber(driverMobile);
+    const normalizedDriver = driverName.trim().replace(/ +/g, " ");
+    const normalizedContact = driverMobile.trim();
     setAssignmentTouched({ vehicle: true, driver: true, contact: true });
     setVehicleNumber(normalizedVehicle);
     setDriverName(normalizedDriver);
     setDriverMobile(normalizedContact);
     const invalidField = !isValidAsnVehicleNumber(normalizedVehicle)
       ? "assignment-vehicle"
-      : !isValidPersonName(normalizedDriver)
+      : !isValidAsnDriverName(normalizedDriver)
         ? "assignment-driver"
         : !isValidAsnDriverMobileNumber(normalizedContact)
           ? "assignment-contact"
@@ -537,6 +515,13 @@ function NewAsnPage() {
   const handleFormSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (submitInFlightRef.current) return;
+    if (!isValidAsnVehicleNumber(vehicleNumber) || !isValidAsnDriverName(driverName) ||
+        !isValidAsnDriverMobileNumber(driverMobile)) {
+      setAssignmentTouched({ vehicle: true, driver: true, contact: true });
+      setIsModalOpen(false);
+      setIsAssignmentOpen(true);
+      return;
+    }
     const errors: Record<string, string> = {};
     if (!isValidDateInput(expectedArrivalDate)) {
       errors["expected-arrival-date"] = "Enter a valid expected arrival date.";
@@ -586,8 +571,8 @@ function NewAsnPage() {
         supplier_name: supplierName.trim(),
         expected_arrival_at: expectedArrivalDate,
         vehicle_number: normalizeAsnVehicleNumber(vehicleNumber),
-        driver_name: sanitizePersonName(driverName).trim().replace(/\s+/g, " "),
-        driver_contact: sanitizeMobileNumber(driverMobile),
+        driver_name: driverName.trim().replace(/ +/g, " "),
+        driver_contact: driverMobile.trim(),
         lines: lines.map((l) => ({
           material_id: l.material_id,
           item_code: l.item_code,
@@ -764,7 +749,6 @@ function NewAsnPage() {
         title={
           <span className="inline-flex items-center gap-2">
             Advance Shipment Notices
-            <InfoTooltip text="An ASN informs the warehouse about materials you plan to deliver before the vehicle arrives." />
           </span>
         }
         subtitle="Create, track and download shipment notices"
@@ -866,7 +850,7 @@ function NewAsnPage() {
                       <th scope="col" className="px-4 py-3">
                         <span className="inline-flex items-center gap-1.5">
                           ASN Number
-                          <InfoTooltip text="Unique reference number for tracking your delivery." />
+
                         </span>
                       </th>
                       <th scope="col" className="px-4 py-3">
@@ -875,37 +859,37 @@ function NewAsnPage() {
                       <th scope="col" className="px-4 py-3">
                         <span className="inline-flex items-center gap-1.5">
                           Vehicle Number
-                          <InfoTooltip text="Registration number of the vehicle carrying your materials." />
+
                         </span>
                       </th>
                       <th scope="col" className="px-4 py-3">
                         <span className="inline-flex items-center gap-1.5">
                           Driver Name &amp; Mobile
-                          <InfoTooltip text="Driver details used by gate security during vehicle verification." />
+
                         </span>
                       </th>
                       <th scope="col" className="px-4 py-3">
                         <span className="inline-flex items-center gap-1.5">
                           Expected Arrival Date
-                          <InfoTooltip text="Date the vehicle is expected to reach the warehouse." />
+
                         </span>
                       </th>
                       <th scope="col" className="px-4 py-3">
                         <span className="inline-flex items-center gap-1.5">
                           Status
-                          <InfoTooltip text="Shows the current progress of your delivery notice." />
+                          <InformationTooltip help="workflowStatus" />
                         </span>
                       </th>
                       <th scope="col" className="px-4 py-3 text-right">
                         <span className="inline-flex items-center gap-1.5">
                           Materials
-                          <InfoTooltip text="Number of material items and total quantity included in the ASN." />
+                          <InformationTooltip help="quantity" />
                         </span>
                       </th>
                       <th scope="col" className="w-44 px-4 py-3 text-right">
                         <span className="inline-flex items-center justify-end gap-1.5">
                           Actions
-                          <InfoTooltip text="View, download, or manage this ASN, depending on available actions." />
+
                         </span>
                       </th>
                     </tr>
@@ -970,7 +954,7 @@ function NewAsnPage() {
                             ) || "—"}
                           </td>
                           <td className="whitespace-nowrap px-4 py-3">
-                            <StatusTooltip status={String(asn.status || "")} />
+                            <StatusTooltip status="SUBMITTED" />
                           </td>
                           <td className="px-4 py-3 text-right tabular-nums text-foreground">
                             {asn.lines?.length || 0} items ·{" "}
@@ -1209,7 +1193,7 @@ function NewAsnPage() {
                           setDriverName(e.target.value);
                           const phone = d?.phone || d?.mobile_number || d?.phone_number;
                           if (phone) {
-                            setDriverMobile(String(phone).replace(/\D/g, "").slice(0, 10));
+                            setDriverMobile(sanitizeMobileNumber(String(phone)));
                           }
                           setAssignmentTouched((prev) => ({
                             ...prev,
@@ -1231,14 +1215,14 @@ function NewAsnPage() {
                       required
                       placeholder="Enter driver name"
                       value={driverName}
-                      onChange={(e) => setDriverName(sanitizePersonName(e.target.value))}
+                      onChange={(e) => setDriverName(e.target.value)}
                       onBlur={() => {
-                        setDriverName((value) => value.trim().replace(/\s+/g, " "));
+                        setDriverName((value) => value.trim().replace(/ +/g, " "));
                         setAssignmentTouched((value) => ({ ...value, driver: true }));
                       }}
-                      aria-invalid={assignmentTouched.driver && !isValidPersonName(driverName)}
+                      aria-invalid={assignmentTouched.driver && !isValidAsnDriverName(driverName)}
                       aria-describedby="assignment-driver-error"
-                      maxLength={80}
+                      maxLength={100}
                       className={formInputClass}
                     />
                     {assignmentTouched.driver && !driverName.trim() && (
@@ -1248,9 +1232,9 @@ function NewAsnPage() {
                     )}
                     {assignmentTouched.driver &&
                       driverName.trim() &&
-                      !isValidPersonName(driverName) && (
+                      !isValidAsnDriverName(driverName) && (
                         <p id="assignment-driver-error" className="mt-1 text-xs text-rose-600">
-                          Enter a valid driver name.
+                          Enter 2–100 characters using letters, spaces, periods, commas, apostrophes or hyphens.
                         </p>
                       )}
                   </div>
@@ -1267,9 +1251,9 @@ function NewAsnPage() {
                         assignmentTouched.contact && !isValidAsnDriverMobileNumber(driverMobile)
                       }
                       aria-describedby="assignment-contact-error"
-                      inputMode="tel"
-                      pattern="[6-9][0-9]{9}"
+                      inputMode="numeric"
                       maxLength={10}
+                      pattern="[6-9][0-9]{9}"
                       className={formInputClass}
                     />
                     {assignmentTouched.contact && !driverMobile && (
@@ -1281,7 +1265,7 @@ function NewAsnPage() {
                       driverMobile &&
                       !isValidAsnDriverMobileNumber(driverMobile) && (
                         <p id="assignment-contact-error" className="mt-1 text-xs text-rose-600">
-                          Enter a valid 10-digit mobile number.
+                          Enter a 10-digit Indian mobile number starting with 6–9.
                         </p>
                       )}
                   </div>
@@ -1300,7 +1284,7 @@ function NewAsnPage() {
                     disabled={
                       assignmentSubmitting ||
                       !isValidAsnVehicleNumber(vehicleNumber) ||
-                      !isValidPersonName(driverName) ||
+                      !isValidAsnDriverName(driverName) ||
                       !isValidAsnDriverMobileNumber(driverMobile)
                     }
                   >
@@ -1356,7 +1340,7 @@ function NewAsnPage() {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="expected-arrival-date">Expected arrival date *</Label>
+                      <span className="inline-flex items-center"><Label htmlFor="expected-arrival-date">Expected arrival date *</Label><InformationTooltip help="arrivalDate" /></span>
                       <Input
                         id="expected-arrival-date"
                         type="date"

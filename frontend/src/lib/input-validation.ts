@@ -27,6 +27,13 @@ export function completionDateError(value: string, today = localDateInput()): st
   return null;
 }
 
+export function pickupDateError(value: string, today = localDateInput()): string | null {
+  if (!value) return "Expected pickup date is required.";
+  if (!isValidDateInput(value)) return "Enter a valid expected pickup date.";
+  if (value < today) return "Pickup date must be today or later.";
+  return null;
+}
+
 export function requiredText(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -49,7 +56,7 @@ export function isValidAsnVehicleNumber(value: string): boolean {
   const normalized = normalizeAsnVehicleNumber(value);
   return (
     /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/.test(normalized) ||
-    /^(?:2[1-9]|[3-9]\d)BH\d{4}[A-HJ-NP-Z]{1,2}$/.test(normalized)
+    /^(?:2[1-9]|[3-9]\d)BH\d{4}[A-HJ-NP-Z]{2}$/.test(normalized)
   );
 }
 
@@ -132,6 +139,12 @@ export function isValidMobileNumber(value: string): boolean {
 
 export function isValidAsnDriverMobileNumber(value: string): boolean {
   return /^[6-9]\d{9}$/.test(value.trim());
+}
+
+export function isValidAsnDriverName(value: string): boolean {
+  const name = value.trim();
+  return name.length >= 2 && name.length <= 100 &&
+    /^[A-Za-z .,'’\-]+$/.test(name) && (name.match(/[A-Za-z]/g)?.length ?? 0) >= 2;
 }
 
 export function isValidIdentifier(value: string, pattern = /^[A-Za-z0-9/_-]+$/): boolean {

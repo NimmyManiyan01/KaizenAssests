@@ -53,6 +53,7 @@ from app.modules.storage.infrastructure.persistence.models import (
     StockAdjustmentModel,
     StorageLocationModel,
 )
+from app.modules.storage.application.rack_capacity import validate_rack_capacity
 from app.modules.store.infrastructure.persistence.models import (
     StoreBinModel,
     StoreManagerUserModel,
@@ -447,6 +448,8 @@ async def perform_bin_to_bin_transfer(
     if req.quantity > transferable:
         raise HTTPException(status_code=409, detail=f"Only {transferable} {src_bal.uom} is unreserved and transferable from this batch/location")
 
+    if src_bin.zone_id != dest_bin.zone_id or src_bin.rack != dest_bin.rack:
+        await validate_rack_capacity(uow.session, dest_bin, req.quantity, src_bal.uom)
     if dest_bin.occupied_quantity + req.quantity > dest_bin.capacity:
         raise HTTPException(status_code=409, detail=f"Destination Bin '{dest_bin.bin_code}' has insufficient capacity")
 
@@ -519,6 +522,7 @@ async def perform_bin_to_bin_transfer(
             bin=dest_bin.bin_code,
             location_code=f"LOC-{dest_store.store_code}-{dest_zone.zone_code}-{dest_bin.bin_code}",
             active=True,
+            capacity=dest_bin.capacity, occupied_quantity=0,
         )
         uow.session.add(dest_loc)
         await uow.session.flush()
@@ -553,6 +557,7 @@ async def perform_bin_to_bin_transfer(
     src_bal.quantity -= req.quantity
     src_bal.available_quantity -= req.quantity
     src_bal.updated_at = now_utc
+    await uow.session.flush()  # Release source occupancy before crediting the destination rack.
 
     dest_bal.quantity += req.quantity
     dest_bal.available_quantity += req.quantity
@@ -1922,7 +1927,7 @@ async def perform_takeaway(
 
     if bin_obj is None:
         bq = await uow.session.execute(
-            select(StoreBinModel).where(func.upper(StoreBinModel.bin_code) == str(bin_identifier).strip().upper())
+            select(StoreBinModel).where(or_(func.upper(StoreBinModel.bin_code) == str(bin_identifier).strip().upper(), func.upper(StoreBinModel.qr_identifier) == str(bin_identifier).strip().upper()))
         )
         bin_obj = bq.scalar_one_or_none()
 
@@ -1931,6 +1936,8 @@ async def perform_takeaway(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Scanned Bin '{bin_raw}' not found in any store.",
         )
+
+    bin_obj = await uow.session.scalar(select(StoreBinModel).where(StoreBinModel.id == bin_obj.id).with_for_update().execution_options(populate_existing=True))
 
     # 2. Store isolation & RBAC check
     target_store = await uow.session.get(StoreModel, bin_obj.store_id)
@@ -1970,6 +1977,16 @@ async def perform_takeaway(
         except Exception:
             cleaned_mat_code = mat_raw
 
+    # Downloaded GRN batch labels use readable key/value text as well as JSON.
+    for line in mat_raw.splitlines():
+        key, separator, value = line.partition(":")
+        if separator:
+            normalized = key.strip().lower().replace(" ", "_")
+            if normalized in {"material_code", "item_code"}:
+                cleaned_mat_code = value.strip()
+            elif normalized in {"batch", "batch_number"}:
+                batch_number = batch_number or value.strip()
+
     if cleaned_mat_code.upper().startswith("QR-MAT-"):
         cleaned_mat_code = cleaned_mat_code[7:]
     elif cleaned_mat_code.upper().startswith("QR-"):
@@ -1979,6 +1996,9 @@ async def perform_takeaway(
     qr_batch = await uow.session.scalar(select(GrnBatchQrModel).where(GrnBatchQrModel.qr_code == mat_raw))
     if qr_batch and qr_batch.item_code:
         cleaned_mat_code = qr_batch.item_code
+        if not batch_number:
+            from app.modules.receiving.infrastructure.persistence.models import GrnBatchModel
+            batch_number = await uow.session.scalar(select(GrnBatchModel.batch_number).where(GrnBatchModel.id == qr_batch.batch_id))
     else:
         hu_match = await uow.session.scalar(
             select(HandlingUnitModel).where(
@@ -2006,6 +2026,8 @@ async def perform_takeaway(
     )
     storage_locs = loc_res.scalars().all()
     loc_ids = [loc.id for loc in storage_locs]
+    if not loc_ids:
+        raise HTTPException(409, "This rack has no stored inventory")
 
     # 5. Find Inventory Location Balance
     bal_query = select(InventoryLocationBalanceModel).where(
@@ -2032,6 +2054,25 @@ async def perform_takeaway(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Insufficient quantity available in Bin '{bin_obj.bin_code}'. Available: {balance.available_quantity} {balance.uom}, Requested: {req.quantity}.",
         )
+
+    reservations = (await uow.session.scalars(select(AssemblyStockReservationModel).where(
+        AssemblyStockReservationModel.material_code == balance.material_code,
+        func.upper(AssemblyStockReservationModel.status).in_(["RESERVED", "ACTIVE", "RESERVED FOR ASSEMBLY"])))).all()
+    reserved = Decimal("0")
+    for reservation in reservations:
+        for allocation in (reservation.allocations or []):
+            if not isinstance(allocation, dict):
+                continue
+            if (str(allocation.get("location_code") or "").upper() in {loc.location_code.upper() for loc in storage_locs}
+                and str(allocation.get("batch_number") or allocation.get("batch") or "UNTRACKED").upper() == balance.batch_number.upper()):
+                issued = await uow.session.scalar(select(func.coalesce(func.sum(InventoryIssueTransactionModel.quantity), 0)).where(
+                    InventoryIssueTransactionModel.requisition_id == reservation.requisition_id,
+                    InventoryIssueTransactionModel.material_code == balance.material_code,
+                    InventoryIssueTransactionModel.batch_number == balance.batch_number,
+                    InventoryIssueTransactionModel.source_location_id == balance.storage_location_id)) or 0
+                reserved += max(Decimal("0"), Decimal(str(allocation.get("quantity") or 0)) - issued)
+    if req.quantity > balance.available_quantity - reserved:
+        raise HTTPException(409, "Quantity is reserved for assembly. Use the approved picking task or release the reservation first.")
 
     # 6. Fetch MaterialStockModel
     if not target_store.warehouse_id:
@@ -2067,7 +2108,7 @@ async def perform_takeaway(
 
     # 8. Record Inventory Movement History
     movement_rec = InventoryMovementHistoryModel(
-        movement_type="TAKEAWAY",
+        movement_type="ADJUSTMENT" if req.reference_document == "RACK_ADJUSTMENT" else "TAKEAWAY",
         material_code=balance.material_code,
         material_name=balance.material_name,
         material_qr=req.material_scan.strip(),

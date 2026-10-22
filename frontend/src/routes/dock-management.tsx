@@ -752,7 +752,7 @@ function DockManagement() {
           <Card className={cn("overflow-hidden rounded-3xl border shadow-soft", warehouseDock?.status === "AVAILABLE" ? "border-emerald-200" : warehouseDock?.status === "MAINTENANCE" ? "border-amber-200" : "border-blue-200")}>
             <div className="flex flex-col gap-6 p-6 lg:flex-row lg:items-center lg:justify-between lg:p-8">
               <div className="min-w-0 flex-1 space-y-3"><div className="flex flex-wrap items-center gap-3"><span className={cn("size-3 rounded-full", warehouseDock?.status === "AVAILABLE" ? "bg-emerald-500" : warehouseDock?.status === "MAINTENANCE" ? "bg-amber-500" : "bg-blue-600")} /><span className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">Single receiving dock</span><span className={cn("rounded-full px-3 py-1 text-xs font-bold", warehouseDock?.status === "AVAILABLE" ? "bg-emerald-100 text-emerald-800" : warehouseDock?.status === "MAINTENANCE" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800")}>{warehouseDock?.status === "OCCUPIED" || warehouseDock?.status === "RESERVED" ? "ALLOCATED" : warehouseDock?.status || "NOT CONFIGURED"}</span></div><div><h2 className="text-3xl font-black tracking-tight">{warehouseDock?.dock_code || "Receiving dock"}</h2><p className="mt-1 text-sm text-muted-foreground">{warehouseDock?.dock_name || "The warehouse dock has not been configured yet."}</p></div></div>
-            <Button type="button" variant="outline" disabled={!warehouseDock || actionBusy} onClick={() => warehouseDock && openEditDock(warehouseDock)} className="shrink-0 gap-2 rounded-xl border-blue-200 bg-white/80 text-blue-800 hover:bg-blue-50 dark:border-blue-900/60 dark:bg-slate-900 dark:text-blue-200 dark:hover:bg-blue-950/40"><SquarePen className="size-4" /> Edit dock</Button>
+            <Button type="button" variant="outline" disabled={actionBusy} onClick={() => warehouseDock ? openEditDock(warehouseDock) : setShowCreateDock(true)} className="shrink-0 gap-2 rounded-xl border-blue-200 bg-white/80 text-blue-800 hover:bg-blue-50 dark:border-blue-900/60 dark:bg-slate-900 dark:text-blue-200 dark:hover:bg-blue-950/40"><SquarePen className="size-4" />{warehouseDock ? "Edit dock" : "Configure dock"}</Button>
               <div className="grid min-w-[280px] grid-cols-2 gap-3 rounded-2xl bg-muted/40 p-4 text-sm"><div><p className="text-xs font-semibold uppercase text-muted-foreground">Dock status</p><p className="mt-1 font-bold">{warehouseDock?.status || "Unavailable"}</p></div><div><p className="text-xs font-semibold uppercase text-muted-foreground">Waiting vehicles</p><p className="mt-1 font-bold">{pendingRequests.length}</p></div>{warehouseDock?.current_allocation ? <><div><p className="text-xs font-semibold uppercase text-muted-foreground">Vehicle</p><p className="mt-1 font-mono font-bold">{warehouseDock.current_allocation.vehicle_number}</p></div><div><p className="text-xs font-semibold uppercase text-muted-foreground">Gate pass</p><p className="mt-1 font-mono font-bold">{warehouseDock.current_allocation.existing_gate_pass_id}</p></div></> : <div className="col-span-2 text-xs text-muted-foreground">GRN releases the dock automatically after receiving is complete.</div>}</div>
             </div>
             {warehouseDock?.current_allocation && <div className="border-t bg-blue-50/70 px-6 py-4 text-sm text-blue-900"><span className="font-semibold">Receiving in progress.</span> GRN releases this dock when receiving is completed. Status refreshes automatically.</div>}
@@ -762,6 +762,34 @@ function DockManagement() {
           </section>
         </div>
       )}
+      <Dialog open={showCreateDock} onOpenChange={(open) => !actionBusy && setShowCreateDock(open)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Configure receiving dock</DialogTitle>
+            <DialogDescription>Create the receiving dock before allocating an approved vehicle.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreateDock} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="create-dock-code">Dock code</Label>
+              <Input id="create-dock-code" name="dock_code" required maxLength={32}
+                pattern={"[A-Za-z0-9_\\-]+"} value={createDockCode}
+                onChange={(event) => setCreateDockCode(event.target.value.toUpperCase())} disabled={actionBusy} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="create-dock-name">Dock name</Label>
+              <Input id="create-dock-name" name="dock_name" required maxLength={128}
+                value={createDockName} onChange={(event) => setCreateDockName(event.target.value)} disabled={actionBusy} />
+            </div>
+            <p className="text-xs text-muted-foreground">Inbound receiving dock. Initial status: Available.</p>
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={actionBusy} onClick={() => setShowCreateDock(false)}>Cancel</Button>
+              <Button type="submit" disabled={actionBusy || !createDockCode.trim() || !createDockName.trim()}>
+                {actionBusy && <Loader2 className="mr-2 size-4 animate-spin" />}Create dock
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
       {/* 4. View Dock Details Modal */}
       {selectedDetailsDock && (
         <Dialog

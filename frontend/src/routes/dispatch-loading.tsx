@@ -1,3 +1,4 @@
+import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { hasRole } from "@/lib/auth-utils";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -300,7 +301,7 @@ function DispatchLoadingPage() {
                   <th className="px-4 py-3">Bay</th>
                   <th className="px-4 py-3">Vehicle</th>
                   <th className="px-4 py-3">Driver</th>
-                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Status<InformationTooltip help="loading" /></th>
                   <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>

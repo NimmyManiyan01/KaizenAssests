@@ -1,3 +1,4 @@
+import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -73,56 +74,6 @@ const getStatusDescription = (status: string) => {
     `Status: ${status.replaceAll("_", " ")}. Click View for full details.`
   );
 };
-
-function HelpTooltip({
-  text,
-  side = "top",
-  align = "center",
-  className = "",
-  iconClassName = "size-3.5 text-slate-400 hover:text-slate-600",
-}: {
-  text: string;
-  side?: "top" | "bottom" | "left" | "right";
-  align?: "start" | "center" | "end";
-  className?: string;
-  iconClassName?: string;
-}) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Tooltip open={open} onOpenChange={setOpen} delayDuration={150}>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setOpen((prev) => !prev);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              setOpen(false);
-            }
-          }}
-          className={cn(
-            "inline-flex items-center justify-center rounded-full p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer touch-manipulation transition-colors",
-            className
-          )}
-          aria-label={text}
-        >
-          <CircleHelp className={iconClassName} />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent
-        side={side}
-        align={align}
-        sideOffset={6}
-        className="z-50 max-w-xs rounded-lg border border-border bg-popover px-3 py-1.5 text-left text-xs font-normal leading-relaxed text-popover-foreground shadow-soft animate-in fade-in-0 zoom-in-95"
-      >
-        {text}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
 
 function validateTransportDetails(vehicle: string, driver: string, contact: string): string | null {
   const normalizedVehicle = vehicle.replace(/\s+/g, "").toUpperCase();
@@ -481,7 +432,7 @@ function SupplierDashboard() {
                 <div>
                   <div className="flex items-center gap-1.5">
                     <p className="text-sm font-medium text-muted-foreground">{title}</p>
-                    <HelpTooltip text={tooltip} side="top" align="start" />
+
                   </div>
                   <p
                     className="mt-1 text-2xl font-semibold tabular-nums text-foreground"
@@ -553,11 +504,7 @@ function SupplierDashboard() {
                     <th scope="col" className="px-3.5 py-3">
                       <div className="inline-flex items-center gap-1">
                         <span>ASN Number</span>
-                        <HelpTooltip
-                          text="Advance Shipping Notice reference code (e.g. ASN-2026-1). Gate security scans this when the truck arrives."
-                          side="top"
-                          align="start"
-                        />
+
                       </div>
                     </th>
                     <th scope="col" className="px-3.5 py-3">
@@ -566,11 +513,7 @@ function SupplierDashboard() {
                     <th scope="col" className="px-3.5 py-3">
                       <div className="inline-flex items-center gap-1">
                         <span>Status</span>
-                        <HelpTooltip
-                          text="Current delivery stage: from scheduled gate arrival to dock unloading and final inventory receipt."
-                          side="top"
-                          align="start"
-                        />
+                        <InformationTooltip help="workflowStatus" />
                       </div>
                     </th>
                     <th scope="col" className="px-3.5 py-3">
@@ -661,11 +604,7 @@ function SupplierDashboard() {
                             >
                               {status.replaceAll("_", " ")}
                             </span>
-                            <HelpTooltip
-                              text={getStatusDescription(status)}
-                              side="top"
-                              iconClassName="size-3 text-slate-400 hover:text-slate-600"
-                            />
+                            <InformationTooltip help="workflowStatus" />
                           </div>
                         </td>
                         <td className="px-3.5 py-3 text-muted-foreground">
@@ -792,10 +731,7 @@ function SupplierDashboard() {
                   <div className="rounded-xl border bg-muted/30 p-3">
                     <div className="flex items-center gap-1">
                       <p className="font-bold uppercase text-muted-foreground">ASN Number</p>
-                      <HelpTooltip
-                        text="Advance Shipping Notice ID scanned by security upon truck arrival."
-                        side="top"
-                      />
+
                     </div>
                     <p className="mt-1 font-mono font-black text-sky-600">
                       {selected.asn_number || "—"}
@@ -835,12 +771,7 @@ function SupplierDashboard() {
                   <div className="rounded-xl border bg-muted/30 p-3">
                     <div className="flex items-center gap-1">
                       <p className="font-bold uppercase text-muted-foreground">Status</p>
-                      <HelpTooltip
-                        text={getStatusDescription(
-                          String(selected.status || "SUBMITTED").toUpperCase(),
-                        )}
-                        side="top"
-                      />
+                      <InformationTooltip help="workflowStatus" />
                     </div>
                     <p className="mt-1 font-black text-slate-900">
                       {String(selected.status || "SUBMITTED").replaceAll("_", " ")}

@@ -1,3 +1,4 @@
+import { useNotificationAlerts } from "@/hooks/use-notification-alerts";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
   LayoutDashboard,
@@ -38,14 +39,10 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { InformationTooltip } from "@/components/ui/information-tooltip";
+import { pageHelp } from "@/lib/information-help";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { api } from "@/lib/api-client";
 import logoUrl from "@/assets/Logo.png";
 import { toast } from "sonner";
@@ -198,8 +195,7 @@ const warehouseNav = [
   { label: "Dashboard", to: "/inventory?tab=dashboard", icon: LayoutDashboard },
   { label: "Putaway", to: "/inventory?tab=putaway", icon: PackageCheck },
   { label: "Inventory", to: "/inventory?tab=inventory", icon: Boxes },
-  { label: "Assembly Requisitions", to: "/warehouse/assembly-requisitions", icon: ClipboardList },
-  { label: "Picking", to: "/inventory?tab=picking", icon: ListOrdered },
+  { label: "Requisitions & Picking", to: "/inventory?tab=picking", icon: ClipboardList },
   { label: "Locations", to: "/inventory?tab=locations", icon: Building2 },
   { label: "Dock Allocation", to: "/dock-management", icon: Warehouse },
 ];
@@ -348,8 +344,7 @@ export function AppShell({
   const fullHref = path + searchStr;
   const navigate = useNavigate();
   const [user, setUser] = useState<UserInfo | null>(null);
-  const [unreadNotifications, setUnreadNotifications] = useState(0);
-  const [notificationAlert, setNotificationAlert] = useState<any | null>(null);
+  const { unreadCount: unreadNotifications, alert: notificationAlert, dismissAlert } = useNotificationAlerts(user ? getNotificationRole(user) : null, user?.username);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -421,94 +416,7 @@ export function AppShell({
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
-    let cleanup: (() => void) | undefined;
-    try {
-      const u = getUserInfo();
-      setUser(u);
-      if (u) {
-        const notifRole = getNotificationRole(u);
-        const fetchNotifications = async () => {
-          try {
-            if (notifRole === "WAREHOUSE" || notifRole === "GRN" || isGrnUser) {
-              const [arrivals, general] = await Promise.all([
-                api.getArrivalNotifications().catch(() => []),
-                api.getNotifications("GRN").catch(() => []),
-              ]);
-              const unreadArrivals = Array.isArray(arrivals)
-                ? arrivals.filter((n) => String(n?.status || "").toUpperCase() !== "ACKNOWLEDGED")
-                    .length
-                : 0;
-              const unreadGeneral = Array.isArray(general)
-                ? general.filter((n) => !(n?.is_read ?? n?.isRead)).length
-                : 0;
-              setUnreadNotifications(unreadArrivals + unreadGeneral);
-              const allNotifications = [
-                ...(Array.isArray(arrivals) ? arrivals : []),
-                ...(Array.isArray(general) ? general : []),
-              ];
-              const ids = new Set(
-                allNotifications.map((n: any) =>
-                  String(n?.id || n?.notification_id || n?.created_at || ""),
-                ),
-              );
-              if (knownNotificationIds.current) {
-                const newest = allNotifications.find(
-                  (n: any) =>
-                    ids.has(String(n?.id || n?.notification_id || n?.created_at || "")) &&
-                    !knownNotificationIds.current?.has(
-                      String(n?.id || n?.notification_id || n?.created_at || ""),
-                    ),
-                );
-                if (newest) {
-                  setNotificationAlert(newest);
-                  window.setTimeout(() => setNotificationAlert(null), 7000);
-                }
-              }
-              knownNotificationIds.current = ids;
-            } else {
-              const data = await api.getNotifications(notifRole);
-              setUnreadNotifications(
-                Array.isArray(data) ? data.filter((n) => !(n?.is_read ?? n?.isRead)).length : 0,
-              );
-              const ids = new Set(
-                (Array.isArray(data) ? data : []).map((n: any) =>
-                  String(n?.id || n?.notification_id || n?.created_at || ""),
-                ),
-              );
-              if (knownNotificationIds.current) {
-                const newest = (Array.isArray(data) ? data : []).find(
-                  (n: any) =>
-                    !knownNotificationIds.current?.has(
-                      String(n?.id || n?.notification_id || n?.created_at || ""),
-                    ),
-                );
-                if (newest) {
-                  setNotificationAlert(newest);
-                  window.setTimeout(() => setNotificationAlert(null), 7000);
-                }
-              }
-              knownNotificationIds.current = ids;
-            }
-          } catch {
-            // Silently ignore during background polling
-          }
-        };
-        void fetchNotifications();
-        window.addEventListener("notifications:refresh", fetchNotifications);
-        window.addEventListener("focus", fetchNotifications);
-        cleanup = () => {
-          window.removeEventListener("notifications:refresh", fetchNotifications);
-          window.removeEventListener("focus", fetchNotifications);
-        };
-      }
-    } catch (e) {
-      console.error("Failed to parse user info", e);
-    }
-
-    return () => {
-      if (cleanup) cleanup();
-    };
-  }, [dark, isGrnUser]);
+  }, [dark]);
   const isAssemblyUser =
     mounted &&
     (user?.roles?.includes("ASSEMBLY") ||
@@ -700,7 +608,7 @@ export function AppShell({
                       setMobileSidebarOpen(false);
                       void navigate({ to: item.to as any });
                     }}
-                    title={item.label}
+
                     className={cn(
                       "group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-sidebar-foreground transition-all",
                       "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
@@ -784,7 +692,7 @@ export function AppShell({
                   e.preventDefault();
                   void navigate({ to: item.to as any });
                 }}
-                title={item.label}
+
                 className={cn(
                   "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground transition-all",
                   "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
@@ -824,7 +732,7 @@ export function AppShell({
               <button
                 type="submit"
                 aria-label="Search"
-                title="Search"
+
                 className="absolute left-2.5 grid size-6 place-items-center rounded-lg text-muted-foreground hover:text-primary transition-colors cursor-pointer"
               >
                 <Search className="size-4" />
@@ -882,7 +790,7 @@ export function AppShell({
                     }
                   }}
                   aria-label="Search shortcut (⌘K or Ctrl+K)"
-                  title="Search shortcut (⌘K or Ctrl+K)"
+
                   className="hidden rounded-md border border-border bg-card px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground hover:text-foreground hover:border-slate-400 transition-colors cursor-pointer lg:block"
                 >
                   {isSearching ? <Loader2 className="size-3 animate-spin" /> : "⌘K"}
@@ -947,9 +855,6 @@ export function AppShell({
             </form>
 
             <div className="ml-auto flex items-center gap-1.5">
-              <TooltipProvider delayDuration={150}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
                     <Link
                       to="/notifications"
                       aria-label="Notifications"
@@ -957,17 +862,11 @@ export function AppShell({
                     >
                       <Bell className="size-[18px]" />
                       {unreadNotifications > 0 && (
-                        <span className="absolute right-2 top-2 grid size-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-white animate-pulse-ring">
+                        <span className="absolute right-2 top-2 grid size-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-white">
                           {unreadNotifications}
                         </span>
                       )}
                     </Link>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="max-w-xs text-xs bg-slate-900 text-white shadow-lg border-slate-800">
-                    Notifications: View real-time gate arrivals, dock releases, and receiving alerts
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
               <div className="group relative ml-1 flex items-center gap-2.5 rounded-xl border border-border bg-card py-1.5 pl-1.5 pr-3 transition-colors hover:bg-accent/50">
                 <span
                   suppressHydrationWarning
@@ -987,7 +886,7 @@ export function AppShell({
                   suppressHydrationWarning
                   onClick={handleLogout}
                   className="ml-2 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                  title="Logout"
+
                 >
                   <LogOut className="size-4" />
                 </button>
@@ -997,21 +896,22 @@ export function AppShell({
         </header>
 
         {notificationAlert && (
-          <div className="fixed right-5 top-20 z-[80] w-[min(380px,calc(100vw-2rem))] rounded-xl border border-primary/20 bg-card p-4 shadow-xl">
+          <div role="status" aria-live="polite" className="fixed right-5 top-20 z-[80] w-[min(380px,calc(100vw-2rem))] rounded-xl border border-primary/20 bg-card p-4 shadow-xl">
             <div className="flex items-start gap-3">
               <Bell className="mt-0.5 size-5 text-primary" />
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-bold">{notificationAlert.title || "GRN Alert"}</p>
+                <p className="text-sm font-bold">{notificationAlert.title || "New notification"}</p>
                 <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">
                   {notificationAlert.message ||
                     notificationAlert.body ||
-                    "The dock is available. The next vehicle can enter."}
+                    "Open Notification Center to view this update."}
                 </p>
+                <Link to="/notifications" onClick={dismissAlert} className="mt-2 inline-block text-xs font-semibold text-primary">View notifications</Link>
               </div>
               <button
                 type="button"
                 aria-label="Dismiss notification"
-                onClick={() => setNotificationAlert(null)}
+                onClick={dismissAlert}
                 className="text-muted-foreground hover:text-foreground"
               >
                 ×
@@ -1024,7 +924,7 @@ export function AppShell({
             {(title || subtitle || actions) && (
               <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
                 <div>
-                  {title && <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">{title}</h1>}
+                  {title && <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">{title}{pageHelp[path] && <InformationTooltip help={pageHelp[path]} placement="title" />}</h1>}
                   {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
                 </div>
                 {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}

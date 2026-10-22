@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database.session import UnitOfWork, get_uow
+from app.modules.storage.application.putaway_quantity import validate_grn_putaway_quantity
 from app.modules.dock.infrastructure.persistence.models import (
     DockAllocationRequestModel,
     DockMasterModel,
@@ -42,6 +43,7 @@ from app.modules.storage.infrastructure.persistence.models import (
     PutawayLocationAssignmentModel,
     StorageLocationModel,
 )
+from app.modules.storage.application.rack_capacity import validate_rack_capacity, get_rack_capacity
 from app.modules.store.infrastructure.persistence.models import (
     StoreBinModel,
     StoreManagerUserModel,
@@ -1419,6 +1421,12 @@ async def assign_storage_location(
                 if task.material_category.strip().upper() not in allowed:
                     raise HTTPException(status_code=422, detail="Selected location does not permit this material category")
 
+        rack_capacity = None
+        if bin_obj:
+            bin_obj = await uow.session.scalar(select(StoreBinModel).where(StoreBinModel.id == bin_obj.id)
+                .with_for_update().execution_options(populate_existing=True))
+            rack_capacity = await validate_rack_capacity(uow.session, bin_obj, requested_quantity, task.uom)
+
         # Resolve or create a storage_location associated with this store, zone, and bin
         location = None
         if zone:
@@ -1426,8 +1434,11 @@ async def assign_storage_location(
                 StorageLocationModel.warehouse_id == task.warehouse_id,
                 StorageLocationModel.active.is_(True),
                 (StorageLocationModel.zone_id == zone.id) | (StorageLocationModel.zone == zone.zone_code),
-                StorageLocationModel.capacity - StorageLocationModel.occupied_quantity >= requested_quantity,
             )
+            # Managed racks use current inventory occupancy; a stale legacy
+            # location cache must not hide the existing physical location.
+            if rack_capacity is None:
+                loc_query = loc_query.where(StorageLocationModel.capacity - StorageLocationModel.occupied_quantity >= requested_quantity)
             if bin_obj:
                 loc_query = loc_query.where(StorageLocationModel.bin_id == bin_obj.id)
             loc_res = await uow.session.execute(loc_query)
@@ -1480,7 +1491,13 @@ async def assign_storage_location(
             raise HTTPException(status_code=422, detail="Storage location is unavailable")
         if location.warehouse_id != task.warehouse_id:
             raise HTTPException(status_code=422, detail="Storage location belongs to a different warehouse")
-        if location.capacity - location.occupied_quantity < requested_quantity:
+        rack = None
+        if location.bin_id:
+            bin_obj = await uow.session.scalar(select(StoreBinModel).where(StoreBinModel.id == location.bin_id)
+                .with_for_update().execution_options(populate_existing=True))
+            if bin_obj:
+                rack = await validate_rack_capacity(uow.session, bin_obj, requested_quantity, task.uom)
+        if rack is None and location.capacity - location.occupied_quantity < requested_quantity:
             raise HTTPException(status_code=409, detail="Storage location has insufficient available capacity")
         
         store = None
@@ -1953,6 +1970,7 @@ async def complete_putaway(
         raise HTTPException(status_code=409, detail="Assigned storage location is inactive")
 
     # 4. Quantity Validation
+    await validate_grn_putaway_quantity(uow.session, task.grn_id, task.item_code, request.quantity)
     if request.quantity <= 0:
         raise HTTPException(status_code=422, detail="Confirmed quantity must be greater than zero")
     if request.quantity > task.quantity:
@@ -1973,6 +1991,7 @@ async def complete_putaway(
                 status_code=422,
                 detail=f"Confirmed quantity ({request.quantity}) exceeds this location assignment remainder ({assignment_remaining} {task.uom})",
             )
+    await validate_rack_capacity(uow.session, target_bin, request.quantity, task.uom)
     if target_bin.occupied_quantity + request.quantity > target_bin.capacity:
         raise HTTPException(status_code=409, detail=f"Target Bin '{target_bin.bin_code}' has insufficient capacity")
 
@@ -2788,8 +2807,11 @@ async def resolve_bin_qr(
                     detail=f"Unauthorized: You are assigned to store '{', '.join(user_store_codes)}', but bin '{bin_obj.bin_code}' belongs to store '{target_store.store_code}'.",
                 )
 
-    capacity = float(bin_obj.capacity or 1000)
-    occupied = float(bin_obj.occupied_quantity or 0)
+    # Assembly picks update the physical balances and shared rack counter.
+    # Legacy bin/location counters can lag; never use them for a managed rack QR.
+    rack = await get_rack_capacity(uow.session, bin_obj)
+    capacity = float(rack.maximum_capacity if rack else (bin_obj.capacity or 0))
+    occupied = float(rack.occupied_quantity if rack else (bin_obj.occupied_quantity or 0))
     avail_cap = max(0.0, capacity - occupied)
     pct = round((occupied / capacity) * 100, 1) if capacity > 0 else 0.0
 
@@ -2990,6 +3012,8 @@ async def execute_putaway(
                 detail=f"Putaway quantity ({request.quantity}) exceeds remaining task quantity ({resolved_task.quantity} {resolved_task.uom}).",
             )
 
+    await validate_grn_putaway_quantity(uow.session, grn_id, item_code, request.quantity)
+
     allowed_category = (getattr(target_bin, "allowed_material_category", None) or "").strip()
     material_category = (grn_info.get("material_category") or "").strip()
     if allowed_category and allowed_category.upper() not in {"ANY", "ALL"} and allowed_category.upper() != material_category.upper():
@@ -3019,6 +3043,7 @@ async def execute_putaway(
     # Capacity validation
     if (target_bin.status or "").upper() not in ("ACTIVE", "AVAILABLE", "OCCUPIED", "PARTIALLY_OCCUPIED"):
         raise HTTPException(status_code=409, detail=f"Target Bin '{target_bin.bin_code}' is {target_bin.status} and cannot receive material")
+    await validate_rack_capacity(uow.session, target_bin, request.quantity, uom)
     if target_bin.occupied_quantity + request.quantity > target_bin.capacity:
         raise HTTPException(
             status_code=409,

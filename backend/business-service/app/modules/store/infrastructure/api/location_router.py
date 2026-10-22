@@ -15,6 +15,8 @@ from sqlalchemy.exc import IntegrityError
 from app.database.session import UnitOfWork, get_uow
 from app.modules.store.infrastructure.persistence.models import (
     StoreBinModel,
+    StoreRackModel,
+    RackOccupancyEventModel,
     StoreModel,
     StoreZoneModel,
 )
@@ -32,6 +34,8 @@ class ZoneCreateRequest(BaseModel):
     zone_name: str = Field(min_length=2, max_length=100)
     zone_code: str | None = Field(default=None, max_length=64)
     description: str | None = Field(default=None, max_length=1000)
+    warehouse_name: str | None = Field(default=None, min_length=1, max_length=128)
+    warehouse_id: str | None = Field(default=None, min_length=1, max_length=64)
 
     @field_validator("zone_name")
     @classmethod
@@ -100,14 +104,16 @@ class BinCreateRequest(BaseModel):
     bin_name: str = Field(min_length=1, max_length=128)
     bin_code: str = Field(min_length=1, max_length=64)
     rack: str = Field(min_length=1, max_length=64)
-    position: str = Field(min_length=1, max_length=64)
+    position: str | None = Field(default=None, max_length=64)
     qr_identifier: str | None = Field(default=None, max_length=128)
     storage_type: str = Field(default="GENERAL", max_length=64)
-    capacity: Decimal = Field(default=Decimal("1000"), gt=0)
+    capacity: int = Field(gt=0, le=2147483647, strict=True)
 
     @field_validator("bin_code", "rack", "position")
     @classmethod
-    def validate_location_code(cls, value: str) -> str:
+    def validate_location_code(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
         normalized = value.strip().upper()
         if not _CODE_RE.fullmatch(normalized):
             raise ValueError("Codes may contain only letters, numbers, underscores, and hyphens")
@@ -144,7 +150,7 @@ async def _get_store(uow: UnitOfWork, id_or_code: str) -> StoreModel:
     return store
 
 
-async def _get_primary_store(uow: UnitOfWork) -> StoreModel:
+async def _get_primary_store(uow: UnitOfWork, *, required: bool = True) -> StoreModel | None:
     """Resolve the single legacy warehouse parent without exposing it in location APIs."""
     store = await uow.session.scalar(
         select(StoreModel)
@@ -152,7 +158,7 @@ async def _get_primary_store(uow: UnitOfWork) -> StoreModel:
         .order_by(StoreModel.store_code.asc())
         .limit(1)
     )
-    if store is None:
+    if store is None and required:
         raise HTTPException(status_code=409, detail="The warehouse has not been initialized")
     return store
 
@@ -256,7 +262,9 @@ async def list_zones(
     uow: UnitOfWork = Depends(get_uow),
 ) -> list[dict]:
     """List zones without requiring a store identifier."""
-    store = await _get_primary_store(uow)
+    store = await _get_primary_store(uow, required=False)
+    if store is None:
+        return []
     result = await uow.session.execute(
         select(StoreZoneModel)
         .where(StoreZoneModel.store_id == store.id)
@@ -272,6 +280,27 @@ async def list_zones(
     return rows
 
 
+def _next_alphabetic_zone_code(codes):
+    sequence = 0
+    for code in codes:
+        suffix = str(code).upper().removeprefix("ZONE-")
+        if str(code).upper().startswith("ZONE-") and suffix.isalpha() and suffix.isascii():
+            number = 0
+            for character in suffix:
+                number = number * 26 + ord(character) - ord("A") + 1
+            sequence = max(sequence, number)
+        else:
+            match = re.search(r"(?:ZONE-|-Z)(\d+)$", str(code).upper())
+            if match:
+                sequence = max(sequence, int(match.group(1)))
+    number = sequence + 1
+    suffix = ""
+    while number:
+        number, remainder = divmod(number - 1, 26)
+        suffix = chr(ord("A") + remainder) + suffix
+    return f"ZONE-{suffix}"
+
+
 @store_router.get("/{id_or_code}/zones/next-code")
 async def next_zone_code(
     id_or_code: str,
@@ -282,12 +311,7 @@ async def next_zone_code(
     result = await uow.session.execute(
         select(StoreZoneModel.zone_code).where(StoreZoneModel.store_id == store.id)
     )
-    max_sequence = 0
-    for code in result.scalars().all():
-        match = re.search(r"(?:ZONE-|-Z)(\d+)$", str(code).upper())
-        if match:
-            max_sequence = max(max_sequence, int(match.group(1)))
-    return {"suggested_zone_code": f"ZONE-{max_sequence + 1:03d}"}
+    return {"suggested_zone_code": _next_alphabetic_zone_code(result.scalars().all())}
 
 
 @zone_router.get("/next-code")
@@ -295,16 +319,13 @@ async def next_unscoped_zone_code(
     _user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ) -> dict:
-    store = await _get_primary_store(uow)
+    store = await _get_primary_store(uow, required=False)
+    if store is None:
+        return {"suggested_zone_code": "ZONE-A"}
     result = await uow.session.execute(
         select(StoreZoneModel.zone_code).where(StoreZoneModel.store_id == store.id)
     )
-    max_sequence = 0
-    for code in result.scalars().all():
-        match = re.search(r"(?:ZONE-|-Z)(\d+)$", str(code).upper())
-        if match:
-            max_sequence = max(max_sequence, int(match.group(1)))
-    return {"suggested_zone_code": f"ZONE-{max_sequence + 1:03d}"}
+    return {"suggested_zone_code": _next_alphabetic_zone_code(result.scalars().all())}
 
 
 @zone_router.post("", status_code=status.HTTP_201_CREATED)
@@ -314,7 +335,17 @@ async def create_unscoped_zone(
     uow: UnitOfWork = Depends(get_uow),
 ) -> dict:
     """Create a zone by name; warehouse ownership is resolved internally."""
-    store = await _get_primary_store(uow)
+    _require_location_write(user)
+    store = await _get_primary_store(uow, required=False)
+    if store is None:
+        if not payload.warehouse_name or not payload.warehouse_id:
+            raise HTTPException(422, "Enter the warehouse name and location / plant to create the first zone")
+        from app.modules.store.infrastructure.api.router import CreateStoreRequest, create_store
+
+        await create_store(CreateStoreRequest(
+            store_name=payload.warehouse_name, warehouse_id=payload.warehouse_id,
+        ), uow)
+        store = await _get_primary_store(uow)
     return await create_store_zone(store.store_code, payload, user, uow)
 
 
@@ -329,22 +360,11 @@ async def create_store_zone(
     store = await _get_store(uow, id_or_code)
     if str(store.status).upper() != "ACTIVE":
         raise HTTPException(status_code=409, detail="Cannot add a zone to an inactive warehouse")
-    existing_names = await uow.session.scalars(
-        select(StoreZoneModel.zone_name).where(StoreZoneModel.store_id == store.id)
-    )
-    normalized_name = payload.zone_name.casefold()
-    if any(
-        unicodedata.normalize("NFKC", name).strip().casefold() == normalized_name
-        or re.sub(r"\s+", " ", unicodedata.normalize("NFKC", name)).strip().casefold()
-        == normalized_name
-        for name in existing_names
-    ):
-        raise HTTPException(status_code=409, detail="A zone with this name already exists in the warehouse")
     code = payload.zone_code
     if not code:
         code = (await next_zone_code(id_or_code, user, uow))["suggested_zone_code"]
-    if not re.fullmatch(r"ZONE-\d{3,}", code):
-        raise HTTPException(status_code=422, detail="Zone codes must use the ZONE-001 format")
+    if not re.fullmatch(r"ZONE-[A-Z]+", code):
+        raise HTTPException(status_code=422, detail="Zone codes must use the ZONE-A, ZONE-B format")
     duplicate_code = await uow.session.scalar(
         select(StoreZoneModel.id).where(
             StoreZoneModel.store_id == store.id,
@@ -356,7 +376,7 @@ async def create_store_zone(
     zone = StoreZoneModel(
         store_id=store.id,
         zone_code=code,
-        zone_name=payload.zone_name,
+        zone_name=code,
         description=payload.description,
         status="ACTIVE",
     )
@@ -430,7 +450,15 @@ async def list_zone_bins(
         .where(StoreBinModel.zone_id == zone.id)
         .order_by(StoreBinModel.bin_code.asc())
     )
-    return [_bin_response(bin_model) for bin_model in result.scalars().all()]
+    rows = []
+    for bin_model in result.scalars().all():
+        row = _bin_response(bin_model)
+        rack = await uow.session.scalar(select(StoreRackModel).where(
+            StoreRackModel.zone_id == zone.id, StoreRackModel.rack_code == str(bin_model.rack or "").upper()))
+        if rack:
+            row["rack_capacity"] = _rack_response(rack)
+        rows.append(row)
+    return rows
 
 
 @zone_router.get("/{zone_id}/bins/next-code")
@@ -459,7 +487,9 @@ async def create_zone_bin(
     uow: UnitOfWork = Depends(get_uow),
 ) -> dict:
     _require_location_write(user)
-    zone = await _get_zone(uow, zone_id)
+    zone = await uow.session.scalar(select(StoreZoneModel).where(StoreZoneModel.id == uuid.UUID(zone_id)).with_for_update())
+    if zone is None:
+        raise HTTPException(404, "Zone not found")
     if str(zone.status).upper() != "ACTIVE":
         raise HTTPException(status_code=409, detail="Cannot add a bin to an inactive zone")
     if not re.fullmatch(rf"{re.escape(zone.zone_code)}-BIN-\d{{3,}}", payload.bin_code):
@@ -469,6 +499,16 @@ async def create_zone_bin(
         )
     if payload.capacity <= 0:
         raise HTTPException(status_code=422, detail="Bin capacity must be greater than zero")
+
+    existing_rack = await uow.session.scalar(select(StoreRackModel).where(
+        StoreRackModel.zone_id == zone.id, StoreRackModel.rack_code == payload.rack))
+    if existing_rack:
+        raise HTTPException(409, "This rack already exists in the zone. Use Add Material to put away stock.")
+    rack = StoreRackModel(zone_id=zone.id, rack_code=payload.rack, maximum_capacity=payload.capacity, occupied_quantity=0)
+    uow.session.add(rack)
+    await uow.session.flush()
+    uow.session.add(RackOccupancyEventModel(rack_id=rack.id, quantity_delta=0,
+        reason=f"Rack created; maximum capacity {payload.capacity} PCS", actor=user.username))
 
     duplicate_code = await uow.session.scalar(
         select(StoreBinModel.id).where(
@@ -515,3 +555,187 @@ async def create_zone_bin(
         await uow.rollback()
         raise HTTPException(status_code=409, detail="Bin code or QR identifier already exists") from exc
     return _bin_response(bin_model)
+
+
+def _rack_response(rack):
+    occupied = float(rack.occupied_quantity)
+    maximum = rack.maximum_capacity
+    return {"id": str(rack.id), "rack_code": rack.rack_code, "maximum_capacity": maximum,
+        "occupied_quantity": occupied, "available_capacity": maximum - occupied,
+        "occupancy_percentage": round(occupied / maximum * 100, 1),
+        "occupancy_status": "Empty" if occupied == 0 else "Full" if occupied >= maximum else "Partially Occupied"}
+
+
+class RackCapacityUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    maximum_capacity: int = Field(gt=0, le=2147483647, strict=True)
+    reason: str = Field(default="", max_length=1000)
+
+
+async def _rack_in_zone(uow, zone_id, rack_id):
+    try:
+        ids = uuid.UUID(zone_id), uuid.UUID(rack_id)
+    except ValueError:
+        raise HTTPException(404, "Rack not found")
+    rack = await uow.session.scalar(select(StoreRackModel).where(
+        StoreRackModel.zone_id == ids[0], StoreRackModel.id == ids[1]).execution_options(populate_existing=True))
+    if rack is None:
+        raise HTTPException(404, "Rack not found")
+    return rack
+
+
+async def _lock_rack(uow, rack):
+    # All stock endpoints lock physical bins before touching rack occupancy.
+    await uow.session.execute(select(StoreBinModel).where(StoreBinModel.zone_id == rack.zone_id,
+        func.upper(StoreBinModel.rack) == rack.rack_code).order_by(StoreBinModel.id).with_for_update())
+    return await uow.session.scalar(select(StoreRackModel).where(StoreRackModel.id == rack.id)
+        .with_for_update().execution_options(populate_existing=True))
+
+
+@zone_router.put("/{zone_id}/racks/{rack_id}")
+async def update_rack_capacity(zone_id: str, rack_id: str, payload: RackCapacityUpdate,
+    user: CurrentUser = Depends(get_current_user), uow: UnitOfWork = Depends(get_uow)):
+    _require_location_write(user)
+    rack = await _rack_in_zone(uow, zone_id, rack_id)
+    rack = await _lock_rack(uow, rack)
+    if payload.maximum_capacity < rack.occupied_quantity:
+        raise HTTPException(409, "Maximum capacity cannot be less than current occupancy")
+    before = rack.maximum_capacity
+    rack.maximum_capacity = payload.maximum_capacity
+    bins = (await uow.session.scalars(select(StoreBinModel).where(StoreBinModel.zone_id == rack.zone_id,
+        func.upper(StoreBinModel.rack) == rack.rack_code).with_for_update())).all()
+    for bin_model in bins:
+        bin_model.capacity = payload.maximum_capacity
+    uow.session.add(RackOccupancyEventModel(rack_id=rack.id, quantity_delta=0, actor=user.username,
+        reason=(f"Capacity {before} -> {payload.maximum_capacity} PCS" + (f": {payload.reason}" if payload.reason else ""))[:1000]))
+    await uow.session.flush()
+    return _rack_response(rack)
+
+
+@zone_router.get("/{zone_id}/racks/{rack_id}/materials")
+async def rack_materials(zone_id: str, rack_id: str, user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow)):
+    from app.modules.storage.infrastructure.persistence.models import InventoryLocationBalanceModel as Balance, StorageLocationModel as Location
+    from app.modules.receiving.infrastructure.persistence.models import GrnBatchQrModel, GrnBatchModel
+    rack = await _rack_in_zone(uow, zone_id, rack_id)
+    rows = (await uow.session.execute(select(Balance, Location, StoreBinModel)
+        .join(Location, Location.id == Balance.storage_location_id).join(StoreBinModel, StoreBinModel.id == Location.bin_id)
+        .where(StoreBinModel.zone_id == rack.zone_id, func.upper(StoreBinModel.rack) == rack.rack_code, Balance.quantity > 0)
+        .order_by(Balance.material_code, Balance.batch_number))).all()
+    items = []
+    for balance, location, bin_model in rows:
+        qr = await uow.session.scalar(select(GrnBatchQrModel.qr_code).join(GrnBatchModel, GrnBatchModel.id == GrnBatchQrModel.batch_id).where(
+            GrnBatchQrModel.item_code == balance.material_code, GrnBatchModel.batch_number == balance.batch_number).limit(1))
+        items.append({"balance_id": str(balance.id), "material_code": balance.material_code,
+            "material_name": balance.material_name, "batch_number": balance.batch_number,
+            "quantity": float(balance.quantity), "available_quantity": float(balance.available_quantity),
+            "uom": balance.uom, "bin_code": bin_model.bin_code, "bin_id": str(bin_model.id),
+            "rack_qr": bin_model.qr_identifier, "material_qr": qr, "location_code": location.location_code,
+            "grn_number": balance.last_grn_number})
+    return {**_rack_response(rack), "materials": items}
+
+
+class EmptyRackRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    confirm: bool
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+@zone_router.post("/{zone_id}/racks/{rack_id}/empty")
+async def empty_rack(zone_id: str, rack_id: str, payload: EmptyRackRequest,
+    user: CurrentUser = Depends(get_current_user), uow: UnitOfWork = Depends(get_uow)):
+    _require_location_write(user)
+    if not payload.confirm:
+        raise HTTPException(422, "Confirm the inventory adjustment before emptying the rack")
+    from app.modules.storage.infrastructure.api.inventory_router import perform_takeaway, TakeawayRequest
+    from app.modules.storage.infrastructure.persistence.models import AssemblyStockReservationModel
+    rack = await _rack_in_zone(uow, zone_id, rack_id)
+    await _lock_rack(uow, rack)
+    content = await rack_materials(zone_id, rack_id, user, uow)
+    for item in content["materials"]:
+        if item["quantity"] != item["available_quantity"]:
+            raise HTTPException(409, "Release reserved or unavailable stock before emptying the rack")
+        # Never remove stock allocated to an active assembly request.
+        reservations = (await uow.session.scalars(select(AssemblyStockReservationModel).where(
+            AssemblyStockReservationModel.material_code == item["material_code"],
+            func.upper(AssemblyStockReservationModel.status).in_(["RESERVED", "ACTIVE", "RESERVED FOR ASSEMBLY"])))).all()
+        if any(str(a.get("location_code", "")).upper() == item["location_code"].upper()
+            for r in reservations for a in (r.allocations or []) if isinstance(a, dict)):
+            raise HTTPException(409, "Release assembly reservations before emptying the rack")
+    for item in content["materials"]:
+        await perform_takeaway(TakeawayRequest(bin_scan=item["bin_code"], material_scan=item["material_code"],
+            batch_number=item["batch_number"], quantity=Decimal(str(item["quantity"])),
+            remarks="Authorized empty rack adjustment: " + payload.reason.strip(), reference_document="RACK_ADJUSTMENT"), user, uow)
+    uow.session.add(RackOccupancyEventModel(rack_id=rack.id, quantity_delta=0, actor=user.username,
+        reason=("Authorized empty rack adjustment: " + payload.reason.strip())[:1000]))
+    await uow.session.flush()
+    return await rack_materials(zone_id, rack_id, user, uow)
+
+
+@zone_router.get("/{zone_id}/racks/{rack_id}/history")
+async def rack_history(zone_id: str, rack_id: str, user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow)):
+    rack = await _rack_in_zone(uow, zone_id, rack_id)
+    rows = (await uow.session.scalars(select(RackOccupancyEventModel).where(RackOccupancyEventModel.rack_id == rack.id)
+        .order_by(RackOccupancyEventModel.id.desc()).limit(200))).all()
+    return [{"id": r.id, "quantity_delta": float(r.quantity_delta), "reason": r.reason,
+        "actor": r.actor, "balance_id": r.balance_id, "created_at": r.created_at.isoformat()} for r in rows]
+
+
+class RackMoveRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    source_scan: str = Field(min_length=1, max_length=4000)
+    material_scan: str = Field(min_length=1, max_length=10000)
+    destination_scan: str | None = Field(default=None, max_length=4000)
+    quantity: int = Field(gt=0, strict=True)
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+@zone_router.post("/{zone_id}/racks/{rack_id}/move")
+async def move_rack_material(zone_id: str, rack_id: str, payload: RackMoveRequest,
+    user: CurrentUser = Depends(get_current_user), uow: UnitOfWork = Depends(get_uow)):
+    _require_location_write(user)
+    from app.modules.storage.infrastructure.api.inventory_router import (
+        perform_takeaway, TakeawayRequest, perform_bin_to_bin_transfer, BinTransferRequest)
+    content = await rack_materials(zone_id, rack_id, user, uow)
+    source = await uow.session.scalar(select(StoreBinModel).where(StoreBinModel.zone_id == uuid.UUID(zone_id),
+        func.upper(StoreBinModel.rack) == content["rack_code"],
+        StoreBinModel.qr_identifier == payload.source_scan))
+    if source is None:
+        raise HTTPException(422, "Scan the QR for this rack")
+    fields = {}
+    try:
+        import json
+        parsed = json.loads(payload.material_scan)
+        if isinstance(parsed, dict):
+            fields = parsed
+    except ValueError:
+        for line in payload.material_scan.splitlines():
+            key, separator, value = line.partition(":")
+            if separator:
+                fields[key.strip().lower().replace(" ", "_")] = value.strip()
+    material = fields.get("material_code") or fields.get("item_code")
+    batch = fields.get("batch_number") or fields.get("batch")
+    item = next((item for item in content["materials"] if item["bin_id"] == str(source.id) and (
+        item["material_qr"] == payload.material_scan or
+        (item["material_qr"] and material == item["material_code"] and batch == item["batch_number"]))), None)
+    if item is None:
+        raise HTTPException(422, "Scan a saved batch-specific QR for material stored in this rack")
+    if payload.destination_scan:
+        destination = await uow.session.scalar(select(StoreBinModel).where(StoreBinModel.qr_identifier == payload.destination_scan))
+        if destination is None:
+            raise HTTPException(422, "Scan a valid destination rack QR")
+        result = await perform_bin_to_bin_transfer(BinTransferRequest(material_code=item["material_code"],
+            batch_number=item["batch_number"], source_bin_code=source.bin_code, source_store_id=str(source.store_id),
+            destination_bin_code=destination.bin_code, destination_store_id=str(destination.store_id),
+            quantity=payload.quantity, reason="Other", remarks=payload.reason,
+            scanned_material_qr=item["material_qr"], scanned_source_bin_qr=payload.source_scan,
+            scanned_dest_bin_qr=payload.destination_scan), user, uow)
+    else:
+        result = await perform_takeaway(TakeawayRequest(bin_scan=source.qr_identifier,
+            material_scan=item["material_qr"], batch_number=item["batch_number"], quantity=payload.quantity,
+            remarks=payload.reason, reference_document="RACK_PICK"), user, uow)
+    uow.session.add(RackOccupancyEventModel(rack_id=uuid.UUID(rack_id), quantity_delta=0,
+        actor=user.username, reason=f"{'Transfer' if payload.destination_scan else 'Pick'} {payload.quantity} PCS; {item['material_code']}; {item['batch_number']}; QR {item['material_qr']}: {payload.reason}"[:1000]))
+    await uow.session.flush()
+    return result

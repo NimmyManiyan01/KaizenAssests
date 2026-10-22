@@ -1,3 +1,4 @@
+import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { Eye, Loader2, Plus, RefreshCw, X } from "lucide-react";
@@ -9,7 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
 import {
-  isValidDateInput,
+  localDateInput,
+  pickupDateError,
   isValidMobileNumber,
   isValidPersonName,
   isValidVehicleNumber,
@@ -32,6 +34,7 @@ function SupplierDispatchPage() {
   const [driverName, setDriverName] = React.useState("");
   const [driverContact, setDriverContact] = React.useState("");
   const [expectedPickupDate, setExpectedPickupDate] = React.useState("");
+  const [pickupDateTouched, setPickupDateTouched] = React.useState(false);
   const [finishedGoods, setFinishedGoods] = React.useState<
     Array<{ code: string; name: string; quantity: number; uom: string }>
   >([]);
@@ -130,8 +133,9 @@ function SupplierDispatchPage() {
       );
       return;
     }
-    if (!isValidDateInput(expectedPickupDate)) {
-      toast.error("Enter a valid expected pickup date");
+    if (pickupDateError(expectedPickupDate)) {
+      setPickupDateTouched(true);
+      document.getElementById("pickup-date")?.focus();
       return;
     }
     const selectedGood = finishedGoods.find(
@@ -209,6 +213,7 @@ function SupplierDispatchPage() {
           className="h-10 rounded-lg"
           onClick={() => {
             void loadAssemblyFinishedGoods();
+            setPickupDateTouched(false);
             setOpen(true);
           }}
         >
@@ -341,15 +346,23 @@ function SupplierDispatchPage() {
           </DialogHeader>
           <form onSubmit={submitDispatch} className="space-y-5">
             <div className="space-y-1.5">
-              <Label htmlFor="pickup-date">Expected pickup date *</Label>
+              <span className="inline-flex items-center"><Label htmlFor="pickup-date">Expected pickup date *</Label><InformationTooltip help="pickupDate" /></span>
               <Input
                 id="pickup-date"
                 className="h-10 rounded-lg"
                 required
                 type="date"
+                min={localDateInput()}
+                max="9999-12-31"
                 value={expectedPickupDate}
                 onChange={(e) => setExpectedPickupDate(e.target.value)}
+                onBlur={() => setPickupDateTouched(true)}
+                aria-invalid={pickupDateTouched && !!pickupDateError(expectedPickupDate)}
+                aria-describedby="pickup-date-error"
               />
+              {pickupDateTouched && pickupDateError(expectedPickupDate) && (
+                <p id="pickup-date-error" role="alert" className="text-xs text-rose-600">{pickupDateError(expectedPickupDate)}</p>
+              )}
             </div>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <div className="space-y-1.5">
@@ -500,7 +513,7 @@ function SupplierDispatchPage() {
               <Button
                 type="submit"
                 className="h-10 rounded-lg"
-                disabled={submitting || finishedGoodsLoading || finishedGoods.length === 0}
+                disabled={submitting || finishedGoodsLoading || finishedGoods.length === 0 || !!pickupDateError(expectedPickupDate)}
               >
                 {submitting && <Loader2 className="mr-2 size-4 animate-spin" />}
                 {submitting ? "Creating…" : "Create Dispatch"}

@@ -915,12 +915,41 @@ class DockAllocationService:
         # A vehicle can reach the dock through either the legacy OCCUPIED
         # state or the gate workflow's AT_DOCK state. Both mean receiving is
         # ready to be completed.
-        if req.status not in {"OCCUPIED", "AT_DOCK"}:
+        completed_assignment = None
+        if req.status == "DOCK_ASSIGNED" and req.assigned_dock_id:
+            # Older GRN flows can finish receiving without advancing the
+            # allocation. Reconcile only with completion evidence for this
+            # exact gate entry, vehicle and dock.
+            from app.modules.gate.infrastructure.persistence.models import DockAssignmentModel, GateEntryModel
+
+            gate_refs = [GateEntryModel.gate_entry_number == req.existing_gate_pass_id]
+            try:
+                gate_refs.append(GateEntryModel.id == uuid.UUID(req.existing_gate_pass_id))
+            except (ValueError, TypeError, AttributeError):
+                pass
+            completed_assignment = (await session.execute(
+                select(DockAssignmentModel)
+                .join(GateEntryModel, GateEntryModel.id == DockAssignmentModel.gate_entry_id)
+                .join(DockMasterModel, DockMasterModel.dock_code == DockAssignmentModel.dock_number)
+                .where(
+                    or_(*gate_refs),
+                    DockMasterModel.id == req.assigned_dock_id,
+                    DockMasterModel.status == DockStatus.OCCUPIED.value,
+                    DockAssignmentModel.vehicle_number == req.vehicle_number,
+                    DockAssignmentModel.prepared_grn_id.is_not(None),
+                    DockAssignmentModel.receiving_completed_at.is_not(None),
+                    DockAssignmentModel.dock_released_at.is_(None),
+                ).with_for_update()
+            )).scalar_one_or_none()
+        if req.status not in {"OCCUPIED", "AT_DOCK"} and completed_assignment is None:
             raise HTTPException(status_code=409, detail=f"Receiving cannot complete while allocation is {req.status}")
 
         previous_status = req.status
         req.status = AllocationStatus.COMPLETED.value
-        req.completed_at = datetime.now(timezone.utc)
+        req.completed_at = (
+            completed_assignment.receiving_completed_at
+            if completed_assignment is not None else datetime.now(timezone.utc)
+        )
 
         session.add(
             DockAllocationHistoryModel(

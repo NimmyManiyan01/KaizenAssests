@@ -1,7 +1,8 @@
+import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, Search } from "lucide-react";
-import QRCode from "qrcode";
+import { PackageQrActions } from "@/components/wms/package-qr-actions";
 import { toast } from "sonner";
 import { AppShell } from "@/components/wms/app-shell";
 import { FgQrInput } from "@/components/wms/fg-qr-input";
@@ -290,14 +291,6 @@ function AssemblyDispatchPage() {
   const currentPage = Math.min(page, pageCount);
   const pageStart = (currentPage - 1) * 10;
   const pageRequests = visible.slice(pageStart, pageStart + 10);
-  const downloadPackageQr = async () => {
-    const number = items.find((item) => item.package_number)?.package_number;
-    if (!number) return;
-    const link = document.createElement("a");
-    link.href = await QRCode.toDataURL(number);
-    link.download = `${number}.png`;
-    link.click();
-  };
   return (
     <AppShell
       title="FG Dispatch"
@@ -755,7 +748,7 @@ function AssemblyDispatchPage() {
                         arrival is recorded.
                       </p>
                     )}
-                    <label className="flex items-start gap-2 text-xs">
+                    <span className="inline-flex items-center"><label className="flex items-start gap-2 text-xs">
                       <input
                         type="checkbox"
                         checked={vehicleConfirmed}
@@ -763,7 +756,7 @@ function AssemblyDispatchPage() {
                         disabled={!inside || busy}
                       />
                       Supplier vehicle and driver physically verified
-                    </label>
+                    </label><InformationTooltip help="loading" /></span>
                     <p className="text-xs">
                       Packed:{" "}
                       <strong>
@@ -795,17 +788,7 @@ function AssemblyDispatchPage() {
                       >
                         Verify & Load QR
                       </Button>
-                      <Button
-                        variant="outline"
-                        className="rounded-xl"
-                        onClick={() =>
-                          void downloadPackageQr().catch(() =>
-                            toast.error("Unable to download package QR"),
-                          )
-                        }
-                      >
-                        Download Package QR
-                      </Button>
+                      <PackageQrActions packageNumber={items.find((item) => item.package_number)?.package_number} />
                       <Button
                         className="rounded-xl"
                         disabled={
@@ -822,7 +805,7 @@ function AssemblyDispatchPage() {
                         }
                       >
                         Confirm Loading
-                      </Button>
+                      </Button><InformationTooltip help="loading" />
                     </div>
                   </div>
                 )}

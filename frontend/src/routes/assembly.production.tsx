@@ -1,3 +1,4 @@
+import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
@@ -74,6 +75,9 @@ function getStatusBadge(status: string) {
         Completed
       </span>
     );
+  }
+  if (s === "REJECTED") {
+    return <Badge variant="outline" className="border-rose-300 bg-rose-50 text-rose-700">Request Rejected</Badge>;
   }
   if (s === "MATERIAL_PENDING" || s === "PLANNED") {
     return (
@@ -368,7 +372,7 @@ function AssemblyProductionPage() {
                     <th className="py-3 px-3">Order Number</th>
                     <th className="py-3 px-3">Product Details</th>
                     <th className="py-3 px-3">Target Qty</th>
-                    <th className="py-3 px-3 min-w-[140px]">Progress</th>
+                    <th className="py-3 px-3 min-w-[140px]">Progress<InformationTooltip help="production" /></th>
                     <th className="py-3 px-3">Status</th>
                     <th className="py-3 px-3">Line & Operator</th>
                     <th className="py-3 px-3 text-right">Production Actions</th>
@@ -528,9 +532,13 @@ function AssemblyProductionPage() {
                               </span>
                             )}
 
+                            {order.status === "REJECTED" && (
+                              <Link to="/assembly/material-requests" className="text-xs font-semibold text-rose-700">View Rejected Request</Link>
+                            )}
                             {/* Material Pending fallback action */}
                             {!order.can_start &&
                               !order.can_complete &&
+                              order.status !== "REJECTED" &&
                               order.status !== "QC_PENDING" &&
                               order.status !== "COMPLETED" && (
                                 <Link

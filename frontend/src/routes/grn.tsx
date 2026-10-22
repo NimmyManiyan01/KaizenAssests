@@ -1,6 +1,9 @@
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel } from "@/components/ui/alert-dialog";
+import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
+import { loadGrnQrRecord } from "@/lib/grn-qr-record";
 import { DamagePhoto } from "@/components/wms/damage-photo";
 import { isValidPersonName, isValidVehicleNumber } from "@/lib/input-validation";
 import {
@@ -190,12 +193,6 @@ const PAGES = [
 
 const GRN_LOCAL_DRAFT_KEY = "grn_wizard_local_draft";
 
-function generateGrnNumber(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  return `GRN-${year}-001`;
-}
-
 function formatCardDate(dateVal?: string | null): string {
   if (!dateVal) return new Date().toISOString().slice(0, 10);
   try {
@@ -323,6 +320,8 @@ function GrnPageWorkflow() {
 
   // Records List State
   const [grnRecords, setGrnRecords] = useState<any[]>([]);
+  const [deleteGrnTarget, setDeleteGrnTarget] = useState<any | null>(null);
+  const [deletingGrn, setDeletingGrn] = useState(false);
   const [totalRecordCount, setTotalRecordCount] = useState<number>(0);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -1075,7 +1074,7 @@ function GrnPageWorkflow() {
         matchedAllocationDock?.dock_number ||
         "";
       const generatedGrnNum =
-        resolvedContext.grn_number || resolvedContext.grnNumber || generateGrnNumber();
+        resolvedContext.grn_number || resolvedContext.grnNumber || "";
 
       setHeader({
         receipt_type: resolvedContext.receipt_type || resolvedContext.receiptType || "",
@@ -1183,6 +1182,31 @@ function GrnPageWorkflow() {
         setMaterialBatches(initBatches);
       }
 
+      // Persist the draft now so this screen displays an assigned number,
+      // not an unreserved preview. Save & Continue reuses this same draft.
+      if (!resolvedGrnId && prefilledDock) {
+        const draft = await api.createGrnHeader({
+          receipt_type: "ASN_RECEIPT",
+          asn_number: asnNum,
+          gate_entry_number: resolvedGateEntryNumber || undefined,
+          dock_number: prefilledDock,
+          supplier_name: supplierName,
+          supplier_company_name: supplierComp,
+          warehouse_id: resolvedContext.warehouse_id || resolvedContext.warehouseId || undefined,
+          warehouse_name: warehouseName,
+          vehicle_number: vehicleNum,
+          driver_name: driverName,
+        });
+        if (requestId !== contextRequest.current) return;
+        const draftId = draft.grn_id || draft.grnId;
+        if (!draftId || !(draft.grn_number || draft.grnNumber)) {
+          throw new Error("The backend did not assign a GRN number. Fetch the ASN details again.");
+        }
+        setGrnId(String(draftId));
+        localStorage.setItem("active_grn_id", String(draftId));
+        setHeader((previous) => ({ ...previous, grn_number: draft.grn_number || draft.grnNumber }));
+        setSaveStatus("saved");
+      }
       toast.success(`${asnNum} details fetched successfully`);
     } catch (err: any) {
       if (requestId !== contextRequest.current) return;
@@ -1202,7 +1226,7 @@ function GrnPageWorkflow() {
     if (newType === "UNEXPECTED_DELIVERY") {
       const generatedGrn =
         header.grn_number ||
-        generateGrnNumber();
+        "";
       setHeader((prev) => ({
         ...prev,
         receipt_type: "UNEXPECTED_DELIVERY",
@@ -1564,31 +1588,35 @@ function GrnPageWorkflow() {
     }
   }
 
-  async function handleDeleteGrn(record: any) {
+  function handleDeleteGrn(record: any) {
+    setDeleteGrnTarget(record);
+  }
+
+  async function confirmDeleteGrn() {
+    if (!deleteGrnTarget || deletingGrn) return;
+    const record = deleteGrnTarget;
     const grnId = String(record?.grn_id || record?.id || "").trim();
     if (!grnId) {
       toast.error("This GRN has no valid database ID.");
       return;
     }
     const label = record?.grn_number || grnId;
-    if (
-      !window.confirm(
-        `Delete GRN ${label}? This will remove its receiving data, lines, batches, and documents.`,
-      )
-    )
-      return;
+    setDeletingGrn(true);
     try {
       await api.deleteGrn(grnId);
+      setDeleteGrnTarget(null);
       toast.success(`GRN ${label} deleted.`);
       await loadRecords();
     } catch (error) {
       toast.error("Unable to delete GRN", {
         description: error instanceof Error ? error.message : "The backend rejected the deletion.",
       });
+    } finally {
+      setDeletingGrn(false);
     }
   }
 
-  function startNewGrn() {
+  function startNewGrn(openWizard = true) {
     setGrnId(null);
     localStorage.removeItem("active_grn_id");
     localStorage.removeItem(GRN_LOCAL_DRAFT_KEY);
@@ -1616,8 +1644,8 @@ function GrnPageWorkflow() {
       invoice_number: "",
       received_by: loggedInUserName,
     });
-    navigate({ to: "/grn", search: { tab: "wizard", page: 1 } });
-    if (availablePos.length > 0) {
+    if (openWizard) navigate({ to: "/grn", search: { tab: "wizard", page: 1 } });
+    if (openWizard && availablePos.length > 0) {
       const first = availablePos[0];
       const targetPo = first.poNumber || first.po_number;
       if (targetPo) {
@@ -2207,7 +2235,7 @@ function GrnPageWorkflow() {
     setSaveStatus("saving");
     try {
       let batchMaterials = materials;
-      if (grnId && materials.some((m) => !isUuid(m.grn_line_id))) {
+      if (grnId) {
         const detail = await api.getGrnDetail(grnId);
         const persistedLines = Array.isArray(detail?.lines) ? detail.lines : [];
         batchMaterials = materials.map((material) => {
@@ -2225,7 +2253,10 @@ function GrnPageWorkflow() {
 
       for (const [idx, m] of batchMaterials.entries()) {
         const rowKey = grnMaterialKey(m, idx);
-        const batchesForLine = materialBatches[rowKey] || materialBatches[m.item_code];
+        const batchesForLine = materialBatches[rowKey] || materialBatches[grnMaterialKey(materials[idx], idx)] || materialBatches[m.item_code];
+        if (Number(m.good_quantity || 0) > 0 && (!batchesForLine?.length || batchesForLine.reduce((sum, batch) => sum + Number(batch.batch_quantity || 0), 0) !== Number(m.good_quantity))) {
+          throw new Error(`Save batches totaling the approved quantity for ${m.material_name || m.item_code} before continuing.`);
+        }
         if (batchesForLine && !isUuid(m.grn_line_id)) {
           throw new Error(`Missing valid GRN line ID for ${m.material_name || m.item_code}`);
         }
@@ -2638,47 +2669,13 @@ function GrnPageWorkflow() {
 
   // Display the same batch QR labels from the GRN History record.
   async function viewGrnRecordBatchLabels(record: any) {
-    let linesToRender =
-      record.lines && record.lines.length > 0
-        ? record.lines
-        : record.materials && record.materials.length > 0
-          ? record.materials
-          : [];
-    const lookupIds = Array.from(
-      new Set(
-        [record.grn_id, record.id, record.grn_number, record.grnNumber].filter(Boolean).map(String),
-      ),
-    );
-    const hasBatchData = linesToRender.some(
-      (line: any) => Array.isArray(line?.batches) && line.batches.length > 0,
-    );
-    if ((!linesToRender.length || !hasBatchData) && lookupIds.length > 0) {
-      for (const lookupId of lookupIds) {
-        try {
-          const fullDetail = await api.getGrnDetail(lookupId);
-          if (fullDetail && (fullDetail.lines || fullDetail.materials)) {
-            const detailLines = fullDetail.lines || fullDetail.materials;
-            // Prefer the persisted detail because it contains the exact batch
-            // allocations created on the Batch-wise QR Code Generation page.
-            if (
-              detailLines.some(
-                (line: any) => Array.isArray(line?.batches) && line.batches.length > 0,
-              )
-            ) {
-              linesToRender = detailLines;
-              record = { ...record, ...fullDetail };
-              break;
-            }
-            if (!linesToRender.length) {
-              linesToRender = detailLines;
-              record = { ...record, ...fullDetail };
-            }
-          }
-        } catch {
-          // Try the next identifier (UUID, database id, or GRN number).
-        }
-      }
+    try {
+      record = await loadGrnQrRecord(record, (id) => api.getGrnDetail(id));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not load saved GRN batches.");
+      return;
     }
+    const linesToRender = record.lines;
 
     const grnNum = record.grn_number || header.grn_number || "";
     const poNum = record.po_number || header.po_number || "";
@@ -2741,6 +2738,7 @@ function GrnPageWorkflow() {
               : (m.good_quantity ?? m.received_quantity ?? 0);
         const qrId = `QR-${grnNum}-${itemCode}-${batchNum}`;
         const payload = [
+          `GRN Number: ${grnNum}`,
           `Material Code: ${itemCode}`,
           `Material Name: ${matName}`,
           `Batch: ${batchNum}`,
@@ -3463,12 +3461,13 @@ function GrnPageWorkflow() {
               const savedBatches = Array.isArray(line.batches) ? line.batches : [];
               if (savedBatches.length > 0) {
                 next[key] = savedBatches.map((batch: any) => ({
+                  batch_id: batch.batch_id || batch.id,
                   batch_number: batch.batch_number,
                   batch_quantity: Number(batch.batch_quantity || 0),
                 }));
               }
             });
-            return next;
+            return JSON.stringify(next) === JSON.stringify(previous) ? previous : next;
           });
         })
         .catch(() => undefined);
@@ -3669,6 +3668,16 @@ function GrnPageWorkflow() {
       subtitle="Manage goods receipts, quality checks, and GRN records"
       actions={
         <>
+          <Button variant="outline" className="rounded-xl"
+            disabled={busyAction || loadingRecords || loadingContext}
+            onClick={async () => {
+              await Promise.all([loadRecords(), loadWarehouseDocks()]);
+              if (activeTab === "wizard" && grnId) await loadExistingGrnSession(grnId);
+              else if (activeTab === "wizard" && header.asn_number.trim()) await fetchPoContext(header.asn_number);
+            }}>
+            <RefreshCw className={`size-4 ${loadingRecords || loadingContext ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
           {activeTab === "dashboard" && (
             <>
               <Button
@@ -4041,7 +4050,7 @@ function GrnPageWorkflow() {
                   onClick={() => exportGrnRecordsCsv()}
                 >
                   <Download className="mr-1.5 size-3.5 text-primary" /> Export CSV
-                </Button>
+                </Button><InformationTooltip help="reports" />
                 <Button
                   variant="outline"
                   size="sm"
@@ -4506,7 +4515,7 @@ function GrnPageWorkflow() {
                       GRN Number
                     </span>
                     <p className="font-mono text-base font-bold text-success">
-                      {header.grn_number}
+                      {header.grn_number || "Assigning GRN number..."}
                     </p>
                   </div>
 
@@ -5006,7 +5015,7 @@ function GrnPageWorkflow() {
               <div className="border-b pb-4">
                 <h3 className="font-bold text-foreground text-base">
                   Quality Inspection & Damage Breakdown
-                </h3>
+                <InformationTooltip help="reconciliation" /></h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Inspect physically received materials into Accepted (Good) and Damaged quantities,
                   then record photo evidence for damaged goods.
@@ -5160,7 +5169,7 @@ function GrnPageWorkflow() {
               <div className="pt-2 space-y-3">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                   <AlertTriangle className="size-4 text-rose-500" /> Damage Evidence & Remarks
-                </h4>
+                <InformationTooltip help="damageEvidence" /></h4>
 
                 {damagedMaterialRows.length === 0 ? (
                   <div className="rounded-xl border bg-emerald-50 p-4 text-center text-sm font-medium text-emerald-800 flex items-center justify-center gap-2">
@@ -5367,7 +5376,7 @@ function GrnPageWorkflow() {
           {currentPage === 4 && (
             <Card className="rounded-xl p-4 space-y-4 shadow-sm">
               <div className="border-b pb-4">
-                <h3 className="font-bold text-foreground text-base">Lot & Batch Creation</h3>
+                <h3 className="font-bold text-foreground text-base">Lot & Batch Creation<InformationTooltip help="batch" /></h3>
                 <p className="text-xs text-muted-foreground">
                   Divide Quality-Approved materials into batches.{" "}
                   <b>Rule: Total Batch Quantity MUST equal Quality-Approved Quantity.</b>
@@ -5933,7 +5942,7 @@ function GrnPageWorkflow() {
               <div className="border-b pb-4">
                 <h3 className="font-bold text-foreground text-base">
                   Batch-wise QR Code Generation
-                </h3>
+                <InformationTooltip help="batch" /></h3>
               </div>
 
               <div className="hidden flex flex-wrap items-center justify-between gap-3 bg-muted/20 p-4 rounded-xl border">
@@ -6074,7 +6083,7 @@ function GrnPageWorkflow() {
                                   <div className="text-xs text-left space-y-1 font-mono text-gray-800 border-t pt-2">
                                     <p></p>
                                     <p>
-                                      <b>GRN Number:</b> {header.grn_number}
+                                      <b>GRN Number:</b> {header.grn_number || "Assigning GRN number..."}
                                     </p>
                                     <p>
                                       <b>Material:</b> {mat.item_code} ({mat.material_name})
@@ -6218,7 +6227,7 @@ function GrnPageWorkflow() {
 
                         <div className="text-xs text-left space-y-1 font-mono text-foreground border-t border-rose-200 dark:border-rose-900 pt-2">
                           <p>
-                            <b>GRN Number:</b> {header.grn_number}
+                            <b>GRN Number:</b> {header.grn_number || "Assigning GRN number..."}
                           </p>
                           <p>
                             <b>Material:</b> {dEntry.item_code} ({dEntry.material_name})
@@ -6290,6 +6299,15 @@ function GrnPageWorkflow() {
                   onClick={async () => {
                     setBusyAction(true);
                     try {
+                      for (const [index, material] of materials.entries()) {
+                        const approved = Number(qualityApproved[grnMaterialKey(material, index)] ?? material.good_quantity ?? 0);
+                        if (approved <= 0) continue;
+                        const batches = materialBatches[grnMaterialKey(material, index)] || materialBatches[material.item_code] || [];
+                        const total = batches.reduce((sum, batch) => sum + Number(batch.batch_quantity || 0), 0);
+                        if (!batches.length || batches.some((batch) => !batch.batch_id) || total !== approved) {
+                          throw new Error(`Saved batches are missing or do not match ${approved} ${material.uom} for ${material.material_name}. Refresh the GRN or save Batch Creation before posting.`);
+                        }
+                      }
                       // A GRN is complete only when every received quantity is
                       // accounted for exactly once across all QC outcomes.
                       const currentMaterials = materials;
@@ -6324,7 +6342,7 @@ function GrnPageWorkflow() {
 
                       const grnNumber =
                         header.grn_number ||
-                        generateGrnNumber();
+                        "";
 
                       const newRecord = {
                         grn_id: grnId || grnNumber,
@@ -6374,10 +6392,10 @@ function GrnPageWorkflow() {
                         description: `GRN ${grnNumber} saved with status: ${persistedStatus}. QC quantities are reconciled across accepted, rejected, damaged, and held categories.`,
                       });
 
-                      localStorage.removeItem("active_grn_id");
-                      localStorage.removeItem(GRN_LOCAL_DRAFT_KEY);
-                      setGrnId(null);
-                      setMaxCompletedStep(1);
+                      startNewGrn(false);
+                      void loadRecords();
+                      void loadWarehouseDocks();
+                      window.dispatchEvent(new CustomEvent("notifications:refresh"));
                       setActiveTab("records");
                       navigate({ to: "/grn", search: { tab: "records", page: 1 } });
                       setSearchTerm("");
@@ -6685,7 +6703,7 @@ function GrnPageWorkflow() {
                       <th className="p-2.5">Material Code & Name</th>
                       <th className="p-2.5">Good Qty</th>
                       <th className="p-2.5">Damaged Qty</th>
-                      <th className="p-2.5">Pass Rate</th>
+                      <th className="p-2.5">Pass Rate<InformationTooltip help="qc" /></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y font-medium">
@@ -7119,8 +7137,8 @@ function GrnPageWorkflow() {
                       <th className="p-2.5 text-right">Received Qty</th>
                       <th className="p-2.5 text-right text-emerald-600">Good Qty</th>
                       <th className="p-2.5 text-right text-rose-600">Damaged Qty</th>
-                      <th className="p-2.5 text-right font-black">Accounted Qty</th>
-                      <th className="p-2.5 text-center">Item Status</th>
+                      <th className="p-2.5 text-right font-black">Accounted Qty<InformationTooltip help="reconciliation" /></th>
+                      <th className="p-2.5 text-center">Item Status<InformationTooltip help="workflowStatus" /></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y font-mono font-medium">
@@ -7244,7 +7262,7 @@ function GrnPageWorkflow() {
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="font-bold text-foreground block mb-1">Select Dock Bay</label>
+                <span className="inline-flex items-center"><label className="font-bold text-foreground block mb-1">Select Dock Bay</label><InformationTooltip help="dock" /></span>
                 <select
                   value={assigningDockId}
                   onChange={(e) => setAssigningDockId(e.target.value)}
@@ -7278,9 +7296,9 @@ function GrnPageWorkflow() {
               </div>
 
               <div>
-                <label className="font-bold text-foreground block mb-1">
+                <span className="inline-flex items-center"><label className="font-bold text-foreground block mb-1">
                   PO Reference (Optional)
-                </label>
+                </label><InformationTooltip help="procurement" /></span>
                 <Input
                   placeholder="PO-2026-0007"
                   value={assigningPo}
@@ -7648,6 +7666,25 @@ function GrnPageWorkflow() {
           </div>
         </DialogContent>
       </Dialog>
+      <AlertDialog open={Boolean(deleteGrnTarget)} onOpenChange={(open) => {
+        if (!open && !deletingGrn) setDeleteGrnTarget(null);
+      }}>
+        <AlertDialogContent className="rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete GRN {deleteGrnTarget?.grn_number}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove this GRN's receiving data, lines, batches, and documents.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingGrn}>Cancel</AlertDialogCancel>
+            <Button variant="destructive" disabled={deletingGrn} onClick={() => void confirmDeleteGrn()}>
+              {deletingGrn ? "Deleting..." : "Delete GRN"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppShell>
   );
 }

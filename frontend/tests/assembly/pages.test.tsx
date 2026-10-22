@@ -232,7 +232,7 @@ describe("Material request queue", () => {
       api.getAssemblyProducts.mockResolvedValue([
         { id: "p1", product_code: "PUMP", product_name: "Pump" },
       ]);
-      api.getProductBOM.mockResolvedValue({ bom_number: "BOM-1", materials: [item] });
+      api.getProductBOM.mockResolvedValue({ product_code: "PUMP", target_quantity: 10, bom_number: "BOM-1", materials: [item] });
       show(Requests);
       await screen.findByText("MR-1");
       await userEvent.click(screen.getByRole("button", { name: "New Material Request" }));
@@ -446,7 +446,11 @@ describe("Production, quality and finished goods", () => {
     expect(screen.getByText(/Enter a valid inspector name/)).toBeInTheDocument();
     await userEvent.type(name, "Asha Kumar");
     expect(submit).toBeEnabled();
+    expect(screen.queryByText("Rework Qty")).not.toBeInTheDocument();
+    expect(screen.queryByText("Failed / Scrap")).not.toBeInTheDocument();
+    expect(screen.queryByText("Held Qty")).not.toBeInTheDocument();
     const quantities = screen.getAllByRole("spinbutton");
+    expect(quantities).toHaveLength(1);
     fireEvent.change(quantities[0], { target: { value: "9" } });
     expect(submit).toBeDisabled();
     fireEvent.change(quantities[0], { target: { value: "10" } });
@@ -888,6 +892,7 @@ describe("Material request date submission", () => {
     ]);
     api.getProductBOM.mockResolvedValue({
       product_code: "FG-LAPT-001",
+      target_quantity: 10,
       bom_number: "BOM-1",
       summary: {},
       materials: [

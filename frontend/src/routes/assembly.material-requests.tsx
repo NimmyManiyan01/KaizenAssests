@@ -216,6 +216,27 @@ function AssemblyMaterialRequestsPage() {
   // Live BOM Preview
   const [bomPreview, setBomPreview] = useState<AssemblyProductBOMResponse | null>(null);
   const [loadingBOM, setLoadingBOM] = useState(false);
+  const [bomRevision, setBomRevision] = useState(0);
+  const [showBomMaterial, setShowBomMaterial] = useState(false);
+  const [savingBomMaterial, setSavingBomMaterial] = useState(false);
+  const [bomMaterialError, setBomMaterialError] = useState("");
+  const [bomMaterialDraft, setBomMaterialDraft] = useState({ material_code: "", quantity_per_unit: "1" });
+  useEffect(() => { setShowBomMaterial(false); setBomMaterialError(""); }, [formData.product_code]);
+  const addBomMaterial = async () => {
+    const quantity = Number(bomMaterialDraft.quantity_per_unit);
+    if (!bomMaterialDraft.material_code || !Number.isFinite(quantity) || quantity <= 0) {
+      setBomMaterialError("Select a material and enter a positive quantity per finished product."); return;
+    }
+    setSavingBomMaterial(true); setBomMaterialError("");
+    try {
+      await api.addProductBOMMaterial(formData.product_code, { material_code: bomMaterialDraft.material_code, quantity_per_unit: quantity });
+      setShowBomMaterial(false); setBomMaterialDraft({ material_code: "", quantity_per_unit: "1" });
+      setBomRevision(value => value + 1);
+      toast.success("Material added to the product BOM.");
+    } catch (err: any) { setBomMaterialError(err.message || "Unable to add the material."); }
+    finally { setSavingBomMaterial(false); }
+  };
+
   const [bomPreviewError, setBomPreviewError] = useState<string | null>(null);
 
   // Detail Modal State
@@ -338,29 +359,22 @@ function AssemblyMaterialRequestsPage() {
     loadRequests();
   }, [loadRequests]);
 
-  // Load BOM preview whenever product or quantity changes in create modal
+  // Ignore responses for older product/quantity selections.
   useEffect(() => {
-    if (isCreateOpen && formData.product_code && formData.target_quantity > 0) {
-      loadBOMPreview(formData.product_code, formData.target_quantity);
-    } else {
-      setBomPreview(null);
-      setBomPreviewError(null);
-    }
-  }, [isCreateOpen, formData.product_code, formData.target_quantity]);
-
-  const loadBOMPreview = async (productCode: string, qty: number) => {
-    try {
-      setLoadingBOM(true);
-      setBomPreviewError(null);
-      const res = await api.getProductBOM(productCode, qty);
-      setBomPreview(res);
-    } catch (err: any) {
-      setBomPreview(null);
-      setBomPreviewError(err?.message || "Unable to load the selected product's BOM.");
-    } finally {
+    let active = true;
+    setBomPreview(null);
+    setBomPreviewError(null);
+    if (!isCreateOpen || !formData.product_code || formData.target_quantity <= 0) {
       setLoadingBOM(false);
+      return;
     }
-  };
+    setLoadingBOM(true);
+    void api.getProductBOM(formData.product_code, formData.target_quantity)
+      .then(result => { if (active) setBomPreview(result); })
+      .catch((err: Error) => { if (active) setBomPreviewError(err.message || "Unable to load the selected product's BOM."); })
+      .finally(() => { if (active) setLoadingBOM(false); });
+    return () => { active = false; };
+  }, [isCreateOpen, formData.product_code, formData.target_quantity, bomRevision]);
 
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -417,6 +431,11 @@ function AssemblyMaterialRequestsPage() {
     e.preventDefault();
     if (!formData.product_code) {
       toast.error("Please select a product to manufacture.");
+      return;
+    }
+    if (showBomMaterial || savingBomMaterial) { toast.error("Save or cancel the new BOM material first."); return; }
+    if (loadingBOM || (bomPreview && (bomPreview.product_code !== formData.product_code || Number(bomPreview.target_quantity) !== Number(formData.target_quantity)))) {
+      toast.error("Wait for the material requirements to finish updating.");
       return;
     }
     if (!bomPreview?.materials?.length) {
@@ -870,16 +889,18 @@ function AssemblyMaterialRequestsPage() {
               </div>
 
               {/* Quantity & Required Date */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground">
-                    Production Quantity *
+                  <label htmlFor="production-target-quantity" className="text-xs font-semibold text-foreground">
+                    Production Quantity (finished products) *
                   </label>
                   <div className="relative">
                     <Input
                       type="number"
                       min="1"
                       step="1"
+                      id="production-target-quantity"
+                      aria-describedby="production-target-help"
                       value={formData.target_quantity}
                       onChange={(e) =>
                         setFormData({ ...formData, target_quantity: Number(e.target.value) })
@@ -891,6 +912,7 @@ function AssemblyMaterialRequestsPage() {
                       PCS
                     </span>
                   </div>
+                  <p id="production-target-help" className="text-[11px] leading-5 text-muted-foreground">Number of finished products to make. Required material = this quantity multiplied by material quantity per product in the BOM.</p>
                 </div>
 
                 <div className="space-y-1.5">
@@ -953,19 +975,33 @@ function AssemblyMaterialRequestsPage() {
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-1.5 font-semibold text-foreground">
                       <Layers className="size-3.5 text-primary" />
-                      <span>BOM Material Preview ({bomPreview.materials?.length || 0} Items)</span>
+                      <span>BOM Material Preview ({bomPreview.materials?.length || 0} {bomPreview.materials?.length === 1 ? "Item" : "Items"})</span>
+                      <Button type="button" size="sm" variant="outline" className="ml-2 h-7 gap-1 text-xs" disabled={savingBomMaterial} onClick={() => { setShowBomMaterial(true); setBomMaterialError(""); }}><Plus className="size-3.5" />Add Material</Button>
                     </div>
                     <span className="text-[11px] text-muted-foreground font-mono">
                       BOM: {bomPreview.bom_number}
                     </span>
                   </div>
 
+                  {showBomMaterial && <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
+                    <p className="text-xs text-muted-foreground">Add a component to this product's saved BOM. Its total requirement is calculated using the production quantity.</p>
+                    <div className="grid gap-3 sm:grid-cols-[1fr_160px_72px]">
+                      <div className="space-y-1.5"><label htmlFor="bom-add-material" className="text-xs font-semibold">Raw Material</label><select id="bom-add-material" disabled={savingBomMaterial} className="h-9 w-full rounded-xl border bg-card px-3 text-sm" value={bomMaterialDraft.material_code} onChange={e => setBomMaterialDraft({ ...bomMaterialDraft, material_code: e.target.value })}>
+                        <option value="">Select material...</option>{rawMaterials.filter(material => !bomPreview.materials?.some(item => item.material_code === material.code)).map(material => <option key={material.id || material.code} value={material.code}>{material.name} ({material.code})</option>)}
+                      </select></div>
+                      <div className="space-y-1.5"><label htmlFor="bom-add-quantity" className="text-xs font-semibold">Qty per Product</label><Input id="bom-add-quantity" disabled={savingBomMaterial} type="number" min="0.0001" step="0.0001" value={bomMaterialDraft.quantity_per_unit} onChange={e => setBomMaterialDraft({ ...bomMaterialDraft, quantity_per_unit: e.target.value })} className="h-9" /></div>
+                      <div className="space-y-1.5"><label className="text-xs font-semibold">UOM</label><div className="flex h-9 items-center rounded-xl border px-3 text-xs">{rawMaterials.find(material => material.code === bomMaterialDraft.material_code)?.uom || "-"}</div></div>
+                    </div>
+                    {bomMaterialError && <p role="alert" className="text-xs text-destructive">{bomMaterialError}</p>}
+                    <div className="flex justify-end gap-2"><Button type="button" size="sm" variant="outline" disabled={savingBomMaterial} onClick={() => setShowBomMaterial(false)}>Cancel Material</Button><Button type="button" size="sm" disabled={savingBomMaterial} onClick={() => void addBomMaterial()}>{savingBomMaterial ? "Saving..." : "Save Material"}</Button></div>
+                  </div>}
                   <div className="max-h-40 overflow-y-auto rounded-lg border border-border/60 text-[11px]">
                     <table className="w-full text-left">
                       <thead className="bg-muted/60 text-[10px] uppercase text-muted-foreground border-b border-border/60 sticky top-0">
                         <tr>
                           <th className="p-2 pl-3">Raw Material</th>
-                          <th className="p-2 text-right font-semibold">Required Qty</th>
+                          <th className="p-2 text-right">Qty per Product</th>
+                          <th className="p-2 text-right font-semibold">Total Required Qty</th>
                           <th className="p-2 text-right pr-3">UOM</th>
                         </tr>
                       </thead>
@@ -982,6 +1018,7 @@ function AssemblyMaterialRequestsPage() {
                                   {item.material_name}
                                 </span>
                               </td>
+                              <td className="p-2 text-right">{item.quantity_per_unit}</td>
                               <td className="p-2 text-right font-bold text-foreground">
                                 {item.required_quantity}
                               </td>
@@ -1021,7 +1058,7 @@ function AssemblyMaterialRequestsPage() {
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={creating || loadingBOM || !bomPreview || !bomPreview.materials?.length}
+                  disabled={creating || showBomMaterial || savingBomMaterial || loadingBOM || !bomPreview || !bomPreview.materials?.length || bomPreview.product_code !== formData.product_code || Number(bomPreview.target_quantity) !== Number(formData.target_quantity)}
                   className="rounded-xl gap-2 bg-primary text-primary-foreground hover:bg-primary/90 font-semibold shadow-soft"
                 >
                   {creating && <RefreshCw className="size-3.5 animate-spin" />}
@@ -1125,7 +1162,7 @@ function AssemblyMaterialRequestsPage() {
                 </div>
                 <div className="grid grid-cols-[1fr_90px_80px_28px] gap-2 text-[10px] font-semibold uppercase text-muted-foreground">
                   <span>Raw Material</span>
-                  <span>Qty / Unit</span>
+                  <span>Qty per Product</span>
                   <span>UOM</span>
                   <span />
                 </div>

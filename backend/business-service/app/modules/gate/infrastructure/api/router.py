@@ -14,6 +14,9 @@ import logging
 import os
 import re
 import uuid
+from app.modules.gate.application.transport_validation import (
+    normalize_vehicle, valid_vehicle, validate_transport, validate_gate_duplicates,
+)
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
@@ -671,15 +674,11 @@ _MAX_ASN_QUANTITY = Decimal("99999999999999.9999")
 
 
 def _normalize_asn_vehicle_number(value: str) -> str:
-    return re.sub(r"[\s-]+", "", value).upper()
+    return normalize_vehicle(value)
 
 
 def _is_valid_asn_vehicle_number(value: str) -> bool:
-    normalized = _normalize_asn_vehicle_number(value)
-    return bool(
-        re.fullmatch(r"[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}", normalized)
-        or re.fullmatch(r"(?:2[1-9]|[3-9]\d)BH\d{4}[A-HJ-NP-Z]{1,2}", normalized)
-    )
+    return valid_vehicle(value)
 
 
 def _validate_asn_quantity(quantity: Decimal, uom: str) -> None:
@@ -753,20 +752,9 @@ async def create_supplier_asn(
         if po_model and not po_number:
             po_number = po_model.po_number
 
-    vehicle_number = _normalize_asn_vehicle_number(str(payload.get("vehicle_number") or ""))
-    driver_name = str(payload.get("driver_name") or "").strip()
-    driver_contact = str(payload.get("driver_contact") or "").strip()
-    if not vehicle_number or not driver_name or not driver_contact:
-        raise HTTPException(status_code=422, detail="vehicle_number, driver_name and driver_contact are required")
-    if not _is_valid_asn_vehicle_number(vehicle_number):
-        raise HTTPException(
-            status_code=422,
-            detail="vehicle_number must be a valid registration, such as KA42EH6948 or 22BH1234AA",
-        )
-    if re.fullmatch(r"[A-Za-z .'-]{2,80}", driver_name) is None:
-        raise HTTPException(status_code=422, detail="driver_name contains invalid characters")
-    if re.fullmatch(r"[6-9]\d{9}", re.sub(r"[\s-]", "", driver_contact)) is None:
-        raise HTTPException(status_code=422, detail="driver_contact must be a valid 10-digit mobile number")
+    vehicle_number, driver_name, driver_contact = validate_transport(
+        payload.get("vehicle_number"), payload.get("driver_name"), payload.get("driver_contact"),
+    )
 
     supplier_result = await uow.session.execute(
         select(SupplierModel).where(SupplierModel.id == supplier_id)
@@ -1805,17 +1793,7 @@ async def create_gate_entry(
     if request.total_quantity is None or request.total_quantity <= 0:
         raise DomainRuleViolationException("Total quantity is mandatory and must be greater than 0.")
 
-    # 1. Block only a duplicate arrival for the same PO and vehicle. A single
-    # PO can have multiple ASN shipments and therefore multiple vehicles.
-    duplicate_filters = [
-        GateEntryModel.po_number == po_num,
-        GateEntryModel.status.notin_([GateEntryStatus.REJECTED.value]),
-    ]
-    if asn:
-        duplicate_filters.append(GateEntryModel.asn_id == asn.id)
-    active_result = await uow.session.execute(select(GateEntryModel).where(*duplicate_filters))
-    active_entries = [_gate_entry_from_model(model) for model in active_result.scalars().all()]
-    GateVerificationService.check_duplicate_active_entry(active_entries, po_num, plate)
+    await validate_gate_duplicates(uow.session, plate, asn.id if asn else None)
 
     # 2. Dynamic OCR processing or extraction
     ocr_res: Optional[OcrResult] = None

@@ -1,3 +1,4 @@
+import { normalizeGrnResponse } from "./grn-response";
 /**
  * Central API Client using native fetch.
  * Links frontend components to the backend python business-service (port 8000)
@@ -1761,14 +1762,16 @@ export const api = {
   },
 
   async markNotificationRead(_id: string): Promise<any> {
-    return { status: "OK" };
+    return request<any>(`${BUSINESS_API_URL}/api/v1/notifications/${encodeURIComponent(_id)}/read`, { method: "POST" });
   },
 
   async markAllNotificationsRead(
     _role: string,
     _filters?: { store_code?: string; store_id?: string },
   ): Promise<any> {
-    return { status: "OK" };
+    const query = new URLSearchParams({ role: _role });
+    if (_filters?.store_code) query.set("store_code", _filters.store_code);
+    return request<any>(`${BUSINESS_API_URL}/api/v1/notifications/read-all?${query}`, { method: "POST" });
   },
 
   async markArrivalNotificationRead(_id: string): Promise<any> {
@@ -2276,6 +2279,8 @@ export const api = {
     zone_name: string;
     description?: string;
     zone_code?: string;
+    warehouse_name?: string;
+    warehouse_id?: string;
   }): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/v1/zones`, {
       method: "POST",
@@ -2409,6 +2414,29 @@ export const api = {
       `${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/bins/next-code`,
     );
   },
+  async moveRackMaterial(zoneId: string, rackId: string, data: {
+    source_scan: string; material_scan: string; quantity: number; reason: string; destination_scan?: string;
+  }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/racks/${encodeURIComponent(rackId)}/move`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+    });
+  },
+  async getRackMaterials(zoneId: string, rackId: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/racks/${encodeURIComponent(rackId)}/materials`);
+  },
+  async updateRackCapacity(zoneId: string, rackId: string, maximum_capacity: number, reason?: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/racks/${encodeURIComponent(rackId)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ maximum_capacity, reason }),
+    });
+  },
+  async emptyRack(zoneId: string, rackId: string, reason: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/racks/${encodeURIComponent(rackId)}/empty`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirm: true, reason }),
+    });
+  },
+  async getRackHistory(zoneId: string, rackId: string): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/racks/${encodeURIComponent(rackId)}/history`);
+  },
   async createBin(
     zoneId: string,
     data: {
@@ -2481,6 +2509,7 @@ export const api = {
     material_scan: string;
     quantity: number;
     remarks?: string;
+    batch_number?: string;
     reference_document?: string;
   }): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/takeaway`, {
@@ -2895,11 +2924,11 @@ export const api = {
     });
   },
   async createGrnBatches(grnLineId: string, batches: { batch_quantity: number }[]): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/receiving/grn/lines/${grnLineId}/batches`, {
+    return normalizeGrnResponse(await request<any[]>(`${BUSINESS_API_URL}/api/receiving/grn/lines/${grnLineId}/batches`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(batches),
-    });
+    }));
   },
   async generateDamageQrs(grnId: string): Promise<any[]> {
     return request<any[]>(
@@ -2941,9 +2970,9 @@ export const api = {
   },
   async getGrnDetail(grnId: string): Promise<any> {
     try {
-      return await request<any>(
+      return normalizeGrnResponse(await request<any>(
         `${BUSINESS_API_URL}/api/receiving/grn/${encodeURIComponent(grnId)}`,
-      );
+      ));
     } catch (error) {
       // A deleted/stale local session is handled by the GRN screen. Do not
       // surface it as an unhandled console error or resume invalid data.
@@ -3231,6 +3260,11 @@ export const api = {
     return request<any>(`${BUSINESS_API_URL}/api/v1/inventory/bin-transfer`, {
       method: "POST",
       body: JSON.stringify(payload),
+    });
+  },
+  async addProductBOMMaterial(productCode: string, data: { material_code: string; quantity_per_unit: number }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/products/${encodeURIComponent(productCode)}/bom/materials`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
     });
   },
   async getProductBOM(productCode: string, quantity = 1): Promise<AssemblyProductBOMResponse> {

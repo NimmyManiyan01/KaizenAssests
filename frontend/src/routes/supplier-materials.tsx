@@ -1,8 +1,8 @@
+import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   Eye,
-  Info,
   Loader2,
   PackagePlus,
   Plus,
@@ -51,30 +51,6 @@ export const Route = createFileRoute("/supplier-materials")({ component: Supplie
 const UOMS = ["PCS", "BUNDLE", "SET", "KG", "LITER", "METER", "BOX"];
 const emptyForm = { code: "", name: "", category: "", description: "", uom: "PCS" };
 
-function InfoTooltip({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Tooltip open={open} onOpenChange={setOpen} delayDuration={150}>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-label={text}
-          onClick={() => setOpen((current) => !current)}
-          className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <Info className="size-3.5" aria-hidden="true" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent
-        side="bottom"
-        className="max-w-xs rounded-lg border border-border bg-popover px-3 py-2 text-left text-xs font-medium leading-5 text-popover-foreground shadow-soft"
-      >
-        {text}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
 
 function SupplierMaterials() {
   const [materials, setMaterials] = useState<any[]>([]);
@@ -242,7 +218,6 @@ function SupplierMaterials() {
         title={
           <span className="inline-flex items-center gap-2">
             Materials
-            <InfoTooltip text="Manage materials used when creating delivery notices (ASN)." />
           </span>
         }
         subtitle="Create and manage the materials available for your ASN submissions."
@@ -338,7 +313,7 @@ function SupplierMaterials() {
                         <th scope="col" className="px-4 py-3">
                           <span className="inline-flex items-center gap-1.5">
                             Material Code
-                            <InfoTooltip text="A unique code used to identify each material." />
+
                           </span>
                         </th>
                         <th scope="col" className="px-4 py-3">
@@ -347,7 +322,7 @@ function SupplierMaterials() {
                         <th scope="col" className="px-4 py-3">
                           <span className="inline-flex items-center gap-1.5">
                             UOM
-                            <InfoTooltip text="Unit of Measurement. PCS means Pieces." />
+                            <InformationTooltip help="quantity" />
                           </span>
                         </th>
                         <th scope="col" className="px-4 py-3">

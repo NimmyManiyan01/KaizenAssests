@@ -1,3 +1,4 @@
+import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Fragment, useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { AppShell } from "@/components/wms/app-shell";
@@ -314,7 +315,7 @@ function AssemblyFinishedGoodsPage() {
                     </th>
                     <th scope="col" className="py-3 px-4">
                       Status
-                    </th>
+                    <InformationTooltip help="finishedGoods" /></th>
                     <th scope="col" className="py-3 px-4 text-right">
                       Actions
                     </th>
@@ -418,7 +419,7 @@ function AssemblyFinishedGoodsPage() {
               <table className="w-full min-w-[650px] text-left text-xs">
                 <thead className="sticky top-0 z-10 bg-muted text-[11px] uppercase text-muted-foreground">
                   <tr>
-                    {["Batch ID", "Manufacturing Date", "Available Qty", "Status", "QR Label"].map(
+                    {["Batch ID", "Manufacturing Date", "Available Qty", "Reserved Qty", "Status", "QR Label"].map(
                       (label) => (
                         <th key={label} className="border-b px-3 py-3 last:text-right">
                           {label}
@@ -431,6 +432,7 @@ function AssemblyFinishedGoodsPage() {
                   {detailBatches.map((batch) => {
                     const expanded = expandedBatches.includes(batch.id);
                     const available = Number(batch.available_quantity ?? batch.quantity);
+                    const reserved = Number(batch.reserved_quantity ?? 0);
                     return (
                       <Fragment key={batch.id}>
                         <tr className="align-top">
@@ -462,16 +464,21 @@ function AssemblyFinishedGoodsPage() {
                           <td className="px-3 py-3 whitespace-nowrap tabular-nums font-semibold">
                             {available.toLocaleString()} {batch.uom}
                           </td>
+                          <td className="px-3 py-3 whitespace-nowrap tabular-nums font-semibold text-blue-700">
+                            {reserved.toLocaleString()} {batch.uom}
+                          </td>
                           <td className="px-3 py-3">
                             <span
                               className={cn(
                                 "inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                                available > 0
+                                reserved > 0
+                                  ? "border-blue-200 bg-blue-50 text-blue-700"
+                                  : available > 0
                                   ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300"
                                   : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300",
                               )}
                             >
-                              {available > 0 ? "Available" : "Out of stock"}
+                              {reserved > 0 ? (available > 0 ? "Partially Reserved" : "Reserved for Dispatch") : available > 0 ? "Available" : "Out of stock"}
                             </span>
                           </td>
                           <td className="px-3 py-3 text-right">
@@ -491,7 +498,7 @@ function AssemblyFinishedGoodsPage() {
                         </tr>
                         {expanded && (
                           <tr id={`batch-details-${batch.id}`} className="bg-muted/20">
-                            <td colSpan={5} className="p-4">
+                            <td colSpan={6} className="p-4">
                               <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
                                 {[
                                   ["Order Number", batch.order_number],

@@ -42,6 +42,7 @@ export const Route = createFileRoute("/assembly-dashboard")({
 
 function formatStatus(status: string) {
   const map: Record<string, string> = {
+    REJECTED: "Request Rejected",
     MATERIAL_PENDING: "Material Pending",
     MATERIAL_ISSUED: "Awaiting Receipt",
     MATERIAL_READY: "Ready for Production",
@@ -93,7 +94,7 @@ function getStatusBadge(status: string) {
       </span>
     );
   }
-  if (s === "REWORK" || s === "REWORK_REQUIRED" || s === "QC_FAILED") {
+  if (s === "REJECTED" || s === "REWORK" || s === "REWORK_REQUIRED" || s === "QC_FAILED") {
     return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/25">
         <span className="size-1.5 rounded-full bg-rose-500" />

@@ -186,6 +186,16 @@ async def _resolve_real_supplier_names(
 # REPOSITORY
 # ============================================================================
 
+def next_grn_number(numbers, year):
+    prefix = f"GRN-{year}-"
+    sequence = max(
+        (int(number[len(prefix):]) for number in numbers
+         if number and number.startswith(prefix) and number[len(prefix):].isdigit()),
+        default=0,
+    ) + 1
+    return f"{prefix}{sequence:03d}"
+
+
 class SqlAlchemyGrnRepository(GrnRepository):
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -859,6 +869,15 @@ class SqlAlchemyGrnRepository(GrnRepository):
             is_unexpected=is_unexpected,
         )
 
+        if not grn_uuid and asn_receipt and asn_number:
+            # Repeated Fetch Details must resume the same persisted draft.
+            existing_id = await self._session.scalar(
+                select(GrnModel.id).where(GrnModel.asn_number == asn_number.strip())
+                .order_by(GrnModel.created_at.desc()).limit(1)
+            )
+            if existing_id:
+                grn_uuid = existing_id
+
         if not grn_uuid and (po_id or po_number):
             existing_snapshot = await self.find_grn_header_by_po(po_id=po_id, po_number=po_number)
             if existing_snapshot:
@@ -871,6 +890,8 @@ class SqlAlchemyGrnRepository(GrnRepository):
             existing = res.scalar_one_or_none()
 
         if existing:
+            if not grn_id and str(existing.status).upper() in {"COMPLETED", "PARTIALLY_COMPLETED", "PARTIALLY COMPLETED", "POSTED"}:
+                raise ValueError(f"ASN already received under {existing.grn_number}. Open GRN History to view it.")
             existing.dock_number = dock_number
             existing.receipt_type = receipt_type
             if receipt_type == "UNEXPECTED_DELIVERY":
@@ -925,11 +946,16 @@ class SqlAlchemyGrnRepository(GrnRepository):
 
         year = now.strftime("%Y")
         year_prefix = f"GRN-{year}-"
+        if self._session.get_bind().dialect.name == "postgresql":
+            await self._session.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"), {"key": 740000 + int(year)}
+            )
         count_res = await self._session.execute(
             select(GrnModel).where(GrnModel.grn_number.like(f"{year_prefix}%"))
         )
-        sequence = len(count_res.scalars().all()) + 1
-        grn_num = f"{year_prefix}{sequence:03d}"
+        grn_num = next_grn_number(
+            [row.grn_number for row in count_res.scalars().all()], year,
+        )
 
         po_uuid = None if is_unexpected or asn_receipt else _uuid_or_none(po_id)
         po_num_val = None if is_unexpected or asn_receipt else po_number
@@ -1587,8 +1613,10 @@ class SqlAlchemyGrnRepository(GrnRepository):
         if not grn:
             raise ValueError(f"GRN not found: {grn_id}")
 
-        if grn.status == "COMPLETED":
-            raise ValueError("GRN is already completed")
+        if (grn.status or "").upper() in {"COMPLETED", "POSTED", "APPROVED", "ACCEPTED", "RECEIVING_COMPLETE", "GRN_POSTED"}:
+            # Opening saved labels is read-only for a finalized receipt.
+            # Never regenerate lots or change quantities after completion.
+            return [lot for line in grn.lines for lot in line.damage_lots]
         if not grn.lines:
             raise ValueError("GRN cannot be completed without material lines")
         for line in grn.lines:

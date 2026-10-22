@@ -1,3 +1,9 @@
+import { PutawayBatchTable, type PutawayView } from "@/components/wms/putaway-batch-table";
+import { canAssignPutaway, canScanPutaway, assignedPutawayLocations, unassignedPutawayQuantity, isAssignableRack } from "@/lib/putaway-task-selection";
+import { Label } from "@/components/ui/label";
+import { RackOccupancyCards } from "@/components/wms/rack-occupancy-cards";
+import { InformationTooltip } from "@/components/ui/information-tooltip";
+import { inventoryHelp } from "@/lib/information-help";
 import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import {
@@ -13,13 +19,15 @@ import {
   QrCode,
   ListOrdered,
   Plus,
-  Pencil,
   Eye,
   Scan,
   Camera,
   Layers,
   Tag,
+  Download,
+  Printer,
 } from "lucide-react";
+import { AssemblyRequisitionsPanel } from "@/components/wms/assembly-requisitions-panel";
 import { AppShell } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -83,7 +91,7 @@ function SimpleWarehouseModule() {
   const searchParams: any = useSearch({ from: "/inventory" });
   const tabOptions: TabType[] = ["dashboard", "putaway", "inventory", "requests", "picking", "locations"];
   const activeTab: TabType = tabOptions.includes(searchParams?.tab)
-    ? searchParams.tab
+    ? (searchParams.tab === "requests" ? "picking" : searchParams.tab)
     : "dashboard";
   const pageHeader: Record<TabType, { eyebrow: string; title: string; description: string; icon: typeof Boxes }> = {
     dashboard: {
@@ -112,14 +120,14 @@ function SimpleWarehouseModule() {
     },
     picking: {
       eyebrow: "Outbound Operations",
-      title: "Picking",
-      description: "Track material picks and confirm quantities prepared for issue.",
+      title: "Assembly Requisitions & Picking",
+      description: "Review assembly requisitions, reserve stock, and confirm material picks for issue.",
       icon: ListOrdered,
     },
     locations: {
       eyebrow: "Warehouse Layout",
-      title: "Zones & Bins",
-      description: "Manage storage zones and the bins assigned to each zone.",
+      title: "Zones & Racks",
+      description: "Manage storage zones, rack capacities, and occupancy.",
       icon: Building2,
     },
   };
@@ -147,6 +155,8 @@ function SimpleWarehouseModule() {
   // Selected Detail Modals
   const [selectedInventory, setSelectedInventory] = useState<any>(null);
   const [selectedPutawayGroup, setSelectedPutawayGroup] = useState<any>(null);
+  const [putawayView, setPutawayView] = useState<PutawayView>("details");
+  const openPutawayGroup = (group: any, view: PutawayView = "details") => { setPutawayView(view); setSelectedPutawayGroup(group); };
   const [assignPutawayTask, setAssignPutawayTask] = useState<any>(null);
   const [scanPutawayTask, setScanPutawayTask] = useState<any>(null);
   const [putawayScan, setPutawayScan] = useState({ materialQr: "", binQr: "", quantity: "" });
@@ -180,8 +190,9 @@ function SimpleWarehouseModule() {
   >(null);
   const [editingZone, setEditingZone] = useState<any | null>(null);
   const [newZoneForm, setNewZoneForm] = useState({ zone_code: "", zone_name: "" });
+  const [firstWarehouse, setFirstWarehouse] = useState({ name: "", location: "" });
   const [newBinForm, setNewBinForm] = useState({ zone_id: "" });
-  const [newBinRows, setNewBinRows] = useState([{ rack: "", position: "", bin_code: "" }]);
+  const [newBinRows, setNewBinRows] = useState<[{ rack: string; position: string; capacity: string; bin_code: string }]>([{ rack: "", position: "", capacity: "", bin_code: "" }]);
   const [viewBinQrModal, setViewBinQrModal] = useState<any>(null);
   const [binQrImage, setBinQrImage] = useState<string | null>(null);
 
@@ -360,6 +371,7 @@ function SimpleWarehouseModule() {
           request_number: req.request_number,
           material_code: item.material_code,
           material_name: item.material_name,
+          material_qr: item.material_qr,
           quantity: item.quantity,
           required_quantity: item.quantity,
           uom: item.uom,
@@ -431,6 +443,7 @@ function SimpleWarehouseModule() {
           assembly_order_number: task.request_number,
           material_code: item.material_code,
           material_name: item.material_name,
+          material_qr: item.material_qr,
           quantity:
             item.picked_quantity ??
             item.issued_quantity ??
@@ -486,7 +499,8 @@ function SimpleWarehouseModule() {
       bin_code: string;
       store_id: string;
       zone_id: string;
-      rack?: string;
+      rack: string;
+      rack_capacity?: any;
       position?: string;
       qr_identifier?: string;
       status?: string;
@@ -500,6 +514,7 @@ function SimpleWarehouseModule() {
           store_id: b.store_id,
           zone_id: b.zone_id,
           rack: b.rack,
+          rack_capacity: b.rack_capacity,
           position: b.position || b.shelf,
           qr_identifier: b.qr_identifier,
           status: b.status,
@@ -519,7 +534,7 @@ function SimpleWarehouseModule() {
       !selectedLocationId ||
       !Number.isFinite(quantity) ||
       quantity <= 0 ||
-      quantity > Number(assignPutawayTask.remaining_quantity ?? assignPutawayTask.quantity ?? 0)
+      quantity > unassignedPutawayQuantity(assignPutawayTask)
     ) {
       toast.error("Select an active rack and enter a valid assignment quantity.");
       return;
@@ -550,14 +565,17 @@ function SimpleWarehouseModule() {
   };
 
   const openAssignPutaway = (task: any) => {
+    if (!canAssignPutaway(task)) return;
+    setSelectedPutawayGroup(null);
     setAssignPutawayTask(task);
     setAssignStoreId(task.destination_store_id || task.assigned_store_id || "");
     setAssignZoneId(task.destination_zone_id || "");
     setSelectedLocationId(task.destination_bin_id || "");
-    setAssignQuantity(String(task.quantity ?? ""));
+    setAssignQuantity(String(unassignedPutawayQuantity(task)));
   };
 
   const openPutawayScan = (task: any) => {
+    setSelectedPutawayGroup(null);
     setScanPutawayTask(task);
     setPutawayScan({ materialQr: "", binQr: "", quantity: String(task.quantity ?? "") });
     setPutawayScanValid(false);
@@ -567,8 +585,8 @@ function SimpleWarehouseModule() {
   };
 
   const pickupMaterialQrValue =
-    pickupToConfirm?.confirmation?.material_qr ||
     pickupToConfirm?.material_qr ||
+    pickupToConfirm?.confirmation?.material_qr ||
     (pickupToConfirm?.batch_number ? `QR-BATCH-${pickupToConfirm.batch_number}` : "") ||
     pickupToConfirm?.material_code ||
     "";
@@ -657,6 +675,46 @@ function SimpleWarehouseModule() {
     } catch {
       toast.error(`Unable to generate the ${title.toLowerCase()} QR.`);
     }
+  };
+
+  const printBinQr = () => {
+    if (!viewBinQrModal || !binQrImage) return;
+    const printWindow = window.open("", "_blank", "width=700,height=700");
+    if (!printWindow) {
+      toast.error("Allow pop-ups to print the bin QR label.");
+      return;
+    }
+    const doc = printWindow.document;
+    doc.title = `Bin QR - ${viewBinQrModal.bin_code}`;
+    const style = doc.createElement("style");
+    style.textContent = "@page { margin: 15mm; } body { font: 16px Arial, sans-serif; color: #000; text-align: center; } img { width: 240px; height: 240px; } h1 { font-size: 24px; } p { margin: 8px 0; }";
+    doc.head.appendChild(style);
+    const heading = doc.createElement("h1");
+    heading.textContent = viewBinQrModal.bin_code;
+    doc.body.appendChild(heading);
+    const image = doc.createElement("img");
+    image.alt = `QR code for ${viewBinQrModal.bin_code}`;
+    image.onload = () => {
+      printWindow.focus();
+      printWindow.print();
+    };
+    image.onerror = () => {
+      printWindow.close();
+      toast.error("Unable to load the bin QR for printing.");
+    };
+    doc.body.appendChild(image);
+    const zone = zones.find((item) => String(item.id) === String(viewBinQrModal.zone_id));
+    for (const text of [
+      viewBinQrModal.qr_identifier,
+      `Zone: ${zone?.zone_name || zone?.zone_code || "—"}`,
+      `Rack: ${viewBinQrModal.rack || "—"} | Shelf: ${viewBinQrModal.position || "—"}`,
+      `Status: ${viewBinQrModal.status || "UNKNOWN"}`,
+    ]) {
+      const line = doc.createElement("p");
+      line.textContent = text;
+      doc.body.appendChild(line);
+    }
+    image.src = binQrImage;
   };
 
   useEffect(() => {
@@ -942,12 +1000,6 @@ function SimpleWarehouseModule() {
     }
   };
 
-  const openEditZone = (zone: any) => {
-    setEditingZone(zone);
-    setNewZoneForm({ zone_code: zone.zone_code || "", zone_name: zone.zone_name || "" });
-    setCreateLocationType("zone");
-  };
-
   const openCreateBin = async (zone: any) => {
     if (!zone || String(zone.status || "ACTIVE").toUpperCase() !== "ACTIVE") {
       toast.error("Bins can only be added to an active zone.");
@@ -956,7 +1008,7 @@ function SimpleWarehouseModule() {
     try {
       const nextCode = await api.getNextBinCode(zone.id);
       setNewBinForm({ zone_id: zone.id });
-      setNewBinRows([{ rack: "", position: "", bin_code: nextCode.suggested_bin_code }]);
+      setNewBinRows([{ rack: "", position: "", capacity: "", bin_code: nextCode.suggested_bin_code }]);
     } catch (err: any) {
       toast.error(err.message || "Unable to prepare the next bin code.");
       return;
@@ -970,37 +1022,7 @@ function SimpleWarehouseModule() {
     setIsSubmitting(true);
     try {
       if (createLocationType === "zone") {
-        if (/\p{Cc}/u.test(newZoneForm.zone_name)) {
-          toast.error("Zone name cannot contain control characters.");
-          return;
-        }
-        const zoneName = newZoneForm.zone_name.normalize("NFKC").replace(/\s+/g, " ").trim();
-        if (zoneName.length < 2 || !/[\p{L}\p{N}]/u.test(zoneName)) {
-          toast.error("Zone name must be at least 2 characters and include a letter or number.");
-          return;
-        }
-        if (zoneName.length > 100) {
-          toast.error("Zone name must be 100 characters or fewer.");
-          return;
-        }
-        if (!/^[\p{L}\p{N}\s_&().,'\/#:+-]+$/u.test(zoneName)) {
-          toast.error("Zone name can use letters, numbers, spaces, and common punctuation only.");
-          return;
-        }
-        if (
-          zones.some(
-            (zone) =>
-              String(zone.id) !== String(editingZone?.id) &&
-              String(zone.zone_name || "")
-                .normalize("NFKC")
-                .replace(/\s+/g, " ")
-                .trim()
-                .toLowerCase() === zoneName.toLowerCase(),
-          )
-        ) {
-          toast.error("A zone with this name already exists.");
-          return;
-        }
+        const zoneName = newZoneForm.zone_code;
         if (!newZoneForm.zone_code) {
           toast.error("A zone code could not be generated. Close and reopen this form.");
           return;
@@ -1010,9 +1032,16 @@ function SimpleWarehouseModule() {
           await api.updateZone(String(editingZone.id), { zone_name: zoneName });
           toast.success(`Zone ${generatedZoneCode} updated.`);
         } else {
+          if (!stores.length && (!firstWarehouse.name.trim() || !firstWarehouse.location.trim())) {
+            toast.error("Enter the warehouse name and location / plant for the first zone.");
+            return;
+          }
           const createdZone = await api.createLocationZone({
             zone_name: zoneName,
             zone_code: generatedZoneCode,
+            ...(!stores.length ? {
+              warehouse_name: firstWarehouse.name.trim(), warehouse_id: firstWarehouse.location.trim(),
+            } : {}),
           });
           toast.success(
             `Zone created: ${createdZone?.zone_name || newZoneForm.zone_name} (${createdZone?.zone_code || generatedZoneCode || "auto-generated"})`,
@@ -1025,27 +1054,29 @@ function SimpleWarehouseModule() {
         if (
           !newBinForm.zone_id ||
           !row.rack.trim() ||
-          !row.position.trim() ||
+          !Number.isSafeInteger(Number(row.capacity)) || Number(row.capacity) <= 0 ||
           !row.bin_code.trim()
         ) {
-          toast.error("Enter rack, shelf/position, and bin code for this zone.");
+          toast.error("Enter a rack code and a positive whole Maximum Capacity (PCS).");
           return;
         }
         if (
           row.rack.trim().length > 64 ||
-          row.position.trim().length > 64 ||
           row.bin_code.trim().length > 64 ||
           !isValidIdentifier(row.rack) ||
-          !isValidIdentifier(row.position) ||
           !isValidIdentifier(row.bin_code)
         ) {
           toast.error("Rack, position, and bin codes must be 1–64 characters using letters, numbers, underscores, or hyphens.");
           return;
         }
+        if (row.position.trim() && (row.position.trim().length > 64 || !isValidIdentifier(row.position))) {
+          toast.error("Shelf / Position must use up to 64 letters, numbers, underscores, or hyphens.");
+          return;
+        }
         const existingBins = await api.getZoneBins(newBinForm.zone_id);
         const normalizedBinCode = row.bin_code.trim().toUpperCase();
         const normalizedRack = row.rack.trim().toUpperCase();
-        const normalizedPosition = row.position.trim().toUpperCase();
+        const normalizedPosition = row.position.trim().toUpperCase() || undefined;
         if ((existingBins || []).some((b: any) => String(b.bin_code).toUpperCase() === normalizedBinCode)) {
           toast.error(`Bin code '${row.bin_code}' already exists in this zone.`);
           return;
@@ -1053,11 +1084,10 @@ function SimpleWarehouseModule() {
         if (
           (existingBins || []).some(
             (b: any) =>
-              String(b.rack || "").toUpperCase() === normalizedRack &&
-              String(b.position || b.shelf || "").toUpperCase() === normalizedPosition,
+              String(b.rack || "").toUpperCase() === normalizedRack,
           )
         ) {
-          toast.error("This rack and shelf/position already has a bin.");
+          toast.error("This rack already exists in the zone. Use Add Material.");
           return;
         }
         const zone = zones.find((z) => z.id === newBinForm.zone_id);
@@ -1070,9 +1100,10 @@ function SimpleWarehouseModule() {
           bin_name: normalizedBinCode,
           rack: normalizedRack,
           position: normalizedPosition,
+          capacity: Number(row.capacity),
           qr_identifier: `QR-${normalizedBinCode}`,
         });
-        toast.success(`Bin ${row.bin_code} created with a unique QR.`);
+        toast.success(`Rack ${normalizedRack} created with capacity ${row.capacity} PCS.`);
       }
       setCreateLocationType(null);
       await fetchData(true);
@@ -1218,6 +1249,11 @@ function SimpleWarehouseModule() {
             : "PENDING",
     }));
   }, [putawayTasks]);
+  const visiblePutawayBatches = (selectedPutawayGroup?.tasks || []).filter((task: any) =>
+    putawayView === "assign" ? canAssignPutaway(task) : putawayView === "scan" ? canScanPutaway(task) : true);
+  const visiblePutawayMaterials = new Set(visiblePutawayBatches.map((task: any) => task.item_code || task.material_name)).size;
+  const visiblePutawayQuantity = visiblePutawayBatches.reduce((total: number, task: any) =>
+    total + (putawayView === "assign" ? unassignedPutawayQuantity(task) : Number(task.quantity || 0)), 0);
   const totalAvailableStock = inventorySummary.reduce(
     (acc, i) => acc + Number(i.available || i.available_quantity || 0),
     0,
@@ -1272,7 +1308,7 @@ function SimpleWarehouseModule() {
             </p>
             <h1 className="mt-2 flex items-center gap-2.5 text-[25px] font-semibold tracking-tight md:text-[28px]">
               <PageHeaderIcon className="h-6 w-6 text-[#71b5ff]" />
-              {pageHeader[activeTab].title}
+              <span className="inline-flex items-center">{pageHeader[activeTab].title}<InformationTooltip help={inventoryHelp[activeTab]} placement="title" className="text-blue-100 hover:text-white" /></span>
             </h1>
             <p className="mt-1.5 text-sm text-blue-50/85">
               {pageHeader[activeTab].description}
@@ -1357,22 +1393,22 @@ function SimpleWarehouseModule() {
           <TabsContent value="dashboard" className="mt-5 space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <Card className="rounded-xl border-emerald-200 border-t-4 border-t-emerald-600 bg-gradient-to-br from-emerald-50 to-white p-4 shadow-sm dark:border-emerald-900/60 dark:bg-emerald-950/30">
-                <div className="flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">Available stock</span><CheckCircle2 className="size-5 text-emerald-600" /></div>
+                <div className="flex items-center justify-between"><div className="flex items-center"><span className="text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">Available stock</span><InformationTooltip help="availableStockKpi" /></div><CheckCircle2 className="size-5 text-emerald-600" /></div>
                 <div className="mt-3 text-3xl font-bold leading-none tabular-nums text-slate-900 dark:text-slate-100">{totalAvailableStock.toLocaleString()}</div>
                 <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">Units ready for picking or issue</p>
               </Card>
               <Card className="rounded-xl border-amber-200 border-t-4 border-t-amber-500 bg-gradient-to-br from-amber-50 to-white p-4 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/30">
-                <div className="flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200">Putaway to do</span><PackageCheck className="size-5 text-amber-600" /></div>
+                <div className="flex items-center justify-between"><div className="flex items-center"><span className="text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200">Putaway to do</span><InformationTooltip help="putawayKpi" /></div><PackageCheck className="size-5 text-amber-600" /></div>
                 <div className="mt-3 text-3xl font-bold leading-none tabular-nums text-slate-900 dark:text-slate-100">{pendingPutawayCount}</div>
                 <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">Open putaway tasks</p>
               </Card>
               <Card className="rounded-xl border-blue-200 border-t-4 border-t-blue-600 bg-gradient-to-br from-blue-50 to-white p-4 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/30">
-                <div className="flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-wide text-blue-800 dark:text-blue-200">Requests to review</span><ClipboardList className="size-5 text-blue-600" /></div>
+                <div className="flex items-center justify-between"><div className="flex items-center"><span className="text-xs font-semibold uppercase tracking-wide text-blue-800 dark:text-blue-200">Requests to review</span><InformationTooltip help="requestsReviewKpi" /></div><ClipboardList className="size-5 text-blue-600" /></div>
                 <div className="mt-3 text-3xl font-bold leading-none tabular-nums text-slate-900 dark:text-slate-100">{pendingRequestsCount}</div>
                 <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">Waiting for warehouse review</p>
               </Card>
               <Card className="rounded-xl border-violet-200 border-t-4 border-t-violet-600 bg-gradient-to-br from-violet-50 to-white p-4 shadow-sm dark:border-violet-900/60 dark:bg-violet-950/30">
-                <div className="flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-wide text-violet-800 dark:text-violet-200">Picks to complete</span><ListOrdered className="size-5 text-violet-600" /></div>
+                <div className="flex items-center justify-between"><div className="flex items-center"><span className="text-xs font-semibold uppercase tracking-wide text-violet-800 dark:text-violet-200">Picks to complete</span><InformationTooltip help="picksCompleteKpi" /></div><ListOrdered className="size-5 text-violet-600" /></div>
                 <div className="mt-3 text-3xl font-bold leading-none tabular-nums text-slate-900 dark:text-slate-100">{pendingPickingCount}</div>
                 <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">Open picking tasks</p>
               </Card>
@@ -1477,15 +1513,16 @@ function SimpleWarehouseModule() {
               <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 uppercase tracking-wider">
                 Putaway Work Queue (Assign Storage Locations & Confirm)
               </h3>
-              <table className="w-full text-left text-xs">
+              <table className="w-full min-w-[1440px] table-fixed text-left text-xs">
+                <colgroup><col /><col className="w-[26%]" /><col /><col /><col className="w-[18%]" /><col /><col className="w-[360px]" /></colgroup>
                 <thead>
                   <tr className="border-b border-sky-200 bg-sky-100/70 text-sky-950 uppercase dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-100">
                     <th className="py-2.5 px-3">GRN / Task No</th>
                     <th className="py-2.5 px-3">Material</th>
                     <th className="py-2.5 px-3">Batch</th>
-                    <th className="py-2.5 px-3">Quantity</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap">Remaining Qty</th>
                     <th className="py-2.5 px-3">Assigned Rack</th>
-                    <th className="py-2.5 px-3">Status</th>
+                    <th className="py-2.5 px-3">Status<InformationTooltip help="workflowStatus" /></th>
                     <th className="py-2.5 px-3 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -1509,7 +1546,7 @@ function SimpleWarehouseModule() {
                           <button
                             type="button"
                             className="text-left hover:text-indigo-600"
-                            onClick={() => setSelectedPutawayGroup(t)}
+                            onClick={() => openPutawayGroup(t)}
                           >
                             {t.material_names?.join(", ") || "-"}
                             {t.material_count > 1 && (
@@ -1522,7 +1559,7 @@ function SimpleWarehouseModule() {
                             <button
                               type="button"
                               className="underline hover:text-indigo-600"
-                              onClick={() => setSelectedPutawayGroup(t)}
+                              onClick={() => openPutawayGroup(t)}
                             >
                               {t.batch_count} batch{t.batch_count === 1 ? "" : "es"}
                             </button>
@@ -1534,16 +1571,10 @@ function SimpleWarehouseModule() {
                           {t.quantity ?? "—"} {t.uom || ""}
                         </td>
                         <td className="py-3 px-3">
-                          {t.tasks[0]?.destination_bin_code || t.tasks[0]?.destination_bin ? (
-                            <Badge
-                              variant="outline"
-                              className="bg-emerald-50 text-emerald-700 font-mono text-[10px]"
-                            >
-                              {t.tasks[0]?.destination_bin_code || t.tasks[0]?.destination_bin}
-                            </Badge>
-                          ) : (
-                            <span className="text-slate-400 italic">Unassigned</span>
-                          )}
+                          <div className="flex flex-wrap gap-1">
+                            {Array.from(new Set<string>(t.tasks.flatMap(assignedPutawayLocations))).map(code => <Badge key={code} variant="outline" className="bg-emerald-50 font-mono text-[10px] text-emerald-700">{code}</Badge>)}
+                            {!t.tasks.some((task: any) => assignedPutawayLocations(task).length) && <span className="italic text-slate-400">Unassigned</span>}
+                          </div>
                         </td>
                         <td className="py-3 px-3">
                           <Badge
@@ -1558,46 +1589,34 @@ function SimpleWarehouseModule() {
                           </Badge>
                         </td>
                         <td className="py-3 px-3 text-right">
+                          <div className="ml-auto grid w-[328px] grid-cols-3 items-center gap-2">
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => openAssignPutaway(t.tasks[0])}
-                            disabled={["PUTAWAY_COMPLETED", "COMPLETED", "STORED"].includes(
-                              String(t.status || "").toUpperCase(),
-                            )}
-                            title={
-                              ["PUTAWAY_COMPLETED", "COMPLETED", "STORED"].includes(
-                                String(t.status || "").toUpperCase(),
-                              )
-                                ? "Completed putaway tasks cannot be reassigned"
-                                : undefined
-                            }
-                            className="h-7 text-xs border-indigo-200 text-indigo-700"
+                            onClick={() => t.tasks.length === 1 ? openAssignPutaway(t.tasks[0]) : openPutawayGroup(t, "assign")}
+                            disabled={!t.tasks.some(canAssignPutaway)}
+                            className="h-8 w-full min-w-0 whitespace-nowrap px-2 text-xs border-indigo-200 text-indigo-700"
                           >
                             Assign Rack
                           </Button>
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => openPutawayScan(t.tasks[0])}
-                            disabled={
-                              !t.tasks[0]?.destination_bin_id ||
-                              t.status === "PUTAWAY_COMPLETED" ||
-                              t.status === "COMPLETED" ||
-                              t.status === "STORED"
-                            }
-                            className="h-7 text-xs border-emerald-200 text-emerald-700"
+                            onClick={() => t.tasks.length === 1 ? openPutawayScan(t.tasks[0]) : openPutawayGroup(t, "scan")}
+                            disabled={!t.tasks.some(canScanPutaway)}
+                            className="h-8 w-full min-w-0 whitespace-nowrap px-2 text-xs border-emerald-200 text-emerald-700"
                           >
                             <Scan className="mr-1 h-3 w-3" /> Scan QR
                           </Button>
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => setSelectedPutawayGroup(t)}
-                            className="h-7 text-xs"
+                            onClick={() => openPutawayGroup(t)}
+                            className="h-8 w-full min-w-0 whitespace-nowrap px-2 text-xs"
                           >
                             View Details
                           </Button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -1646,7 +1665,7 @@ function SimpleWarehouseModule() {
                       <th className="py-2.5 px-3">Material Code</th>
                       <th className="py-2.5 px-3">Material Name</th>
                       <th className="py-2.5 px-3">Batch</th>
-                      <th className="py-2.5 px-3">Available</th>
+                      <th className="py-2.5 px-3">Available<InformationTooltip help="inventory" /></th>
                       <th className="py-2.5 px-3">Location</th>
                       <th className="py-2.5 px-3 text-right">Action</th>
                     </tr>
@@ -1785,7 +1804,7 @@ function SimpleWarehouseModule() {
             <Card className="overflow-x-auto border-blue-200 bg-gradient-to-br from-blue-50/80 via-white to-indigo-50/50 p-5 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/20">
               <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 uppercase tracking-wider">
                 Assembly Material Requisitions (Warehouse Approval & Reservation)
-              </h3>
+              <InformationTooltip help="reserved" /></h3>
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-sky-200 bg-sky-100/70 text-sky-950 uppercase dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-100">
@@ -1794,7 +1813,7 @@ function SimpleWarehouseModule() {
                     <th className="py-2.5 px-3">Material Required</th>
                     <th className="py-2.5 px-3">Required Qty</th>
                     <th className="py-2.5 px-3">Available Stock</th>
-                    <th className="py-2.5 px-3">Status</th>
+                    <th className="py-2.5 px-3">Status<InformationTooltip help="workflowStatus" /></th>
                     <th className="py-2.5 px-3 text-right">Action</th>
                   </tr>
                 </thead>
@@ -1878,10 +1897,11 @@ function SimpleWarehouseModule() {
           {/* 5. PICKING TAB */}
           {/* ========================================================================= */}
           <TabsContent value="picking" className="space-y-6 mt-6">
+            <AssemblyRequisitionsPanel onUpdated={() => fetchData(true)} />
             <Card className="overflow-x-auto border-violet-200 bg-gradient-to-br from-violet-50/80 via-white to-indigo-50/50 p-5 shadow-sm dark:border-violet-900/60 dark:bg-violet-950/20">
               <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 uppercase tracking-wider">
                 Warehouse Picking Queue (Operator Pick Tasks)
-              </h3>
+              <InformationTooltip help="pickRemaining" /></h3>
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-violet-200 bg-violet-100/70 text-violet-950 uppercase dark:border-violet-900 dark:bg-violet-950/50 dark:text-violet-100">
@@ -1890,7 +1910,7 @@ function SimpleWarehouseModule() {
                     <th className="py-2.5 px-3">Material</th>
                     <th className="py-2.5 px-3">Pick Location</th>
                     <th className="py-2.5 px-3">Quantity</th>
-                    <th className="py-2.5 px-3">Status</th>
+                    <th className="py-2.5 px-3">Status<InformationTooltip help="workflowStatus" /></th>
                     <th className="py-2.5 px-3 text-right">Action</th>
                   </tr>
                 </thead>
@@ -1965,7 +1985,7 @@ function SimpleWarehouseModule() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                  <Building2 className="h-5 w-5 text-indigo-600" /> Zone & Bin Locations
+                  <Building2 className="h-5 w-5 text-indigo-600" /> Zones & Racks
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Zone → Rack → Shelf/Position → Bin
@@ -2103,15 +2123,16 @@ function SimpleWarehouseModule() {
               <div className="space-y-4">
                 {zones.map((zone) => {
                   const zoneBins = allFlattenedBins.filter((bin) => bin.zone_id === zone.id);
+                  const rackCount = new Set(zoneBins.map(bin => bin.rack_capacity?.id || bin.rack || bin.id)).size;
                   return (
                     <Card key={zone.id} className="overflow-hidden border-indigo-200 bg-gradient-to-br from-indigo-50/70 via-white to-sky-50/40 shadow-sm dark:border-indigo-900/60 dark:bg-indigo-950/20">
                       <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-slate-50 px-5 py-4">
                         <div>
                           <h3 className="font-bold text-slate-900">
-                            {zone.zone_code} <span className="font-medium text-slate-600">{zone.zone_name}</span>
+                            {zone.zone_code}
                           </h3>
                           <p className="mt-1 text-xs text-slate-500">
-                      {zoneBins.length} {zoneBins.length === 1 ? "bin" : "bins"}
+                      {rackCount} {rackCount === 1 ? "rack" : "racks"}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
@@ -2120,68 +2141,22 @@ function SimpleWarehouseModule() {
                           </Badge>
                           <Button
                             size="sm"
-                            type="button"
-                            variant="outline"
-                            disabled={isSubmitting}
-                            onClick={() => openEditZone(zone)}
-                            className="h-8 gap-1 text-xs"
-                          >
-                            <Pencil className="h-3.5 w-3.5" /> Edit Zone
-                          </Button>
-                          <Button
-                            size="sm"
                             disabled={isSubmitting || String(zone.status || "ACTIVE").toUpperCase() !== "ACTIVE"}
                             onClick={() => void openCreateBin(zone)}
                             className="h-8 gap-1 bg-indigo-600 text-xs text-white hover:bg-indigo-700"
                           >
-                            <Plus className="h-3.5 w-3.5" /> Add Bin
+                            <Plus className="h-3.5 w-3.5" /> Add Rack
                           </Button>
                         </div>
                       </div>
                       {zoneBins.length === 0 ? (
                         <p className="px-5 py-6 text-center text-sm text-slate-500">
-                          No bins in this zone. Use Add Bin to add a storage location.
+                          No racks in this zone. Use Add Rack to add a storage location.
                         </p>
                       ) : (
-                        <div className="overflow-x-auto p-4">
-                          <table className="w-full text-left text-xs">
-                            <thead>
-                              <tr className="border-b text-slate-500 uppercase">
-                                <th className="px-3 py-2.5">Bin Code</th>
-                                <th className="px-3 py-2.5">Rack</th>
-                                <th className="px-3 py-2.5">Shelf / Position</th>
-                                <th className="px-3 py-2.5">Status</th>
-                                <th className="px-3 py-2.5">QR Code</th>
-                                <th className="px-3 py-2.5 text-right">Actions</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                              {zoneBins.map((bin) => (
-                                <tr key={bin.id} className="hover:bg-slate-50">
-                                  <td className="px-3 py-3 font-bold text-indigo-600">{bin.bin_code}</td>
-                                  <td className="px-3 py-3 font-medium text-slate-700">{bin.rack || "—"}</td>
-                                  <td className="px-3 py-3 text-slate-500">{bin.position || "—"}</td>
-                                  <td className="px-3 py-3">
-                                    <Badge className="text-[10px] font-bold">{bin.status || "UNKNOWN"}</Badge>
-                                  </td>
-                                  <td className="px-3 py-3 font-mono text-[10px] text-slate-500">
-                                    {bin.qr_identifier || "—"}
-                                  </td>
-                                  <td className="px-3 py-3 text-right">
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() => setViewBinQrModal(bin)}
-                                      className="h-7 gap-1.5 border-indigo-200 text-xs text-indigo-600 hover:bg-indigo-50"
-                                    >
-                                      <QrCode className="h-3.5 w-3.5" /> View QR & Placed Material
-                                    </Button>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
+                        <RackOccupancyCards bins={zoneBins} allBins={allFlattenedBins}
+                          onAddMaterial={() => handleTabChange("putaway")}
+                          zone={{ zone_code: zone.zone_code, zone_name: zone.zone_name }} onUpdated={() => fetchData(true)} />
                       )}
                     </Card>
                   );
@@ -2266,9 +2241,9 @@ function SimpleWarehouseModule() {
               {pickupToConfirm.status !== "COMPLETED" && (
                 <>
                   <div className="space-y-2">
-                    <label className="text-xs font-semibold" htmlFor="pickup-material-scan">
+                    <span className="inline-flex items-center"><label className="text-xs font-semibold" htmlFor="pickup-material-scan">
                       Material code / QR scan
-                    </label>
+                    </label><InformationTooltip help="qr" /></span>
                     <Input
                       id="pickup-material-scan"
                       required
@@ -2306,9 +2281,9 @@ function SimpleWarehouseModule() {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-xs font-semibold" htmlFor="pickup-zone-scan">
+                    <span className="inline-flex items-center"><label className="text-xs font-semibold" htmlFor="pickup-zone-scan">
                       BIN / location code / QR scan
-                    </label>
+                    </label><InformationTooltip help="qr" /></span>
                     <Input
                       id="pickup-zone-scan"
                       required
@@ -2345,9 +2320,9 @@ function SimpleWarehouseModule() {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-xs font-semibold" htmlFor="pickup-quantity">
+                    <span className="inline-flex items-center"><label className="text-xs font-semibold" htmlFor="pickup-quantity">
                       Quantity picked {pickupToConfirm.uom ? `(${pickupToConfirm.uom})` : ""}
-                    </label>
+                    </label><InformationTooltip help="pickRemaining" /></span>
                     <Input
                       id="pickup-quantity"
                       type="number"
@@ -2503,12 +2478,11 @@ function SimpleWarehouseModule() {
                         (loc) =>
                           loc.store_id === assignStoreId &&
                           loc.zone_id === assignZoneId &&
-                          (!loc.status ||
-                            ["ACTIVE", "AVAILABLE"].includes(String(loc.status).toUpperCase())),
+                          isAssignableRack(loc.status),
                       )
                       .map((loc) => (
-                        <SelectItem key={loc.id} value={loc.id}>
-                          {loc.rack || loc.bin_code} ({loc.bin_code})
+                        <SelectItem key={loc.id} value={loc.id} disabled={typeof loc.rack_capacity?.available_capacity === "number" && loc.rack_capacity.available_capacity <= 0}>
+                          {loc.rack || loc.bin_code} ({loc.bin_code}){typeof loc.rack_capacity?.available_capacity === "number" ? ` / ${loc.rack_capacity.available_capacity} PCS available` : ""}
                         </SelectItem>
                       ))}
                   </SelectContent>
@@ -2522,16 +2496,16 @@ function SimpleWarehouseModule() {
                   type="number"
                   min="0.0001"
                   step="0.0001"
-                  max={assignPutawayTask.quantity}
+                  max={unassignedPutawayQuantity(assignPutawayTask)}
                   value={assignQuantity}
                   onChange={(event) => setAssignQuantity(event.target.value)}
                 />
                 <p className="text-xs text-slate-500">
-                  Selected batch: {assignPutawayTask.quantity ?? 0} {assignPutawayTask.uom || "PCS"}{" "}
+                  Unassigned in selected batch: {unassignedPutawayQuantity(assignPutawayTask)} {assignPutawayTask.uom || "PCS"}{" "}
                   · Remaining:{" "}
                   {Math.max(
                     0,
-                    Number(assignPutawayTask.quantity || 0) - Number(assignQuantity || 0),
+                    unassignedPutawayQuantity(assignPutawayTask) - Number(assignQuantity || 0),
                   )}{" "}
                   {assignPutawayTask.uom || "PCS"}
                 </p>
@@ -2552,7 +2526,7 @@ function SimpleWarehouseModule() {
                 !selectedLocationId ||
                 !Number.isFinite(Number(assignQuantity)) ||
                 Number(assignQuantity) <= 0 ||
-                Number(assignQuantity) > Number(assignPutawayTask?.quantity || 0)
+                Number(assignQuantity) > (assignPutawayTask ? unassignedPutawayQuantity(assignPutawayTask) : 0)
               }
               className="bg-indigo-600 text-white"
             >
@@ -2586,7 +2560,7 @@ function SimpleWarehouseModule() {
                 </div>
               </div>
               <div className="space-y-1.5">
-                <label className="font-semibold">Material QR</label>
+                <span className="inline-flex items-center"><label className="font-semibold">Material QR</label><InformationTooltip help="qr" /></span>
                 <div className="flex gap-2">
                   <Input
                     className="flex-1"
@@ -2703,7 +2677,7 @@ function SimpleWarehouseModule() {
               className="bg-emerald-600 text-white"
             >
               {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirm Putaway"}
-            </Button>
+            </Button><InformationTooltip help="putaway" />
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2752,9 +2726,9 @@ function SimpleWarehouseModule() {
       </Dialog>
 
       <Dialog open={!!selectedPutawayGroup} onOpenChange={() => setSelectedPutawayGroup(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] max-w-5xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Putaway Details</DialogTitle>
+            <DialogTitle>{putawayView === "assign" ? "Assign Rack / Select Batch" : putawayView === "scan" ? "Scan QR / Select Assigned Batch" : "Putaway Details"}</DialogTitle>
             <DialogDescription>{selectedPutawayGroup?.grn_number || "GRN"}</DialogDescription>
           </DialogHeader>
           {selectedPutawayGroup && (
@@ -2766,35 +2740,21 @@ function SimpleWarehouseModule() {
                 </div>
                 <div>
                   <span className="text-xs text-muted-foreground">Materials</span>
-                  <p className="font-bold">{selectedPutawayGroup.material_count}</p>
+                  <p className="font-bold">{visiblePutawayMaterials}</p>
                 </div>
                 <div>
                   <span className="text-xs text-muted-foreground">Batches</span>
-                  <p className="font-bold">{selectedPutawayGroup.batch_count}</p>
+                  <p className="font-bold">{visiblePutawayBatches.length}</p>
                 </div>
                 <div>
-                  <span className="text-xs text-muted-foreground">Total Quantity</span>
+                  <span className="text-xs text-muted-foreground">{putawayView === "assign" ? "Quantity to Assign" : "Remaining to Put Away"}</span>
                   <p className="font-bold">
-                    {selectedPutawayGroup.quantity} {selectedPutawayGroup.uom}
+                    {visiblePutawayQuantity} {selectedPutawayGroup.uom}
                   </p>
                 </div>
               </div>
-              <div className="max-h-64 overflow-auto rounded-xl border">
-                {selectedPutawayGroup.tasks.map((task: any) => (
-                  <div key={task.id} className="grid grid-cols-4 gap-2 border-b p-3 last:border-0">
-                    <span className="font-medium">
-                      {task.material_name || task.item_code || "—"}
-                    </span>
-                    <span className="font-mono text-muted-foreground">
-                      {task.batch_number || ""}
-                    </span>
-                    <span>
-                      {task.quantity ?? "—"} {task.uom || ""}
-                    </span>
-                    <span className="text-right">{task.status || "—"}</span>
-                  </div>
-                ))}
-              </div>
+              <p className="text-sm text-muted-foreground">{putawayView === "assign" ? "Only batches with unassigned quantities are shown. Select a batch to assign its remaining quantity to a rack." : putawayView === "scan" ? "Only assigned, unfinished batches are shown. Select a batch to scan its material and rack QR and confirm putaway." : "Review all material batches, remaining quantities, assigned locations, and completion statuses."}</p>
+              <PutawayBatchTable mode={putawayView} tasks={selectedPutawayGroup.tasks} onAssign={openAssignPutaway} onScan={openPutawayScan} />
             </div>
           )}
         </DialogContent>
@@ -3015,6 +2975,19 @@ function SimpleWarehouseModule() {
                       <Badge className="bg-emerald-500/15 text-emerald-700 text-[10px] font-bold uppercase mt-1">
                         STATUS: {viewBinQrModal.status || "UNKNOWN"}
                       </Badge>
+                      <div className="flex flex-wrap justify-center gap-2 pt-3 sm:justify-start">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!binQrImage}
+                          onClick={() => void downloadQrValue(qrCodeVal || "", `Bin QR ${bCode}`)}
+                        >
+                          <Download className="mr-2 h-4 w-4" /> Download QR
+                        </Button>
+                        <Button size="sm" disabled={!binQrImage} onClick={printBinQr}>
+                          <Printer className="mr-2 h-4 w-4" /> Print QR
+                        </Button>
+                      </div>
                     </div>
                   </div>
 
@@ -3047,7 +3020,7 @@ function SimpleWarehouseModule() {
                             <th className="py-2 px-3">Batch</th>
                             <th className="py-2 px-3">Quantity</th>
                             <th className="py-2 px-3">Source GRN</th>
-                            <th className="py-2 px-3">Status</th>
+                            <th className="py-2 px-3">Status<InformationTooltip help="workflowStatus" /></th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
@@ -3113,35 +3086,39 @@ function SimpleWarehouseModule() {
             <DialogTitle className="flex items-center gap-2">
               <Building2 className="h-5 w-5 text-indigo-600" />
               {createLocationType === "zone" && (editingZone ? "Edit Storage Zone" : "Add New Storage Zone")}
-              {createLocationType === "bin" && "Add Storage Bin (Rack, Shelf & Auto QR)"}
+              {createLocationType === "bin" && "Add Rack (Capacity & Auto QR)"}
             </DialogTitle>
             <DialogDescription>
               {createLocationType === "zone" && (editingZone ? "Update the zone name. The generated zone code remains unchanged." : "Define a storage zone.")}
               {createLocationType === "bin" &&
-                "Configure one physical bin with Rack, Shelf/Position, and auto-generated QR code."}
+                "Configure the rack capacity and optional shelf / position. A bin code and QR code are generated automatically."}
             </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleCreateLocationSubmit} className="space-y-4 text-xs py-2">
             {createLocationType === "zone" && (
               <>
+                {!editingZone && !stores.length && (
+                  <div className="space-y-3 rounded-lg border p-3">
+                    <p className="text-muted-foreground">Set up the warehouse with your first zone.</p>
+                    <div className="space-y-1">
+                      <label htmlFor="first-warehouse-name" className="font-semibold">Warehouse name</label>
+                      <Input id="first-warehouse-name" required maxLength={128}
+                        value={firstWarehouse.name} onChange={(event) => setFirstWarehouse({ ...firstWarehouse, name: event.target.value })} />
+                    </div>
+                    <div className="space-y-1">
+                      <label htmlFor="first-warehouse-location" className="font-semibold">Location / plant</label>
+                      <Input id="first-warehouse-location" required maxLength={64}
+                        value={firstWarehouse.location} onChange={(event) => setFirstWarehouse({ ...firstWarehouse, location: event.target.value })} />
+                    </div>
+                  </div>
+                )}
                 <div className="space-y-1">
                   <label className="font-semibold text-slate-700">Zone Code</label>
                   <Input
                     value={newZoneForm.zone_code}
                     readOnly
                     className="bg-slate-50 font-mono"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-700">Zone Name</label>
-                  <Input
-                    required
-                    minLength={2}
-                    maxLength={100}
-                    placeholder="e.g. Zone B - Heavy Metals & Fasteners"
-                    value={newZoneForm.zone_name}
-                    onChange={(e) => setNewZoneForm({ ...newZoneForm, zone_name: e.target.value })}
                   />
                 </div>
               </>
@@ -3155,27 +3132,23 @@ function SimpleWarehouseModule() {
                     {zones.find((zone) => zone.id === newBinForm.zone_id)?.zone_code} - {zones.find((zone) => zone.id === newBinForm.zone_id)?.zone_name}
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <Input
-                    placeholder="Rack"
-                    value={newBinRows[0].rack}
-                    onChange={(e) => setNewBinRows([{ ...newBinRows[0], rack: e.target.value }])}
-                  />
-                  <Input
-                    placeholder="Shelf / Position"
-                    value={newBinRows[0].position}
-                    onChange={(e) =>
-                      setNewBinRows([{ ...newBinRows[0], position: e.target.value }])
-                    }
-                  />
-                  <Input
-                    placeholder="Auto-generated bin code"
-                    readOnly
-                    value={newBinRows[0].bin_code}
-                    onChange={(e) =>
-                      setNewBinRows([{ ...newBinRows[0], bin_code: e.target.value }])
-                    }
-                  />
+                <div className="grid grid-cols-1 items-start gap-x-4 gap-y-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="new-rack-code" className="block text-sm leading-5">Rack Code *</Label>
+                    <Input id="new-rack-code" className="h-11 w-full" required maxLength={64} placeholder="RACK-001" value={newBinRows[0].rack} onChange={e => setNewBinRows([{ ...newBinRows[0], rack: e.target.value.toUpperCase() }])} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="new-rack-capacity" className="block text-sm leading-5">Maximum Capacity (PCS) *</Label>
+                    <Input id="new-rack-capacity" className="h-11 w-full" type="number" min={1} max={2147483647} step={1} required placeholder="80" value={newBinRows[0].capacity} onChange={e => setNewBinRows([{ ...newBinRows[0], capacity: e.target.value }])} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="new-rack-position" className="block text-sm leading-5">Shelf / Position (optional)</Label>
+                    <Input id="new-rack-position" className="h-11 w-full" maxLength={64} placeholder="e.g. SHELF-001" value={newBinRows[0].position} onChange={e => setNewBinRows([{ ...newBinRows[0], position: e.target.value.toUpperCase() }])} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="new-rack-bin-code" className="block text-sm leading-5">Bin Code (auto-generated)</Label>
+                    <Input id="new-rack-bin-code" className="h-11 w-full" readOnly value={newBinRows[0].bin_code} />
+                  </div>
                 </div>
               </div>
             )}
@@ -3187,7 +3160,7 @@ function SimpleWarehouseModule() {
                 {isSubmitting ? (
                   <Loader2 className="h-4 w-4 animate-spin mx-auto" />
                 ) : createLocationType === "bin" ? (
-                  "Create BIN"
+                  "Create Rack"
                 ) : (
                   editingZone ? "Save Changes" : `Create ${createLocationType?.toUpperCase()}`
                 )}
