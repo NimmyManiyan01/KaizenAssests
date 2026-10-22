@@ -852,7 +852,11 @@ export function AppShell({
                   </div>
                 </>
               )}
+<<<<<<< HEAD
+            </div>
+=======
             </form>
+>>>>>>> origin/Srujan_M_S
 
             <div className="ml-auto flex items-center gap-1.5">
                     <Link

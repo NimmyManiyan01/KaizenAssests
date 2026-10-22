@@ -1,5 +1,9 @@
+<<<<<<< HEAD
+import { createFileRoute, useSearch } from "@tanstack/react-router";
+=======
 import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute } from "@tanstack/react-router";
+>>>>>>> origin/Srujan_M_S
 import { useEffect, useMemo, useState } from "react";
 import {
   Eye,
@@ -53,6 +57,7 @@ const emptyForm = { code: "", name: "", category: "", description: "", uom: "PCS
 
 
 function SupplierMaterials() {
+  const routeSearch = useSearch({ strict: false }) as { search?: string };
   const [materials, setMaterials] = useState<any[]>([]);
   const [query, setQuery] = useState("");
   const [uomFilter, setUomFilter] = useState("ALL");
@@ -67,6 +72,10 @@ function SupplierMaterials() {
     type: "status" | "delete";
     material: any;
   } | null>(null);
+
+  useEffect(() => {
+    if (typeof routeSearch.search === "string") setQuery(routeSearch.search);
+  }, [routeSearch.search]);
 
   const loadMaterials = async () => {
     setLoading(true);
@@ -230,6 +239,148 @@ function SupplierMaterials() {
               >
                 <Plus className="size-4" /> Add Material
               </Button>
+<<<<<<< HEAD
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border">
+              <table className="w-full min-w-[800px] text-left text-sm">
+                <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+                  <tr>
+                    {["Material Code", "Material Name", "UOM", "Status", "Actions"].map((title) => (
+                      <th key={title} className="px-4 py-3">
+                        {title}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-10 text-center">
+                        <Loader2 className="mx-auto size-5 animate-spin" />
+                      </td>
+                    </tr>
+                  ) : !filtered.length ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
+                        {materials.length
+                          ? "No materials match your filters."
+                          : "No materials found."}
+                      </td>
+                    </tr>
+                  ) : (
+                    filtered.map((m) => (
+                      <tr key={m.id || m.code} className="hover:bg-muted/30">
+                        <td className="px-4 py-3 font-mono font-bold text-sky-700">{m.code}</td>
+                        <td className="px-4 py-3 font-semibold">{m.name}</td>
+                        <td className="px-4 py-3">{m.uom}</td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                              String(m.status).toUpperCase() === "ACTIVE"
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-slate-200 bg-slate-100 text-slate-600"
+                            }`}
+                          >
+                            {String(m.status).toUpperCase() === "ACTIVE" ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                title="Material actions"
+                                aria-label={`Actions for ${m.name}`}
+                              >
+                                <MoreHorizontal className="size-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-40">
+                              <DropdownMenuItem onClick={() => setDetails(m)}>
+                                <Eye /> View
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => openEdit(m)}>
+                                <Pencil /> Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => setPendingAction({ type: "status", material: m })}
+                              >
+                                {String(m.status).toUpperCase() === "ACTIVE" ? (
+                                  <ToggleLeft />
+                                ) : (
+                                  <ToggleRight />
+                                )}
+                                {String(m.status).toUpperCase() === "ACTIVE"
+                                  ? "Deactivate"
+                                  : "Activate"}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-rose-600 focus:text-rose-700"
+                                onClick={() => setPendingAction({ type: "delete", material: m })}
+                              >
+                                <Trash2 /> Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="mt-3 text-xs text-muted-foreground">
+            Showing {filtered.length} of {materials.length} materials
+          </p>
+        </CardContent>
+      </Card>
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="rounded-2xl sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editing ? "Edit Material" : "Add Material"}</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={saveMaterial} className="space-y-4">
+            <div>
+              <Label>Material Name *</Label>
+              <Input
+                value={form.name}
+                onChange={(e) => {
+                  setForm({
+                    ...form,
+                    name: e.target.value,
+                    code: editing ? form.code : "",
+                  });
+                  if (!editing && e.target.value.trim()) generateMaterialCode(e.target.value);
+                }}
+                onBlur={() => generateMaterialCode()}
+                placeholder="Enter material name"
+              />
+            </div>
+            <div>
+              <Label>Material Code *</Label>
+              <Input
+                value={form.code}
+                disabled={Boolean(editing)}
+                readOnly={!editing}
+                onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
+                placeholder="Generated after entering material name"
+                className={!editing ? "bg-muted font-mono font-bold text-sky-700" : ""}
+              />
+              {!editing && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Generated automatically after entering the material name.
+                </p>
+              )}
+            </div>
+            <div>
+              <Label>Base UOM *</Label>
+              <Select value={form.uom} onValueChange={(value) => setForm({ ...form, uom: value })}>
+                <SelectTrigger>
+=======
             </TooltipTrigger>
             <TooltipContent
               side="bottom"
@@ -264,6 +415,7 @@ function SupplierMaterials() {
                   aria-label="Filter materials by unit of measurement"
                   className="h-10 w-28 rounded-lg text-sm"
                 >
+>>>>>>> origin/Srujan_M_S
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

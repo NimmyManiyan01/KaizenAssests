@@ -229,6 +229,11 @@ function NewAsnPage() {
   const [materialLoadError, setMaterialLoadError] = useState("");
   const [selectedAsn, setSelectedAsn] = useState<AsnRecord | null>(null);
   const [asnPendingDelete, setAsnPendingDelete] = useState<AsnRecord | null>(null);
+  const [editingAsnNumber, setEditingAsnNumber] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof search?.search === "string") setSearchQuery(search.search);
+  }, [search?.search]);
 
   // Modal Form Inputs
   const [asnNumber, setAsnNumber] = useState("");
@@ -361,11 +366,20 @@ function NewAsnPage() {
   };
 
   const handleOpenCreateModal = async () => {
+<<<<<<< HEAD
+    setEditingAsnNumber(null);
+    // Open the first dialog immediately; loading the next ASN number should
+    // never make the user wait before seeing the popup.
+    setIsAssignmentOpen(true);
+    const next = await api.getNextAsnNumber().catch(() => null);
+    if (next?.asnNumber) setAsnNumber(next.asnNumber);
+=======
     // Reset state synchronously BEFORE opening dialog to prevent race condition
     requestIdRef.current = window.crypto.randomUUID();
     setAsnNumber("");
     setAsnFormErrors({});
     setSubmissionError("");
+>>>>>>> origin/Srujan_M_S
     setExpectedArrivalDate(todayDate());
     setSupplierName(supplierCompanyName || currentUser?.full_name || currentUser?.username || "");
     setSelectedPo(null);
@@ -583,9 +597,15 @@ function NewAsnPage() {
         status: "SUBMITTED",
       };
 
+<<<<<<< HEAD
+      const createdAsn = editingAsnNumber
+        ? await api.updateAsn(editingAsnNumber, payload)
+        : await api.createAsn(payload);
+=======
       const createdAsn = await api.createAsn(payload);
       const createdAsnNumber = createdAsn?.asn_number || asnNumber;
       const createdSupplierName = createdAsn?.supplier_name || supplierName.trim();
+>>>>>>> origin/Srujan_M_S
 
       const newRecord: AsnRecord = {
         // Keep the server identifier so the PDF endpoint can resolve this
@@ -605,11 +625,29 @@ function NewAsnPage() {
         lines: Array.isArray(createdAsn?.lines) ? createdAsn.lines : payload.lines,
       };
 
+<<<<<<< HEAD
+      setAsnList((prev) =>
+        editingAsnNumber
+          ? prev.map((row) =>
+              row.asn_number === editingAsnNumber ? { ...row, ...newRecord, id: row.id } : row,
+            )
+          : [newRecord, ...prev],
+      );
+      setSubmitting(false);
+=======
       setAsnList((prev) => [newRecord, ...prev]);
+>>>>>>> origin/Srujan_M_S
       setAsnSubmitted(true);
       setIsModalOpen(false);
       setIsAssignmentOpen(false);
 
+<<<<<<< HEAD
+      toast.success(
+        `ASN ${asnNumber} ${editingAsnNumber ? "updated and resubmitted" : "submitted successfully"}`,
+      );
+      setEditingAsnNumber(null);
+    } catch (err: any) {
+=======
       setAsnNumber(createdAsnNumber);
       toast.success(`ASN ${createdAsnNumber} submitted successfully`);
     } catch (error) {
@@ -618,6 +656,7 @@ function NewAsnPage() {
       toast.error("ASN creation failed", { description: message });
     } finally {
       submitInFlightRef.current = false;
+>>>>>>> origin/Srujan_M_S
       setSubmitting(false);
     }
   };
@@ -684,6 +723,7 @@ function NewAsnPage() {
       return;
     }
     setSelectedAsn(null);
+    setEditingAsnNumber(asn.asn_number);
     setAsnNumber(asn.asn_number);
     setSupplierName(asn.supplier_name || "");
     setExpectedArrivalDate(
@@ -764,11 +804,282 @@ function NewAsnPage() {
                 </CardDescription>
               </div>
 
+<<<<<<< HEAD
+              <Button
+                onClick={handleOpenCreateModal}
+                className="rounded-xl font-bold shadow-md bg-sky-600 hover:bg-sky-700 text-white h-9 px-4 text-xs"
+              >
+                <Plus className="mr-1.5 size-4" /> Create ASN
+              </Button>
+            </div>
+          </CardHeader>
+
+          <CardContent className="p-0">
+            {loadError && (
+              <div className="m-4 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                <span>{loadError}</span>
+                <Button size="sm" variant="outline" onClick={() => void loadAsnData()}>
+                  <RefreshCw className="mr-2 size-4" /> Retry
+                </Button>
+              </div>
+            )}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b bg-muted/40 font-bold uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3">ASN Number</th>
+                    <th className="px-4 py-3">Supplier Name</th>
+                    <th className="px-4 py-3">Vehicle Number</th>
+                    <th className="px-4 py-3">Driver Name & Mobile</th>
+                    <th className="px-4 py-3">Expected Arrival Date</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Materials</th>
+                    <th className="w-44 px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60 font-medium">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
+                        <Loader2 className="mx-auto size-5 animate-spin" /> Loading ASN records…
+                      </td>
+                    </tr>
+                  ) : !filteredList.length ? (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
+                        {asnList.length
+                          ? "No ASNs match the selected filters."
+                          : "No ASN records found."}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredList.map((asn) => (
+                      <tr key={asn.id} className="hover:bg-muted/30 transition-colors">
+                        <td className="px-4 py-3 font-mono font-bold text-primary">
+                          {asn.asn_number}
+                        </td>
+                        <td className="px-4 py-3 font-bold text-foreground">{asn.supplier_name}</td>
+                        <td className="px-4 py-3 font-mono font-bold text-sky-600">
+                          {asn.vehicle_number}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="font-bold">{asn.driver_name}</span>{" "}
+                          <span className="text-muted-foreground font-mono">
+                            ({asn.driver_contact})
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 font-bold text-emerald-600">
+                          {asn.delivery_date ||
+                            asn.expected_arrival_date ||
+                            asn.expected_arrival_at?.split("T")[0] ||
+                            "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          <span className="inline-flex rounded-full bg-blue-100 px-2.5 py-1 text-[10px] font-bold text-blue-700">
+                            {String(asn.status || "SUBMITTED").replaceAll("_", " ")}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-xs">
+                          {asn.lines?.length || 0} items ·{" "}
+                          {asn.lines?.reduce(
+                            (sum: number, line: any) =>
+                              sum + Number(line.shipped_quantity ?? line.quantity ?? 0),
+                            0,
+                          ) || 0}{" "}
+                          units
+                        </td>
+                        <td className="w-20 px-4 py-3 text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="size-8 rounded-lg"
+                                aria-label={`Actions for ${asn.asn_number}`}
+                              >
+                                <MoreHorizontal className="size-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-40">
+                              <DropdownMenuItem
+                                disabled={!canModifyAsn(asn)}
+                                onSelect={() => editAsnRecord(asn)}
+                              >
+                                <Pencil /> Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-rose-600 focus:text-rose-700"
+                                disabled={!canModifyAsn(asn)}
+                                onSelect={() => deleteAsnRecord(asn)}
+                              >
+                                <Trash2 /> Delete
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => setSelectedAsn(asn)}>
+                                <Eye /> View
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Dialog open={Boolean(selectedAsn)} onOpenChange={(open) => !open && setSelectedAsn(null)}>
+          <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto rounded-2xl p-6">
+            <DialogHeader>
+              <DialogTitle className="text-lg font-black text-primary">ASN Details</DialogTitle>
+            </DialogHeader>
+            {selectedAsn && (
+              <div className="grid grid-cols-2 gap-3 rounded-xl border p-4 text-sm">
+                <div>
+                  <span className="text-muted-foreground">ASN Number</span>
+                  <p className="font-mono font-bold">{selectedAsn.asn_number}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Supplier</span>
+                  <p className="font-semibold">{selectedAsn.supplier_name}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Vehicle</span>
+                  <p className="font-mono font-semibold">{selectedAsn.vehicle_number}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Driver</span>
+                  <p className="font-semibold">{selectedAsn.driver_name}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Driver Contact</span>
+                  <p className="font-mono">{selectedAsn.driver_contact}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Status</span>
+                  <p className="font-semibold">
+                    {String(selectedAsn.status || "SUBMITTED").replaceAll("_", " ")}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Expected Arrival</span>
+                  <p className="font-semibold">
+                    {selectedAsn.delivery_date ||
+                      selectedAsn.expected_arrival_date ||
+                      selectedAsn.expected_arrival_at?.split("T")[0] ||
+                      "—"}
+                  </p>
+                </div>
+                <div className="col-span-2 border-t pt-3">
+                  <span className="text-muted-foreground">Shipped Materials</span>
+                  {selectedAsn.lines?.length ? (
+                    <div className="mt-2 divide-y">
+                      {selectedAsn.lines.map((line: any, index: number) => (
+                        <div
+                          key={`${line.item_code || line.material_name}-${index}`}
+                          className="flex items-center justify-between gap-3 py-2"
+                        >
+                          <span className="font-semibold">
+                            {line.material_name || line.item_code || "—"}{" "}
+                            <span className="font-mono text-muted-foreground">
+                              ({line.item_code || "—"})
+                            </span>
+                          </span>
+                          <span className="font-bold">
+                            {line.shipped_quantity ?? line.quantity ?? 0} {line.uom || ""}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-muted-foreground">No shipment materials recorded.</p>
+                  )}
+                </div>
+                <div className="col-span-2 flex justify-end gap-2 border-t pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void downloadSelectedAsn()}
+                  >
+                    <Download className="mr-2 size-4" /> Download
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+        <AlertDialog
+          open={Boolean(asnPendingDelete)}
+          onOpenChange={(open) => !open && setAsnPendingDelete(null)}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete ASN?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Delete ASN {asnPendingDelete?.asn_number}? This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => void confirmDeleteAsn()}
+              >
+                Delete ASN
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <Dialog
+          open={isAssignmentOpen}
+          onOpenChange={(open) => {
+            if (!assignmentSubmitting) setIsAssignmentOpen(open);
+          }}
+        >
+          <DialogContent className="w-[calc(100%-2rem)] max-w-xl rounded-2xl p-6">
+            <DialogHeader>
+              <DialogTitle className="text-lg font-black text-primary">
+                Assign vehicle and driver
+              </DialogTitle>
+            </DialogHeader>
+            <form onSubmit={continueToAsnForm} className="space-y-5">
+              <p className="text-sm text-muted-foreground">
+                Enter transport details. The complete ASN form will open after you continue.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <Label htmlFor="assignment-vehicle">Vehicle Number *</Label>
+                  <Input
+                    id="assignment-vehicle"
+                    required
+                    placeholder="Enter vehicle number"
+                    value={vehicleNumber}
+                    onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())}
+                    onBlur={() => {
+                      setVehicleNumber((value) => value.trim());
+                      setAssignmentTouched((value) => ({ ...value, vehicle: true }));
+                    }}
+                    onFocus={() => setAssignmentTouched((value) => ({ ...value, vehicle: true }))}
+                    aria-invalid={
+                      assignmentTouched.vehicle &&
+                      !/^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/.test(
+                        vehicleNumber.replace(/\s+/g, "").trim(),
+                      )
+                    }
+                    aria-describedby="assignment-vehicle-error"
+                    pattern="[A-Za-z]{2}[0-9]{1,2}[A-Za-z]{1,3}[0-9]{4}"
+                    maxLength={13}
+                    className={inputClass}
+=======
               <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
                 <div className="relative w-full sm:w-64">
                   <Search
                     className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
                     aria-hidden="true"
+>>>>>>> origin/Srujan_M_S
                   />
                   <input
                     type="text"

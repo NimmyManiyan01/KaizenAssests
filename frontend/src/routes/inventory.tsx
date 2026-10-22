@@ -1027,6 +1027,30 @@ function SimpleWarehouseModule() {
           toast.error("A zone code could not be generated. Close and reopen this form.");
           return;
         }
+<<<<<<< HEAD
+        const nextCode = await api.getNextStoreCode();
+        const createdStore = await api.createStore({
+          store_name: storeName,
+          store_code: nextCode.suggested_store_code,
+          store_type: newStoreForm.store_type,
+          status: "ACTIVE",
+          warehouse_id: newStoreForm.warehouse_id || "Main Warehouse",
+        });
+        toast.success(`Warehouse created: ${createdStore.store_name} (${createdStore.store_code})`);
+        setNewStoreForm({
+          store_code: "",
+          store_name: "",
+          description: "",
+          store_type: "RAW_MATERIAL",
+          status: "ACTIVE",
+          warehouse_id: "",
+        });
+      } else if (createLocationType === "zone") {
+        const targetStoreId = newZoneForm.store_id;
+        if (!targetStoreId) {
+          toast.error("Select a warehouse before creating a zone.");
+          return;
+=======
         const generatedZoneCode = newZoneForm.zone_code;
         if (editingZone) {
           await api.updateZone(String(editingZone.id), { zone_name: zoneName });
@@ -1046,6 +1070,7 @@ function SimpleWarehouseModule() {
           toast.success(
             `Zone created: ${createdZone?.zone_name || newZoneForm.zone_name} (${createdZone?.zone_code || generatedZoneCode || "auto-generated"})`,
           );
+>>>>>>> origin/Srujan_M_S
         }
         setNewZoneForm({ zone_code: "", zone_name: "" });
         setEditingZone(null);
@@ -1061,6 +1086,15 @@ function SimpleWarehouseModule() {
           return;
         }
         if (
+<<<<<<< HEAD
+          !isValidIdentifier(row.rack) ||
+          !isValidIdentifier(row.position) ||
+          !isValidIdentifier(row.bin_code)
+        ) {
+          toast.error(
+            "Rack, position, and bin codes may contain only letters, numbers, underscores, and hyphens.",
+          );
+=======
           row.rack.trim().length > 64 ||
           row.bin_code.trim().length > 64 ||
           !isValidIdentifier(row.rack) ||
@@ -1071,6 +1105,7 @@ function SimpleWarehouseModule() {
         }
         if (row.position.trim() && (row.position.trim().length > 64 || !isValidIdentifier(row.position))) {
           toast.error("Shelf / Position must use up to 64 letters, numbers, underscores, or hyphens.");
+>>>>>>> origin/Srujan_M_S
           return;
         }
         const existingBins = await api.getZoneBins(newBinForm.zone_id);

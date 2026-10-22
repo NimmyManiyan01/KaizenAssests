@@ -439,6 +439,8 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
           <div className="size-8 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
         </div>
       )}
+<<<<<<< HEAD
+=======
       {/* Cinematic tagline overlay replaces the operational landing HUD. */}
       {false ? (
         <div className="pointer-events-none absolute inset-x-0 top-24 sm:top-28 text-center transition-all duration-500">
@@ -456,6 +458,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
           </p>
         </div>
       ) : null}
+>>>>>>> origin/Srujan_M_S
 
       <div
         hidden={scrollProgress < 0.12}
