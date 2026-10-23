@@ -1,5 +1,6 @@
 import { memo, Suspense, useEffect, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import * as THREE from "three";
 import { OrbitControls } from "@react-three/drei";
 import { SceneHtml as Html } from "./SceneHtml";
 import type { JourneyStage } from "./data/journeyStages";
@@ -89,6 +90,21 @@ function smoothstep(min: number, max: number, value: number) {
   return x * x * (3 - 2 * x);
 }
 
+function DynamicEnvironmentTheme({ progress }: { progress: number }) {
+  const { scene } = useThree();
+  useFrame(() => {
+    const factor = smoothstep(0.04, 0.12, progress);
+    const targetBg = new THREE.Color("#e7e9e5").lerp(new THREE.Color("#ffffff"), factor);
+    scene.background = targetBg;
+    if (scene.fog instanceof THREE.Fog) {
+      scene.fog.color = targetBg;
+      scene.fog.near = THREE.MathUtils.lerp(78, 140, factor);
+      scene.fog.far = THREE.MathUtils.lerp(285, 420, factor);
+    }
+  });
+  return null;
+}
+
 export function JourneyCanvas({
   stages,
   activeIndex,
@@ -108,7 +124,7 @@ export function JourneyCanvas({
   const storageSceneVisible = isFreeOrbit || (scrollProgress >= 0.25 && scrollProgress < 0.48);
   const productionSceneVisible = isFreeOrbit || (scrollProgress >= 0.58 && scrollProgress < 0.79);
   const outboundSceneVisible = isFreeOrbit || scrollProgress >= 0.79;
-  const cityEnvironmentVisible = isFreeOrbit || journeyProgress < 0.15;
+  const cityEnvironmentVisible = isFreeOrbit || journeyProgress < 0.12;
   const [manualTruckOffset, setManualTruckOffset] = useState({ x: 0, z: 0 });
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -430,6 +446,7 @@ export function JourneyCanvas({
       >
         <color attach="background" args={["#e7e9e5"]} />
         <fog attach="fog" args={["#e7e9e5", 90, 300]} />
+        <DynamicEnvironmentTheme progress={journeyProgress} />
         <hemisphereLight args={["#fffaf0", "#7e8580", 0.6]} />
 
         {/* ─── LIGHTING RIG (DAYLIGHT) ─── */}
