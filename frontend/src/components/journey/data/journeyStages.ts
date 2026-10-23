@@ -158,8 +158,10 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "HYDRAULIC RAMP", value: "LEVELLED" },
       { label: "REAR DOORS", value: "OPENED" },
     ],
-    cameraPosition: [1.2, 3.8, -13.5],
-    cameraTarget: [-8.5, 1.8, -21.0],
+    // Keep the full trailer-to-dock relationship visible while the vehicle
+    // reverses; the previous close anchor hid the rear doors and dock edge.
+    cameraPosition: [2.8, 5.2, -9.5],
+    cameraTarget: [-8.5, 2.0, -21.5],
   },
   {
     id: "goods-unloading",
@@ -185,8 +187,11 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "FORKLIFT ID", value: "FL-01" },
       { label: "DAMAGE REPORT", value: "0 DEFECTS" },
     ],
-    cameraPosition: [-3.2, 3.0, -19.5],
-    cameraTarget: [-8.5, 1.5, -23.8],
+    // The receiving action spans the trailer rear, forklift and staging pad.
+    // Pulling this shot back prevents the forklift/pallet pair from being
+    // cropped at the edge of the authored camera frame.
+    cameraPosition: [3.5, 4.6, -13.5],
+    cameraTarget: [-7.5, 2.0, -24.0],
   },
   {
     id: "quality-inspection",
@@ -212,8 +217,8 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "GOOD QTY", value: "480 UNITS" },
       { label: "REJECT QTY", value: "0 UNITS" },
     ],
-    cameraPosition: [-3.5, 2.8, -21.0],
-    cameraTarget: [-7.5, 1.5, -23.8],
+    cameraPosition: [3.8, 4.4, -14.0],
+    cameraTarget: [-7.5, 2.0, -24.0],
   },
   {
     id: "material-qr",
@@ -239,8 +244,8 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "QR BARCODE", value: "MAT-MOT-1001-QR" },
       { label: "LEDGER LINK", value: "CONFIRMED" },
     ],
-    cameraPosition: [-4.0, 2.6, -21.5],
-    cameraTarget: [-8.5, 1.5, -23.8],
+    cameraPosition: [3.5, 4.2, -13.0],
+    cameraTarget: [-8.5, 2.0, -24.0],
   },
   {
     id: "inventory-putaway",

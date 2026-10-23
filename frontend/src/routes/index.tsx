@@ -54,23 +54,23 @@ function HomePage() {
       <header
         className={`fixed top-0 left-0 right-0 z-50 border-b backdrop-blur-xl transition-all duration-300 ${isDarkMode ? "border-white/10 bg-slate-950/75" : isScrolled ? "border-slate-200/70 bg-white/70" : "border-transparent bg-white/25"}`}
       >
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2.5 sm:px-6 sm:py-3">
+        <div className="mx-auto flex min-h-16 max-w-7xl items-center justify-between gap-3 px-4 py-2 sm:px-6 sm:py-2.5">
           <button
             type="button"
             onClick={goToDashboard}
-            className="flex items-center gap-3.5 text-left group cursor-pointer focus:outline-none"
+            className="flex min-w-0 items-center gap-2 sm:gap-3.5 text-left group cursor-pointer focus-visible:outline-2 focus-visible:outline-cyan-600"
           >
-            <div className="relative flex items-center justify-center h-11 px-3.5 rounded-2xl bg-gradient-to-r from-cyan-500/10 via-blue-500/10 to-indigo-500/10 border border-cyan-500/30 backdrop-blur-md shadow-[0_0_20px_rgba(6,182,212,0.25)] transition-all duration-300 group-hover:scale-105 group-hover:border-cyan-400/60 group-hover:shadow-[0_0_30px_rgba(6,182,212,0.5)]">
+            <div className="relative flex h-10 shrink-0 items-center justify-center rounded-xl border border-cyan-500/30 bg-gradient-to-r from-cyan-500/10 via-blue-500/10 to-indigo-500/10 px-2.5 backdrop-blur-md shadow-[0_0_20px_rgba(6,182,212,0.25)] transition-all duration-300 group-hover:border-cyan-400/60 sm:h-11 sm:px-3.5">
               <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-cyan-500/20 to-indigo-500/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 blur-sm -z-10" />
               <img
                 src={logoUrl}
                 alt="Kaizentrix Logo"
-                className="h-8 w-auto object-contain drop-shadow-[0_2px_8px_rgba(6,182,212,0.45)]"
+                className="h-7 w-auto max-w-[11rem] object-contain drop-shadow-[0_2px_8px_rgba(6,182,212,0.45)] sm:h-8"
               />
             </div>
             <div className="flex flex-col">
               <div className="flex items-center gap-1.5">
-                <span className="text-base font-black tracking-wider uppercase bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 dark:from-cyan-300 dark:via-blue-400 dark:to-indigo-300 bg-clip-text text-transparent">
+                <span className="truncate text-[11px] font-black uppercase tracking-wide text-cyan-700 sm:text-base sm:tracking-wider">
                   KaizenAssests
                 </span>
               </div>
@@ -80,7 +80,7 @@ function HomePage() {
           <div className="flex items-center gap-2 sm:gap-3">
             <Button
               onClick={() => navigate({ to: "/login" })}
-              className="bg-cyan-600 hover:bg-cyan-500 text-white shadow-[0_0_20px_rgba(6,182,212,0.4)] rounded-xl text-xs font-black px-5 py-2.5 tracking-wider uppercase"
+              className="h-10 shrink-0 rounded-xl bg-cyan-600 px-3 text-[11px] font-black uppercase tracking-wider text-white shadow-[0_0_20px_rgba(6,182,212,0.4)] hover:bg-cyan-500 sm:px-5 sm:text-xs"
             >
               Sign In <ArrowRight className="size-3.5 ml-1.5" />
             </Button>

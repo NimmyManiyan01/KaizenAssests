@@ -113,7 +113,7 @@ export function PalletAndCargo({
               <group key={`b1-${i}`} position={[bx, by, bz]}>
                 <mesh castShadow receiveShadow>
                   <boxGeometry args={[0.54, 0.58, 0.54]} />
-                  <meshStandardMaterial color="#b45309" roughness={0.8} />
+                  <meshStandardMaterial color="#b96822" roughness={0.86} metalness={0.02} />
                 </mesh>
                 {/* White Barcode Shipping Label */}
                 {!showQr && (
@@ -139,7 +139,7 @@ export function PalletAndCargo({
                 <group key={`b2-${i}`} position={[bx, by, bz]}>
                   <mesh castShadow receiveShadow>
                     <boxGeometry args={[0.54, 0.58, 0.54]} />
-                    <meshStandardMaterial color="#d97706" roughness={0.8} />
+                    <meshStandardMaterial color="#c9782c" roughness={0.86} metalness={0.02} />
                   </mesh>
                   {!showQr && (
                     <mesh position={[0, 0.05, 0.272]}>

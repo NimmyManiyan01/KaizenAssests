@@ -11,9 +11,9 @@ export function IndustrialCampus() {
     const box = (p: Part["p"], s: Part["s"], color: string) => result.push({ p, s, color });
     for (const side of [-1, 1]) {
       const x = side * 28;
-      box([x, 0.018, -118], [5, 0.025, 258], "#343c43");
-      box([side * 25.4, 0.1, -118], [0.22, 0.2, 258], "#aab3bc");
-      box([side * 30.6, 0.1, -118], [0.22, 0.2, 258], "#aab3bc");
+      box([x, 0.018, -118], [5, 0.025, 258], "#2f373d");
+      box([side * 25.4, 0.1, -118], [0.22, 0.2, 258], "#8c989d");
+      box([side * 30.6, 0.1, -118], [0.22, 0.2, 258], "#8c989d");
       for (let z = 6; z > -245; z -= 12) {
         box([x, 0.037, z], [0.12, 0.012, 3], "#e3e2d8");
         box([side * 30, 3.8, z], [0.12, 7.6, 0.12], "#243747");

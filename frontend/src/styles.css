@@ -242,6 +242,19 @@
 }
 
 @layer utilities {
+  .journey-control {
+    display: inline-flex;
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.75rem;
+    color: rgb(226 232 240);
+    transition: background-color 150ms ease, color 150ms ease, opacity 150ms ease;
+  }
+  .journey-control:hover:not(:disabled) { background: rgb(255 255 255 / 0.12); color: white; }
+  .journey-control:disabled { cursor: not-allowed; opacity: 0.35; }
+  .journey-control-primary { background: rgb(6 182 212 / 0.2); color: rgb(103 232 249); }
   .animate-fade-up {
     animation: wms-fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
   }

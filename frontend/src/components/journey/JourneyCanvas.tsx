@@ -105,7 +105,10 @@ export function JourneyCanvas({
   const quality = useQuality();
   const supplierProgress = clamp(journeyProgress / 0.12, 0, 1);
   const scrollProgress = clamp((journeyProgress - 0.12) / 0.88, 0, 1);
-  const storageSceneVisible = isFreeOrbit || (scrollProgress >= 0.25 && scrollProgress < 0.48);
+  // Keep storage mounted through the stage-09 camera transition. The inventory
+  // racks sit deep in the aisle (z=-68..-125), while the camera reaches that
+  // view just after the previous 0.48 cutoff.
+  const storageSceneVisible = isFreeOrbit || (scrollProgress >= 0.25 && scrollProgress < 0.6);
   const productionSceneVisible = isFreeOrbit || (scrollProgress >= 0.58 && scrollProgress < 0.79);
   const outboundSceneVisible = isFreeOrbit || scrollProgress >= 0.79;
   const cityEnvironmentVisible = isFreeOrbit || journeyProgress < 0.15;
@@ -157,7 +160,8 @@ export function JourneyCanvas({
     // Approach the stop line, wait for security clearance, then pass the raised boom.
     const approach = smoothstep(0, 0.012, inboundProgress);
     const departure = smoothstep(0.034, 0.09, inboundProgress);
-    barrier1Open = smoothstep(0.014, 0.032, inboundProgress);
+    // Hold at the stop line until the gate-pass verification beat completes.
+    barrier1Open = smoothstep(0.032, 0.05, inboundProgress);
     truck1Pos = [
       lerp(0.8, 0, departure),
       0,
@@ -180,7 +184,9 @@ export function JourneyCanvas({
     truck1Pos = [-4.25 + 4.25 * Math.cos(angle), 0, -10 - 4.25 * Math.sin(angle)];
     truck1Rot = [0, Math.PI + angle, 0];
     wheelRot = (33 + 4.25 * angle) / 0.49;
-    dockDoorOpen = smoothstep(0.12, 0.145, inboundProgress);
+    // The dock door stays closed until the truck is fully aligned and the
+    // dock authorization state begins.
+    dockDoorOpen = 0;
   } else if (inboundProgress < 0.1667) {
     // Once aligned, reverse straight back to the dock bumpers.
     const t = smoothstep(0.145, 0.1667, inboundProgress);
@@ -189,13 +195,13 @@ export function JourneyCanvas({
     truck1Pos = [-8.5, 0, lerp(-10, -17.5, t)];
     truck1Rot = [0, Math.PI * 2, 0];
     wheelRot = (33 + 4.25 * Math.PI - 7.5 * t) / 0.49;
-    dockDoorOpen = 1;
+    dockDoorOpen = 0;
   } else {
     barrier1Open = 1;
     truck1Pos = [-8.5, 0, -17.5];
     truck1Rot = [0, Math.PI * 2, 0];
     wheelRot = (33 + 4.25 * Math.PI - 7.5) / 0.49;
-    dockDoorOpen = 1;
+    dockDoorOpen = smoothstep(0.1667, 0.19, inboundProgress);
     // The truck remains closed until the demonstration sequence establishes
     // secure docking and unloading authorization at the manifest check.
     truck1Doors = smoothstep(0.22, 0.235, inboundProgress);
@@ -261,7 +267,8 @@ export function JourneyCanvas({
   let palletPos: [number, number, number] = [-8.5, 1.25, -23.8];
   let palletRot: [number, number, number] = [0, 0, 0];
 
-  if (scrollProgress < 0.225) {
+  const materialAccepted = scrollProgress >= 0.235;
+  if (scrollProgress < 0.235) {
     // Goods list is being checked by the inspector: Forklift waits in receiving buffer
     forkliftPos = [-8.5, 0, -30.5];
     forkliftRot = [0, 0, 0];
@@ -274,12 +281,12 @@ export function JourneyCanvas({
         ? [truck1Pos[0] - Math.sin(heading) * 3.3, 0.98, truck1Pos[2] - Math.cos(heading) * 3.3]
         : [-8.5, lerp(0.98, 1.25, unload), lerp(-20.8, -23.8, unload)];
     palletRot = scrollProgress < 0.22 ? truck1Rot : [0, 0, 0];
-  } else if (scrollProgress < 0.255) {
+  } else if (scrollProgress < 0.255 && materialAccepted) {
     // AFTER goods list checked: Forklift approaches Dock 02 and slides forks under pallet
-    const t = smoothstep(0.225, 0.255, scrollProgress);
+    const t = smoothstep(0.235, 0.255, scrollProgress);
     forkliftPos = [-8.5, 0, lerp(-30.5, -25.45, t)];
     forkliftRot = [0, 0, 0];
-    forkLiftProgress = lerp(0, pickupLift, smoothstep(0.225, 0.238, scrollProgress)); // carriage elevates to match dock height (Y: 1.25)
+    forkLiftProgress = lerp(0, pickupLift, smoothstep(0.235, 0.248, scrollProgress)); // carriage elevates to match dock height (Y: 1.25)
     palletPos = [-8.5, 1.25, -23.8];
     palletRot = [0, 0, 0];
   } else if (scrollProgress < 0.275) {
@@ -363,6 +370,48 @@ export function JourneyCanvas({
     palletRot = [...forkliftRot];
   }
 
+  const putawayPhase =
+    scrollProgress < 0.345
+      ? "PENDING"
+      : scrollProgress < 0.365
+        ? "RACK ASSIGNED"
+        : scrollProgress < 0.375
+          ? "VERIFY MATERIAL QR"
+          : scrollProgress < 0.385
+            ? "VERIFY RACK QR"
+            : scrollProgress < 0.39
+              ? "CONFIRM QUANTITY"
+              : scrollProgress < 0.425
+                ? "PUTAWAY COMPLETED"
+                : "INVENTORY UPDATED";
+
+  // Illustrative material issue: the cinematic pallet leaves the assigned
+  // rack only after the putaway sequence and arrives at Assembly before the
+  // production cell starts. This is deliberately separate from API stock.
+  const issueProgress = smoothstep(0.48, 0.62, scrollProgress);
+  const materialIssuePosition: [number, number, number] = [
+    lerp(8, 0.35, issueProgress),
+    1.25,
+    lerp(-68, -158, issueProgress),
+  ];
+  const materialReady = scrollProgress >= 0.62;
+  const fgQcPassed = scrollProgress >= 0.75;
+  const dispatchAssigned = scrollProgress >= 0.76;
+  const loadingProgress = smoothstep(0.78, 0.84, scrollProgress);
+  const dispatchReady = scrollProgress >= 0.84;
+  const exitAuthorized = scrollProgress >= 0.94;
+  const exitComplete = scrollProgress >= 0.985;
+  const outboundPalletOne: [number, number, number] = [
+    lerp(-0.8, -8.5, loadingProgress),
+    1.25,
+    lerp(-160, -210, loadingProgress),
+  ];
+  const outboundPalletTwo: [number, number, number] = [
+    lerp(0.4, -6, loadingProgress),
+    1.25,
+    lerp(-160, -210, loadingProgress),
+  ];
+
   // 3. Scene 5: Robotic assembly kinematics (progress 0.64 to 0.76)
   const robotProgress = clamp((scrollProgress - 0.64) / 0.11, 0, 1);
 
@@ -373,7 +422,8 @@ export function JourneyCanvas({
   let departureHeading = 0;
   let departureDistance = 0;
   const turnRadius = 4.65;
-  const barrier2Open = smoothstep(0.92, 0.94, scrollProgress);
+  // Exit authorization is completed before the barrier begins to lift.
+  const barrier2Open = smoothstep(0.94, 0.96, scrollProgress);
   if (scrollProgress < 0.855) {
     const distance = 7.5 * smoothstep(0.84, 0.855, scrollProgress);
     truckExitPos = [-8.5, 0, -204.5 + distance];
@@ -421,41 +471,41 @@ export function JourneyCanvas({
           typeof window === "undefined" ? 1 : window.devicePixelRatio || 1,
           QUALITY[quality].dpr,
         )}
-        shadows
+        // Keep the cinematic shadow pass for HIGH/BALANCED, but remove the
+        // expensive shadow render when adaptive quality reaches PERFORMANCE.
+        // Operational meshes and their animations remain fully visible.
+        shadows={quality !== "PERFORMANCE"}
         onCreated={({ gl }) => {
           gl.toneMapping = ACESFilmicToneMapping;
-          gl.toneMappingExposure = 1;
+          gl.toneMappingExposure = 0.95;
           gl.shadowMap.type = PCFShadowMap;
         }}
       >
-        <color attach="background" args={["#e7e9e5"]} />
-        <fog attach="fog" args={["#e7e9e5", 90, 300]} />
-        <hemisphereLight args={["#fffaf0", "#7e8580", 0.6]} />
+        <color attach="background" args={["#dfe4e1"]} />
+        <fog attach="fog" args={["#dfe4e1", 78, 285]} />
+        <hemisphereLight args={["#fffaf0", "#59615f", 0.72]} />
 
         {/* ─── LIGHTING RIG (DAYLIGHT) ─── */}
-        <ambientLight intensity={0.35} color="#f4f7fa" />
+        <ambientLight intensity={0.22} color="#f7f4ed" />
         <CampusDaylight />
         <AdaptiveQuality automatic={automaticQuality} onChange={onQualityChange} />
 
         {/* Key Operational Luminaires */}
         {/* Gate Entry Perimeter Illumination */}
-        <pointLight position={[2, 6, 22]} intensity={3.5} color="#f4f7fa" distance={25} />
+        <pointLight position={[2, 6, 22]} intensity={2.4} color="#fff8ea" distance={25} />
         {/* Receiving Dock Illumination */}
-        <pointLight position={[-4, 7, -22]} intensity={3.5} color="#f4f7fa" distance={25} />
+        <pointLight position={[-4, 7, -22]} intensity={2.2} color="#fff8ea" distance={25} />
         {/* Storage Aisle Illumination */}
-        <pointLight position={[-10, 8, -50]} intensity={2.5} color="#f4f7fa" distance={35} />
         {/* Inventory High Matrix Illumination */}
-        <pointLight position={[10, 12, -120]} intensity={3.0} color="#f4f7fa" distance={45} />
+        <pointLight position={[10, 12, -120]} intensity={2.3} color="#fff8ea" distance={48} />
         {/* Robotic Workcell Illumination */}
-        <pointLight position={[-8, 6, -180]} intensity={2.5} color="#f4f7fa" distance={35} />
         {/* Outbound Dispatch Dock Illumination */}
-        <pointLight position={[-4, 7, -210]} intensity={3.5} color="#f4f7fa" distance={25} />
+        <pointLight position={[-4, 7, -210]} intensity={2.4} color="#fff8ea" distance={34} />
         {/* Exit Gate Illumination */}
-        <pointLight position={[2, 6, -248]} intensity={3.5} color="#f4f7fa" distance={25} />
 
         <Suspense fallback={null}>
           <SceneDiagnostics>
-            <ScenePerformanceDiagnostics />
+            {import.meta.env.DEV && <ScenePerformanceDiagnostics />}
             {/* Nature Environment (Hills & Trees) */}
             <group visible={cityEnvironmentVisible}>
               <CampusSurfaceFinish>
@@ -545,7 +595,7 @@ export function JourneyCanvas({
               rotation={palletRot}
               hasCargo={true}
               boxCount={8}
-              showQr={scrollProgress >= 0.22}
+              showQr={materialAccepted}
             />
 
             {/* ─── SCENE 3 & 4: STORAGE AISLES & INVENTORY MATRIX ─── */}
@@ -586,11 +636,13 @@ export function JourneyCanvas({
               {/* Stocked inventory matrix: use the same pallet/cargo language as
               the receiving aisle so the inventory stage feels like the same
               physical warehouse, not a separate abstract scene. */}
-              <PalletAndCargo
-                position={[8.0, 1.66, -64.8]}
-                rotation={[0, Math.PI / 2, 0]}
-                boxCount={6}
-              />
+              {scrollProgress >= 0.39 && (
+                <PalletAndCargo
+                  position={[8.0, 1.66, -64.8]}
+                  rotation={[0, Math.PI / 2, 0]}
+                  boxCount={6}
+                />
+              )}
               <PalletAndCargo
                 position={[8.0, 3.46, -71.2]}
                 rotation={[0, Math.PI / 2, 0]}
@@ -645,12 +697,12 @@ export function JourneyCanvas({
                   )}
                   {/* In-Scene 3D Floating Putaway Verification Tag */}
                   <Html fullscreen zIndexRange={[45, 0]} style={{ pointerEvents: "none" }}>
-                    <div className="absolute bottom-6 left-4 max-w-[calc(100vw-2rem)] bg-slate-950/90 border border-emerald-500/70 px-4 py-3 rounded shadow-xl shadow-emerald-500/20 backdrop-blur pointer-events-none text-left sm:bottom-8 sm:left-8">
+                    <div className="absolute left-4 top-[28%] max-w-[calc(100vw-2rem)] rounded border border-emerald-500/70 bg-slate-950/90 px-4 py-3 text-left shadow-xl shadow-emerald-500/20 backdrop-blur pointer-events-none sm:left-8 sm:top-[24%]">
                       <div className="flex items-center justify-center gap-1.5 font-mono text-[10px] text-emerald-400 font-bold tracking-wider">
                         <span
                           className={`w-2 h-2 rounded-full ${scrollProgress >= 0.39 ? "bg-emerald-400" : "bg-cyan-400 animate-pulse"}`}
                         />
-                        {scrollProgress >= 0.39
+                        {putawayPhase === "INVENTORY UPDATED"
                           ? "BIN AISLE-04-B1 : STORED ✓"
                           : "PUTAWAY : SLOTTING BIN..."}
                       </div>
@@ -668,10 +720,28 @@ export function JourneyCanvas({
               {/* ─── SCENE 5: PRODUCTION ASSEMBLY ─── */}
               {/* Automated Production Line Conveyor */}
             </group>
+            <group visible={isFreeOrbit || (scrollProgress >= 0.48 && scrollProgress < 0.64)}>
+              <PalletAndCargo
+                position={materialIssuePosition}
+                rotation={[0, Math.PI / 2, 0]}
+                boxCount={6}
+                showQr
+              />
+            </group>
             <group visible={productionSceneVisible}>
               <ConveyorSystem position={[0.35, 0, -165]} length={16} width={1.1} height={0.96} />
               {/* Dual-Robot Automated Assembly & Goods-Box Packaging Station */}
               <PumpAssemblyCell position={[-0.8, 0, -165]} />
+              {fgQcPassed && (
+                <Html position={[-0.8, 3.9, -165]} center distanceFactor={10} zIndexRange={[35, 0]}>
+                  <div className="pointer-events-none rounded-md border border-emerald-400/60 bg-slate-950/90 px-3 py-2 text-center font-mono text-[10px] text-emerald-300 shadow-lg">
+                    FG QC PASSED · FG QR GENERATED
+                    <div className="mt-1 text-[9px] text-slate-400">
+                      MATERIAL_READY: {materialReady ? "YES" : "PENDING"}
+                    </div>
+                  </div>
+                </Html>
+              )}
             </group>
 
             {/* ─── SCENE 6: OUTBOUND DISPATCH DOCK ─── */}
@@ -690,9 +760,38 @@ export function JourneyCanvas({
                 wheelRotation={departureDistance / 0.49}
               />
               {/* Outbound Wrapped Pallets ready for trailer */}
-              <PalletAndCargo position={[-8.5, 1.25, -210]} isWrapped={true} boxCount={8} />
-              <PalletAndCargo position={[-6.0, 1.25, -210]} isWrapped={true} boxCount={8} />
+              {dispatchReady && (
+                <>
+                  <PalletAndCargo position={[-8.5, 1.25, -210]} isWrapped boxCount={8} />
+                  <PalletAndCargo position={[-6.0, 1.25, -210]} isWrapped boxCount={8} />
+                </>
+              )}
+              {dispatchAssigned && (
+                <Html fullscreen zIndexRange={[42, 0]} style={{ pointerEvents: "none" }}>
+                  <div className="pointer-events-none absolute left-4 top-[31%] max-w-[calc(100vw-2rem)] rounded border border-cyan-400/60 bg-slate-950/90 px-3 py-2 font-mono text-[10px] text-cyan-200 shadow-lg backdrop-blur sm:left-8 sm:top-[27%]">
+                    <div className="font-bold tracking-wider">
+                      {exitComplete
+                        ? "EXIT COMPLETE · VEHICLE CLEARED"
+                        : exitAuthorized
+                          ? "EXIT AUTHORIZED · BARRIER OPENING"
+                          : dispatchReady
+                            ? "DISPATCH READY · LOADED 50 / 50 UNITS"
+                            : `LOADING · ${Math.round(loadingProgress * 50)} / 50 UNITS`}
+                    </div>
+                    <div className="mt-1 text-[9px] text-slate-400">
+                      DRIVER: RAMESH KUMAR · VEHICLE: MH-12-PQ-9988 · FG-9004 QR VERIFIED
+                    </div>
+                  </div>
+                </Html>
+              )}
             </group>
+
+            {dispatchAssigned && !dispatchReady && (
+              <group>
+                <PalletAndCargo position={outboundPalletOne} isWrapped boxCount={8} showQr />
+                <PalletAndCargo position={outboundPalletTwo} isWrapped boxCount={8} showQr />
+              </group>
+            )}
 
             {/* ─── SCENE 7: DEPARTURE GATE EXIT ─── */}
             <GateBarrier

@@ -77,7 +77,7 @@ export function CampusSurfaceFinish({ children }: { children: ReactNode }) {
           material.roughnessMap = metal ? cladding : mineral;
           material.bumpMap = metal ? cladding : mineral;
           material.bumpScale = metal ? 0.018 : 0.025;
-          material.roughness = metal ? 0.78 : 0.98;
+          material.roughness = metal ? 0.58 : 0.9;
           material.metalness = metal ? 0.25 : 0;
           if (metal && material.color && material.color.g > material.color.r * 1.4) {
             material.color.set("#243747");

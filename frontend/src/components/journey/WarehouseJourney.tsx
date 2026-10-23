@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw } from "lucide-react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { JOURNEY_STAGES, type JourneyStage } from "./data/journeyStages";
@@ -177,6 +178,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
       }),
     [stages, liveSnapshot],
   );
+  const activeStage = liveStages[activeIndex] ?? liveStages[0];
 
   const taglineIndex = useMemo(() => {
     const p = Math.max(0, (scrollProgress - 0.12) / 0.88);
@@ -353,9 +355,12 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
       overviewRef.current.val = 1;
       setOverviewProgress(1);
 
-      const journeyFraction = index === 0 ? 0 : 0.12 + (0.88 * index) / (stages.length - 1);
+      // Map the selected stage once across the post-overview journey range.
+      // The previous calculation added the overview offset twice, pushing
+      // intermediate stages too far down the scroll track.
       const targetFraction =
-        OVERVIEW_SCROLL_FRACTION + journeyFraction * (1 - OVERVIEW_SCROLL_FRACTION);
+        OVERVIEW_SCROLL_FRACTION +
+        (index / Math.max(1, stages.length - 1)) * (1 - OVERVIEW_SCROLL_FRACTION);
       const targetScroll = trigger.start + targetFraction * (trigger.end - trigger.start);
 
       window.scrollTo({
@@ -403,6 +408,16 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
     handleSelectStage(0);
   }, [handleSelectStage]);
 
+  useEffect(() => {
+    if (!isPlaying) return;
+    const timer = window.setInterval(() => {
+      const next = Math.min(stages.length - 1, activeIndex + 1);
+      if (next === activeIndex) setIsPlaying(false);
+      else handleSelectStage(next);
+    }, 4200 / playSpeed);
+    return () => window.clearInterval(timer);
+  }, [activeIndex, handleSelectStage, isPlaying, playSpeed, stages.length]);
+
   return (
     <QualityContext.Provider value={quality}>
       <SceneHtmlProvider>
@@ -433,56 +448,6 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
               <div className="size-8 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
             </div>
           )}
-          <div className="pointer-events-none absolute inset-x-3 bottom-5 z-40 flex flex-wrap items-center justify-center gap-2 text-xs sm:inset-x-6">
-            <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-xl border border-slate-500/30 bg-slate-950/90 p-2 text-white shadow-lg">
-              <button
-                type="button"
-                aria-pressed={isFreeOrbit}
-                className="rounded-lg px-3 py-2 focus-visible:outline-cyan-400"
-                onClick={handleToggleFreeOrbit}
-              >
-                {isFreeOrbit ? "Return to Guided" : "Explore campus"}
-              </button>
-              <button
-                type="button"
-                className="rounded-lg px-3 py-2"
-                onClick={() => {
-                  window.dispatchEvent(new Event("kaizenassests:replay-journey"));
-                  window.scrollTo({
-                    top: 0,
-                    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-                      ? "instant"
-                      : "smooth",
-                  });
-                }}
-              >
-                Replay
-              </button>
-              <label className="flex items-center gap-2 px-2">
-                Quality
-                <select
-                  aria-label="Rendering quality"
-                  value={qualitySelection}
-                  className="rounded bg-slate-800 p-2"
-                  onChange={(event) => {
-                    const value = event.target.value as Quality | "AUTO";
-                    setQualitySelection(value);
-                    if (value !== "AUTO") setQuality(value);
-                  }}
-                >
-                  <option value="AUTO">Auto ({quality.toLowerCase()})</option>
-                  <option value="HIGH">High</option>
-                  <option value="BALANCED">Balanced</option>
-                  <option value="PERFORMANCE">Performance</option>
-                </select>
-              </label>
-            </div>
-            <span className="sr-only" aria-live="polite">
-              {isFreeOrbit
-                ? "Explore mode: drag to orbit, pinch or scroll to zoom."
-                : "Guided mode: scroll to follow the journey."}
-            </span>
-          </div>
           <div
             hidden={scrollProgress < 0.12}
             className="pointer-events-none absolute inset-x-0 top-[17%] z-30 flex -translate-y-1/2 justify-center px-6 text-center"

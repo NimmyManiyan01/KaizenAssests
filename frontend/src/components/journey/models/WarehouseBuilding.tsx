@@ -22,6 +22,39 @@ export function WarehouseBuilding() {
         <planeGeometry args={[28, 20]} />
         <meshStandardMaterial color="#414c55" roughness={0.9} />
       </mesh>
+      {/* Raised curb edges and drainage channels give the apron a readable
+          industrial scale while keeping the vehicle lane unobstructed. */}
+      {[-18, 10].map((x) => (
+        <group key={x} position={[x, 0.12, -10]}>
+          <mesh receiveShadow>
+            <boxGeometry args={[0.28, 0.24, 20]} />
+            <meshStandardMaterial color="#69757a" roughness={0.92} metalness={0.08} />
+          </mesh>
+          <mesh position={[0, 0.13, 0]}>
+            <boxGeometry args={[0.16, 0.025, 19.5]} />
+            <meshStandardMaterial color="#263238" roughness={0.98} />
+          </mesh>
+        </group>
+      ))}
+      {/* Inbound and outbound dock wear pads / wheel stops. */}
+      {[-25, -212].map((z) => (
+        <group key={z} position={[-8.5, 0.08, z]}>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+            <planeGeometry args={[10.5, 7]} />
+            <meshStandardMaterial color="#69757b" roughness={0.98} />
+          </mesh>
+          {[-4.2, 4.2].map((x) => (
+            <mesh key={x} position={[x, 0.18, 2.5]} castShadow>
+              <boxGeometry args={[0.28, 0.36, 0.5]} />
+              <meshStandardMaterial color="#e0a62b" roughness={0.7} metalness={0.15} />
+            </mesh>
+          ))}
+          <mesh position={[0, 0.02, 3.2]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[7.5, 0.12]} />
+            <meshStandardMaterial color="#e5e7eb" roughness={0.85} />
+          </mesh>
+        </group>
+      ))}
       {[-2.65, 2.65].map((x) => (
         <group key={x}>
           <mesh position={[x, 0.012, 25]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -143,7 +176,9 @@ export function WarehouseBuilding() {
                 <cylinderGeometry args={[0.55, 0.55, 0.05, 16]} />
                 <meshStandardMaterial color="#ffffff" emissive="#e0f2fe" emissiveIntensity={3} />
               </mesh>
-              <pointLight color="#bae6fd" intensity={3} distance={24} decay={2} />
+              {/* One practical light per bay keeps the high-bay readable without
+                  creating a costly point-light grid across the whole campus. */}
+              {j === 1 && <pointLight color="#dbeafe" intensity={2.2} distance={22} decay={2} />}
             </group>
           ))}
         </group>

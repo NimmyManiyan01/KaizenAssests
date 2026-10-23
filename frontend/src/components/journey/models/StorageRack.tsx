@@ -33,12 +33,12 @@ export function StorageRack({
               {/* Front Post */}
               <mesh position={[0, 0, depth / 2]} castShadow receiveShadow>
                 <boxGeometry args={[0.1, height, 0.1]} />
-                <meshStandardMaterial color="#0284c7" metalness={0.7} roughness={0.3} />
+                <meshStandardMaterial color="#176b87" metalness={0.82} roughness={0.28} />
               </mesh>
               {/* Rear Post */}
               <mesh position={[0, 0, -depth / 2]} castShadow receiveShadow>
                 <boxGeometry args={[0.1, height, 0.1]} />
-                <meshStandardMaterial color="#0284c7" metalness={0.7} roughness={0.3} />
+                <meshStandardMaterial color="#176b87" metalness={0.82} roughness={0.28} />
               </mesh>
               {/* Diagonal Bracing Struts */}
               {Array.from({ length: tiers }).map((__, j) => (
@@ -48,7 +48,7 @@ export function StorageRack({
                   rotation={[0.45 * (j % 2 === 0 ? 1 : -1), 0, 0]}
                 >
                   <boxGeometry args={[0.04, tierHeight * 1.1, 0.04]} />
-                  <meshStandardMaterial color="#38bdf8" metalness={0.6} />
+                  <meshStandardMaterial color="#4b9bb0" metalness={0.72} roughness={0.32} />
                 </mesh>
               ))}
             </group>
@@ -67,12 +67,12 @@ export function StorageRack({
                     {/* Front Load Beam */}
                     <mesh position={[0, 0, depth / 2]} castShadow receiveShadow>
                       <boxGeometry args={[bayWidth - 0.1, 0.14, 0.08]} />
-                      <meshStandardMaterial color="#ea580c" metalness={0.6} roughness={0.3} />
+                      <meshStandardMaterial color="#d96820" metalness={0.72} roughness={0.27} />
                     </mesh>
                     {/* Rear Load Beam */}
                     <mesh position={[0, 0, -depth / 2]} castShadow receiveShadow>
                       <boxGeometry args={[bayWidth - 0.1, 0.14, 0.08]} />
-                      <meshStandardMaterial color="#ea580c" metalness={0.6} roughness={0.3} />
+                      <meshStandardMaterial color="#d96820" metalness={0.72} roughness={0.27} />
                     </mesh>
                     {/* Wire Decking Shelf Surface */}
                     <mesh position={[0, 0.06, 0]}>

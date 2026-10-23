@@ -53,6 +53,7 @@ export function JourneyCamera({
       target: new THREE.Vector3(),
       front: new THREE.Vector3(),
       frontTarget: new THREE.Vector3(0, 4.8, 10),
+      direction: new THREE.Vector3(),
     }),
     [],
   );
@@ -65,7 +66,9 @@ export function JourneyCamera({
     const p = clamp(scrollProgress, 0, 1);
 
     // Find the bounding keyframe segment
-    let idx = 0;
+    // Default to the final segment so an exact p=1 frame resolves to the
+    // final authored camera instead of falling back to stage 01.
+    let idx = keyframes.length - 2;
     for (let i = 0; i < keyframes.length - 1; i++) {
       if (p >= keyframes[i]!.p && p <= keyframes[i + 1]!.p) {
         idx = i;
@@ -119,6 +122,42 @@ export function JourneyCamera({
     );
     scratch.frontTarget.set(0, 4.8, 10);
 
+    // Blend to a whole-vehicle composition while approaching the dock.
+    const dockWeight = smoothstep(0.18, 0.24, p) * (1 - smoothstep(0.28, 0.34, p));
+    desiredPos.lerp(scratch.front.set(5, 6, -4), dockWeight);
+    desiredTarget.lerp(scratch.frontTarget.set(-8.5, 2, -17), dockWeight);
+
+    // Observe departure from outside the roof footprint, looking back at the gate.
+    const exitWeight = smoothstep(0.93, 1, p);
+    // Keep the final truck and barrier in the same readable frame. The former
+    // roof-line viewpoint looked back through the building and hid the exit.
+    desiredPos.lerp(scratch.front.set(13, 7.5, -272), exitWeight);
+    desiredTarget.lerp(scratch.frontTarget.set(0.8, 2.2, -252), exitWeight);
+    scratch.frontTarget.set(0, 4.8, 10);
+
+    // Keep authored targets while preserving horizontal subject space in portrait.
+    const aspect = size.width / Math.max(1, size.height);
+    desiredPos
+      .sub(desiredTarget)
+      // Portrait needs a little more breathing room, but the previous 1.8x
+      // expansion made the operational subject look distant and left large
+      // areas of empty floor in the middle stages.
+      .multiplyScalar(clamp(1.08 / aspect, 1, 1.45))
+      .add(desiredTarget);
+
+    if (aspect < 1) {
+      // Keep the portrait dock viewpoint inside the building frontage.
+      desiredPos.lerp(scratch.front.set(18, 6.5, -22), dockWeight);
+    }
+
+    if (camera instanceof THREE.PerspectiveCamera) {
+      const targetFov = aspect < 1 ? 54 : 48;
+      if (Math.abs(camera.fov - targetFov) > 0.1) {
+        camera.fov = lerp(camera.fov, targetFov, 1 - Math.exp(-8 * Math.min(delta, 0.1)));
+        camera.updateProjectionMatrix();
+      }
+    }
+
     const pointerSmoothing = 1 - Math.exp(-12 * Math.min(delta, 0.1));
     pointer.current.x += (mouseOffset.x - pointer.current.x) * pointerSmoothing;
     pointer.current.y += (mouseOffset.y - pointer.current.y) * pointerSmoothing;
@@ -130,9 +169,8 @@ export function JourneyCamera({
     const smoothing = 1 - Math.exp(-12 * Math.min(delta, 0.1));
     if (!initialized.current) {
       if (resumeFromCurrent) {
-        const dir = new THREE.Vector3();
-        camera.getWorldDirection(dir);
-        currentLookAt.current.copy(camera.position).add(dir.multiplyScalar(20));
+        camera.getWorldDirection(scratch.direction);
+        currentLookAt.current.copy(camera.position).add(scratch.direction.multiplyScalar(20));
       } else {
         camera.position.copy(desiredPos);
         currentLookAt.current.copy(desiredTarget);

@@ -22,7 +22,7 @@ export function CampusDaylight() {
     const previous = scene.environment;
     const intensity = scene.environmentIntensity;
     scene.environment = reflection.texture;
-    scene.environmentIntensity = 0.25;
+    scene.environmentIntensity = 0.34;
     room.dispose();
     generator.dispose();
     return () => {
@@ -42,8 +42,8 @@ export function CampusDaylight() {
   return (
     <directionalLight
       ref={sun}
-      intensity={2.2}
-      color="#fff4df"
+      intensity={1.7}
+      color="#fff1d6"
       castShadow
       shadow-mapSize={[resolution, resolution]}
       shadow-camera-near={1}
@@ -52,8 +52,8 @@ export function CampusDaylight() {
       shadow-camera-right={36}
       shadow-camera-top={36}
       shadow-camera-bottom={-36}
-      shadow-normalBias={0.035}
-      shadow-bias={-0.0002}
+      shadow-normalBias={0.045}
+      shadow-bias={0.00015}
     />
   );
 }
