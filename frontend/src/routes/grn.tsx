@@ -1,9 +1,6 @@
-import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel } from "@/components/ui/alert-dialog";
-import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { loadGrnQrRecord } from "@/lib/grn-qr-record";
 import { DamagePhoto } from "@/components/wms/damage-photo";
 import { isValidPersonName, isValidVehicleNumber } from "@/lib/input-validation";
 import {
@@ -136,7 +133,6 @@ type UploadedDocument = {
 };
 
 type GrnHeaderState = {
-  warehouse_id?: string;
   po_number: string;
   supplier_name: string;
   supplier_company_name: string;
@@ -193,6 +189,12 @@ const PAGES = [
 ];
 
 const GRN_LOCAL_DRAFT_KEY = "grn_wizard_local_draft";
+
+function generateGrnNumber(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  return `GRN-${year}-001`;
+}
 
 function formatCardDate(dateVal?: string | null): string {
   if (!dateVal) return new Date().toISOString().slice(0, 10);
@@ -297,6 +299,7 @@ function GrnPageWorkflow() {
   const [maxCompletedStep, setMaxCompletedStep] = useState<number>(1);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [showExitConfirmModal, setShowExitConfirmModal] = useState(false);
+  const [showNewGrnModal, setShowNewGrnModal] = useState(search.tab === "wizard");
 
   useEffect(() => {
     if (search.tab) setActiveTab(search.tab as any);
@@ -321,8 +324,6 @@ function GrnPageWorkflow() {
 
   // Records List State
   const [grnRecords, setGrnRecords] = useState<any[]>([]);
-  const [deleteGrnTarget, setDeleteGrnTarget] = useState<any | null>(null);
-  const [deletingGrn, setDeletingGrn] = useState(false);
   const [totalRecordCount, setTotalRecordCount] = useState<number>(0);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -604,17 +605,27 @@ function GrnPageWorkflow() {
   // Fetch All Docks & Allocations Created in Warehouse Module
   const loadWarehouseDocks = useCallback(async () => {
     try {
-      // The dock master response already includes its active allocation.
-      // Avoid a second legacy allocations endpoint that can fail on older
-      // databases and leave the GRN page without the assigned gate pass.
-      const docksRes = await api.getDocks();
+      const [docksRes, allocsRes] = await Promise.all([
+        api.getDocks().catch(() => []),
+        api.getDockAllocationRequests().catch(() => []),
+      ]);
 
       const docksList = Array.isArray(docksRes) ? docksRes : [];
+      const allocsList = Array.isArray(allocsRes) ? allocsRes : [];
 
-      if (docksList.length > 0) {
+      if (docksList.length > 0 || allocsList.length > 0) {
         const enrichedDocks = docksList.map((d: any) => {
           const num = d.dock_number || d.dock_code || d.name || `DOCK-${d.id}`;
-          const currentAlloc = d.current_allocation || null;
+          const currentAlloc =
+            d.current_allocation ||
+            allocsList.find(
+              (a: any) =>
+                (a.assigned_dock_id &&
+                  (a.assigned_dock_id === d.id || String(a.assigned_dock_id) === String(d.id))) ||
+                (a.assigned_dock_code && a.assigned_dock_code === num) ||
+                (a.assigned_dock?.dock_number && a.assigned_dock?.dock_number === num) ||
+                (a.assigned_dock?.dock_code && a.assigned_dock?.dock_code === num),
+            );
 
           return {
             id: d.id,
@@ -636,8 +647,7 @@ function GrnPageWorkflow() {
         // Auto-detect dock allocated to current shipment or gate pass
         setHeader((prev) => {
           if (prev.receiving_dock) return prev;
-          const activeAllocations = enrichedDocks.filter((d: any) => d.current_allocation);
-          const matched = activeAllocations.find((d: any) => {
+          const matched = enrichedDocks.find((d: any) => {
             const alloc = d.current_allocation;
             if (!alloc) return false;
             return (
@@ -655,18 +665,15 @@ function GrnPageWorkflow() {
                 alloc.vendor_reference &&
                 alloc.vendor_reference.toLowerCase().includes(prev.supplier_name.toLowerCase()))
             );
-          }) || (activeAllocations.length === 1 ? activeAllocations[0] : undefined);
+          });
           if (matched) {
             return { ...prev, receiving_dock: matched.dock_number };
           }
           return prev;
         });
-        return enrichedDocks;
       }
-      return [];
     } catch (err) {
       console.warn("Failed to load warehouse dock allocations:", err);
-      return [];
     }
   }, []);
 
@@ -694,8 +701,7 @@ function GrnPageWorkflow() {
       };
     }
 
-    const activeAllocations = dockOptions.filter((d: any) => d.current_allocation);
-    const matched = activeAllocations.find((d: any) => {
+    const matched = dockOptions.find((d: any) => {
       const alloc = d.current_allocation;
       if (!alloc) return false;
       const vMatch =
@@ -711,12 +717,8 @@ function GrnPageWorkflow() {
         header.po_number &&
         ((alloc.material_reference && alloc.material_reference.includes(header.po_number)) ||
           (alloc.po_number && alloc.po_number === header.po_number));
-      const supplierMatch =
-        header.supplier_name &&
-        alloc.vendor_reference &&
-        alloc.vendor_reference.trim().toLowerCase().includes(header.supplier_name.trim().toLowerCase());
-      return Boolean(vMatch || gMatch || pMatch || supplierMatch);
-    }) || (activeAllocations.length === 1 ? activeAllocations[0] : undefined);
+      return Boolean(vMatch || gMatch || pMatch);
+    });
 
     if (matched) {
       return {
@@ -921,8 +923,6 @@ function GrnPageWorkflow() {
       }
     }
     // Purchase orders are optional in the ASN-based receiving flow. Do not
-    // call the unavailable PO endpoint during GRN page initialization.
-    if (false) void loadPos();
   }, []);
 
   // Persistent Rehydration on Page Refresh / Navigation
@@ -1044,27 +1044,6 @@ function GrnPageWorkflow() {
         ctx.destinationWarehouse ||
         "";
 
-      // Refresh allocation data when resolving an ASN. The ASN response can
-      // predate dock assignment, and some older gate records lack their ASN FK.
-      const latestDocks = await loadWarehouseDocks();
-      const availableDocks = latestDocks.length ? latestDocks : dockOptions;
-      const activeAllocations = availableDocks.filter((dock: any) => dock.current_allocation);
-      const matchedAllocationDock = activeAllocations.find((dock: any) => {
-        const allocation = dock.current_allocation;
-        const norm = (value: unknown) => String(value || "").trim().toUpperCase();
-        const allocationMaterial = norm(allocation.material_reference);
-        return Boolean(
-          (vehicleNum && norm(allocation.vehicle_number) === norm(vehicleNum)) ||
-          (gateNum && norm(allocation.existing_gate_pass_id) === norm(gateNum)) ||
-          (resolvedPoNumber && allocationMaterial.includes(norm(resolvedPoNumber))) ||
-          (numToFetch && allocationMaterial.includes(norm(numToFetch))) ||
-          (supplierName && norm(allocation.vendor_reference).includes(norm(supplierName)))
-        );
-      }) || (activeAllocations.length === 1 ? activeAllocations[0] : undefined);
-      const allocationGateNumber =
-        matchedAllocationDock?.current_allocation?.existing_gate_pass_id || "";
-      const resolvedGateEntryNumber = gateNum || allocationGateNumber;
-
       // Auto-detect allocated dock from warehouse allocation, gate entry, or PO context
       let prefilledDock =
         resolvedContext.prefilled_dock_number ||
@@ -1072,10 +1051,32 @@ function GrnPageWorkflow() {
         resolvedContext.gate_entry?.dock_number ||
         resolvedContext.gate_entry?.dockNumber ||
         resolvedContext.assigned_dock_number ||
-        matchedAllocationDock?.dock_number ||
         "";
+      if (!prefilledDock && dockOptions.length > 0) {
+        const matchedDock = dockOptions.find((d: any) => {
+          const alloc = d.current_allocation;
+          if (!alloc) return false;
+          return (
+            (vehicleNum &&
+              alloc.vehicle_number &&
+              alloc.vehicle_number.toUpperCase() === vehicleNum.toUpperCase()) ||
+            (gateNum &&
+              alloc.existing_gate_pass_id &&
+              alloc.existing_gate_pass_id.toUpperCase() === gateNum.toUpperCase()) ||
+            (numToFetch &&
+              alloc.material_reference &&
+              alloc.material_reference.includes(numToFetch)) ||
+            (supplierName &&
+              alloc.vendor_reference &&
+              alloc.vendor_reference.toLowerCase().includes(supplierName.toLowerCase()))
+          );
+        });
+        if (matchedDock) {
+          prefilledDock = matchedDock.dock_number;
+        }
+      }
       const generatedGrnNum =
-        resolvedContext.grn_number || resolvedContext.grnNumber || "";
+        resolvedContext.grn_number || resolvedContext.grnNumber || generateGrnNumber();
 
       setHeader({
         receipt_type: resolvedContext.receipt_type || resolvedContext.receiptType || "",
@@ -1084,8 +1085,7 @@ function GrnPageWorkflow() {
         supplier_company_name: supplierComp,
         supplier_email: supplierEmail,
         asn_number: asnNum,
-        gate_entry_number: resolvedGateEntryNumber,
-        warehouse_id: resolvedContext.warehouse_id || resolvedContext.warehouseId || "",
+        gate_entry_number: gateNum,
         warehouse_name: warehouseName,
         grn_number: generatedGrnNum,
         vehicle_number: vehicleNum,
@@ -1183,31 +1183,6 @@ function GrnPageWorkflow() {
         setMaterialBatches(initBatches);
       }
 
-      // Persist the draft now so this screen displays an assigned number,
-      // not an unreserved preview. Save & Continue reuses this same draft.
-      if (!resolvedGrnId && prefilledDock) {
-        const draft = await api.createGrnHeader({
-          receipt_type: "ASN_RECEIPT",
-          asn_number: asnNum,
-          gate_entry_number: resolvedGateEntryNumber || undefined,
-          dock_number: prefilledDock,
-          supplier_name: supplierName,
-          supplier_company_name: supplierComp,
-          warehouse_id: resolvedContext.warehouse_id || resolvedContext.warehouseId || undefined,
-          warehouse_name: warehouseName,
-          vehicle_number: vehicleNum,
-          driver_name: driverName,
-        });
-        if (requestId !== contextRequest.current) return;
-        const draftId = draft.grn_id || draft.grnId;
-        if (!draftId || !(draft.grn_number || draft.grnNumber)) {
-          throw new Error("The backend did not assign a GRN number. Fetch the ASN details again.");
-        }
-        setGrnId(String(draftId));
-        localStorage.setItem("active_grn_id", String(draftId));
-        setHeader((previous) => ({ ...previous, grn_number: draft.grn_number || draft.grnNumber }));
-        setSaveStatus("saved");
-      }
       toast.success(`${asnNum} details fetched successfully`);
     } catch (err: any) {
       if (requestId !== contextRequest.current) return;
@@ -1225,9 +1200,7 @@ function GrnPageWorkflow() {
   async function handleReceiptTypeChange(newType: "PO_RECEIPT" | "UNEXPECTED_DELIVERY") {
     if (newType === header.receipt_type) return;
     if (newType === "UNEXPECTED_DELIVERY") {
-      const generatedGrn =
-        header.grn_number ||
-        "";
+      const generatedGrn = header.grn_number || generateGrnNumber();
       setHeader((prev) => ({
         ...prev,
         receipt_type: "UNEXPECTED_DELIVERY",
@@ -1363,7 +1336,7 @@ function GrnPageWorkflow() {
     );
   }
 
-  async function loadExistingGrnSession(targetGrnId: string) {
+  async function loadExistingGrnSession(targetGrnId: string, resumePage?: number) {
     if (
       !targetGrnId ||
       targetGrnId === "undefined" ||
@@ -1401,7 +1374,6 @@ function GrnPageWorkflow() {
           detail.asn?.asnNumber ||
           "",
         gate_entry_number: detail.gate_entry_number || "",
-        warehouse_id: detail.warehouse_id || "",
         warehouse_name: detail.warehouse_name || "",
         grn_number: detail.grn_number || "",
         vehicle_number: detail.vehicle_number || "",
@@ -1482,8 +1454,7 @@ function GrnPageWorkflow() {
           const rowKey = grnMaterialKey(itemTarget, idx);
           const persistedQualityResult = String(l.quality_result || "PENDING").toUpperCase();
           const hasPersistedInspection =
-            l.quality_approved_quantity !== null &&
-            l.quality_approved_quantity !== undefined ||
+            (l.quality_approved_quantity !== null && l.quality_approved_quantity !== undefined) ||
             !["", "PENDING", "UNINSPECTED"].includes(persistedQualityResult);
           if (hasPersistedInspection) {
             qApp[rowKey] = Number(l.quality_approved_quantity ?? l.good_quantity ?? 0);
@@ -1564,7 +1535,7 @@ function GrnPageWorkflow() {
       }
 
       const effectiveMaxStep = Math.max(detail.max_completed_step || 0, computedStep - 1);
-      const targetStep = (search as any).page || detail.current_step || Math.min(computedStep, 6);
+      const targetStep = resumePage ?? ((search as any).page || detail.current_step || Math.min(computedStep, 6));
 
       setMaxCompletedStep(effectiveMaxStep);
       setCurrentPage(targetStep);
@@ -1589,35 +1560,33 @@ function GrnPageWorkflow() {
     }
   }
 
-  function handleDeleteGrn(record: any) {
-    setDeleteGrnTarget(record);
-  }
-
-  async function confirmDeleteGrn() {
-    if (!deleteGrnTarget || deletingGrn) return;
-    const record = deleteGrnTarget;
+  async function handleDeleteGrn(record: any) {
     const grnId = String(record?.grn_id || record?.id || "").trim();
     if (!grnId) {
       toast.error("This GRN has no valid database ID.");
       return;
     }
     const label = record?.grn_number || grnId;
-    setDeletingGrn(true);
+    if (
+      !window.confirm(
+        `Delete GRN ${label}? This will remove its receiving data, lines, batches, and documents.`,
+      )
+    )
+      return;
     try {
       await api.deleteGrn(grnId);
-      setDeleteGrnTarget(null);
       toast.success(`GRN ${label} deleted.`);
       await loadRecords();
     } catch (error) {
       toast.error("Unable to delete GRN", {
         description: error instanceof Error ? error.message : "The backend rejected the deletion.",
       });
-    } finally {
-      setDeletingGrn(false);
     }
   }
 
-  function startNewGrn(openWizard = true) {
+  function startNewGrn() {
+    setActiveTab("wizard");
+    setShowNewGrnModal(true);
     setGrnId(null);
     localStorage.removeItem("active_grn_id");
     localStorage.removeItem(GRN_LOCAL_DRAFT_KEY);
@@ -1645,8 +1614,8 @@ function GrnPageWorkflow() {
       invoice_number: "",
       received_by: loggedInUserName,
     });
-    if (openWizard) navigate({ to: "/grn", search: { tab: "wizard", page: 1 } });
-    if (openWizard && availablePos.length > 0) {
+    void navigate({ to: "/grn", search: { tab: "wizard", page: 1 } });
+    if (availablePos.length > 0) {
       const first = availablePos[0];
       const targetPo = first.poNumber || first.po_number;
       if (targetPo) {
@@ -1673,34 +1642,12 @@ function GrnPageWorkflow() {
   }
 
   async function saveGrnHeader(): Promise<string> {
-    // Refresh at save time: the GRN page may have been left open while
-    // Warehouse allocated the single receiving dock in another tab.
-    const latestDocks = await loadWarehouseDocks();
-    const activeAllocations = latestDocks.filter((dock: any) => dock.current_allocation);
-    const matchingAllocation = activeAllocations.find((dock: any) => {
-      const allocation = dock.current_allocation;
-      return Boolean(
-        (header.vehicle_number && allocation.vehicle_number &&
-          allocation.vehicle_number.trim().toUpperCase() === header.vehicle_number.trim().toUpperCase()) ||
-        (header.gate_entry_number && allocation.existing_gate_pass_id &&
-          allocation.existing_gate_pass_id.trim().toUpperCase() === header.gate_entry_number.trim().toUpperCase()) ||
-        (header.po_number && allocation.material_reference &&
-          allocation.material_reference.trim().toUpperCase().includes(header.po_number.trim().toUpperCase())) ||
-        (header.supplier_name && allocation.vendor_reference &&
-          allocation.vendor_reference.trim().toLowerCase().includes(header.supplier_name.trim().toLowerCase()))
-      );
-    }) || (activeAllocations.length === 1 ? activeAllocations[0] : undefined);
     const receivingDock =
-      (grnId ? header.receiving_dock.trim() : "") ||
-      matchingAllocation?.dock_number ||
       header.receiving_dock.trim() ||
       allocatedDockInfo?.dock_number ||
-      dockOptions.find((dock: any) => String(dock.status || "").toUpperCase() === "AVAILABLE")?.dock_number ||
+      dockOptions.find((dock: any) => String(dock.status || "").toUpperCase() === "AVAILABLE")
+        ?.dock_number ||
       dockOptions[0]?.dock_number ||
-      "";
-    const receivingGateEntryNumber =
-      header.gate_entry_number.trim() ||
-      matchingAllocation?.current_allocation?.existing_gate_pass_id ||
       "";
     if (!receivingDock) {
       throw new Error(
@@ -1720,7 +1667,6 @@ function GrnPageWorkflow() {
       grn_id: grnId || undefined,
       receipt_type: "ASN_RECEIPT",
       asn_number: header.asn_number.trim(),
-      gate_entry_number: receivingGateEntryNumber || undefined,
       dock_number: receivingDock,
       invoice_number: header.invoice_number,
       supplier_name:
@@ -1731,10 +1677,6 @@ function GrnPageWorkflow() {
         header.receipt_type === "PO_RECEIPT"
           ? header.supplier_company_name
           : header.supplier_company_name || header.supplier_name || "Unknown / Unexpected Supplier",
-      warehouse_id:
-        header.warehouse_id ||
-        dockOptions.find((dock: any) => dock.dock_number === receivingDock)?.warehouse_id ||
-        undefined,
       warehouse_name: header.warehouse_name,
       vehicle_number: header.vehicle_number,
       driver_name: header.driver_name,
@@ -1923,8 +1865,7 @@ function GrnPageWorkflow() {
 
       const updated = materials.map((m, idx) => {
         const savedLine = lines[idx] || lines.find((line) => line.item_code === m.item_code);
-        const grnLineId =
-          savedLine?.grn_line_id || m.grn_line_id || `line-${idx}`;
+        const grnLineId = savedLine?.grn_line_id || m.grn_line_id || `line-${idx}`;
         const rec = m.received_quantity !== undefined ? m.received_quantity : m.good_quantity;
         const currentTotal = (m.good_quantity || 0) + (m.damaged_quantity || 0);
         const good = currentTotal === rec ? m.good_quantity : rec;
@@ -2186,8 +2127,7 @@ function GrnPageWorkflow() {
             grn_line_id: m.grn_line_id,
             item_code: m.item_code,
             accepted_quantity: qualityApproved[grnMaterialKey(m, idx)] ?? 0,
-            quality_approved_quantity:
-              qualityApproved[grnMaterialKey(m, idx)] ?? 0,
+            quality_approved_quantity: qualityApproved[grnMaterialKey(m, idx)] ?? 0,
             good_quantity: qualityApproved[grnMaterialKey(m, idx)] ?? 0,
             rejected_quantity: m.rejected_quantity || 0,
             damaged_quantity: m.damaged_quantity || 0,
@@ -2226,7 +2166,7 @@ function GrnPageWorkflow() {
     const isUuid = (value: string | undefined) =>
       Boolean(
         value &&
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value),
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value),
       );
     if (!allBatchesValid) {
       toast.error("Total batch quantity must match the approved good quantity for every material.");
@@ -2236,7 +2176,7 @@ function GrnPageWorkflow() {
     setSaveStatus("saving");
     try {
       let batchMaterials = materials;
-      if (grnId) {
+      if (grnId && materials.some((m) => !isUuid(m.grn_line_id))) {
         const detail = await api.getGrnDetail(grnId);
         const persistedLines = Array.isArray(detail?.lines) ? detail.lines : [];
         batchMaterials = materials.map((material) => {
@@ -2671,13 +2611,47 @@ function GrnPageWorkflow() {
 
   // Display the same batch QR labels from the GRN History record.
   async function viewGrnRecordBatchLabels(record: any) {
-    try {
-      record = await loadGrnQrRecord(record, (id) => api.getGrnDetail(id));
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not load saved GRN batches.");
-      return;
+    let linesToRender =
+      record.lines && record.lines.length > 0
+        ? record.lines
+        : record.materials && record.materials.length > 0
+          ? record.materials
+          : [];
+    const lookupIds = Array.from(
+      new Set(
+        [record.grn_id, record.id, record.grn_number, record.grnNumber].filter(Boolean).map(String),
+      ),
+    );
+    const hasBatchData = linesToRender.some(
+      (line: any) => Array.isArray(line?.batches) && line.batches.length > 0,
+    );
+    if ((!linesToRender.length || !hasBatchData) && lookupIds.length > 0) {
+      for (const lookupId of lookupIds) {
+        try {
+          const fullDetail = await api.getGrnDetail(lookupId);
+          if (fullDetail && (fullDetail.lines || fullDetail.materials)) {
+            const detailLines = fullDetail.lines || fullDetail.materials;
+            // Prefer the persisted detail because it contains the exact batch
+            // allocations created on the Batch-wise QR Code Generation page.
+            if (
+              detailLines.some(
+                (line: any) => Array.isArray(line?.batches) && line.batches.length > 0,
+              )
+            ) {
+              linesToRender = detailLines;
+              record = { ...record, ...fullDetail };
+              break;
+            }
+            if (!linesToRender.length) {
+              linesToRender = detailLines;
+              record = { ...record, ...fullDetail };
+            }
+          }
+        } catch {
+          // Try the next identifier (UUID, database id, or GRN number).
+        }
+      }
     }
-    const linesToRender = record.lines;
 
     const grnNum = record.grn_number || header.grn_number || "";
     const poNum = record.po_number || header.po_number || "";
@@ -2740,7 +2714,6 @@ function GrnPageWorkflow() {
               : (m.good_quantity ?? m.received_quantity ?? 0);
         const qrId = `QR-${grnNum}-${itemCode}-${batchNum}`;
         const payload = [
-          `GRN Number: ${grnNum}`,
           `Material Code: ${itemCode}`,
           `Material Name: ${matName}`,
           `Batch: ${batchNum}`,
@@ -3463,13 +3436,12 @@ function GrnPageWorkflow() {
               const savedBatches = Array.isArray(line.batches) ? line.batches : [];
               if (savedBatches.length > 0) {
                 next[key] = savedBatches.map((batch: any) => ({
-                  batch_id: batch.batch_id || batch.id,
                   batch_number: batch.batch_number,
                   batch_quantity: Number(batch.batch_quantity || 0),
                 }));
               }
             });
-            return JSON.stringify(next) === JSON.stringify(previous) ? previous : next;
+            return next;
           });
         })
         .catch(() => undefined);
@@ -3485,7 +3457,8 @@ function GrnPageWorkflow() {
       const appQty = Number(
         qualityApproved[rowKey] !== undefined ? qualityApproved[rowKey] : (m.good_quantity ?? 0),
       );
-      const existing = effectiveBatches[rowKey] || effectiveBatches[m.item_code] || effectiveBatches[materialCode];
+      const existing =
+        effectiveBatches[rowKey] || effectiveBatches[m.item_code] || effectiveBatches[materialCode];
       if (!existing || existing.length === 0) {
         effectiveBatches[rowKey] = [
           { batch_number: `BATCH-${materialCode}-001`, batch_quantity: appQty },
@@ -3670,16 +3643,6 @@ function GrnPageWorkflow() {
       subtitle="Manage goods receipts, quality checks, and GRN records"
       actions={
         <>
-          <Button variant="outline" className="rounded-xl"
-            disabled={busyAction || loadingRecords || loadingContext}
-            onClick={async () => {
-              await Promise.all([loadRecords(), loadWarehouseDocks()]);
-              if (activeTab === "wizard" && grnId) await loadExistingGrnSession(grnId);
-              else if (activeTab === "wizard" && header.asn_number.trim()) await fetchPoContext(header.asn_number);
-            }}>
-            <RefreshCw className={`size-4 ${loadingRecords || loadingContext ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
           {activeTab === "dashboard" && (
             <>
               <Button
@@ -3694,19 +3657,16 @@ function GrnPageWorkflow() {
                 <ClipboardList className="size-4" />{" "}
                 All GRN Records
               </Button>
-              <Button
-                className="rounded-xl shadow-glow bg-primary text-primary-foreground font-bold"
-                onClick={() => {
-                  startNewGrn();
-                  setActiveTab("wizard");
-                  setCurrentPage(1);
-                  navigate({ to: "/grn", search: { tab: "wizard", page: 1 } });
-                }}
-              >
-                <Plus className="size-4" /> New GRN Entry
-              </Button>
             </>
           )}
+          <Button
+            className="rounded-xl shadow-glow bg-primary text-primary-foreground font-bold"
+            onClick={startNewGrn}
+            type="button"
+            data-testid="new-grn-entry"
+          >
+            <Plus className="size-4" /> New GRN Entry
+          </Button>
         </>
       }
     >
@@ -4052,7 +4012,7 @@ function GrnPageWorkflow() {
                   onClick={() => exportGrnRecordsCsv()}
                 >
                   <Download className="mr-1.5 size-3.5 text-primary" /> Export CSV
-                </Button><InformationTooltip help="reports" />
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -4178,6 +4138,19 @@ function GrnPageWorkflow() {
                           {/* REAL ACTION BUTTONS PER RECORD */}
                           <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                             <div className="flex items-center gap-2">
+                              {String(status).toUpperCase().replace(/ /g, "_") === "PARTIALLY_COMPLETED" && (
+                                <Button size="sm" className="rounded-xl text-xs font-semibold"
+                                  disabled={loadingContext || busyAction}
+                                  onClick={() => {
+                                    const id = String(r.grn_id || r.id || "");
+                                    if (!id) { toast.error("This GRN has no saved identifier."); return; }
+                                    setGrnId(id);
+                                    setActiveTab("wizard");
+                                    void loadExistingGrnSession(id, 2);
+                                  }}>
+                                  <ArrowRight className="mr-1.5 size-3.5" /> Complete GRN
+                                </Button>
+                              )}
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -4237,2198 +4210,2243 @@ function GrnPageWorkflow() {
 
       {/* ✨ 6-PAGE WIZARD WORKFLOW */}
       {activeTab === "wizard" && (
-        <div className="mx-auto w-full max-w-7xl space-y-4 px-1 sm:px-2">
-          {/* STEP NAVIGATION HEADER */}
-          <Card className="rounded-2xl p-4 overflow-x-auto shadow-sm border border-border/80">
-            <div className="flex items-center justify-between min-w-[720px] gap-2">
-              {PAGES.map((pg) => {
-                const displayMaxCompletedStep = Math.max(maxCompletedStep, currentPage - 1);
-                const isCurrent = currentPage === pg.id;
-                const isCompleted = displayMaxCompletedStep >= pg.id && !isCurrent;
-                const isAccessible = pg.id <= displayMaxCompletedStep + 1;
-                const StepIcon = pg.icon;
+        <Dialog open={showNewGrnModal} onOpenChange={setShowNewGrnModal}>
+          <DialogContent className="w-[96vw] max-w-[96vw] max-h-[94vh] overflow-y-auto gap-0 rounded-2xl p-0">
+            <DialogHeader className="sr-only">
+              <DialogTitle>New GRN Entry</DialogTitle>
+              <DialogDescription>Enter goods receipt details.</DialogDescription>
+            </DialogHeader>
+            <div className="mx-auto w-full max-w-7xl space-y-0 px-0">
+              {/* STEP NAVIGATION HEADER */}
+              <Card className="rounded-2xl p-4 overflow-x-auto shadow-sm border border-border/80">
+                <div className="flex items-center justify-between min-w-[720px] gap-2">
+                  {PAGES.map((pg) => {
+                    const displayMaxCompletedStep = Math.max(maxCompletedStep, currentPage - 1);
+                    const isCurrent = currentPage === pg.id;
+                    const isCompleted = displayMaxCompletedStep >= pg.id && !isCurrent;
+                    const isAccessible = pg.id <= displayMaxCompletedStep + 1;
+                    const StepIcon = pg.icon;
 
-                return (
-                  <div
-                    key={pg.id}
-                    role="button"
-                    tabIndex={0}
-                    aria-current={isCurrent ? "step" : undefined}
-                    aria-label={`Open ${pg.title}`}
-                    onClick={() => handleStepClick(pg.id)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        handleStepClick(pg.id);
-                      }
-                    }}
-                    className={`flex-1 flex flex-col items-center text-center transition-all p-2 rounded-xl select-none cursor-pointer hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                      isCurrent
-                        ? "bg-primary/5 font-bold shadow-xs"
-                        : isAccessible
-                          ? "opacity-90"
-                          : "opacity-40"
-                    }`}
-                  >
-                    <div
-                      className={`flex size-8 items-center justify-center rounded-full text-xs font-bold transition-all ${
-                        isCurrent
-                          ? "bg-primary text-primary-foreground shadow-md ring-4 ring-primary/20"
-                          : isCompleted
-                            ? "bg-emerald-600 text-white shadow-xs"
+                    return (
+                      <div
+                        key={pg.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-current={isCurrent ? "step" : undefined}
+                        aria-label={`Open ${pg.title}`}
+                        onClick={() => handleStepClick(pg.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            handleStepClick(pg.id);
+                          }
+                        }}
+                        className={`flex-1 flex flex-col items-center text-center transition-all p-2 rounded-xl select-none cursor-pointer hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                          isCurrent
+                            ? "bg-primary/5 font-bold shadow-xs"
                             : isAccessible
-                              ? "bg-muted text-foreground border border-border"
-                              : "bg-muted/60 text-muted-foreground"
-                      }`}
-                    >
-                      {isCompleted ? (
-                        <CheckCircle2 className="size-4" />
-                      ) : (
-                        <StepIcon className="size-4" />
-                      )}
-                    </div>
-                    <span className="mt-1.5 text-xs text-foreground line-clamp-1">{pg.title}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
-
-          {/* PAGE 1 – GRN HEADER DETAILS */}
-          {currentPage === 1 && (
-            <div className="space-y-4">
-              {/* A. ASN REFERENCE */}
-              <Card className="rounded-xl p-4 space-y-4 shadow-sm">
-                <div className="border-b pb-3">
-                  <h3 className="font-bold text-foreground text-sm uppercase tracking-wider">
-                    Advance Shipping Notice (ASN)
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Enter an ASN number to automatically populate supplier, gate, vehicle, and
-                    material details.
-                  </p>
-                </div>
-
-                {/* PO NUMBER ENTRY & SIDE FETCH DETAILS BUTTON */}
-                <div className="flex flex-wrap items-end gap-3 max-w-xl">
-                  <div className="flex-1 min-w-[260px]">
-                    <label className="text-xs font-bold text-foreground mb-1 flex items-center justify-between">
-                      <span>ASN Number *</span>
-                      {loadingContext && (
-                        <span className="text-[10px] font-bold text-primary flex items-center gap-1 animate-pulse">
-                          <Loader2 className="size-3 animate-spin" /> Fetching ASN Details...
+                              ? "opacity-90"
+                              : "opacity-40"
+                        }`}
+                      >
+                        <div
+                          className={`flex size-8 items-center justify-center rounded-full text-xs font-bold transition-all ${
+                            isCurrent
+                              ? "bg-primary text-primary-foreground shadow-md ring-4 ring-primary/20"
+                              : isCompleted
+                                ? "bg-emerald-600 text-white shadow-xs"
+                                : isAccessible
+                                  ? "bg-muted text-foreground border border-border"
+                                  : "bg-muted/60 text-muted-foreground"
+                          }`}
+                        >
+                          {isCompleted ? (
+                            <CheckCircle2 className="size-4" />
+                          ) : (
+                            <StepIcon className="size-4" />
+                          )}
+                        </div>
+                        <span className="mt-1.5 text-xs text-foreground line-clamp-1">
+                          {pg.title}
                         </span>
-                      )}
-                    </label>
-                    <Input
-                      placeholder="Enter ASN (e.g. ASN-2026-001)"
-                      value={header.asn_number}
-                      disabled={busyAction || loadingContext}
-                      onChange={(e) => changePoNumber(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          void fetchPoContext();
-                        }
-                      }}
-                      className="rounded-xl font-mono text-base font-bold text-primary"
-                    />
-                  </div>
-                  <Button
-                    type="button"
-                    onClick={() => void fetchPoContext()}
-                    disabled={loadingContext || busyAction || !header.asn_number.trim()}
-                    className="rounded-xl font-semibold shadow-xs h-10 px-5"
-                  >
-                    {loadingContext ? (
-                      <>
-                        <Loader2 className="mr-2 size-4 animate-spin" /> Fetching...
-                      </>
-                    ) : (
-                      <>
-                        <Search className="mr-2 size-4" /> Fetch Details
-                      </>
-                    )}
-                  </Button>
-                </div>
-
-                {false && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                    {/* PO Number */}
-                    <div className="rounded-xl border bg-muted/10 p-3">
-                      <span className="text-[11px] font-semibold uppercase text-muted-foreground">
-                        PO Number
-                      </span>
-                      <p className="font-mono text-base font-bold text-primary">
-                        {header.po_number || "—"}
-                      </p>
-                    </div>
-
-                    {/* Supplier Name */}
-                    <div className="rounded-xl border bg-muted/10 p-3">
-                      <span className="text-[11px] font-semibold uppercase text-muted-foreground">
-                        Supplier Name
-                      </span>
-                      <p className="text-sm font-bold text-foreground mt-1">
-                        {header.supplier_name || "—"}
-                      </p>
-                    </div>
-
-                    {/* Supplier Company Name */}
-                    <div className="rounded-xl border bg-muted/10 p-3 md:col-span-2">
-                      <span className="text-[11px] font-semibold uppercase text-muted-foreground">
-                        Supplier Company Name
-                      </span>
-                      <p className="text-sm font-bold text-foreground mt-1">
-                        {header.supplier_company_name || header.supplier_name || "—"}
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </Card>
-
-              {/* B. INBOUND DETAILS */}
-              <Card className="rounded-xl p-4 space-y-4 shadow-sm">
-                <div className="border-b pb-3">
-                  <h3 className="font-bold text-foreground text-sm uppercase tracking-wider">
-                    Inbound Details
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Transport, gate entry, and delivery identification.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* ASN Number */}
-                  <div className="rounded-xl border bg-muted/10 p-3">
-                    <span className="text-[11px] font-semibold uppercase text-muted-foreground">
-                      ASN Number
-                    </span>
-                    <p className="font-mono text-sm font-bold text-foreground">
-                      {header.asn_number}
-                    </p>
-                  </div>
-
-                  {/* Gate Entry Number */}
-                  <div className="rounded-xl border bg-muted/10 p-3">
-                    <span className="text-[11px] font-semibold uppercase text-muted-foreground">
-                      Gate Entry Number
-                    </span>
-                    <p className="font-mono text-sm font-bold text-foreground">
-                      {header.gate_entry_number}
-                    </p>
-                  </div>
-
-                  {/* Receipt Type */}
-                  {false && (
-                    <div className="rounded-xl border bg-muted/10 p-3">
-                      <label className="text-[11px] font-semibold uppercase text-muted-foreground block mb-1">
-                        Receipt Type
-                      </label>
-                      <div className="rounded-lg border bg-background px-2.5 py-1.5 text-xs font-bold text-foreground">
-                        {header.receipt_type}
                       </div>
-                    </div>
-                  )}
-
-                  {/* Vehicle Number */}
-                  <div className="rounded-xl border bg-muted/10 p-3">
-                    <label className="text-[11px] font-semibold uppercase text-muted-foreground block mb-1">
-                      Vehicle Number
-                    </label>
-                    <Input
-                      value={header.vehicle_number}
-                      onChange={(e) => setHeader({ ...header, vehicle_number: e.target.value })}
-                      className="font-mono text-sm font-bold rounded-lg"
-                    />
-                  </div>
-
-                  {/* Driver Name */}
-                  <div className="rounded-xl border bg-muted/10 p-3">
-                    <label className="text-[11px] font-semibold uppercase text-muted-foreground block mb-1">
-                      Driver Name
-                    </label>
-                    <Input
-                      value={header.driver_name}
-                      onChange={(e) => setHeader({ ...header, driver_name: e.target.value })}
-                      className="text-sm font-bold rounded-lg"
-                    />
-                  </div>
+                    );
+                  })}
                 </div>
               </Card>
 
-              {/* C. WAREHOUSE & DOCK */}
-              <Card className="rounded-xl p-4 space-y-4 shadow-sm">
-                <div className="border-b pb-3">
-                  <h3 className="font-bold text-foreground text-sm uppercase tracking-wider">
-                    Warehouse & Dock
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Receiving dock bay allocation and internal receiving verification.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Receiving Dock */}
-                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-bold uppercase text-primary tracking-wide">
-                          Receiving Dock *
-                        </span>
-                        {header.receiving_dock ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                            <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            Allocated by Warehouse
-                          </span>
-                        ) : null}
-                      </div>
-
-                      <div className="mt-2 flex items-baseline gap-2">
-                        {header.receiving_dock ? (
-                          <>
-                            <p className="text-base font-black tracking-tight text-foreground font-mono">
-                              {header.receiving_dock}
-                            </p>
-                            {allocatedDockInfo?.dock_name &&
-                              allocatedDockInfo.dock_name !== header.receiving_dock && (
-                                <span className="text-xs font-medium text-muted-foreground">
-                                  ({allocatedDockInfo.dock_name})
-                                </span>
-                              )}
-                          </>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    {header.receiving_dock ? (
-                      <p className="text-[11px] text-muted-foreground mt-2 flex items-center gap-1 font-medium">
-                        <>
-                          <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
-                          Assigned via Warehouse Dock Allocation
-                        </>
-                      </p>
-                    ) : null}
-                  </div>
-
-                  {/* GRN Number */}
-                  <div className="rounded-xl border bg-muted/10 p-3">
-                    <span className="text-[11px] font-semibold uppercase text-muted-foreground">
-                      GRN Number
-                    </span>
-                    <p className="font-mono text-base font-bold text-success">
-                      {header.grn_number || "Assigning GRN number..."}
-                    </p>
-                  </div>
-
-                  {/* Received By */}
-                  <div className="rounded-xl border border-success/30 bg-success-soft/20 p-3">
-                    <span className="text-[11px] font-bold uppercase text-success block">
-                      Received By
-                    </span>
-                    <div className="flex items-center gap-2 mt-1">
-                      <User className="size-4 text-success" />
-                      <span className="text-sm font-bold text-foreground">
-                        {header.received_by}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-
-              {/* BOTTOM ACTION & AUTO-SAVE AREA */}
-              <div className="flex flex-wrap items-center justify-between pt-4 border-t gap-3">
-                <div className="flex items-center gap-2 text-xs font-semibold">
-                  {saveStatus === "saving" ? (
-                    <span className="flex items-center gap-1.5 text-amber-600 font-semibold">
-                      <Loader2 className="size-4 animate-spin" /> Saving...
-                    </span>
-                  ) : saveStatus === "error" ? (
-                    <span className="flex items-center gap-1.5 text-rose-600 font-semibold">
-                      <AlertTriangle className="size-4 text-rose-600" /> ⚠ Unable to save changes
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1.5 text-emerald-600 font-semibold">
-                      <CheckCircle2 className="size-4 text-emerald-600" /> ✓ All changes saved
-                    </span>
-                  )}
-                </div>
-                <Button
-                  onClick={() => void handleProceedFromPage1()}
-                  disabled={busyAction || loadingContext}
-                  className="rounded-xl font-bold px-6"
-                >
-                  {busyAction ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-                  Save & Continue <ArrowRight className="ml-2 size-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* PAGE 2 – ITEM RECEIVING DETAILS */}
-          {currentPage === 2 && (
-            <Card className="rounded-xl p-4 space-y-4 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between border-b pb-4 gap-3">
-                <div>
-                  <h3 className="font-bold text-foreground text-base flex items-center gap-2">
-                    <span>
-                      {header.receipt_type === "UNEXPECTED_DELIVERY"
-                        ? "Manual Material Receipt (Unexpected Delivery)"
-                        : "Material Line Items"}
-                    </span>
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {header.receipt_type === "UNEXPECTED_DELIVERY"
-                      ? "Add materials received in this shipment and enter their physical counts."
-                      : "Compare quantity with physically received quantity."}
-                  </p>
-                </div>
-                {header.receipt_type === "UNEXPECTED_DELIVERY" ? (
-                  <Button
-                    type="button"
-                    onClick={addManualMaterialRow}
-                    size="sm"
-                    className="rounded-xl font-bold text-xs"
-                  >
-                    <Plus className="mr-1.5 size-4" /> Add Material
-                  </Button>
-                ) : (
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-semibold text-muted-foreground">
-                      Receiving Status:
-                    </span>
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                        step2OverallStatus === "COMPLETED"
-                          ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                          : "bg-amber-100 text-amber-800 border-amber-300"
-                      }`}
-                    >
-                      {step2OverallStatus === "COMPLETED" ? "✓ COMPLETED" : "PENDING"}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {header.receipt_type === "UNEXPECTED_DELIVERY" ? (
-                /* UNEXPECTED DELIVERY MANUAL TABLE */
-                materials.length === 0 ? (
-                  <div className="rounded-2xl border-2 border-dashed p-8 text-center space-y-3 bg-muted/10">
-                    <Boxes className="mx-auto size-10 text-muted-foreground opacity-60" />
-                    <div>
-                      <h4 className="font-bold text-foreground text-sm">No Materials Added Yet</h4>
+              {/* PAGE 1 – GRN HEADER DETAILS */}
+              {currentPage === 1 && (
+                <div className="space-y-4">
+                  {/* A. ASN REFERENCE */}
+                  <Card className="rounded-xl p-4 space-y-4 shadow-sm">
+                    <div className="border-b pb-3">
+                      <h3 className="font-bold text-foreground text-sm uppercase tracking-wider">
+                        Advance Shipping Notice (ASN)
+                      </h3>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Click "Add Material" to add the items received in this unexpected delivery.
+                        Enter an ASN number to automatically populate supplier, gate, vehicle, and
+                        material details.
                       </p>
+                    </div>
+
+                    {/* PO NUMBER ENTRY & SIDE FETCH DETAILS BUTTON */}
+                    <div className="flex flex-wrap items-end gap-3 max-w-xl">
+                      <div className="flex-1 min-w-[260px]">
+                        <label className="text-xs font-bold text-foreground mb-1 flex items-center justify-between">
+                          <span>ASN Number *</span>
+                          {loadingContext && (
+                            <span className="text-[10px] font-bold text-primary flex items-center gap-1 animate-pulse">
+                              <Loader2 className="size-3 animate-spin" /> Fetching ASN Details...
+                            </span>
+                          )}
+                        </label>
+                        <Input
+                          placeholder="Enter ASN (e.g. ASN-2026-001)"
+                          value={header.asn_number}
+                          disabled={busyAction || loadingContext}
+                          onChange={(e) => changePoNumber(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              void fetchPoContext();
+                            }
+                          }}
+                          className="rounded-xl font-mono text-base font-bold text-primary"
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        onClick={() => void fetchPoContext()}
+                        disabled={loadingContext || busyAction || !header.asn_number.trim()}
+                        className="rounded-xl font-semibold shadow-xs h-10 px-5"
+                      >
+                        {loadingContext ? (
+                          <>
+                            <Loader2 className="mr-2 size-4 animate-spin" /> Fetching...
+                          </>
+                        ) : (
+                          <>
+                            <Search className="mr-2 size-4" /> Fetch Details
+                          </>
+                        )}
+                      </Button>
+                    </div>
+
+                    {false && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                        {/* PO Number */}
+                        <div className="rounded-xl border bg-muted/10 p-3">
+                          <span className="text-[11px] font-semibold uppercase text-muted-foreground">
+                            PO Number
+                          </span>
+                          <p className="font-mono text-base font-bold text-primary">
+                            {header.po_number || "—"}
+                          </p>
+                        </div>
+
+                        {/* Supplier Name */}
+                        <div className="rounded-xl border bg-muted/10 p-3">
+                          <span className="text-[11px] font-semibold uppercase text-muted-foreground">
+                            Supplier Name
+                          </span>
+                          <p className="text-sm font-bold text-foreground mt-1">
+                            {header.supplier_name || "—"}
+                          </p>
+                        </div>
+
+                        {/* Supplier Company Name */}
+                        <div className="rounded-xl border bg-muted/10 p-3 md:col-span-2">
+                          <span className="text-[11px] font-semibold uppercase text-muted-foreground">
+                            Supplier Company Name
+                          </span>
+                          <p className="text-sm font-bold text-foreground mt-1">
+                            {header.supplier_company_name || header.supplier_name || "—"}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </Card>
+
+                  {/* B. INBOUND DETAILS */}
+                  <Card className="rounded-xl p-4 space-y-4 shadow-sm">
+                    <div className="border-b pb-3">
+                      <h3 className="font-bold text-foreground text-sm uppercase tracking-wider">
+                        Inbound Details
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Transport, gate entry, and delivery identification.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* ASN Number */}
+                      <div className="rounded-xl border bg-muted/10 p-3">
+                        <span className="text-[11px] font-semibold uppercase text-muted-foreground">
+                          ASN Number
+                        </span>
+                        <p className="font-mono text-sm font-bold text-foreground">
+                          {header.asn_number}
+                        </p>
+                      </div>
+
+                      {/* Gate Entry Number */}
+                      <div className="rounded-xl border bg-muted/10 p-3">
+                        <span className="text-[11px] font-semibold uppercase text-muted-foreground">
+                          Gate Entry Number
+                        </span>
+                        <p className="font-mono text-sm font-bold text-foreground">
+                          {header.gate_entry_number}
+                        </p>
+                      </div>
+
+                      {/* Receipt Type */}
+                      {false && (
+                        <div className="rounded-xl border bg-muted/10 p-3">
+                          <label className="text-[11px] font-semibold uppercase text-muted-foreground block mb-1">
+                            Receipt Type
+                          </label>
+                          <div className="rounded-lg border bg-background px-2.5 py-1.5 text-xs font-bold text-foreground">
+                            {header.receipt_type}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Vehicle Number */}
+                      <div className="rounded-xl border bg-muted/10 p-3">
+                        <label className="text-[11px] font-semibold uppercase text-muted-foreground block mb-1">
+                          Vehicle Number
+                        </label>
+                        <Input
+                          value={header.vehicle_number}
+                          onChange={(e) => setHeader({ ...header, vehicle_number: e.target.value })}
+                          className="font-mono text-sm font-bold rounded-lg"
+                        />
+                      </div>
+
+                      {/* Driver Name */}
+                      <div className="rounded-xl border bg-muted/10 p-3">
+                        <label className="text-[11px] font-semibold uppercase text-muted-foreground block mb-1">
+                          Driver Name
+                        </label>
+                        <Input
+                          value={header.driver_name}
+                          onChange={(e) => setHeader({ ...header, driver_name: e.target.value })}
+                          className="text-sm font-bold rounded-lg"
+                        />
+                      </div>
+                    </div>
+                  </Card>
+
+                  {/* C. WAREHOUSE & DOCK */}
+                  <Card className="rounded-xl p-4 space-y-4 shadow-sm">
+                    <div className="border-b pb-3">
+                      <h3 className="font-bold text-foreground text-sm uppercase tracking-wider">
+                        Warehouse & Dock
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Receiving dock bay allocation and internal receiving verification.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Receiving Dock */}
+                      <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-bold uppercase text-primary tracking-wide">
+                              Receiving Dock *
+                            </span>
+                            {header.receiving_dock ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                Allocated by Warehouse
+                              </span>
+                            ) : null}
+                          </div>
+
+                          <div className="mt-2 flex items-baseline gap-2">
+                            {header.receiving_dock ? (
+                              <>
+                                <p className="text-base font-black tracking-tight text-foreground font-mono">
+                                  {header.receiving_dock}
+                                </p>
+                                {allocatedDockInfo?.dock_name &&
+                                  allocatedDockInfo.dock_name !== header.receiving_dock && (
+                                    <span className="text-xs font-medium text-muted-foreground">
+                                      ({allocatedDockInfo.dock_name})
+                                    </span>
+                                  )}
+                              </>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        {header.receiving_dock ? (
+                          <p className="text-[11px] text-muted-foreground mt-2 flex items-center gap-1 font-medium">
+                            <>
+                              <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
+                              Assigned via Warehouse Dock Allocation
+                            </>
+                          </p>
+                        ) : null}
+                      </div>
+
+                      {/* GRN Number */}
+                      <div className="rounded-xl border bg-muted/10 p-3">
+                        <span className="text-[11px] font-semibold uppercase text-muted-foreground">
+                          GRN Number
+                        </span>
+                        <p className="font-mono text-base font-bold text-success">
+                          {header.grn_number}
+                        </p>
+                      </div>
+
+                      {/* Received By */}
+                      <div className="rounded-xl border border-success/30 bg-success-soft/20 p-3">
+                        <span className="text-[11px] font-bold uppercase text-success block">
+                          Received By
+                        </span>
+                        <div className="flex items-center gap-2 mt-1">
+                          <User className="size-4 text-success" />
+                          <span className="text-sm font-bold text-foreground">
+                            {header.received_by}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+
+                  {/* BOTTOM ACTION & AUTO-SAVE AREA */}
+                  <div className="flex flex-wrap items-center justify-between pt-4 border-t gap-3">
+                    <div className="flex items-center gap-2 text-xs font-semibold">
+                      {saveStatus === "saving" ? (
+                        <span className="flex items-center gap-1.5 text-amber-600 font-semibold">
+                          <Loader2 className="size-4 animate-spin" /> Saving...
+                        </span>
+                      ) : saveStatus === "error" ? (
+                        <span className="flex items-center gap-1.5 text-rose-600 font-semibold">
+                          <AlertTriangle className="size-4 text-rose-600" /> ⚠ Unable to save
+                          changes
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1.5 text-emerald-600 font-semibold">
+                          <CheckCircle2 className="size-4 text-emerald-600" /> ✓ All changes saved
+                        </span>
+                      )}
                     </div>
                     <Button
-                      type="button"
-                      onClick={addManualMaterialRow}
-                      size="sm"
-                      className="rounded-xl font-bold"
+                      onClick={() => void handleProceedFromPage1()}
+                      disabled={busyAction || loadingContext}
+                      className="rounded-xl font-bold px-6"
                     >
-                      <Plus className="mr-1.5 size-4" /> Add First Material
+                      {busyAction ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+                      Save & Continue <ArrowRight className="ml-2 size-4" />
                     </Button>
                   </div>
-                ) : (
-                  <div className="overflow-x-auto rounded-xl border">
-                    <table className="w-full text-sm text-left">
-                      <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
-                        <tr>
-                          <th className="px-4 py-3">Material Selection</th>
-                          <th className="px-4 py-3">Item Code</th>
-                          <th className="px-4 py-3">Category</th>
-                          <th className="px-4 py-3 text-right">Received Quantity *</th>
-                          <th className="px-4 py-3">UOM</th>
-                          <th className="px-4 py-3 text-center">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y font-medium">
-                        {materials.map((m, idx) => {
-                          const recQty =
-                            m.received_quantity !== undefined
-                              ? m.received_quantity
-                              : m.good_quantity;
-                          return (
-                            <tr key={idx} className="hover:bg-muted/20">
-                              <td className="px-4 py-3">
-                                <select
-                                  value={m.item_code}
-                                  onChange={(e) => {
-                                    const selectedCode = e.target.value;
-                                    const found = materialMasterList.find(
-                                      (mat) =>
-                                        mat.code === selectedCode ||
-                                        mat.material_code === selectedCode,
-                                    );
-                                    if (found) {
-                                      updateManualMaterialRow(idx, {
-                                        item_code:
-                                          found.code || found.material_code || selectedCode,
-                                        material_name:
-                                          found.name || found.material_name || selectedCode,
-                                        material_category:
-                                          found.category ||
-                                          found.material_category ||
-                                          "Raw Materials",
-                                        uom: found.base_uom || found.uom || "PCS",
-                                      });
-                                    } else {
-                                      updateManualMaterialRow(idx, { item_code: selectedCode });
-                                    }
-                                  }}
-                                  className="w-full rounded-lg border bg-background px-2.5 py-1.5 text-xs font-bold text-foreground"
-                                >
-                                  {materialMasterList.length > 0 ? (
-                                    materialMasterList.map((mat) => (
-                                      <option
-                                        key={mat.code || mat.material_code}
-                                        value={mat.code || mat.material_code}
-                                      >
-                                        {mat.name || mat.material_name} (
-                                        {mat.code || mat.material_code})
-                                      </option>
-                                    ))
-                                  ) : (
-                                    <option value={m.item_code}>
-                                      {m.material_name} ({m.item_code})
-                                    </option>
-                                  )}
-                                </select>
+                </div>
+              )}
+
+              {/* PAGE 2 – ITEM RECEIVING DETAILS */}
+              {currentPage === 2 && (
+                <Card className="rounded-xl p-4 space-y-4 shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between border-b pb-4 gap-3">
+                    <div>
+                      <h3 className="font-bold text-foreground text-base flex items-center gap-2">
+                        <span>
+                          {header.receipt_type === "UNEXPECTED_DELIVERY"
+                            ? "Manual Material Receipt (Unexpected Delivery)"
+                            : "Material Line Items"}
+                        </span>
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {header.receipt_type === "UNEXPECTED_DELIVERY"
+                          ? "Add materials received in this shipment and enter their physical counts."
+                          : "Compare quantity with physically received quantity."}
+                      </p>
+                    </div>
+                    {header.receipt_type === "UNEXPECTED_DELIVERY" ? (
+                      <Button
+                        type="button"
+                        onClick={addManualMaterialRow}
+                        size="sm"
+                        className="rounded-xl font-bold text-xs"
+                      >
+                        <Plus className="mr-1.5 size-4" /> Add Material
+                      </Button>
+                    ) : (
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs font-semibold text-muted-foreground">
+                          Receiving Status:
+                        </span>
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                            step2OverallStatus === "COMPLETED"
+                              ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                              : "bg-amber-100 text-amber-800 border-amber-300"
+                          }`}
+                        >
+                          {step2OverallStatus === "COMPLETED" ? "✓ COMPLETED" : "PENDING"}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {header.receipt_type === "UNEXPECTED_DELIVERY" ? (
+                    /* UNEXPECTED DELIVERY MANUAL TABLE */
+                    materials.length === 0 ? (
+                      <div className="rounded-2xl border-2 border-dashed p-8 text-center space-y-3 bg-muted/10">
+                        <Boxes className="mx-auto size-10 text-muted-foreground opacity-60" />
+                        <div>
+                          <h4 className="font-bold text-foreground text-sm">
+                            No Materials Added Yet
+                          </h4>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Click "Add Material" to add the items received in this unexpected
+                            delivery.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          onClick={addManualMaterialRow}
+                          size="sm"
+                          className="rounded-xl font-bold"
+                        >
+                          <Plus className="mr-1.5 size-4" /> Add First Material
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl border">
+                        <table className="w-full text-sm text-left">
+                          <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+                            <tr>
+                              <th className="px-4 py-3">Material Selection</th>
+                              <th className="px-4 py-3">Item Code</th>
+                              <th className="px-4 py-3">Category</th>
+                              <th className="px-4 py-3 text-right">Received Quantity *</th>
+                              <th className="px-4 py-3">UOM</th>
+                              <th className="px-4 py-3 text-center">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y font-medium">
+                            {materials.map((m, idx) => {
+                              const recQty =
+                                m.received_quantity !== undefined
+                                  ? m.received_quantity
+                                  : m.good_quantity;
+                              return (
+                                <tr key={idx} className="hover:bg-muted/20">
+                                  <td className="px-4 py-3">
+                                    <select
+                                      value={m.item_code}
+                                      onChange={(e) => {
+                                        const selectedCode = e.target.value;
+                                        const found = materialMasterList.find(
+                                          (mat) =>
+                                            mat.code === selectedCode ||
+                                            mat.material_code === selectedCode,
+                                        );
+                                        if (found) {
+                                          updateManualMaterialRow(idx, {
+                                            item_code:
+                                              found.code || found.material_code || selectedCode,
+                                            material_name:
+                                              found.name || found.material_name || selectedCode,
+                                            material_category:
+                                              found.category ||
+                                              found.material_category ||
+                                              "Raw Materials",
+                                            uom: found.base_uom || found.uom || "PCS",
+                                          });
+                                        } else {
+                                          updateManualMaterialRow(idx, { item_code: selectedCode });
+                                        }
+                                      }}
+                                      className="w-full rounded-lg border bg-background px-2.5 py-1.5 text-xs font-bold text-foreground"
+                                    >
+                                      {materialMasterList.length > 0 ? (
+                                        materialMasterList.map((mat) => (
+                                          <option
+                                            key={mat.code || mat.material_code}
+                                            value={mat.code || mat.material_code}
+                                          >
+                                            {mat.name || mat.material_name} (
+                                            {mat.code || mat.material_code})
+                                          </option>
+                                        ))
+                                      ) : (
+                                        <option value={m.item_code}>
+                                          {m.material_name} ({m.item_code})
+                                        </option>
+                                      )}
+                                    </select>
+                                  </td>
+                                  <td className="px-4 py-3 font-mono text-xs text-primary font-bold">
+                                    {m.item_code}
+                                  </td>
+                                  <td className="px-4 py-3 text-xs text-muted-foreground font-medium">
+                                    {m.material_category || "Raw Materials"}
+                                  </td>
+                                  <td className="px-4 py-3 text-right">
+                                    <Input
+                                      type="number"
+                                      min={1}
+                                      placeholder="1"
+                                      value={recQty === 0 ? "" : (recQty ?? "")}
+                                      onChange={(e) => {
+                                        const val = Math.max(0, Number(e.target.value) || 0);
+                                        updateManualMaterialRow(idx, { received_quantity: val });
+                                      }}
+                                      className="w-28 text-right font-bold text-foreground rounded-xl ml-auto"
+                                    />
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <Input
+                                      value={m.uom}
+                                      onChange={(e) =>
+                                        updateManualMaterialRow(idx, { uom: e.target.value })
+                                      }
+                                      className="w-20 font-bold text-xs rounded-lg"
+                                      placeholder="PCS"
+                                    />
+                                  </td>
+                                  <td className="px-4 py-3 text-center">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => removeManualMaterialRow(idx)}
+                                      className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg p-1.5"
+                                    >
+                                      Remove
+                                    </Button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                          <tfoot className="bg-muted/40 font-bold border-t text-sm">
+                            <tr>
+                              <td
+                                colSpan={3}
+                                className="px-4 py-3 uppercase text-xs text-muted-foreground"
+                              >
+                                Total Manual Items: {materials.length}
                               </td>
-                              <td className="px-4 py-3 font-mono text-xs text-primary font-bold">
-                                {m.item_code}
+                              <td className="px-4 py-3 text-right font-bold text-foreground">
+                                {totalReceivedQty.toLocaleString()}
                               </td>
-                              <td className="px-4 py-3 text-xs text-muted-foreground font-medium">
-                                {m.material_category || "Raw Materials"}
-                              </td>
-                              <td className="px-4 py-3 text-right">
-                                <Input
-                                  type="number"
-                                  min={1}
-                                  placeholder="1"
-                                  value={recQty === 0 ? "" : (recQty ?? "")}
-                                  onChange={(e) => {
-                                    const val = Math.max(0, Number(e.target.value) || 0);
-                                    updateManualMaterialRow(idx, { received_quantity: val });
-                                  }}
-                                  className="w-28 text-right font-bold text-foreground rounded-xl ml-auto"
-                                />
-                              </td>
-                              <td className="px-4 py-3">
-                                <Input
-                                  value={m.uom}
-                                  onChange={(e) =>
-                                    updateManualMaterialRow(idx, { uom: e.target.value })
-                                  }
-                                  className="w-20 font-bold text-xs rounded-lg"
-                                  placeholder="PCS"
-                                />
-                              </td>
-                              <td className="px-4 py-3 text-center">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => removeManualMaterialRow(idx)}
-                                  className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg p-1.5"
-                                >
-                                  Remove
-                                </Button>
+                              <td
+                                colSpan={2}
+                                className="px-4 py-3 text-muted-foreground text-xs font-normal"
+                              >
+                                Units Received
                               </td>
                             </tr>
-                          );
-                        })}
-                      </tbody>
-                      <tfoot className="bg-muted/40 font-bold border-t text-sm">
-                        <tr>
-                          <td
-                            colSpan={3}
-                            className="px-4 py-3 uppercase text-xs text-muted-foreground"
-                          >
-                            Total Manual Items: {materials.length}
-                          </td>
-                          <td className="px-4 py-3 text-right font-bold text-foreground">
-                            {totalReceivedQty.toLocaleString()}
-                          </td>
-                          <td
-                            colSpan={2}
-                            className="px-4 py-3 text-muted-foreground text-xs font-normal"
-                          >
-                            Units Received
-                          </td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-                )
-              ) : (
-                /* ASN MATERIAL TABLE */
-                <div className="overflow-x-auto rounded-xl border">
-                  <table className="w-full table-fixed text-sm text-left">
-                    <colgroup>
-                      <col className="w-[40%]" />
-                      <col className="w-[20%]" />
-                      <col className="w-[25%]" />
-                      <col className="w-[15%]" />
-                    </colgroup>
-                    <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
-                      <tr>
-                        <th className="px-4 py-3">Material</th>
-                        <th className="px-4 py-3 text-right">Quantity</th>
-                        <th className="px-4 py-3 text-right">Received Quantity</th>
-                        <th className="px-4 py-3 text-center">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y font-medium">
-                      {materials.map((m, idx) => {
-                        const recQty =
-                          m.received_quantity !== undefined ? m.received_quantity : m.good_quantity;
-                        const isCompleted = recQty === m.po_quantity;
-                        const rejectedVal = Number(m.rejected_quantity || 0);
-                        const damagedVal = Number(m.damaged_quantity || 0);
-                        const heldVal = Number(m.held_quantity || 0);
+                          </tfoot>
+                        </table>
+                      </div>
+                    )
+                  ) : (
+                    /* ASN MATERIAL TABLE */
+                    <div className="overflow-x-auto rounded-xl border">
+                      <table className="w-full table-fixed text-sm text-left">
+                        <colgroup>
+                          <col className="w-[40%]" />
+                          <col className="w-[20%]" />
+                          <col className="w-[25%]" />
+                          <col className="w-[15%]" />
+                        </colgroup>
+                        <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+                          <tr>
+                            <th className="px-4 py-3">Material</th>
+                            <th className="px-4 py-3 text-right">Quantity</th>
+                            <th className="px-4 py-3 text-right">Received Quantity</th>
+                            <th className="px-4 py-3 text-center">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y font-medium">
+                          {materials.map((m, idx) => {
+                            const recQty =
+                              m.received_quantity !== undefined
+                                ? m.received_quantity
+                                : m.good_quantity;
+                            const isCompleted = recQty === m.po_quantity;
+                            const rejectedVal = Number(m.rejected_quantity || 0);
+                            const damagedVal = Number(m.damaged_quantity || 0);
+                            const heldVal = Number(m.held_quantity || 0);
 
-                        return (
-                          <tr key={grnMaterialKey(m, idx)} className="hover:bg-muted/20">
-                            <td className="px-4 py-3 font-bold text-foreground">
-                              <div>
-                                {m.item_code || m.material_code} —{" "}
-                                {m.material_name ||
-                                  m.materialName ||
-                                  m.material_description ||
-                                  "Material"}
-                              </div>
-                              <span className="text-[10px] text-emerald-600 font-medium block mt-0.5">
-                                Category: {m.material_category || "General"}
-                              </span>
+                            return (
+                              <tr key={grnMaterialKey(m, idx)} className="hover:bg-muted/20">
+                                <td className="px-4 py-3 font-bold text-foreground">
+                                  <div>
+                                    {m.item_code || m.material_code} —{" "}
+                                    {m.material_name ||
+                                      m.materialName ||
+                                      m.material_description ||
+                                      "Material"}
+                                  </div>
+                                  <span className="text-[10px] text-emerald-600 font-medium block mt-0.5">
+                                    Category: {m.material_category || "General"}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-right font-bold">
+                                  <div>
+                                    {m.po_quantity.toLocaleString()}{" "}
+                                    <span className="text-xs font-normal text-muted-foreground">
+                                      {m.uom || "PCS"}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <div className="flex flex-col items-end gap-1">
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      max={m.po_quantity}
+                                      placeholder="0"
+                                      value={recQty === 0 ? "" : (recQty ?? "")}
+                                      onChange={(e) => {
+                                        const raw = e.target.value;
+                                        const val = raw === "" ? 0 : Number(raw);
+                                        if (val < 0) {
+                                          toast.error("Received quantity cannot be negative.");
+                                          return;
+                                        }
+                                        if (val > m.po_quantity) {
+                                          toast.error(
+                                            `Received quantity for ${m.material_name} cannot exceed quantity (${m.po_quantity}).`,
+                                          );
+                                          return;
+                                        }
+                                        setMaterials((prev) =>
+                                          prev.map((item, i) =>
+                                            i === idx
+                                              ? {
+                                                  ...item,
+                                                  received_quantity: val,
+                                                  good_quantity: val,
+                                                  damaged_quantity: 0,
+                                                  balance_quantity: Math.max(
+                                                    item.po_quantity - val,
+                                                    0,
+                                                  ),
+                                                }
+                                              : item,
+                                          ),
+                                        );
+                                      }}
+                                      className="w-32 text-right font-bold text-foreground rounded-xl"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setMaterials((prev) =>
+                                          prev.map((item, i) =>
+                                            i === idx
+                                              ? {
+                                                  ...item,
+                                                  received_quantity: item.po_quantity,
+                                                  good_quantity: item.po_quantity,
+                                                  damaged_quantity: 0,
+                                                  balance_quantity: 0,
+                                                }
+                                              : item,
+                                          ),
+                                        );
+                                      }}
+                                      className="text-[10px] font-semibold text-primary hover:underline flex items-center gap-0.5"
+                                    >
+                                      Match Quantity ({m.po_quantity})
+                                    </button>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <span
+                                    className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border ${
+                                      isCompleted
+                                        ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                                        : "bg-amber-100 text-amber-800 border-amber-300"
+                                    }`}
+                                  >
+                                    {isCompleted ? "✓ COMPLETED" : "PENDING"}
+                                  </span>
+                                  {(rejectedVal > 0 || damagedVal > 0 || heldVal > 0) && (
+                                    <div className="mt-2 space-y-1 text-left">
+                                      {rejectedVal > 0 && (
+                                        <Input
+                                          placeholder="Rejected reason *"
+                                          value={m.rejected_reason || ""}
+                                          onChange={(e) =>
+                                            setMaterials((prev) =>
+                                              prev.map((item, i) =>
+                                                i === idx
+                                                  ? { ...item, rejected_reason: e.target.value }
+                                                  : item,
+                                              ),
+                                            )
+                                          }
+                                          className="h-7 text-[11px]"
+                                        />
+                                      )}
+                                      {damagedVal > 0 && (
+                                        <Input
+                                          placeholder="Damage reason *"
+                                          value={m.damage_reason || ""}
+                                          onChange={(e) =>
+                                            setMaterials((prev) =>
+                                              prev.map((item, i) =>
+                                                i === idx
+                                                  ? { ...item, damage_reason: e.target.value }
+                                                  : item,
+                                              ),
+                                            )
+                                          }
+                                          className="h-7 text-[11px]"
+                                        />
+                                      )}
+                                      {heldVal > 0 && (
+                                        <Input
+                                          placeholder="Held reason *"
+                                          value={m.held_reason || ""}
+                                          onChange={(e) =>
+                                            setMaterials((prev) =>
+                                              prev.map((item, i) =>
+                                                i === idx
+                                                  ? { ...item, held_reason: e.target.value }
+                                                  : item,
+                                              ),
+                                            )
+                                          }
+                                          className="h-7 text-[11px]"
+                                        />
+                                      )}
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot className="bg-muted/40 font-bold border-t text-sm">
+                          <tr>
+                            <td
+                              colSpan={1}
+                              className="px-4 py-3 uppercase text-xs text-muted-foreground"
+                            >
+                              Totals
                             </td>
                             <td className="px-4 py-3 text-right font-bold">
-                              <div>
-                                {m.po_quantity.toLocaleString()}{" "}
-                                <span className="text-xs font-normal text-muted-foreground">
-                                  {m.uom || "PCS"}
-                                </span>
-                              </div>
+                              {totalPoQty.toLocaleString()}
                             </td>
-                            <td className="px-4 py-3 text-right">
-                              <div className="flex flex-col items-end gap-1">
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  max={m.po_quantity}
-                                  placeholder="0"
-                                  value={recQty === 0 ? "" : (recQty ?? "")}
-                                  onChange={(e) => {
-                                    const raw = e.target.value;
-                                    const val = raw === "" ? 0 : Number(raw);
-                                    if (val < 0) {
-                                      toast.error("Received quantity cannot be negative.");
-                                      return;
-                                    }
-                                    if (val > m.po_quantity) {
-                                      toast.error(
-                                        `Received quantity for ${m.material_name} cannot exceed quantity (${m.po_quantity}).`,
-                                      );
-                                      return;
-                                    }
-                                    setMaterials((prev) =>
-                                      prev.map((item, i) =>
-                                        i === idx
-                                          ? {
-                                              ...item,
-                                              received_quantity: val,
-                                              good_quantity: val,
-                                              damaged_quantity: 0,
-                                              balance_quantity: Math.max(item.po_quantity - val, 0),
-                                            }
-                                          : item,
-                                      ),
-                                    );
-                                  }}
-                                  className="w-32 text-right font-bold text-foreground rounded-xl"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setMaterials((prev) =>
-                                      prev.map((item, i) =>
-                                        i === idx
-                                          ? {
-                                              ...item,
-                                              received_quantity: item.po_quantity,
-                                              good_quantity: item.po_quantity,
-                                              damaged_quantity: 0,
-                                              balance_quantity: 0,
-                                            }
-                                          : item,
-                                      ),
-                                    );
-                                  }}
-                                  className="text-[10px] font-semibold text-primary hover:underline flex items-center gap-0.5"
-                                >
-                                  Match Quantity ({m.po_quantity})
-                                </button>
-                              </div>
+                            <td className="px-4 py-3 text-right font-bold">
+                              {totalReceivedQty.toLocaleString()}
                             </td>
                             <td className="px-4 py-3 text-center">
                               <span
-                                className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border ${
-                                  isCompleted
+                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                                  step2OverallStatus === "COMPLETED"
                                     ? "bg-emerald-100 text-emerald-800 border-emerald-300"
                                     : "bg-amber-100 text-amber-800 border-amber-300"
                                 }`}
                               >
-                                {isCompleted ? "✓ COMPLETED" : "PENDING"}
+                                {step2OverallStatus === "COMPLETED" ? "✓ COMPLETED" : "PENDING"}
                               </span>
-                              {(rejectedVal > 0 || damagedVal > 0 || heldVal > 0) && (
-                                <div className="mt-2 space-y-1 text-left">
-                                  {rejectedVal > 0 && (
-                                    <Input
-                                      placeholder="Rejected reason *"
-                                      value={m.rejected_reason || ""}
-                                      onChange={(e) =>
-                                        setMaterials((prev) =>
-                                          prev.map((item, i) =>
-                                            i === idx
-                                              ? { ...item, rejected_reason: e.target.value }
-                                              : item,
-                                          ),
-                                        )
-                                      }
-                                      className="h-7 text-[11px]"
-                                    />
-                                  )}
-                                  {damagedVal > 0 && (
-                                    <Input
-                                      placeholder="Damage reason *"
-                                      value={m.damage_reason || ""}
-                                      onChange={(e) =>
-                                        setMaterials((prev) =>
-                                          prev.map((item, i) =>
-                                            i === idx
-                                              ? { ...item, damage_reason: e.target.value }
-                                              : item,
-                                          ),
-                                        )
-                                      }
-                                      className="h-7 text-[11px]"
-                                    />
-                                  )}
-                                  {heldVal > 0 && (
-                                    <Input
-                                      placeholder="Held reason *"
-                                      value={m.held_reason || ""}
-                                      onChange={(e) =>
-                                        setMaterials((prev) =>
-                                          prev.map((item, i) =>
-                                            i === idx
-                                              ? { ...item, held_reason: e.target.value }
-                                              : item,
-                                          ),
-                                        )
-                                      }
-                                      className="h-7 text-[11px]"
-                                    />
-                                  )}
-                                </div>
-                              )}
                             </td>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot className="bg-muted/40 font-bold border-t text-sm">
-                      <tr>
-                        <td
-                          colSpan={1}
-                          className="px-4 py-3 uppercase text-xs text-muted-foreground"
-                        >
-                          Totals
-                        </td>
-                        <td className="px-4 py-3 text-right font-bold">
-                          {totalPoQty.toLocaleString()}
-                        </td>
-                        <td className="px-4 py-3 text-right font-bold">
-                          {totalReceivedQty.toLocaleString()}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span
-                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${
-                              step2OverallStatus === "COMPLETED"
-                                ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                                : "bg-amber-100 text-amber-800 border-amber-300"
-                            }`}
-                          >
-                            {step2OverallStatus === "COMPLETED" ? "✓ COMPLETED" : "PENDING"}
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center justify-between pt-4 border-t gap-3">
+                    <Button
+                      variant="outline"
+                      className="rounded-xl font-semibold"
+                      onClick={() => handleStepClick(1)}
+                    >
+                      <ArrowLeft className="mr-2 size-4" /> Back
+                    </Button>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2 text-xs font-semibold">
+                        {saveStatus === "saving" ? (
+                          <span className="flex items-center gap-1.5 text-amber-600 font-semibold">
+                            <Loader2 className="size-4 animate-spin" /> Saving...
                           </span>
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
+                        ) : saveStatus === "error" ? (
+                          <span className="flex items-center gap-1.5 text-rose-600 font-semibold">
+                            <AlertTriangle className="size-4 text-rose-600" /> ⚠ Unable to save
+                            changes
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1.5 text-emerald-600 font-semibold">
+                            <CheckCircle2 className="size-4 text-emerald-600" /> ✓ All changes saved
+                          </span>
+                        )}
+                      </div>
+                      <Button
+                        disabled={
+                          busyAction ||
+                          loadingContext ||
+                          materials.length === 0 ||
+                          materials.some((m) => Number(m.received_quantity || 0) <= 0)
+                        }
+                        onClick={() => void handleProceedFromPage2()}
+                        className="rounded-xl font-bold px-6"
+                      >
+                        {busyAction ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+                        Next <ArrowRight className="ml-2 size-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
               )}
 
-              <div className="flex flex-wrap items-center justify-between pt-4 border-t gap-3">
-                <Button
-                  variant="outline"
-                  className="rounded-xl font-semibold"
-                  onClick={() => handleStepClick(1)}
-                >
-                  <ArrowLeft className="mr-2 size-4" /> Back
-                </Button>
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 text-xs font-semibold">
-                    {saveStatus === "saving" ? (
-                      <span className="flex items-center gap-1.5 text-amber-600 font-semibold">
-                        <Loader2 className="size-4 animate-spin" /> Saving...
-                      </span>
-                    ) : saveStatus === "error" ? (
-                      <span className="flex items-center gap-1.5 text-rose-600 font-semibold">
-                        <AlertTriangle className="size-4 text-rose-600" /> ⚠ Unable to save changes
-                      </span>
+              {/* PAGE 3 – QUALITY INSPECTION & DAMAGED GOODS */}
+              {currentPage === 3 && (
+                <Card className="rounded-xl p-4 space-y-4 shadow-sm">
+                  <div className="border-b pb-4">
+                    <h3 className="font-bold text-foreground text-base">
+                      Quality Inspection & Damage Breakdown
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Inspect physically received materials into Accepted (Good) and Damaged
+                      quantities, then record photo evidence for damaged goods.
+                    </p>
+                  </div>
+
+                  {/* Quality Inspection & Quantity Breakdown Table */}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                      <ShieldCheck className="size-4 text-emerald-600" /> Material Quality
+                      Inspection Breakdown
+                    </h4>
+                    <div className="overflow-x-auto rounded-xl border">
+                      <table className="w-full text-sm text-left">
+                        <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+                          <tr>
+                            <th className="px-4 py-3">Material</th>
+                            <th className="px-4 py-3 text-right">Received Qty</th>
+                            <th className="px-4 py-3 text-right">Accepted Qty</th>
+                            <th className="px-4 py-3 text-right">Damaged Qty</th>
+                            <th className="px-4 py-3 text-center">Quality Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y font-medium">
+                          {materials.map((m, idx) => {
+                            const rowKey = grnMaterialKey(m, idx);
+                            const recQty =
+                              m.received_quantity !== undefined
+                                ? m.received_quantity
+                                : m.good_quantity + m.damaged_quantity;
+                            const hasInspectionInput = qualityApproved[rowKey] !== undefined;
+                            const acceptedVal = qualityApproved[rowKey] ?? 0;
+                            const damagedVal = hasInspectionInput
+                              ? Math.max(0, Number(recQty) - Number(acceptedVal || 0))
+                              : 0;
+                            const hasInspection = !["", "PENDING", "UNINSPECTED"].includes(
+                              String(m.quality_result || "PENDING").toUpperCase(),
+                            );
+                            const isSound = hasInspection && acceptedVal > 0 && damagedVal === 0;
+                            const isPartial =
+                              hasInspection && (acceptedVal > 0 || damagedVal > 0) && !isSound;
+
+                            return (
+                              <tr key={grnMaterialKey(m, idx)} className="hover:bg-muted/20">
+                                <td className="px-4 py-3 font-bold text-foreground">
+                                  <div>{m.material_name}</div>
+                                  <span className="font-mono text-xs text-primary font-normal">
+                                    {resolveGrnMaterialCode(m) || "—"}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-right font-bold">
+                                  <div>
+                                    {recQty.toLocaleString()}{" "}
+                                    <span className="text-xs font-normal text-muted-foreground">
+                                      {m.uom || "PCS"}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    max={recQty}
+                                    placeholder="0"
+                                    value={acceptedVal === 0 ? "" : (acceptedVal ?? "")}
+                                    onChange={(e) => {
+                                      const raw = e.target.value;
+                                      const val =
+                                        raw === "" ? 0 : Math.max(0, Math.min(Number(raw), recQty));
+                                      setQualityApproved((prev) => ({ ...prev, [rowKey]: val }));
+                                      setMaterials((prev) =>
+                                        prev.map((item, i) =>
+                                          i === idx
+                                            ? {
+                                                ...item,
+                                                good_quantity: val,
+                                                damaged_quantity: Math.max(0, Number(recQty) - val),
+                                                rejected_quantity: item.rejected_quantity || 0,
+                                                held_quantity: item.held_quantity || 0,
+                                                quality_approved_quantity: val,
+                                                quality_result: "INSPECTED",
+                                              }
+                                            : item,
+                                        ),
+                                      );
+                                    }}
+                                    className="w-28 text-right font-bold text-emerald-600 rounded-xl ml-auto"
+                                  />
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    max={recQty}
+                                    placeholder="0"
+                                    value={
+                                      !hasInspectionInput || damagedVal === 0 ? "" : damagedVal
+                                    }
+                                    onChange={(e) => {
+                                      const raw = e.target.value;
+                                      const val =
+                                        raw === "" ? 0 : Math.max(0, Math.min(Number(raw), recQty));
+                                      const accepted = Math.max(0, recQty - val);
+                                      setQualityApproved((prev) => ({
+                                        ...prev,
+                                        [rowKey]: accepted,
+                                      }));
+                                      setMaterials((prev) =>
+                                        prev.map((item, i) =>
+                                          i === idx
+                                            ? {
+                                                ...item,
+                                                good_quantity: accepted,
+                                                damaged_quantity: val,
+                                                quality_approved_quantity: accepted,
+                                                quality_result: "INSPECTED",
+                                              }
+                                            : item,
+                                        ),
+                                      );
+                                    }}
+                                    className="w-28 text-right font-bold text-rose-600 rounded-xl ml-auto"
+                                  />
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <span
+                                    className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border ${
+                                      isSound
+                                        ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                                        : isPartial
+                                          ? "bg-amber-100 text-amber-800 border-amber-300"
+                                          : "bg-rose-100 text-rose-800 border-rose-300"
+                                    }`}
+                                  >
+                                    {!hasInspection
+                                      ? "PENDING QC"
+                                      : isSound
+                                        ? "COMPLETED"
+                                        : isPartial
+                                          ? "INSPECTED — WITH EXCEPTIONS"
+                                          : "REJECTED ✗"}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Damaged Goods Photo Evidence Section */}
+                  <div className="pt-2 space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                      <AlertTriangle className="size-4 text-rose-500" /> Damage Evidence & Remarks
+                    </h4>
+
+                    {damagedMaterialRows.length === 0 ? (
+                      <div className="rounded-xl border bg-emerald-50 p-4 text-center text-sm font-medium text-emerald-800 flex items-center justify-center gap-2">
+                        <CheckCircle2 className="size-5 text-emerald-600" />
+                        {materials.every(
+                          (m, idx) =>
+                            Number(qualityApproved[grnMaterialKey(m, idx)] ?? 0) ===
+                            Number(m.received_quantity || 0),
+                        )
+                          ? `${totalReceivedQty.toLocaleString()} ${materials[0]?.uom || "units"} recorded as accepted; QC confirmation pending.`
+                          : `${totalReceivedQty.toLocaleString()} ${materials[0]?.uom || "units"} received; enter QC quantities before confirmation.`}
+                      </div>
                     ) : (
-                      <span className="flex items-center gap-1.5 text-emerald-600 font-semibold">
-                        <CheckCircle2 className="size-4 text-emerald-600" /> ✓ All changes saved
-                      </span>
+                      <div className="overflow-x-auto rounded-xl border">
+                        <table className="w-full text-sm text-left">
+                          <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+                            <tr>
+                              <th className="px-4 py-3">Material Code</th>
+                              <th className="px-4 py-3">Material Name</th>
+                              <th className="px-4 py-3 text-right">Damaged Qty</th>
+                              <th className="px-4 py-3">Damage Reason</th>
+                              <th className="px-4 py-3">Photo Evidence</th>
+                            </tr>
+                          </thead>
+
+                          <tbody className="divide-y">
+                            {damagedMaterialRows.map(({ material: m, materialIndex, rowKey }) => (
+                              <tr key={rowKey}>
+                                <td className="px-4 py-3 font-mono font-bold text-primary">
+                                  {resolveGrnMaterialCode(m) || "—"}
+                                </td>
+
+                                <td className="px-4 py-3 font-bold text-foreground">
+                                  {resolveGrnMaterialCode(m) || "—"} —{" "}
+                                  {m.material_name ||
+                                    m.materialName ||
+                                    m.material_description ||
+                                    "Material"}
+                                </td>
+
+                                <td className="px-4 py-3 text-right font-bold text-rose-600">
+                                  {m.damaged_quantity} {m.uom}
+                                </td>
+
+                                <td className="px-4 py-3 min-w-[200px]">
+                                  <Input
+                                    type="text"
+                                    placeholder="Specify damage reason for this material..."
+                                    value={m.damage_reason || ""}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setMaterials((prev) =>
+                                        prev.map((item, i) =>
+                                          i === materialIndex
+                                            ? { ...item, damage_reason: val }
+                                            : item,
+                                        ),
+                                      );
+                                    }}
+                                    className="rounded-xl text-xs font-medium border"
+                                  />
+                                </td>
+
+                                <td className="px-4 py-3">
+                                  <DamagePhoto
+                                    key={`${grnId || "draft"}:${m.grn_line_id || m.item_code}`}
+                                    lineId={
+                                      m.grn_line_id &&
+                                      !["undefined", "null"].includes(
+                                        String(m.grn_line_id).toLowerCase(),
+                                      )
+                                        ? String(m.grn_line_id)
+                                        : undefined
+                                    }
+                                    damagedQuantity={m.damaged_quantity}
+                                    reason={m.damage_reason}
+                                    initialPreviewUrl={
+                                      damagePhotos[rowKey]?.previewUrl ||
+                                      damagePhotos[m.item_code]?.previewUrl
+                                    }
+                                    initialFile={
+                                      damagePhotos[rowKey]?.file || damagePhotos[m.item_code]?.file
+                                    }
+                                    onSuccess={(ev) => {
+                                      setDamagePhotos((prev) => ({
+                                        ...prev,
+                                        [rowKey]: {
+                                          evidenceId: ev.evidenceId,
+                                          evidenceIds: [ev.evidenceId],
+                                          photos: ev.filePath
+                                            ? [{ id: ev.evidenceId, file_path: ev.filePath }]
+                                            : [],
+                                          reason: m.damage_reason,
+                                          previewUrl: ev.filePath,
+                                          file: ev.file,
+                                        },
+                                      }));
+                                    }}
+                                  />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     )}
                   </div>
-                  <Button
-                    disabled={
-                      busyAction ||
-                      loadingContext ||
-                      materials.length === 0 ||
-                      materials.some((m) => Number(m.received_quantity || 0) <= 0)
-                    }
-                    onClick={() => void handleProceedFromPage2()}
-                    className="rounded-xl font-bold px-6"
-                  >
-                    {busyAction ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-                    Next <ArrowRight className="ml-2 size-4" />
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          )}
 
-          {/* PAGE 3 – QUALITY INSPECTION & DAMAGED GOODS */}
-          {currentPage === 3 && (
-            <Card className="rounded-xl p-4 space-y-4 shadow-sm">
-              <div className="border-b pb-4">
-                <h3 className="font-bold text-foreground text-base">
-                  Quality Inspection & Damage Breakdown
-                <InformationTooltip help="reconciliation" /></h3>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Inspect physically received materials into Accepted (Good) and Damaged quantities,
-                  then record photo evidence for damaged goods.
-                </p>
-              </div>
+                  <div className="pt-2 space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                      <AlertTriangle className="size-4 text-amber-500" /> Exception Reasons
+                    </h4>
+                    <div className="overflow-x-auto rounded-xl border">
+                      <table className="w-full text-sm text-left">
+                        <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+                          <tr>
+                            <th className="px-4 py-3">Material</th>
+                            <th className="px-4 py-3">Exception</th>
+                            <th className="px-4 py-3 text-right">Quantity</th>
+                            <th className="px-4 py-3">Reason *</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {materials.flatMap((m, idx) => {
+                            const rows = [
+                              {
+                                kind: "Damaged",
+                                qty: Number(m.damaged_quantity || 0),
+                                field: "damage_reason" as const,
+                              },
+                              {
+                                kind: "Rejected",
+                                qty: Number(m.rejected_quantity || 0),
+                                field: "rejected_reason" as const,
+                              },
+                              {
+                                kind: "Held",
+                                qty: Number(m.held_quantity || 0),
+                                field: "held_reason" as const,
+                              },
+                            ].filter((row) => row.qty > 0);
+                            return rows.map((row) => (
+                              <tr key={`${grnMaterialKey(m, idx)}-${row.kind}`}>
+                                <td className="px-4 py-3 font-semibold">
+                                  {resolveGrnMaterialCode(m) || "—"} — {m.material_name}
+                                </td>
+                                <td className="px-4 py-3 font-semibold">{row.kind}</td>
+                                <td className="px-4 py-3 text-right font-bold">
+                                  {row.qty} {m.uom || "PCS"}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <Input
+                                    placeholder={`${row.kind} reason *`}
+                                    value={m[row.field] || ""}
+                                    onChange={(e) =>
+                                      setMaterials((prev) =>
+                                        prev.map((item, i) =>
+                                          i === idx
+                                            ? { ...item, [row.field]: e.target.value }
+                                            : item,
+                                        ),
+                                      )
+                                    }
+                                    className="rounded-xl text-xs"
+                                  />
+                                </td>
+                              </tr>
+                            ));
+                          })}
+                          {materials.every(
+                            (m) =>
+                              !(
+                                Number(m.damaged_quantity || 0) ||
+                                Number(m.rejected_quantity || 0) ||
+                                Number(m.held_quantity || 0)
+                              ),
+                          ) && (
+                            <tr>
+                              <td
+                                colSpan={4}
+                                className="px-4 py-4 text-center text-xs text-muted-foreground"
+                              >
+                                No exception quantities recorded.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
 
-              {/* Quality Inspection & Quantity Breakdown Table */}
-              <div className="space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                  <ShieldCheck className="size-4 text-emerald-600" /> Material Quality Inspection
-                  Breakdown
-                </h4>
-                <div className="overflow-x-auto rounded-xl border">
-                  <table className="w-full text-sm text-left">
-                    <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
-                      <tr>
-                        <th className="px-4 py-3">Material</th>
-                        <th className="px-4 py-3 text-right">Received Qty</th>
-                        <th className="px-4 py-3 text-right">Accepted Qty</th>
-                        <th className="px-4 py-3 text-right">Damaged Qty</th>
-                        <th className="px-4 py-3 text-center">Quality Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y font-medium">
-                      {materials.map((m, idx) => {
-                        const rowKey = grnMaterialKey(m, idx);
-                        const recQty =
-                          m.received_quantity !== undefined
-                            ? m.received_quantity
-                            : m.good_quantity + m.damaged_quantity;
-                        const hasInspectionInput = qualityApproved[rowKey] !== undefined;
-                        const acceptedVal = qualityApproved[rowKey] ?? 0;
-                        const damagedVal = hasInspectionInput
-                          ? Math.max(0, Number(recQty) - Number(acceptedVal || 0))
-                          : 0;
-                        const hasInspection = !["", "PENDING", "UNINSPECTED"].includes(
-                          String(m.quality_result || "PENDING").toUpperCase(),
-                        );
-                        const isSound = hasInspection && acceptedVal > 0 && damagedVal === 0;
-                        const isPartial =
-                          hasInspection && (acceptedVal > 0 || damagedVal > 0) && !isSound;
+                  <div className="flex justify-between pt-4 border-t">
+                    <Button
+                      variant="outline"
+                      className="rounded-xl"
+                      onClick={() => handleStepClick(2)}
+                    >
+                      <ArrowLeft className="mr-2 size-4" /> Back
+                    </Button>
+                    <Button
+                      disabled={busyAction || !qcHasRequiredEvidence}
+                      onClick={() => void handleProceedFromPage3()}
+                      className="rounded-xl font-bold px-6"
+                    >
+                      Next <ArrowRight className="ml-2 size-4" />
+                    </Button>
+                  </div>
+                </Card>
+              )}
 
-                        return (
-                          <tr key={grnMaterialKey(m, idx)} className="hover:bg-muted/20">
-                            <td className="px-4 py-3 font-bold text-foreground">
-                              <div>{m.material_name}</div>
-                              <span className="font-mono text-xs text-primary font-normal">
-                                {resolveGrnMaterialCode(m) || "—"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-right font-bold">
+              {/* PAGE 4 – BATCH CREATION */}
+              {currentPage === 4 && (
+                <Card className="rounded-xl p-4 space-y-4 shadow-sm">
+                  <div className="border-b pb-4">
+                    <h3 className="font-bold text-foreground text-base">Lot & Batch Creation</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Divide Quality-Approved materials into batches.{" "}
+                      <b>Rule: Total Batch Quantity MUST equal Quality-Approved Quantity.</b>
+                    </p>
+                  </div>
+
+                  {!allBatchesValid && (
+                    <div className="rounded-xl border border-rose-300 bg-rose-50 p-4 text-xs text-rose-800 font-bold flex items-center gap-2">
+                      <AlertTriangle className="size-5 shrink-0" />
+                      <span>
+                        Batch Quantity Mismatch! The sum of batch quantities for each material must
+                        strictly match the Quality-Approved Quantity before proceeding.
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="space-y-5">
+                    {materials.map((m, idx) => {
+                      const rowKey = grnMaterialKey(m, idx);
+                      const { appQty, totalBatchQty, isValid } = getBatchValidation(m, idx);
+                      const batches = materialBatches[rowKey] || materialBatches[m.item_code] || [];
+
+                      return (
+                        <Card
+                          key={grnMaterialKey(m, idx)}
+                          className={`rounded-xl p-4 border ${isValid ? "border-emerald-300 bg-emerald-50/20" : "border-rose-300 bg-rose-50/20"}`}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-3 mb-3 border-b pb-2">
+                            <div className="flex items-center flex-wrap gap-4">
                               <div>
-                                {recQty.toLocaleString()}{" "}
-                                <span className="text-xs font-normal text-muted-foreground">
-                                  {m.uom || "PCS"}
+                                <span className="font-bold text-foreground">{m.material_name}</span>
+                                <span className="ml-2 font-mono text-xs text-primary font-bold">
+                                  ({m.item_code})
                                 </span>
                               </div>
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <Input
-                                type="number"
-                                min={0}
-                                max={recQty}
-                                placeholder="0"
-                                value={acceptedVal === 0 ? "" : (acceptedVal ?? "")}
-                                onChange={(e) => {
-                                  const raw = e.target.value;
-                                  const val =
-                                    raw === "" ? 0 : Math.max(0, Math.min(Number(raw), recQty));
-                                  setQualityApproved((prev) => ({ ...prev, [rowKey]: val }));
-                                  setMaterials((prev) =>
-                                    prev.map((item, i) =>
-                                      i === idx
-                                        ? {
-                                            ...item,
-                                            good_quantity: val,
-                                            damaged_quantity: Math.max(0, Number(recQty) - val),
-                                            rejected_quantity: item.rejected_quantity || 0,
-                                            held_quantity: item.held_quantity || 0,
-                                            quality_approved_quantity: val,
-                                            quality_result: "INSPECTED",
-                                          }
-                                        : item,
-                                    ),
-                                  );
-                                }}
-                                className="w-28 text-right font-bold text-emerald-600 rounded-xl ml-auto"
-                              />
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <Input
-                                type="number"
-                                min={0}
-                                max={recQty}
-                                placeholder="0"
-                                value={!hasInspectionInput || damagedVal === 0 ? "" : damagedVal}
-                                onChange={(e) => {
-                                  const raw = e.target.value;
-                                  const val =
-                                    raw === "" ? 0 : Math.max(0, Math.min(Number(raw), recQty));
-                                  const accepted = Math.max(0, recQty - val);
-                                  setQualityApproved((prev) => ({
-                                    ...prev,
-                                    [rowKey]: accepted,
-                                  }));
-                                  setMaterials((prev) =>
-                                    prev.map((item, i) =>
-                                      i === idx
-                                        ? {
-                                            ...item,
-                                            good_quantity: accepted,
-                                            damaged_quantity: val,
-                                            quality_approved_quantity: accepted,
-                                            quality_result: "INSPECTED",
-                                          }
-                                        : item,
-                                    ),
-                                  );
-                                }}
-                                className="w-28 text-right font-bold text-rose-600 rounded-xl ml-auto"
-                              />
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <span
-                                className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border ${
-                                  isSound
-                                    ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                                    : isPartial
-                                      ? "bg-amber-100 text-amber-800 border-amber-300"
-                                      : "bg-rose-100 text-rose-800 border-rose-300"
-                                }`}
-                              >
-                                {!hasInspection
-                                  ? "PENDING QC"
-                                  : isSound
-                                    ? "COMPLETED"
-                                    : isPartial
-                                      ? "INSPECTED — WITH EXCEPTIONS"
-                                      : "REJECTED ✗"}
+                              <div className="flex items-center gap-2 bg-background/50 px-3 py-1.5 rounded-lg border">
+                                <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">
+                                  No. of Batches:
+                                </span>
+                                <Input
+                                  type="number"
+                                  min="1"
+                                  placeholder="1"
+                                  className="w-16 h-7 text-xs rounded border-border text-center font-bold"
+                                  value={batches.length === 0 ? "" : batches.length}
+                                  onChange={(e) => {
+                                    const valStr = e.target.value;
+                                    if (valStr === "") {
+                                      setMaterialBatches((prev) => ({ ...prev, [rowKey]: [] }));
+                                      return;
+                                    }
+                                    const num = parseInt(valStr, 10);
+                                    if (!isNaN(num) && num > 0) {
+                                      const isFloat = appQty % 1 !== 0;
+                                      const newBatches = [];
+                                      if (isFloat) {
+                                        const baseQty = Number((appQty / num).toFixed(2));
+                                        let sum = 0;
+                                        for (let i = 0; i < num - 1; i++) {
+                                          newBatches.push({
+                                            batch_number: `BATCH-${m.item_code}-${(i + 1).toString().padStart(3, "0")}`,
+                                            batch_quantity: baseQty,
+                                          });
+                                          sum += baseQty;
+                                        }
+                                        newBatches.push({
+                                          batch_number: `BATCH-${m.item_code}-${num.toString().padStart(3, "0")}`,
+                                          batch_quantity: Number((appQty - sum).toFixed(2)),
+                                        });
+                                      } else {
+                                        const baseQty = Math.floor(appQty / num);
+                                        const remainder = appQty % num;
+                                        for (let i = 0; i < num; i++) {
+                                          newBatches.push({
+                                            batch_number: `BATCH-${m.item_code}-${(i + 1).toString().padStart(3, "0")}`,
+                                            batch_quantity:
+                                              i === num - 1 ? baseQty + remainder : baseQty,
+                                          });
+                                        }
+                                      }
+                                      setMaterialBatches((prev) => ({
+                                        ...prev,
+                                        [rowKey]: newBatches,
+                                      }));
+                                    }
+                                  }}
+                                />
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-4 text-xs font-semibold">
+                              <span>
+                                Quality-Approved Qty: <b className="text-emerald-700">{appQty}</b>{" "}
+                                {m.uom}
                               </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                              <span>
+                                Total Batch Qty:{" "}
+                                <b className={isValid ? "text-emerald-700" : "text-rose-700"}>
+                                  {totalBatchQty}
+                                </b>{" "}
+                                {m.uom}
+                              </span>
+                              <span
+                                className={`px-2 py-0.5 rounded text-[11px] font-bold ${isValid ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}
+                              >
+                                {isValid ? "VALID ✓" : "MISMATCH ✗"}
+                              </span>
+                            </div>
+                          </div>
 
-              {/* Damaged Goods Photo Evidence Section */}
-              <div className="pt-2 space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                  <AlertTriangle className="size-4 text-rose-500" /> Damage Evidence & Remarks
-                <InformationTooltip help="damageEvidence" /></h4>
-
-                {damagedMaterialRows.length === 0 ? (
-                  <div className="rounded-xl border bg-emerald-50 p-4 text-center text-sm font-medium text-emerald-800 flex items-center justify-center gap-2">
-                    <CheckCircle2 className="size-5 text-emerald-600" />
-                    {materials.every(
-                      (m, idx) =>
-                        Number(qualityApproved[grnMaterialKey(m, idx)] ?? 0) ===
-                        Number(m.received_quantity || 0),
-                    )
-                      ? `${totalReceivedQty.toLocaleString()} ${materials[0]?.uom || "units"} recorded as accepted; QC confirmation pending.`
-                      : `${totalReceivedQty.toLocaleString()} ${materials[0]?.uom || "units"} received; enter QC quantities before confirmation.`}
+                          <div className="space-y-2">
+                            {batches.map((b, bIdx) => (
+                              <div
+                                key={b.batch_number || `batch_${m.item_code}_${bIdx}`}
+                                className="flex items-center gap-3"
+                              >
+                                <span className="text-xs font-mono font-bold text-muted-foreground w-24">
+                                  Batch #{bIdx + 1}
+                                </span>
+                                <Input
+                                  placeholder="BATCH-001"
+                                  value={b.batch_number}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setMaterialBatches((prev) => {
+                                      const list = [...(prev[rowKey] || prev[m.item_code] || [])];
+                                      if (list[bIdx]) {
+                                        list[bIdx] = { ...list[bIdx], batch_number: val };
+                                      }
+                                      return { ...prev, [rowKey]: list };
+                                    });
+                                  }}
+                                  className="w-64 font-mono text-xs rounded-xl"
+                                  title={b.batch_number}
+                                />
+                                <Input
+                                  type="number"
+                                  placeholder="0"
+                                  value={b.batch_quantity === 0 ? "" : (b.batch_quantity ?? "")}
+                                  onChange={(e) => {
+                                    const val = e.target.value === "" ? 0 : Number(e.target.value);
+                                    setMaterialBatches((prev) => {
+                                      const list = [...(prev[rowKey] || prev[m.item_code] || [])];
+                                      if (list[bIdx]) {
+                                        list[bIdx] = { ...list[bIdx], batch_quantity: val };
+                                      }
+                                      return { ...prev, [rowKey]: list };
+                                    });
+                                  }}
+                                  className="w-32 text-right font-bold rounded-xl"
+                                />
+                                <span className="text-xs text-muted-foreground font-medium">
+                                  {m.uom}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </Card>
+                      );
+                    })}
                   </div>
-                ) : (
-                  <div className="overflow-x-auto rounded-xl border">
-                    <table className="w-full text-sm text-left">
-                      <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+
+                  <div className="flex justify-between pt-4 border-t">
+                    <Button
+                      variant="outline"
+                      className="rounded-xl"
+                      onClick={() => handleStepClick(3)}
+                    >
+                      <ArrowLeft className="mr-2 size-4" /> Back
+                    </Button>
+                    <Button
+                      onClick={() => void handleProceedFromPage4()}
+                      disabled={!allBatchesValid || busyAction}
+                      className="rounded-xl font-bold px-6"
+                    >
+                      Next <ArrowRight className="ml-2 size-4" />
+                    </Button>
+                  </div>
+                </Card>
+              )}
+
+              {/* PAGE 5 – DOCUMENT COMPLIANCE & ATTACHMENTS REPOSITORY */}
+              {currentPage === 5 && (
+                <Card className="rounded-xl p-4 space-y-4 shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between border-b pb-4 gap-3">
+                    <div>
+                      <h3 className="font-bold text-foreground text-base flex items-center gap-2">
+                        <span>Inbound Goods Document Repository</span>
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        <>
+                          <b>ASN Copy (Required)</b> must be captured and saved using the camera
+                          below.
+                        </>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* INLINE CUSTOM DOCUMENT CATEGORY CREATION FORM */}
+                  {false && showAddCustomTypeInput && (
+                    <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+                      <span className="text-xs font-bold text-primary block">
+                        Create Custom Document Category
+                      </span>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <Input
+                          placeholder="e.g. Insurance Certificate, MSDS, Safety Audit Report..."
+                          value={newCustomCategoryInput}
+                          onChange={(e) => setNewCustomCategoryInput(e.target.value)}
+                          className="rounded-xl text-xs font-bold flex-1 min-w-[240px] bg-background"
+                        />
+                        <Button
+                          size="sm"
+                          className="rounded-xl font-bold text-xs"
+                          onClick={() => {
+                            const trimmed = newCustomCategoryInput.trim();
+                            if (!trimmed) {
+                              toast.error("Please enter a valid document type name");
+                              return;
+                            }
+                            if (!customDocTypes.includes(trimmed)) {
+                              setCustomDocTypes((prev) => [...prev, trimmed]);
+                            }
+                            setSelectedDocCategory(trimmed);
+                            setNewCustomCategoryInput("");
+                            setShowAddCustomTypeInput(false);
+                            toast.success(`Added custom category "${trimmed}"`);
+                          }}
+                        >
+                          Save Category
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="rounded-xl text-xs"
+                          onClick={() => setShowAddCustomTypeInput(false)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* + ADD DOCUMENT ACTION FORM */}
+                  <div className="hidden rounded-xl border bg-muted/20 p-4 space-y-3">
+                    <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                      <Plus className="size-4 text-primary" /> Add Document / Attach File
+                    </span>
+                    <div className="flex flex-wrap items-end gap-3">
+                      <div className="w-64">
+                        <label className="text-[11px] font-bold text-muted-foreground block mb-1">
+                          Select Document Category
+                        </label>
+                        <select
+                          value={selectedDocCategory}
+                          onChange={(e) => setSelectedDocCategory(e.target.value)}
+                          className="w-full rounded-xl border bg-background px-3 py-2 text-xs font-bold text-foreground"
+                        >
+                          {customDocTypes.map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}{" "}
+                              {cat.toLowerCase().includes("asn") ? "(Required)" : "(Optional)"}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="flex-1 min-w-[220px]">
+                        <label className="text-[11px] font-bold text-muted-foreground block mb-1">
+                          Select File
+                        </label>
+                        <Input
+                          type="file"
+                          onChange={(e) => setPendingDocFile(e.target.files?.[0] || null)}
+                          className="rounded-xl text-xs cursor-pointer bg-background"
+                        />
+                      </div>
+
+                      <Button
+                        disabled={busyAction}
+                        onClick={async () => {
+                          if (!pendingDocFile) {
+                            toast.error("Please choose a file to attach");
+                            return;
+                          }
+                          const activeGrnId = grnId || localStorage.getItem("active_grn_id");
+                          if (
+                            !activeGrnId ||
+                            ["undefined", "null"].includes(activeGrnId.toLowerCase())
+                          ) {
+                            toast.error("Save the GRN header before uploading documents.");
+                            return;
+                          }
+                          const fileType =
+                            pendingDocFile.type ||
+                            (pendingDocFile.name.toLowerCase().endsWith(".pdf")
+                              ? "application/pdf"
+                              : pendingDocFile.name
+                                    .toLowerCase()
+                                    .match(/\.(jpg|jpeg|png|webp|svg|gif)$/)
+                                ? "image/jpeg"
+                                : "application/octet-stream");
+                          try {
+                            setBusyAction(true);
+                            const formData = new FormData();
+                            formData.append("document_type", selectedDocCategory);
+                            formData.append("file", pendingDocFile);
+                            const saved = await api.uploadGrnDocument(activeGrnId, formData);
+                            const newDoc: UploadedDocument = {
+                              document_id: saved.document_id || saved.documentId,
+                              grn_id: saved.grn_id || saved.grnId || activeGrnId,
+                              category: saved.document_type || selectedDocCategory,
+                              file_name: saved.file_name || pendingDocFile.name,
+                              file_path:
+                                saved.file_path ||
+                                saved.filePath ||
+                                URL.createObjectURL(pendingDocFile),
+                              file_type: fileType,
+                            };
+                            setUploadedDocuments((prev) => {
+                              const duplicate = prev.some(
+                                (doc) =>
+                                  doc.category.toLowerCase() === newDoc.category.toLowerCase() &&
+                                  doc.file_name.toLowerCase() === newDoc.file_name.toLowerCase(),
+                              );
+                              return duplicate
+                                ? prev.map((doc) =>
+                                    doc.category.toLowerCase() === newDoc.category.toLowerCase() &&
+                                    doc.file_name.toLowerCase() === newDoc.file_name.toLowerCase()
+                                      ? newDoc
+                                      : doc,
+                                  )
+                                : [...prev, newDoc];
+                            });
+                            setPendingDocFile(null);
+                            toast.success(`Saved ${newDoc.file_name} under ${newDoc.category}`);
+                          } catch (error) {
+                            toast.error(
+                              error instanceof Error ? error.message : "Unable to save document.",
+                            );
+                          } finally {
+                            setBusyAction(false);
+                          }
+                        }}
+                        className="rounded-xl font-bold"
+                      >
+                        <Upload className="mr-1.5 size-4" /> Attach Document
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* DOCUMENT TABLE (PO IS COMPULSORY + ATTACHED DOCUMENTS) */}
+                  <div className="overflow-x-auto rounded-xl border shadow-sm">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-muted/60 text-muted-foreground uppercase font-mono border-b">
                         <tr>
-                          <th className="px-4 py-3">Material Code</th>
-                          <th className="px-4 py-3">Material Name</th>
-                          <th className="px-4 py-3 text-right">Damaged Qty</th>
-                          <th className="px-4 py-3">Damage Reason</th>
-                          <th className="px-4 py-3">Photo Evidence</th>
+                          <th className="px-4 py-3">Document Category / Name</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">Attached File</th>
+                          <th className="px-4 py-3 text-right">Actions</th>
                         </tr>
                       </thead>
+                      <tbody className="divide-y font-medium">
+                        {/* ALWAYS RENDER ASN COMPULSORY ROW FIRST */}
+                        {(() => {
+                          const asnDoc = uploadedDocuments.find((d) =>
+                            d.category.toLowerCase().includes("asn"),
+                          );
+                          return (
+                            <tr className={!asnDoc ? "bg-rose-50/30" : "hover:bg-muted/10"}>
+                              <td className="px-4 py-3.5">
+                                <div className="flex items-center gap-2.5">
+                                  <FileText className="size-4 text-rose-600 shrink-0" />
+                                  <div>
+                                    <span className="font-bold text-foreground text-xs block">
+                                      ASN Copy (Required)
+                                    </span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3.5">
+                                {asnDoc ? (
+                                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 w-fit">
+                                    ATTACHED ✓
+                                  </span>
+                                ) : (
+                                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1 w-fit animate-pulse">
+                                    PENDING *
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3.5 font-mono text-xs">
+                                {asnDoc ? (
+                                  <span className="font-bold text-foreground line-clamp-1">
+                                    {asnDoc.file_name}
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground text-[11px] font-normal italic">
+                                    No file uploaded
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3.5 text-right">
+                                {asnDoc ? (
+                                  <div className="flex items-center justify-end gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="rounded-xl text-xs font-bold border-primary/40 text-primary hover:bg-primary/10 h-7"
+                                      onClick={() => setViewingDocumentModal(asnDoc)}
+                                    >
+                                      <Eye className="mr-1 size-3" /> View Image
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="rounded-xl text-xs text-rose-600 hover:bg-rose-50 h-7"
+                                      onClick={() => {
+                                        setUploadedDocuments((prev) =>
+                                          prev.filter((d) => d.file_name !== asnDoc.file_name),
+                                        );
+                                        toast.info(`Removed ${asnDoc.file_name}`);
+                                      }}
+                                    >
+                                      Remove
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <Button
+                                      type="button"
+                                      className="rounded-xl bg-rose-600 text-xs font-bold hover:bg-rose-700"
+                                      onClick={() => void openAsnDocumentCamera()}
+                                    >
+                                      <Camera className="mr-1 size-3" /> Open Camera *
+                                    </Button>
+                                    <Dialog
+                                      open={asnCameraOpen}
+                                      onOpenChange={(open) => {
+                                        if (!open) closeAsnDocumentCamera();
+                                      }}
+                                    >
+                                      <DialogContent className="max-w-xl rounded-2xl p-5">
+                                        <DialogHeader>
+                                          <DialogTitle className="font-black text-primary">
+                                            Capture ASN Document
+                                          </DialogTitle>
+                                        </DialogHeader>
+                                        <div className="space-y-3">
+                                          <video
+                                            ref={asnCameraVideoRef}
+                                            autoPlay
+                                            playsInline
+                                            className="w-full rounded-xl border bg-black"
+                                          />
+                                          <div className="flex gap-2">
+                                            <Button
+                                              type="button"
+                                              className="flex-1 rounded-xl"
+                                              onClick={captureAsnDocument}
+                                            >
+                                              Capture & Save
+                                            </Button>
+                                            <Button
+                                              type="button"
+                                              variant="outline"
+                                              className="rounded-xl"
+                                              onClick={closeAsnDocumentCamera}
+                                            >
+                                              Close
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      </DialogContent>
+                                    </Dialog>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })()}
 
-                      <tbody className="divide-y">
-                        {damagedMaterialRows.map(({ material: m, materialIndex, rowKey }) => (
-                          <tr key={rowKey}>
-                            <td className="px-4 py-3 font-mono font-bold text-primary">
-                              {resolveGrnMaterialCode(m) || "—"}
-                            </td>
-
-                            <td className="px-4 py-3 font-bold text-foreground">
-                              {resolveGrnMaterialCode(m) || "—"} —{" "}
-                              {m.material_name ||
-                                m.materialName ||
-                                m.material_description ||
-                                "Material"}
-                            </td>
-
-                            <td className="px-4 py-3 text-right font-bold text-rose-600">
-                              {m.damaged_quantity} {m.uom}
-                            </td>
-
-                            <td className="px-4 py-3 min-w-[200px]">
-                              <Input
-                                type="text"
-                                placeholder="Specify damage reason for this material..."
-                                value={m.damage_reason || ""}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  setMaterials((prev) =>
-                                    prev.map((item, i) =>
-                                      i === materialIndex ? { ...item, damage_reason: val } : item,
-                                    ),
-                                  );
-                                }}
-                                className="rounded-xl text-xs font-medium border"
-                              />
-                            </td>
-
-                            <td className="px-4 py-3">
-                              <DamagePhoto
-                                key={`${grnId || "draft"}:${m.grn_line_id || m.item_code}`}
-                                lineId={
-                                  m.grn_line_id &&
-                                  !["undefined", "null"].includes(
-                                    String(m.grn_line_id).toLowerCase(),
-                                  )
-                                    ? String(m.grn_line_id)
-                                    : undefined
-                                }
-                                damagedQuantity={m.damaged_quantity}
-                                reason={m.damage_reason}
-                                initialPreviewUrl={
-                                  damagePhotos[rowKey]?.previewUrl ||
-                                  damagePhotos[m.item_code]?.previewUrl
-                                }
-                                initialFile={
-                                  damagePhotos[rowKey]?.file || damagePhotos[m.item_code]?.file
-                                }
-                                onSuccess={(ev) => {
-                                  setDamagePhotos((prev) => ({
-                                    ...prev,
-                                    [rowKey]: {
-                                      evidenceId: ev.evidenceId,
-                                      evidenceIds: [ev.evidenceId],
-                                      photos: ev.filePath
-                                        ? [{ id: ev.evidenceId, file_path: ev.filePath }]
-                                        : [],
-                                      reason: m.damage_reason,
-                                      previewUrl: ev.filePath,
-                                      file: ev.file,
-                                    },
-                                  }));
-                                }}
-                              />
-                            </td>
-                          </tr>
-                        ))}
+                        {/* RENDER ANY ATTACHED OPTIONAL DOCUMENTS DYNAMICALLY */}
+                        {uploadedDocuments
+                          .filter(
+                            (d) =>
+                              !d.category.toLowerCase().includes("po") &&
+                              !d.category.toLowerCase().includes("purchase order") &&
+                              !d.category.toLowerCase().includes("asn"),
+                          )
+                          .map((optDoc, idx) => (
+                            <tr
+                              key={optDoc.file_name || `opt_doc_${idx}`}
+                              className="hover:bg-muted/10"
+                            >
+                              <td className="px-4 py-3.5">
+                                <div className="flex items-center gap-2.5">
+                                  <FileText className="size-4 text-primary shrink-0" />
+                                  <div>
+                                    <span className="font-bold text-foreground text-xs block">
+                                      {optDoc.category}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground block line-clamp-1">
+                                      Optional Inbound Attachment
+                                    </span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3.5">
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 w-fit">
+                                  ATTACHED ✓
+                                </span>
+                              </td>
+                              <td className="px-4 py-3.5 font-mono text-xs">
+                                <span className="font-bold text-foreground line-clamp-1">
+                                  {optDoc.file_name}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3.5 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="rounded-xl text-xs font-bold border-primary/40 text-primary hover:bg-primary/10 h-7"
+                                    onClick={() => setViewingDocumentModal(optDoc)}
+                                  >
+                                    <Eye className="mr-1 size-3" /> View Image
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="rounded-xl text-xs text-rose-600 hover:bg-rose-50 h-7"
+                                    onClick={() => {
+                                      setUploadedDocuments((prev) =>
+                                        prev.filter((d) => d.file_name !== optDoc.file_name),
+                                      );
+                                      toast.info(`Removed ${optDoc.file_name}`);
+                                    }}
+                                  >
+                                    Remove
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
                       </tbody>
                     </table>
                   </div>
-                )}
-              </div>
 
-              <div className="pt-2 space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                  <AlertTriangle className="size-4 text-amber-500" /> Exception Reasons
-                </h4>
-                <div className="overflow-x-auto rounded-xl border">
-                  <table className="w-full text-sm text-left">
-                    <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
-                      <tr>
-                        <th className="px-4 py-3">Material</th>
-                        <th className="px-4 py-3">Exception</th>
-                        <th className="px-4 py-3 text-right">Quantity</th>
-                        <th className="px-4 py-3">Reason *</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {materials.flatMap((m, idx) => {
-                        const rows = [
-                          {
-                            kind: "Damaged",
-                            qty: Number(m.damaged_quantity || 0),
-                            field: "damage_reason" as const,
-                          },
-                          {
-                            kind: "Rejected",
-                            qty: Number(m.rejected_quantity || 0),
-                            field: "rejected_reason" as const,
-                          },
-                          {
-                            kind: "Held",
-                            qty: Number(m.held_quantity || 0),
-                            field: "held_reason" as const,
-                          },
-                        ].filter((row) => row.qty > 0);
-                        return rows.map((row) => (
-                          <tr key={`${grnMaterialKey(m, idx)}-${row.kind}`}>
-                            <td className="px-4 py-3 font-semibold">
-                              {resolveGrnMaterialCode(m) || "—"} — {m.material_name}
-                            </td>
-                            <td className="px-4 py-3 font-semibold">{row.kind}</td>
-                            <td className="px-4 py-3 text-right font-bold">
-                              {row.qty} {m.uom || "PCS"}
-                            </td>
-                            <td className="px-4 py-3">
-                              <Input
-                                placeholder={`${row.kind} reason *`}
-                                value={m[row.field] || ""}
-                                onChange={(e) =>
-                                  setMaterials((prev) =>
-                                    prev.map((item, i) =>
-                                      i === idx ? { ...item, [row.field]: e.target.value } : item,
-                                    ),
-                                  )
-                                }
-                                className="rounded-xl text-xs"
-                              />
-                            </td>
-                          </tr>
-                        ));
-                      })}
-                      {materials.every(
-                        (m) =>
-                          !(
-                            Number(m.damaged_quantity || 0) ||
-                            Number(m.rejected_quantity || 0) ||
-                            Number(m.held_quantity || 0)
-                          ),
-                      ) && (
-                        <tr>
-                          <td
-                            colSpan={4}
-                            className="px-4 py-4 text-center text-xs text-muted-foreground"
-                          >
-                            No exception quantities recorded.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="flex justify-between pt-4 border-t">
-                <Button variant="outline" className="rounded-xl" onClick={() => handleStepClick(2)}>
-                  <ArrowLeft className="mr-2 size-4" /> Back
-                </Button>
-                <Button
-                  disabled={busyAction || !qcHasRequiredEvidence}
-                  onClick={() => void handleProceedFromPage3()}
-                  className="rounded-xl font-bold px-6"
-                >
-                  Next <ArrowRight className="ml-2 size-4" />
-                </Button>
-              </div>
-            </Card>
-          )}
-
-          {/* PAGE 4 – BATCH CREATION */}
-          {currentPage === 4 && (
-            <Card className="rounded-xl p-4 space-y-4 shadow-sm">
-              <div className="border-b pb-4">
-                <h3 className="font-bold text-foreground text-base">Lot & Batch Creation<InformationTooltip help="batch" /></h3>
-                <p className="text-xs text-muted-foreground">
-                  Divide Quality-Approved materials into batches.{" "}
-                  <b>Rule: Total Batch Quantity MUST equal Quality-Approved Quantity.</b>
-                </p>
-              </div>
-
-              {!allBatchesValid && (
-                <div className="rounded-xl border border-rose-300 bg-rose-50 p-4 text-xs text-rose-800 font-bold flex items-center gap-2">
-                  <AlertTriangle className="size-5 shrink-0" />
-                  <span>
-                    Batch Quantity Mismatch! The sum of batch quantities for each material must
-                    strictly match the Quality-Approved Quantity before proceeding.
-                  </span>
-                </div>
-              )}
-
-              <div className="space-y-5">
-                {materials.map((m, idx) => {
-                  const rowKey = grnMaterialKey(m, idx);
-                  const { appQty, totalBatchQty, isValid } = getBatchValidation(m, idx);
-                  const batches = materialBatches[rowKey] || materialBatches[m.item_code] || [];
-
-                  return (
-                    <Card
-                      key={grnMaterialKey(m, idx)}
-                      className={`rounded-xl p-4 border ${isValid ? "border-emerald-300 bg-emerald-50/20" : "border-rose-300 bg-rose-50/20"}`}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-3 mb-3 border-b pb-2">
-                        <div className="flex items-center flex-wrap gap-4">
-                          <div>
-                            <span className="font-bold text-foreground">{m.material_name}</span>
-                            <span className="ml-2 font-mono text-xs text-primary font-bold">
-                              ({m.item_code})
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2 bg-background/50 px-3 py-1.5 rounded-lg border">
-                            <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">
-                              No. of Batches:
-                            </span>
-                            <Input
-                              type="number"
-                              min="1"
-                              placeholder="1"
-                              className="w-16 h-7 text-xs rounded border-border text-center font-bold"
-                              value={batches.length === 0 ? "" : batches.length}
-                              onChange={(e) => {
-                                const valStr = e.target.value;
-                                if (valStr === "") {
-                                  setMaterialBatches((prev) => ({ ...prev, [rowKey]: [] }));
-                                  return;
-                                }
-                                const num = parseInt(valStr, 10);
-                                if (!isNaN(num) && num > 0) {
-                                  const isFloat = appQty % 1 !== 0;
-                                  let newBatches = [];
-                                  if (isFloat) {
-                                    const baseQty = Number((appQty / num).toFixed(2));
-                                    let sum = 0;
-                                    for (let i = 0; i < num - 1; i++) {
-                                      newBatches.push({
-                                        batch_number: `BATCH-${m.item_code}-${(i + 1).toString().padStart(3, "0")}`,
-                                        batch_quantity: baseQty,
-                                      });
-                                      sum += baseQty;
-                                    }
-                                    newBatches.push({
-                                      batch_number: `BATCH-${m.item_code}-${num.toString().padStart(3, "0")}`,
-                                      batch_quantity: Number((appQty - sum).toFixed(2)),
-                                    });
-                                  } else {
-                                    const baseQty = Math.floor(appQty / num);
-                                    const remainder = appQty % num;
-                                    for (let i = 0; i < num; i++) {
-                                      newBatches.push({
-                                        batch_number: `BATCH-${m.item_code}-${(i + 1).toString().padStart(3, "0")}`,
-                                        batch_quantity:
-                                          i === num - 1 ? baseQty + remainder : baseQty,
-                                      });
-                                    }
-                                  }
-                                  setMaterialBatches((prev) => ({ ...prev, [rowKey]: newBatches }));
-                                }
-                              }}
-                            />
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-4 text-xs font-semibold">
-                          <span>
-                            Quality-Approved Qty: <b className="text-emerald-700">{appQty}</b>{" "}
-                            {m.uom}
-                          </span>
-                          <span>
-                            Total Batch Qty:{" "}
-                            <b className={isValid ? "text-emerald-700" : "text-rose-700"}>
-                              {totalBatchQty}
-                            </b>{" "}
-                            {m.uom}
-                          </span>
-                          <span
-                            className={`px-2 py-0.5 rounded text-[11px] font-bold ${isValid ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}
-                          >
-                            {isValid ? "VALID ✓" : "MISMATCH ✗"}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        {batches.map((b, bIdx) => (
-                          <div
-                            key={b.batch_number || `batch_${m.item_code}_${bIdx}`}
-                            className="flex items-center gap-3"
-                          >
-                            <span className="text-xs font-mono font-bold text-muted-foreground w-24">
-                              Batch #{bIdx + 1}
-                            </span>
-                            <Input
-                              placeholder="BATCH-001"
-                              value={b.batch_number}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setMaterialBatches((prev) => {
-                                  const list = [...(prev[rowKey] || prev[m.item_code] || [])];
-                                  if (list[bIdx]) {
-                                    list[bIdx] = { ...list[bIdx], batch_number: val };
-                                  }
-                                  return { ...prev, [rowKey]: list };
-                                });
-                              }}
-                              className="w-64 font-mono text-xs rounded-xl"
-                              title={b.batch_number}
-                            />
-                            <Input
-                              type="number"
-                              placeholder="0"
-                              value={b.batch_quantity === 0 ? "" : (b.batch_quantity ?? "")}
-                              onChange={(e) => {
-                                const val = e.target.value === "" ? 0 : Number(e.target.value);
-                                setMaterialBatches((prev) => {
-                                  const list = [...(prev[rowKey] || prev[m.item_code] || [])];
-                                  if (list[bIdx]) {
-                                    list[bIdx] = { ...list[bIdx], batch_quantity: val };
-                                  }
-                                  return { ...prev, [rowKey]: list };
-                                });
-                              }}
-                              className="w-32 text-right font-bold rounded-xl"
-                            />
-                            <span className="text-xs text-muted-foreground font-medium">
-                              {m.uom}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
-
-              <div className="flex justify-between pt-4 border-t">
-                <Button variant="outline" className="rounded-xl" onClick={() => handleStepClick(3)}>
-                  <ArrowLeft className="mr-2 size-4" /> Back
-                </Button>
-                <Button
-                  onClick={() => void handleProceedFromPage4()}
-                  disabled={!allBatchesValid || busyAction}
-                  className="rounded-xl font-bold px-6"
-                >
-                  Next <ArrowRight className="ml-2 size-4" />
-                </Button>
-              </div>
-            </Card>
-          )}
-
-          {/* PAGE 5 – DOCUMENT COMPLIANCE & ATTACHMENTS REPOSITORY */}
-          {currentPage === 5 && (
-            <Card className="rounded-xl p-4 space-y-4 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between border-b pb-4 gap-3">
-                <div>
-                  <h3 className="font-bold text-foreground text-base flex items-center gap-2">
-                    <span>Inbound Goods Document Repository</span>
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    <>
-                      <b>ASN Copy (Required)</b> must be captured and saved using the camera below.
-                    </>
-                  </p>
-                </div>
-              </div>
-
-              {/* INLINE CUSTOM DOCUMENT CATEGORY CREATION FORM */}
-              {false && showAddCustomTypeInput && (
-                <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
-                  <span className="text-xs font-bold text-primary block">
-                    Create Custom Document Category
-                  </span>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Input
-                      placeholder="e.g. Insurance Certificate, MSDS, Safety Audit Report..."
-                      value={newCustomCategoryInput}
-                      onChange={(e) => setNewCustomCategoryInput(e.target.value)}
-                      className="rounded-xl text-xs font-bold flex-1 min-w-[240px] bg-background"
-                    />
+                  <div className="flex justify-between pt-4 border-t">
                     <Button
-                      size="sm"
-                      className="rounded-xl font-bold text-xs"
-                      onClick={() => {
-                        const trimmed = newCustomCategoryInput.trim();
-                        if (!trimmed) {
-                          toast.error("Please enter a valid document type name");
-                          return;
-                        }
-                        if (!customDocTypes.includes(trimmed)) {
-                          setCustomDocTypes((prev) => [...prev, trimmed]);
-                        }
-                        setSelectedDocCategory(trimmed);
-                        setNewCustomCategoryInput("");
-                        setShowAddCustomTypeInput(false);
-                        toast.success(`Added custom category "${trimmed}"`);
-                      }}
+                      variant="outline"
+                      className="rounded-xl"
+                      onClick={() => handleStepClick(4)}
                     >
-                      Save Category
+                      <ArrowLeft className="mr-2 size-4" />
+                      Back
                     </Button>
                     <Button
-                      size="sm"
-                      variant="ghost"
-                      className="rounded-xl text-xs"
-                      onClick={() => setShowAddCustomTypeInput(false)}
+                      disabled={
+                        busyAction ||
+                        !uploadedDocuments.some(
+                          (d) => isPersistedDocument(d) && d.category.toLowerCase().includes("asn"),
+                        )
+                      }
+                      onClick={() => void handleProceedFromPage5()}
+                      className="rounded-xl font-bold px-6"
                     >
-                      Cancel
+                      Next <ArrowRight className="ml-2 size-4" />
                     </Button>
                   </div>
-                </div>
+                </Card>
               )}
 
-              {/* + ADD DOCUMENT ACTION FORM */}
-              <div className="hidden rounded-xl border bg-muted/20 p-4 space-y-3">
-                <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                  <Plus className="size-4 text-primary" /> Add Document / Attach File
-                </span>
-                <div className="flex flex-wrap items-end gap-3">
-                  <div className="w-64">
-                    <label className="text-[11px] font-bold text-muted-foreground block mb-1">
-                      Select Document Category
-                    </label>
-                    <select
-                      value={selectedDocCategory}
-                      onChange={(e) => setSelectedDocCategory(e.target.value)}
-                      className="w-full rounded-xl border bg-background px-3 py-2 text-xs font-bold text-foreground"
-                    >
-                      {customDocTypes.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat} {cat.toLowerCase().includes("asn") ? "(Required)" : "(Optional)"}
+              {/* PAGE 6 – QR CODE GENERATION */}
+              {currentPage === 6 && (
+                <Card className="rounded-xl p-4 space-y-4 shadow-sm">
+                  <div className="border-b pb-4">
+                    <h3 className="font-bold text-foreground text-base">
+                      Batch-wise QR Code Generation
+                    </h3>
+                  </div>
+
+                  <div className="hidden flex flex-wrap items-center justify-between gap-3 bg-muted/20 p-4 rounded-xl border">
+                    <div className="flex-1 min-w-[280px]">
+                      <label className="text-xs font-bold text-foreground mb-1 block">
+                        Filter Material / View Option
+                      </label>
+                      <select
+                        value={selectedQrMaterialCode}
+                        onChange={(e) => setSelectedQrMaterialCode(e.target.value)}
+                        className="w-full rounded-xl border bg-background px-3 py-2 text-sm font-bold text-primary"
+                      >
+                        <option value="ALL">
+                          📦 All Materials in PO ({materials.length} Materials)
                         </option>
-                      ))}
-                    </select>
+                        {materials.map((m, idx) => (
+                          <option key={grnMaterialKey(m, idx)} value={m.item_code}>
+                            {m.item_code} – {m.material_name} ({m.material_category || "General"})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        onClick={() => printAllPoQrLabels()}
+                        className="rounded-xl font-bold bg-primary text-white shadow-sm"
+                      >
+                        <Printer className="mr-2 size-4" /> Print All PO Batch QR Labels
+                      </Button>
+                    </div>
                   </div>
 
-                  <div className="flex-1 min-w-[220px]">
-                    <label className="text-[11px] font-bold text-muted-foreground block mb-1">
-                      Select File
-                    </label>
-                    <Input
-                      type="file"
-                      onChange={(e) => setPendingDocFile(e.target.files?.[0] || null)}
-                      className="rounded-xl text-xs cursor-pointer bg-background"
-                    />
-                  </div>
-
-                  <Button
-                    disabled={busyAction}
-                    onClick={async () => {
-                      if (!pendingDocFile) {
-                        toast.error("Please choose a file to attach");
-                        return;
-                      }
-                      const activeGrnId = grnId || localStorage.getItem("active_grn_id");
-                      if (
-                        !activeGrnId ||
-                        ["undefined", "null"].includes(activeGrnId.toLowerCase())
-                      ) {
-                        toast.error("Save the GRN header before uploading documents.");
-                        return;
-                      }
-                      const fileType =
-                        pendingDocFile.type ||
-                        (pendingDocFile.name.toLowerCase().endsWith(".pdf")
-                          ? "application/pdf"
-                          : pendingDocFile.name
-                                .toLowerCase()
-                                .match(/\.(jpg|jpeg|png|webp|svg|gif)$/)
-                            ? "image/jpeg"
-                            : "application/octet-stream");
-                      try {
-                        setBusyAction(true);
-                        const formData = new FormData();
-                        formData.append("document_type", selectedDocCategory);
-                        formData.append("file", pendingDocFile);
-                        const saved = await api.uploadGrnDocument(activeGrnId, formData);
-                        const newDoc: UploadedDocument = {
-                          document_id: saved.document_id || saved.documentId,
-                          grn_id: saved.grn_id || saved.grnId || activeGrnId,
-                          category: saved.document_type || selectedDocCategory,
-                          file_name: saved.file_name || pendingDocFile.name,
-                          file_path:
-                            saved.file_path ||
-                            saved.filePath ||
-                            URL.createObjectURL(pendingDocFile),
-                          file_type: fileType,
-                        };
-                        setUploadedDocuments((prev) => {
-                          const duplicate = prev.some(
-                            (doc) =>
-                              doc.category.toLowerCase() === newDoc.category.toLowerCase() &&
-                              doc.file_name.toLowerCase() === newDoc.file_name.toLowerCase(),
-                          );
-                          return duplicate
-                            ? prev.map((doc) =>
-                                doc.category.toLowerCase() === newDoc.category.toLowerCase() &&
-                                doc.file_name.toLowerCase() === newDoc.file_name.toLowerCase()
-                                  ? newDoc
-                                  : doc,
-                              )
-                            : [...prev, newDoc];
-                        });
-                        setPendingDocFile(null);
-                        toast.success(`Saved ${newDoc.file_name} under ${newDoc.category}`);
-                      } catch (error) {
-                        toast.error(
-                          error instanceof Error ? error.message : "Unable to save document.",
-                        );
-                      } finally {
-                        setBusyAction(false);
-                      }
-                    }}
-                    className="rounded-xl font-bold"
-                  >
-                    <Upload className="mr-1.5 size-4" /> Attach Document
-                  </Button>
-                </div>
-              </div>
-
-              {/* DOCUMENT TABLE (PO IS COMPULSORY + ATTACHED DOCUMENTS) */}
-              <div className="overflow-x-auto rounded-xl border shadow-sm">
-                <table className="w-full text-xs text-left">
-                  <thead className="bg-muted/60 text-muted-foreground uppercase font-mono border-b">
-                    <tr>
-                      <th className="px-4 py-3">Document Category / Name</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3">Attached File</th>
-                      <th className="px-4 py-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y font-medium">
-                    {/* ALWAYS RENDER ASN COMPULSORY ROW FIRST */}
+                  {/* Material-wise Batch QR Labels Grid (Good Stock) */}
+                  <div className="space-y-8">
                     {(() => {
-                      const asnDoc = uploadedDocuments.find((d) =>
-                        d.category.toLowerCase().includes("asn"),
-                      );
-                      return (
-                        <tr className={!asnDoc ? "bg-rose-50/30" : "hover:bg-muted/10"}>
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-2.5">
-                              <FileText className="size-4 text-rose-600 shrink-0" />
+                      const goodMaterials =
+                        selectedQrMaterialCode === "ALL"
+                          ? materials.filter(
+                              (m, index, list) =>
+                                (m.good_quantity || 0) > 0 &&
+                                list.findIndex((item) => item.item_code === m.item_code) === index,
+                            )
+                          : materials.filter(
+                              (m, index, list) =>
+                                m.item_code === selectedQrMaterialCode &&
+                                (m.good_quantity || 0) > 0 &&
+                                list.findIndex((item) => item.item_code === m.item_code) === index,
+                            );
+                      if (goodMaterials.length === 0) {
+                        return (
+                          <div className="p-4 rounded-xl border border-blue-200 bg-blue-50/50 text-center text-xs text-blue-800 font-medium">
+                            No Good Quantity stock recorded for QR generation (Good Quantity = 0).
+                          </div>
+                        );
+                      }
+                      return goodMaterials.map((mat, matIdx) => {
+                        const materialIndex = materials.indexOf(mat);
+                        const rowKey =
+                          materialIndex >= 0
+                            ? grnMaterialKey(mat, materialIndex)
+                            : grnMaterialKey(mat, matIdx);
+                        const matBatches =
+                          materialBatches[rowKey] || materialBatches[mat.item_code];
+                        const bList =
+                          matBatches && matBatches.length > 0
+                            ? matBatches.filter((b) => (b.batch_quantity || 0) > 0)
+                            : [];
+                        return (
+                          <div
+                            key={rowKey}
+                            className="space-y-4 rounded-2xl border p-4 bg-muted/10"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
                               <div>
-                                <span className="font-bold text-foreground text-xs block">
-                                  ASN Copy (Required)
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="grid size-6 place-items-center rounded-full bg-primary text-primary-foreground font-mono text-xs font-bold">
+                                    {matIdx + 1}
+                                  </span>
+                                  <h4 className="font-bold text-base text-foreground">
+                                    {mat.material_name}{" "}
+                                    <span className="font-mono text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-full border border-primary/20">
+                                      {mat.item_code}
+                                    </span>
+                                  </h4>
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-0.5">
+                                  Category: <b>{mat.material_category || "General"}</b> | Total
+                                  Batches: <b>{bList.length}</b> | UOM: <b>{mat.uom}</b> | Approved
+                                  Qty:{" "}
+                                  <b>
+                                    {mat.good_quantity} {mat.uom}
+                                  </b>
+                                </p>
                               </div>
                             </div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            {asnDoc ? (
-                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 w-fit">
-                                ATTACHED ✓
-                              </span>
-                            ) : (
-                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1 w-fit animate-pulse">
-                                PENDING *
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3.5 font-mono text-xs">
-                            {asnDoc ? (
-                              <span className="font-bold text-foreground line-clamp-1">
-                                {asnDoc.file_name}
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground text-[11px] font-normal italic">
-                                No file uploaded
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3.5 text-right">
-                            {asnDoc ? (
-                              <div className="flex items-center justify-end gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="rounded-xl text-xs font-bold border-primary/40 text-primary hover:bg-primary/10 h-7"
-                                  onClick={() => setViewingDocumentModal(asnDoc)}
-                                >
-                                  <Eye className="mr-1 size-3" /> View Image
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="rounded-xl text-xs text-rose-600 hover:bg-rose-50 h-7"
-                                  onClick={() => {
-                                    setUploadedDocuments((prev) =>
-                                      prev.filter((d) => d.file_name !== asnDoc.file_name),
-                                    );
-                                    toast.info(`Removed ${asnDoc.file_name}`);
-                                  }}
-                                >
-                                  Remove
-                                </Button>
-                              </div>
-                            ) : (
-                              <div>
-                                <Button
-                                  type="button"
-                                  className="rounded-xl bg-rose-600 text-xs font-bold hover:bg-rose-700"
-                                  onClick={() => void openAsnDocumentCamera()}
-                                >
-                                  <Camera className="mr-1 size-3" /> Open Camera *
-                                </Button>
-                                <Dialog
-                                  open={asnCameraOpen}
-                                  onOpenChange={(open) => {
-                                    if (!open) closeAsnDocumentCamera();
-                                  }}
-                                >
-                                  <DialogContent className="max-w-xl rounded-2xl p-5">
-                                    <DialogHeader>
-                                      <DialogTitle className="font-black text-primary">
-                                        Capture ASN Document
-                                      </DialogTitle>
-                                    </DialogHeader>
-                                    <div className="space-y-3">
-                                      <video
-                                        ref={asnCameraVideoRef}
-                                        autoPlay
-                                        playsInline
-                                        className="w-full rounded-xl border bg-black"
-                                      />
-                                      <div className="flex gap-2">
-                                        <Button
-                                          type="button"
-                                          className="flex-1 rounded-xl"
-                                          onClick={captureAsnDocument}
-                                        >
-                                          Capture & Save
-                                        </Button>
-                                        <Button
-                                          type="button"
-                                          variant="outline"
-                                          className="rounded-xl"
-                                          onClick={closeAsnDocumentCamera}
-                                        >
-                                          Close
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  </DialogContent>
-                                </Dialog>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })()}
 
-                    {/* RENDER ANY ATTACHED OPTIONAL DOCUMENTS DYNAMICALLY */}
-                    {uploadedDocuments
-                      .filter(
-                        (d) =>
-                          !d.category.toLowerCase().includes("po") &&
-                          !d.category.toLowerCase().includes("purchase order") &&
-                          !d.category.toLowerCase().includes("asn"),
-                      )
-                      .map((optDoc, idx) => (
-                        <tr
-                          key={optDoc.file_name || `opt_doc_${idx}`}
-                          className="hover:bg-muted/10"
-                        >
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-2.5">
-                              <FileText className="size-4 text-primary shrink-0" />
-                              <div>
-                                <span className="font-bold text-foreground text-xs block">
-                                  {optDoc.category}
-                                </span>
-                                <span className="text-[10px] text-muted-foreground block line-clamp-1">
-                                  Optional Inbound Attachment
-                                </span>
+                            {bList.length === 0 ? (
+                              <p className="text-xs text-muted-foreground italic p-4 text-center">
+                                No batches created for this material yet.
+                              </p>
+                            ) : (
+                              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                                {bList.map((b, idx) => {
+                                  const qrInfo = qrLabels[`${rowKey}:${b.batch_number}`] || {
+                                    qr_id: `QR-MAT-${mat.item_code}-${b.batch_number}`,
+                                    data_url: "",
+                                    payload: buildMaterialQrPayload(mat.item_code, b, mat),
+                                  };
+
+                                  return (
+                                    <Card
+                                      key={b.batch_number}
+                                      className="rounded-2xl p-5 border text-center space-y-3 bg-white text-black shadow-md relative overflow-hidden group"
+                                    >
+                                      <div className="border-b pb-2 text-left">
+                                        <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                                          GRN Batch Label
+                                        </span>
+                                        <h4 className="font-mono text-base font-bold text-gray-900">
+                                          {b.batch_number}
+                                        </h4>
+                                      </div>
+
+                                      <div className="relative my-2">
+                                        {qrInfo.data_url ? (
+                                          <div className="relative inline-block rounded-2xl border border-gray-200 bg-white p-2 shadow-sm">
+                                            <img
+                                              src={qrInfo.data_url}
+                                              alt="Material QR Code"
+                                              className="size-48 mx-auto"
+                                            />
+                                          </div>
+                                        ) : (
+                                          <div className="grid size-48 place-items-center bg-gray-100 mx-auto rounded-2xl border border-dashed border-gray-300">
+                                            <Loader2 className="size-8 animate-spin text-primary" />
+                                            <span className="text-xs text-gray-500">
+                                              Generating QR...
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      <div className="text-xs text-left space-y-1 font-mono text-gray-800 border-t pt-2">
+                                        <p></p>
+                                        <p>
+                                          <b>GRN Number:</b> {header.grn_number}
+                                        </p>
+                                        <p>
+                                          <b>Material:</b> {mat.item_code} ({mat.material_name})
+                                        </p>
+                                        <p>
+                                          <b>Category:</b> {mat.material_category || "General"}
+                                        </p>
+                                        <p>
+                                          <b>Batch Qty:</b> {b.batch_quantity} {mat.uom}
+                                        </p>
+                                      </div>
+
+                                      <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-3">
+                                        {qrInfo.data_url ? (
+                                          <a
+                                            href={qrInfo.data_url}
+                                            download={`${b.batch_number}-QR.png`}
+                                            className="inline-flex h-9 w-full items-center justify-center rounded-xl bg-emerald-600 text-xs font-bold text-white hover:bg-emerald-700"
+                                          >
+                                            <Download className="mr-1 size-3" /> Download QR
+                                          </a>
+                                        ) : (
+                                          <Button
+                                            disabled
+                                            className="w-full rounded-xl text-xs font-bold"
+                                          >
+                                            <Download className="mr-1 size-3" /> Download QR
+                                          </Button>
+                                        )}
+                                      </div>
+                                    </Card>
+                                  );
+                                })}
                               </div>
+                            )}
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+
+                  {/* ⚠️ DAMAGED & REJECTED GOODS QR LABELS (QUARANTINE) SECTION */}
+                  <div className="hidden pt-6 border-t space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3 bg-rose-50/70 dark:bg-rose-950/30 p-4 rounded-2xl border border-rose-200 dark:border-rose-900">
+                      <div>
+                        <h4 className="font-bold text-base text-rose-900 dark:text-rose-200 flex items-center gap-2">
+                          <AlertTriangle className="size-5 text-rose-600 animate-pulse" />
+                          Quarantine QR Labels — Damaged, Rejected & QC Hold
+                        </h4>
+                        <p className="text-xs text-rose-700 dark:text-rose-300 mt-0.5">
+                          <b>
+                            Rule: Damaged/Rejected Goods → Damage Lot → Unique Damage QR →
+                            Quarantine Storage.
+                          </b>{" "}
+                          Damaged goods are excluded from available stock.
+                        </p>
+                      </div>
+                      {damageQrLabels.length > 0 && (
+                        <div className="flex items-center gap-2">
+                          <Button
+                            onClick={() => {
+                              setNotifyVendorEmail(header.supplier_email || "");
+                              setShowNotifyVendorModal(true);
+                            }}
+                            className="rounded-xl font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm"
+                          >
+                            <Mail className="mr-2 size-4" /> Send Damage Return to Supplier App
+                          </Button>
+                          <Button
+                            onClick={() => printAllDamageQrLabels()}
+                            variant="outline"
+                            className="rounded-xl font-bold border-rose-300 text-rose-800 dark:text-rose-200 hover:bg-rose-100 shadow-sm"
+                          >
+                            <Printer className="mr-2 size-4" /> Print All Damage Labels (
+                            {damageQrLabels.length})
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+
+                    {damageQrLabels.length === 0 ? (
+                      <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 text-center text-xs text-emerald-800 font-medium">
+                        ✓ No damaged or rejected goods recorded for this GRN. All received material
+                        lines are 100% sound.
+                      </div>
+                    ) : (
+                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        {damageQrLabels.map((dEntry) => (
+                          <Card
+                            key={dEntry.damage_lot_number}
+                            className="rounded-2xl p-5 border-2 border-rose-300 dark:border-rose-800 text-center space-y-3 bg-rose-50/20 dark:bg-rose-950/20 text-foreground shadow-md relative overflow-hidden group"
+                          >
+                            <div className="border-b border-rose-200 dark:border-rose-900 pb-2 text-left">
+                              <span className="text-[10px] font-extrabold uppercase tracking-widest text-rose-700 dark:text-rose-400">
+                                {dEntry.exception_type === "REJECTED"
+                                  ? "Rejected Lot QR"
+                                  : dEntry.exception_type === "QC_HOLD"
+                                    ? "QC Hold Lot QR"
+                                    : "Damage Lot QR"}
+                              </span>
+                              <h4 className="font-mono text-sm font-bold text-rose-950 dark:text-rose-100">
+                                {dEntry.damage_lot_number}
+                              </h4>
                             </div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 w-fit">
-                              ATTACHED ✓
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5 font-mono text-xs">
-                            <span className="font-bold text-foreground line-clamp-1">
-                              {optDoc.file_name}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5 text-right">
-                            <div className="flex items-center justify-end gap-2">
+
+                            <div
+                              className="relative group/qr cursor-pointer my-2"
+                              onClick={() =>
+                                setEnlargedQr({
+                                  title: dEntry.damage_lot_number,
+                                  qr_id: dEntry.qr_code,
+                                  data_url: dEntry.qr_data_url,
+                                  payload: dEntry.qr_payload,
+                                  batch: {
+                                    batch_number: dEntry.damage_lot_number,
+                                    batch_quantity: dEntry.damaged_quantity,
+                                  },
+                                  itemCode: dEntry.item_code,
+                                })
+                              }
+                            >
+                              {dEntry.qr_data_url ? (
+                                <div className="relative inline-block p-2 bg-white rounded-2xl border border-rose-200 shadow-sm transition-transform group-hover/qr:scale-105">
+                                  <img
+                                    src={dEntry.qr_data_url}
+                                    alt="Damage QR Code"
+                                    className="size-44 mx-auto"
+                                  />
+                                  <div className="absolute inset-0 bg-rose-950/80 opacity-0 group-hover/qr:opacity-100 transition-opacity rounded-2xl flex flex-col items-center justify-center text-white text-xs font-bold gap-1 p-2">
+                                    <Eye className="size-7 text-rose-300" />
+                                    <span>Click to Enlarge / Scan</span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="grid size-44 place-items-center bg-rose-100 mx-auto rounded-2xl border border-dashed border-rose-300">
+                                  <Loader2 className="size-8 animate-spin text-rose-600" />
+                                  <span className="text-xs text-rose-700">
+                                    Generating Damage QR...
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="text-xs text-left space-y-1 font-mono text-foreground border-t border-rose-200 dark:border-rose-900 pt-2">
+                              <p>
+                                <b>GRN Number:</b> {header.grn_number}
+                              </p>
+                              <p>
+                                <b>Material:</b> {dEntry.item_code} ({dEntry.material_name})
+                              </p>
+                              <p>
+                                <b>{dEntry.quantity_label || "Damaged Qty"}:</b>{" "}
+                                <b className="text-rose-600 dark:text-rose-400">
+                                  {dEntry.damaged_quantity} {dEntry.uom}
+                                </b>
+                              </p>
+                              <p>
+                                <b>Reason:</b> {dEntry.reason}
+                              </p>
+                              <p>
+                                <b>QA Status:</b>{" "}
+                                <span className="bg-rose-100 dark:bg-rose-900 text-rose-800 dark:text-rose-200 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                                  {dEntry.exception_type || dEntry.qa_status || "DAMAGED"}
+                                </span>
+                              </p>
+                              <p>
+                                <b>Quarantine Location:</b>{" "}
+                                <span className="text-amber-700 dark:text-amber-400 font-bold">
+                                  {dEntry.quarantine_location}
+                                </span>
+                              </p>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 pt-1">
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="rounded-xl text-xs font-bold border-primary/40 text-primary hover:bg-primary/10 h-7"
-                                onClick={() => setViewingDocumentModal(optDoc)}
+                                className="w-full rounded-xl text-xs font-bold border-rose-200 hover:bg-rose-100"
+                                onClick={() =>
+                                  setEnlargedQr({
+                                    title: dEntry.damage_lot_number,
+                                    qr_id: dEntry.qr_code,
+                                    data_url: dEntry.qr_data_url,
+                                    payload: dEntry.qr_payload,
+                                    batch: {
+                                      batch_number: dEntry.damage_lot_number,
+                                      batch_quantity: dEntry.damaged_quantity,
+                                    },
+                                    itemCode: dEntry.item_code,
+                                  })
+                                }
                               >
-                                <Eye className="mr-1 size-3" /> View Image
+                                <Eye className="mr-1 size-3 text-rose-600" /> Preview
                               </Button>
                               <Button
                                 size="sm"
-                                variant="ghost"
-                                className="rounded-xl text-xs text-rose-600 hover:bg-rose-50 h-7"
-                                onClick={() => {
-                                  setUploadedDocuments((prev) =>
-                                    prev.filter((d) => d.file_name !== optDoc.file_name),
-                                  );
-                                  toast.info(`Removed ${optDoc.file_name}`);
-                                }}
+                                className="w-full rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white"
+                                onClick={() => printSingleDamageQrLabel(dEntry)}
                               >
-                                Remove
+                                <Printer className="mr-1 size-3" /> Print Label
                               </Button>
                             </div>
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="flex justify-between pt-4 border-t">
-                <Button variant="outline" className="rounded-xl" onClick={() => handleStepClick(4)}>
-                  <ArrowLeft className="mr-2 size-4" />Back
-                </Button>
-                <Button
-                  disabled={
-                    busyAction ||
-                    !uploadedDocuments.some(
-                      (d) => isPersistedDocument(d) && d.category.toLowerCase().includes("asn"),
-                    )
-                  }
-                  onClick={() => void handleProceedFromPage5()}
-                  className="rounded-xl font-bold px-6"
-                >
-                  Next <ArrowRight className="ml-2 size-4" />
-                </Button>
-              </div>
-            </Card>
-          )}
-
-          {/* PAGE 6 – QR CODE GENERATION */}
-          {currentPage === 6 && (
-            <Card className="rounded-xl p-4 space-y-4 shadow-sm">
-              <div className="border-b pb-4">
-                <h3 className="font-bold text-foreground text-base">
-                  Batch-wise QR Code Generation
-                <InformationTooltip help="batch" /></h3>
-              </div>
-
-              <div className="hidden flex flex-wrap items-center justify-between gap-3 bg-muted/20 p-4 rounded-xl border">
-                <div className="flex-1 min-w-[280px]">
-                  <label className="text-xs font-bold text-foreground mb-1 block">
-                    Filter Material / View Option
-                  </label>
-                  <select
-                    value={selectedQrMaterialCode}
-                    onChange={(e) => setSelectedQrMaterialCode(e.target.value)}
-                    className="w-full rounded-xl border bg-background px-3 py-2 text-sm font-bold text-primary"
-                  >
-                    <option value="ALL">
-                      📦 All Materials in PO ({materials.length} Materials)
-                    </option>
-                    {materials.map((m, idx) => (
-                      <option key={grnMaterialKey(m, idx)} value={m.item_code}>
-                        {m.item_code} – {m.material_name} ({m.material_category || "General"})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    onClick={() => printAllPoQrLabels()}
-                    className="rounded-xl font-bold bg-primary text-white shadow-sm"
-                  >
-                    <Printer className="mr-2 size-4" /> Print All PO Batch QR Labels
-                  </Button>
-                </div>
-              </div>
-
-              {/* Material-wise Batch QR Labels Grid (Good Stock) */}
-              <div className="space-y-8">
-                {(() => {
-                  const goodMaterials =
-                    selectedQrMaterialCode === "ALL"
-                      ? materials.filter(
-                          (m, index, list) =>
-                            (m.good_quantity || 0) > 0 &&
-                            list.findIndex((item) => item.item_code === m.item_code) === index,
-                        )
-                      : materials.filter(
-                          (m, index, list) =>
-                            m.item_code === selectedQrMaterialCode &&
-                            (m.good_quantity || 0) > 0 &&
-                            list.findIndex((item) => item.item_code === m.item_code) === index,
-                        );
-                  if (goodMaterials.length === 0) {
-                    return (
-                      <div className="p-4 rounded-xl border border-blue-200 bg-blue-50/50 text-center text-xs text-blue-800 font-medium">
-                        No Good Quantity stock recorded for QR generation (Good Quantity = 0).
+                          </Card>
+                        ))}
                       </div>
-                    );
-                  }
-                  return goodMaterials.map((mat, matIdx) => {
-                    const materialIndex = materials.indexOf(mat);
-                    const rowKey =
-                      materialIndex >= 0
-                        ? grnMaterialKey(mat, materialIndex)
-                        : grnMaterialKey(mat, matIdx);
-                    const matBatches = materialBatches[rowKey] || materialBatches[mat.item_code];
-                    const bList =
-                      matBatches && matBatches.length > 0
-                        ? matBatches.filter((b) => (b.batch_quantity || 0) > 0)
-                        : [];
-                    return (
-                      <div key={rowKey} className="space-y-4 rounded-2xl border p-4 bg-muted/10">
-                        <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="grid size-6 place-items-center rounded-full bg-primary text-primary-foreground font-mono text-xs font-bold">
-                                {matIdx + 1}
-                              </span>
-                              <h4 className="font-bold text-base text-foreground">
-                                {mat.material_name}{" "}
-                                <span className="font-mono text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-full border border-primary/20">
-                                  {mat.item_code}
-                                </span>
-                              </h4>
-                            </div>
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              Category: <b>{mat.material_category || "General"}</b> | Total Batches:{" "}
-                              <b>{bList.length}</b> | UOM: <b>{mat.uom}</b> | Approved Qty:{" "}
-                              <b>
-                                {mat.good_quantity} {mat.uom}
-                              </b>
-                            </p>
-                          </div>
-                        </div>
-
-                        {bList.length === 0 ? (
-                          <p className="text-xs text-muted-foreground italic p-4 text-center">
-                            No batches created for this material yet.
-                          </p>
-                        ) : (
-                          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                            {bList.map((b, idx) => {
-                              const qrInfo = qrLabels[`${rowKey}:${b.batch_number}`] || {
-                                qr_id: `QR-MAT-${mat.item_code}-${b.batch_number}`,
-                                data_url: "",
-                                payload: buildMaterialQrPayload(mat.item_code, b, mat),
-                              };
-
-                              return (
-                                <Card
-                                  key={b.batch_number}
-                                  className="rounded-2xl p-5 border text-center space-y-3 bg-white text-black shadow-md relative overflow-hidden group"
-                                >
-                                  <div className="border-b pb-2 text-left">
-                                    <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
-                                      GRN Batch Label
-                                    </span>
-                                    <h4 className="font-mono text-base font-bold text-gray-900">
-                                      {b.batch_number}
-                                    </h4>
-                                  </div>
-
-                                  <div className="relative my-2">
-                                    {qrInfo.data_url ? (
-                                      <div className="relative inline-block rounded-2xl border border-gray-200 bg-white p-2 shadow-sm">
-                                        <img
-                                          src={qrInfo.data_url}
-                                          alt="Material QR Code"
-                                          className="size-48 mx-auto"
-                                        />
-                                      </div>
-                                    ) : (
-                                      <div className="grid size-48 place-items-center bg-gray-100 mx-auto rounded-2xl border border-dashed border-gray-300">
-                                        <Loader2 className="size-8 animate-spin text-primary" />
-                                        <span className="text-xs text-gray-500">
-                                          Generating QR...
-                                        </span>
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  <div className="text-xs text-left space-y-1 font-mono text-gray-800 border-t pt-2">
-                                    <p></p>
-                                    <p>
-                                      <b>GRN Number:</b> {header.grn_number || "Assigning GRN number..."}
-                                    </p>
-                                    <p>
-                                      <b>Material:</b> {mat.item_code} ({mat.material_name})
-                                    </p>
-                                    <p>
-                                      <b>Category:</b> {mat.material_category || "General"}
-                                    </p>
-                                    <p>
-                                      <b>Batch Qty:</b> {b.batch_quantity} {mat.uom}
-                                    </p>
-                                  </div>
-
-                                  <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-3">
-                                    {qrInfo.data_url ? (
-                                      <a
-                                        href={qrInfo.data_url}
-                                        download={`${b.batch_number}-QR.png`}
-                                        className="inline-flex h-9 w-full items-center justify-center rounded-xl bg-emerald-600 text-xs font-bold text-white hover:bg-emerald-700"
-                                      >
-                                        <Download className="mr-1 size-3" /> Download QR
-                                      </a>
-                                    ) : (
-                                      <Button
-                                        disabled
-                                        className="w-full rounded-xl text-xs font-bold"
-                                      >
-                                        <Download className="mr-1 size-3" /> Download QR
-                                      </Button>
-                                    )}
-                                  </div>
-                                </Card>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-
-              {/* ⚠️ DAMAGED & REJECTED GOODS QR LABELS (QUARANTINE) SECTION */}
-              <div className="hidden pt-6 border-t space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3 bg-rose-50/70 dark:bg-rose-950/30 p-4 rounded-2xl border border-rose-200 dark:border-rose-900">
-                  <div>
-                    <h4 className="font-bold text-base text-rose-900 dark:text-rose-200 flex items-center gap-2">
-                      <AlertTriangle className="size-5 text-rose-600 animate-pulse" />
-                      Quarantine QR Labels — Damaged, Rejected & QC Hold
-                    </h4>
-                    <p className="text-xs text-rose-700 dark:text-rose-300 mt-0.5">
-                      <b>
-                        Rule: Damaged/Rejected Goods → Damage Lot → Unique Damage QR → Quarantine
-                        Storage.
-                      </b>{" "}
-                      Damaged goods are excluded from available stock.
-                    </p>
+                    )}
                   </div>
-                  {damageQrLabels.length > 0 && (
+                  <div className="flex justify-between pt-6 border-t">
+                    <Button
+                      variant="outline"
+                      className="rounded-xl"
+                      onClick={() => handleStepClick(5)}
+                    >
+                      <ArrowLeft className="mr-2 size-4" /> Back to Step 5
+                    </Button>
                     <div className="flex items-center gap-2">
                       <Button
-                        onClick={() => {
-                          setNotifyVendorEmail(header.supplier_email || "");
-                          setShowNotifyVendorModal(true);
+                        disabled={busyAction}
+                        onClick={async () => {
+                          setBusyAction(true);
+                          try {
+                            // A GRN is complete only when every received quantity is
+                            // accounted for exactly once across all QC outcomes.
+                            const currentMaterials = materials;
+
+                            const processedMaterials = currentMaterials.map((m, idx) => {
+                              const rowKey = grnMaterialKey(m, idx);
+                              const good = Number(qualityApproved[rowKey] ?? m.good_quantity) || 0;
+                              const damaged = Number(m.damaged_quantity) || 0;
+                              const rejected = Number(m.rejected_quantity) || 0;
+                              const held = Number(m.held_quantity) || 0;
+                              const received = Number(m.received_quantity) || 0;
+                              const accounted = good + rejected + damaged + held;
+                              const balance = Math.max(0, received - accounted);
+                              return {
+                                ...m,
+                                good_quantity: good,
+                                damaged_quantity: damaged,
+                                rejected_quantity: rejected,
+                                held_quantity: held,
+                                combined_received: accounted,
+                                balance_quantity: balance,
+                                is_line_complete: received > 0 && accounted === received,
+                              };
+                            });
+
+                            const isAllFullyDelivered = processedMaterials.every(
+                              (m) => m.is_line_complete,
+                            );
+                            const computedStatus = isAllFullyDelivered
+                              ? "COMPLETED"
+                              : "PARTIALLY COMPLETED";
+
+                            const grnNumber = header.grn_number || generateGrnNumber();
+
+                            const newRecord = {
+                              grn_id: grnId || grnNumber,
+                              grn_number: grnNumber,
+                              po_number: header.po_number || "",
+                              supplier_name:
+                                header.supplier_name || header.supplier_company_name || "",
+                              supplier_company_name:
+                                header.supplier_company_name || header.supplier_name || "",
+                              supplier_email: header.supplier_email || "",
+                              vehicle_number: header.vehicle_number || "",
+                              driver_name: header.driver_name || "",
+                              dock_number: header.receiving_dock || "",
+                              status: computedStatus,
+                              receipt_date: new Date().toISOString().split("T")[0],
+                              created_at: new Date().toISOString(),
+                              received_by: loggedInUserName || "Warehouse Officer",
+                              allocation_id: allocatedDockInfo?.allocation_id || "",
+                              materials: processedMaterials,
+                            };
+
+                            let persistedStatus = computedStatus;
+                            if (grnId || grnNumber) {
+                              const postedGrn = await api.postGrn(
+                                grnId || grnNumber,
+                                `Status: ${computedStatus} - Posted from GRN Console`,
+                              );
+                              persistedStatus =
+                                postedGrn?.status || postedGrn?.grn?.status || computedStatus;
+                            }
+                            newRecord.status = persistedStatus;
+
+                            // Ask the GRN operator to release the dock after the
+                            // GRN has been successfully posted.
+                            if (allocatedDockInfo?.allocation_id) {
+                              setDockReleasePrompt(String(allocatedDockInfo.allocation_id));
+                            }
+
+                            // Update grnRecords state so it appears immediately on Dashboard & Records table
+                            setGrnRecords((prev) => [
+                              newRecord,
+                              ...prev.filter(
+                                (r) => r.grn_number !== grnNumber && r.grn_id !== newRecord.grn_id,
+                              ),
+                            ]);
+
+                            toast.success(`GOODS RECEIVING PROCESS COMPLETED!`, {
+                              description: `GRN ${grnNumber} saved with status: ${persistedStatus}. QC quantities are reconciled across accepted, rejected, damaged, and held categories.`,
+                            });
+
+                            localStorage.removeItem("active_grn_id");
+                            localStorage.removeItem(GRN_LOCAL_DRAFT_KEY);
+                            setGrnId(null);
+                            setMaxCompletedStep(1);
+                            setActiveTab("records");
+                            navigate({ to: "/grn", search: { tab: "records", page: 1 } });
+                            setSearchTerm("");
+                          } catch (e: any) {
+                            console.error("GRN Posting error:", e);
+                            toast.error("Failed to post GRN", {
+                              description:
+                                e?.message || "An unexpected error occurred during GRN posting.",
+                            });
+                          } finally {
+                            setSaveStatus("idle");
+                            setBusyAction(false);
+                          }
                         }}
-                        className="rounded-xl font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm"
+                        className="rounded-xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-8 text-sm shadow-md flex items-center gap-2"
                       >
-                        <Mail className="mr-2 size-4" /> Send Damage Return to Supplier App
-                      </Button>
-                      <Button
-                        onClick={() => printAllDamageQrLabels()}
-                        variant="outline"
-                        className="rounded-xl font-bold border-rose-300 text-rose-800 dark:text-rose-200 hover:bg-rose-100 shadow-sm"
-                      >
-                        <Printer className="mr-2 size-4" /> Print All Damage Labels (
-                        {damageQrLabels.length})
+                        {busyAction ? (
+                          <>
+                            <Loader2 className="size-5 animate-spin" /> Saving & Posting GRN...
+                          </>
+                        ) : (
+                          <>
+                            <ShieldCheck className="size-5" /> COMPLETE & POST GOODS RECEIVING
+                          </>
+                        )}
                       </Button>
                     </div>
-                  )}
-                </div>
-
-                {damageQrLabels.length === 0 ? (
-                  <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 text-center text-xs text-emerald-800 font-medium">
-                    ✓ No damaged or rejected goods recorded for this GRN. All received material
-                    lines are 100% sound.
                   </div>
-                ) : (
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {damageQrLabels.map((dEntry) => (
-                      <Card
-                        key={dEntry.damage_lot_number}
-                        className="rounded-2xl p-5 border-2 border-rose-300 dark:border-rose-800 text-center space-y-3 bg-rose-50/20 dark:bg-rose-950/20 text-foreground shadow-md relative overflow-hidden group"
-                      >
-                        <div className="border-b border-rose-200 dark:border-rose-900 pb-2 text-left">
-                          <span className="text-[10px] font-extrabold uppercase tracking-widest text-rose-700 dark:text-rose-400">
-                            {dEntry.exception_type === "REJECTED"
-                              ? "Rejected Lot QR"
-                              : dEntry.exception_type === "QC_HOLD"
-                                ? "QC Hold Lot QR"
-                                : "Damage Lot QR"}
-                          </span>
-                          <h4 className="font-mono text-sm font-bold text-rose-950 dark:text-rose-100">
-                            {dEntry.damage_lot_number}
-                          </h4>
-                        </div>
-
-                        <div
-                          className="relative group/qr cursor-pointer my-2"
-                          onClick={() =>
-                            setEnlargedQr({
-                              title: dEntry.damage_lot_number,
-                              qr_id: dEntry.qr_code,
-                              data_url: dEntry.qr_data_url,
-                              payload: dEntry.qr_payload,
-                              batch: {
-                                batch_number: dEntry.damage_lot_number,
-                                batch_quantity: dEntry.damaged_quantity,
-                              },
-                              itemCode: dEntry.item_code,
-                            })
-                          }
-                        >
-                          {dEntry.qr_data_url ? (
-                            <div className="relative inline-block p-2 bg-white rounded-2xl border border-rose-200 shadow-sm transition-transform group-hover/qr:scale-105">
-                              <img
-                                src={dEntry.qr_data_url}
-                                alt="Damage QR Code"
-                                className="size-44 mx-auto"
-                              />
-                              <div className="absolute inset-0 bg-rose-950/80 opacity-0 group-hover/qr:opacity-100 transition-opacity rounded-2xl flex flex-col items-center justify-center text-white text-xs font-bold gap-1 p-2">
-                                <Eye className="size-7 text-rose-300" />
-                                <span>Click to Enlarge / Scan</span>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="grid size-44 place-items-center bg-rose-100 mx-auto rounded-2xl border border-dashed border-rose-300">
-                              <Loader2 className="size-8 animate-spin text-rose-600" />
-                              <span className="text-xs text-rose-700">Generating Damage QR...</span>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="text-xs text-left space-y-1 font-mono text-foreground border-t border-rose-200 dark:border-rose-900 pt-2">
-                          <p>
-                            <b>GRN Number:</b> {header.grn_number || "Assigning GRN number..."}
-                          </p>
-                          <p>
-                            <b>Material:</b> {dEntry.item_code} ({dEntry.material_name})
-                          </p>
-                          <p>
-                            <b>{dEntry.quantity_label || "Damaged Qty"}:</b>{" "}
-                            <b className="text-rose-600 dark:text-rose-400">
-                              {dEntry.damaged_quantity} {dEntry.uom}
-                            </b>
-                          </p>
-                          <p>
-                            <b>Reason:</b> {dEntry.reason}
-                          </p>
-                          <p>
-                            <b>QA Status:</b>{" "}
-                            <span className="bg-rose-100 dark:bg-rose-900 text-rose-800 dark:text-rose-200 px-1.5 py-0.5 rounded text-[10px] font-bold">
-                              {dEntry.exception_type || dEntry.qa_status || "DAMAGED"}
-                            </span>
-                          </p>
-                          <p>
-                            <b>Quarantine Location:</b>{" "}
-                            <span className="text-amber-700 dark:text-amber-400 font-bold">
-                              {dEntry.quarantine_location}
-                            </span>
-                          </p>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2 pt-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="w-full rounded-xl text-xs font-bold border-rose-200 hover:bg-rose-100"
-                            onClick={() =>
-                              setEnlargedQr({
-                                title: dEntry.damage_lot_number,
-                                qr_id: dEntry.qr_code,
-                                data_url: dEntry.qr_data_url,
-                                payload: dEntry.qr_payload,
-                                batch: {
-                                  batch_number: dEntry.damage_lot_number,
-                                  batch_quantity: dEntry.damaged_quantity,
-                                },
-                                itemCode: dEntry.item_code,
-                              })
-                            }
-                          >
-                            <Eye className="mr-1 size-3 text-rose-600" /> Preview
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="w-full rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white"
-                            onClick={() => printSingleDamageQrLabel(dEntry)}
-                          >
-                            <Printer className="mr-1 size-3" /> Print Label
-                          </Button>
-                        </div>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="flex justify-between pt-6 border-t">
-                <Button variant="outline" className="rounded-xl" onClick={() => handleStepClick(5)}>
-                  <ArrowLeft className="mr-2 size-4" /> Back to Step 5
-                </Button>
-                <div className="flex items-center gap-2">
-                  <Button
-                  disabled={busyAction}
-                  onClick={async () => {
-                    setBusyAction(true);
-                    try {
-                      for (const [index, material] of materials.entries()) {
-                        const approved = Number(qualityApproved[grnMaterialKey(material, index)] ?? material.good_quantity ?? 0);
-                        if (approved <= 0) continue;
-                        const batches = materialBatches[grnMaterialKey(material, index)] || materialBatches[material.item_code] || [];
-                        const total = batches.reduce((sum, batch) => sum + Number(batch.batch_quantity || 0), 0);
-                        if (!batches.length || batches.some((batch) => !batch.batch_id) || total !== approved) {
-                          throw new Error(`Saved batches are missing or do not match ${approved} ${material.uom} for ${material.material_name}. Refresh the GRN or save Batch Creation before posting.`);
-                        }
-                      }
-                      // A GRN is complete only when every received quantity is
-                      // accounted for exactly once across all QC outcomes.
-                      const currentMaterials = materials;
-
-                      const processedMaterials = currentMaterials.map((m, idx) => {
-                        const rowKey = grnMaterialKey(m, idx);
-                        const good = Number(qualityApproved[rowKey] ?? m.good_quantity) || 0;
-                        const damaged = Number(m.damaged_quantity) || 0;
-                        const rejected = Number(m.rejected_quantity) || 0;
-                        const held = Number(m.held_quantity) || 0;
-                        const received = Number(m.received_quantity) || 0;
-                        const accounted = good + rejected + damaged + held;
-                        const balance = Math.max(0, received - accounted);
-                        return {
-                          ...m,
-                          good_quantity: good,
-                          damaged_quantity: damaged,
-                          rejected_quantity: rejected,
-                          held_quantity: held,
-                          combined_received: accounted,
-                          balance_quantity: balance,
-                          is_line_complete: received > 0 && accounted === received,
-                        };
-                      });
-
-                      const isAllFullyDelivered = processedMaterials.every(
-                        (m) => m.is_line_complete,
-                      );
-                      const computedStatus = isAllFullyDelivered
-                        ? "COMPLETED"
-                        : "PARTIALLY COMPLETED";
-
-                      const grnNumber =
-                        header.grn_number ||
-                        "";
-
-                      const newRecord = {
-                        grn_id: grnId || grnNumber,
-                        grn_number: grnNumber,
-                        po_number: header.po_number || "",
-                        supplier_name: header.supplier_name || header.supplier_company_name || "",
-                        supplier_company_name:
-                          header.supplier_company_name || header.supplier_name || "",
-                        supplier_email: header.supplier_email || "",
-                        vehicle_number: header.vehicle_number || "",
-                        driver_name: header.driver_name || "",
-                        dock_number: header.receiving_dock || "",
-                        status: computedStatus,
-                        receipt_date: new Date().toISOString().split("T")[0],
-                        created_at: new Date().toISOString(),
-                        received_by: loggedInUserName || "Warehouse Officer",
-                        allocation_id: allocatedDockInfo?.allocation_id || "",
-                        materials: processedMaterials,
-                      };
-
-                      let persistedStatus = computedStatus;
-                      if (grnId || grnNumber) {
-                        const postedGrn = await api.postGrn(
-                          grnId || grnNumber,
-                          `Status: ${computedStatus} - Posted from GRN Console`,
-                        );
-                        persistedStatus =
-                          postedGrn?.status || postedGrn?.grn?.status || computedStatus;
-                      }
-                      newRecord.status = persistedStatus;
-
-                      // Ask the GRN operator to release the dock after the
-                      // GRN has been successfully posted.
-                      if (allocatedDockInfo?.allocation_id) {
-                        setDockReleasePrompt(String(allocatedDockInfo.allocation_id));
-                      }
-
-                      // Update grnRecords state so it appears immediately on Dashboard & Records table
-                      setGrnRecords((prev) => [
-                        newRecord,
-                        ...prev.filter(
-                          (r) => r.grn_number !== grnNumber && r.grn_id !== newRecord.grn_id,
-                        ),
-                      ]);
-
-                      toast.success(`GOODS RECEIVING PROCESS COMPLETED!`, {
-                        description: `GRN ${grnNumber} saved with status: ${persistedStatus}. QC quantities are reconciled across accepted, rejected, damaged, and held categories.`,
-                      });
-
-                      startNewGrn(false);
-                      void loadRecords();
-                      void loadWarehouseDocks();
-                      window.dispatchEvent(new CustomEvent("notifications:refresh"));
-                      setActiveTab("records");
-                      navigate({ to: "/grn", search: { tab: "records", page: 1 } });
-                      setSearchTerm("");
-                    } catch (e: any) {
-                      console.error("GRN Posting error:", e);
-                      toast.error("Failed to post GRN", {
-                        description:
-                          e?.message || "An unexpected error occurred during GRN posting.",
-                      });
-                    } finally {
-                      setSaveStatus("idle");
-                      setBusyAction(false);
-                    }
-                  }}
-                  className="rounded-xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-8 text-sm shadow-md flex items-center gap-2"
-                >
-                  {busyAction ? (
-                    <>
-                      <Loader2 className="size-5 animate-spin" /> Saving & Posting GRN...
-                    </>
-                  ) : (
-                    <>
-                      <ShieldCheck className="size-5" /> COMPLETE & POST GOODS RECEIVING
-                    </>
-                  )}
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          )}
-        </div>
+                </Card>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
 
       {historyQrLabels && (
@@ -6705,7 +6723,7 @@ function GrnPageWorkflow() {
                       <th className="p-2.5">Material Code & Name</th>
                       <th className="p-2.5">Good Qty</th>
                       <th className="p-2.5">Damaged Qty</th>
-                      <th className="p-2.5">Pass Rate<InformationTooltip help="qc" /></th>
+                      <th className="p-2.5">Pass Rate</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y font-medium">
@@ -7139,8 +7157,8 @@ function GrnPageWorkflow() {
                       <th className="p-2.5 text-right">Received Qty</th>
                       <th className="p-2.5 text-right text-emerald-600">Good Qty</th>
                       <th className="p-2.5 text-right text-rose-600">Damaged Qty</th>
-                      <th className="p-2.5 text-right font-black">Accounted Qty<InformationTooltip help="reconciliation" /></th>
-                      <th className="p-2.5 text-center">Item Status<InformationTooltip help="workflowStatus" /></th>
+                      <th className="p-2.5 text-right font-black">Accounted Qty</th>
+                      <th className="p-2.5 text-center">Item Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y font-mono font-medium">
@@ -7264,7 +7282,7 @@ function GrnPageWorkflow() {
 
             <div className="space-y-3 text-xs">
               <div>
-                <span className="inline-flex items-center"><label className="font-bold text-foreground block mb-1">Select Dock Bay</label><InformationTooltip help="dock" /></span>
+                <label className="font-bold text-foreground block mb-1">Select Dock Bay</label>
                 <select
                   value={assigningDockId}
                   onChange={(e) => setAssigningDockId(e.target.value)}
@@ -7298,9 +7316,9 @@ function GrnPageWorkflow() {
               </div>
 
               <div>
-                <span className="inline-flex items-center"><label className="font-bold text-foreground block mb-1">
+                <label className="font-bold text-foreground block mb-1">
                   PO Reference (Optional)
-                </label><InformationTooltip help="procurement" /></span>
+                </label>
                 <Input
                   placeholder="PO-2026-0007"
                   value={assigningPo}
@@ -7668,25 +7686,6 @@ function GrnPageWorkflow() {
           </div>
         </DialogContent>
       </Dialog>
-      <AlertDialog open={Boolean(deleteGrnTarget)} onOpenChange={(open) => {
-        if (!open && !deletingGrn) setDeleteGrnTarget(null);
-      }}>
-        <AlertDialogContent className="rounded-2xl">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete GRN {deleteGrnTarget?.grn_number}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will remove this GRN's receiving data, lines, batches, and documents.
-              This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deletingGrn}>Cancel</AlertDialogCancel>
-            <Button variant="destructive" disabled={deletingGrn} onClick={() => void confirmDeleteGrn()}>
-              {deletingGrn ? "Deleting..." : "Delete GRN"}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </AppShell>
   );
 }
