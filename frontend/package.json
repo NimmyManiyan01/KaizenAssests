@@ -5,9 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev --host 0.0.0.0 --port 8080",
-    "build": "NITRO_PRESET=node-server vite build && node scripts/copy-build.js",
+    "build": "vite build",
     "build:dev": "vite build --mode development",
-    "start": "node .output/server/index.mjs",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
