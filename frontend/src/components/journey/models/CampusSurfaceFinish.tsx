@@ -79,12 +79,12 @@ export function CampusSurfaceFinish({ children }: { children: ReactNode }) {
           material.bumpScale = metal ? 0.018 : 0.025;
           material.roughness = metal ? 0.78 : 0.98;
           material.metalness = metal ? 0.25 : 0;
-          if (metal && material.color.g > material.color.r * 1.4) {
+          if (metal && material.color && material.color.g > material.color.r * 1.4) {
             material.color.set("#243747");
           }
         }
         // Retain useful white luminaires but remove decorative cyan roof emission.
-        if (material.emissive.b > material.emissive.r * 1.2) {
+        if (material.emissive && material.emissive.b > material.emissive.r * 1.2) {
           material.emissive.set("#dce5ea");
           material.emissiveIntensity = Math.min(material.emissiveIntensity, 0.12);
         }

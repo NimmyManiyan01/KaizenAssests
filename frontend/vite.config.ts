@@ -1,6 +1,8 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import type { ConfigEnv, PluginOption, Plugin, UserConfig } from "vite";
 
+process.env.NITRO_PRESET = process.env.NITRO_PRESET || "node-server";
+
 const makeConfig = (defineConfig as any)({
   server: {
     port: 8080,
