@@ -50,8 +50,8 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "ASN REF", value: "ASN-90412" },
       { label: "DESTINATION", value: "Bay D-04 / Gate 1" },
     ],
-    cameraPosition: [-12, 10, 38],
-    cameraTarget: [0.8, 1.8, 23.0],
+    cameraPosition: [-12.0, 10.0, 42.0],
+    cameraTarget: [0.8, 2.0, 24.0],
   },
   {
     id: "gate-arrival",
@@ -77,8 +77,8 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "CARGO", value: "Raw Industrial Materials" },
       { label: "CHECKPOINT", value: "Gate #01" },
     ],
-    cameraPosition: [-7.5, 4.5, 28.5],
-    cameraTarget: [0.0, 1.8, 17.5],
+    cameraPosition: [-6.8, 3.8, 26.5],
+    cameraTarget: [0.4, 1.8, 17.5],
   },
   {
     id: "gate-verification",
@@ -104,8 +104,8 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "QR BARCODE", value: "GP-QR-8821" },
       { label: "BARRIER", value: "OPENED" },
     ],
-    cameraPosition: [-4.5, 3.8, 20.0],
-    cameraTarget: [0.0, 1.8, 10.0],
+    cameraPosition: [-4.2, 3.2, 19.5],
+    cameraTarget: [0.8, 1.8, 13.0],
   },
   {
     id: "dock-allocation",
@@ -131,7 +131,7 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "BAY NUMBER", value: "D-04" },
       { label: "ROUTE SIGNAL", value: "SENT TO GATE" },
     ],
-    cameraPosition: [4.5, 6.2, -6.0],
+    cameraPosition: [5.5, 6.8, -4.0],
     cameraTarget: [-8.5, 2.0, -22.0],
   },
   {
@@ -158,10 +158,8 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "HYDRAULIC RAMP", value: "LEVELLED" },
       { label: "REAR DOORS", value: "OPENED" },
     ],
-    // Keep the full trailer-to-dock relationship visible while the vehicle
-    // reverses; the previous close anchor hid the rear doors and dock edge.
-    cameraPosition: [2.8, 5.2, -9.5],
-    cameraTarget: [-8.5, 2.0, -21.5],
+    cameraPosition: [-1.8, 4.2, -12.5],
+    cameraTarget: [-8.5, 1.8, -21.0],
   },
   {
     id: "goods-unloading",
@@ -187,11 +185,8 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "FORKLIFT ID", value: "FL-01" },
       { label: "DAMAGE REPORT", value: "0 DEFECTS" },
     ],
-    // The receiving action spans the trailer rear, forklift and staging pad.
-    // Pulling this shot back prevents the forklift/pallet pair from being
-    // cropped at the edge of the authored camera frame.
-    cameraPosition: [3.5, 4.6, -13.5],
-    cameraTarget: [-7.5, 2.0, -24.0],
+    cameraPosition: [-2.8, 3.2, -19.0],
+    cameraTarget: [-8.0, 1.5, -23.8],
   },
   {
     id: "quality-inspection",
@@ -217,8 +212,8 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "GOOD QTY", value: "480 UNITS" },
       { label: "REJECT QTY", value: "0 UNITS" },
     ],
-    cameraPosition: [3.8, 4.4, -14.0],
-    cameraTarget: [-7.5, 2.0, -24.0],
+    cameraPosition: [-3.8, 2.8, -20.5],
+    cameraTarget: [-7.2, 1.5, -23.8],
   },
   {
     id: "material-qr",
@@ -244,8 +239,8 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "QR BARCODE", value: "MAT-MOT-1001-QR" },
       { label: "LEDGER LINK", value: "CONFIRMED" },
     ],
-    cameraPosition: [3.5, 4.2, -13.0],
-    cameraTarget: [-8.5, 2.0, -24.0],
+    cameraPosition: [-4.2, 2.6, -21.0],
+    cameraTarget: [-8.0, 1.5, -23.8],
   },
   {
     id: "inventory-putaway",

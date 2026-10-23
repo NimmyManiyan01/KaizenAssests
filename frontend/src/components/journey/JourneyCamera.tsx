@@ -104,36 +104,6 @@ export function JourneyCamera({
 
     desiredPos.lerp(warehouseFrontPos, 1 - approach);
     desiredTarget.lerp(warehouseFrontTarget, 1 - approach);
-    // Hold the security checkpoint in view until the ASN document is revealed.
-    const supplierWeight = 1 - smoothstep(0.85, 1, supplierProgress);
-    const supplier = supplierJourney(supplierProgress);
-    const cameraDistance = size.width < 768 ? 24 : 17;
-    desiredPos.lerp(
-      scratch.front.set(supplier.truck.x - 11, 12, supplier.truck.z + cameraDistance),
-      supplierWeight,
-    );
-    desiredTarget.lerp(
-      scratch.frontTarget.set(
-        (supplier.truck.x + supplier.envelope.x) / 2,
-        2.4,
-        (supplier.truck.z + supplier.envelope.z) / 2,
-      ),
-      supplierWeight,
-    );
-    scratch.frontTarget.set(0, 4.8, 10);
-
-    // Blend to a whole-vehicle composition while approaching the dock.
-    const dockWeight = smoothstep(0.18, 0.24, p) * (1 - smoothstep(0.28, 0.34, p));
-    desiredPos.lerp(scratch.front.set(5, 6, -4), dockWeight);
-    desiredTarget.lerp(scratch.frontTarget.set(-8.5, 2, -17), dockWeight);
-
-    // Observe departure from outside the roof footprint, looking back at the gate.
-    const exitWeight = smoothstep(0.93, 1, p);
-    // Keep the final truck and barrier in the same readable frame. The former
-    // roof-line viewpoint looked back through the building and hid the exit.
-    desiredPos.lerp(scratch.front.set(13, 7.5, -272), exitWeight);
-    desiredTarget.lerp(scratch.frontTarget.set(0.8, 2.2, -252), exitWeight);
-    scratch.frontTarget.set(0, 4.8, 10);
 
     // Keep authored targets while preserving horizontal subject space in portrait.
     const aspect = size.width / Math.max(1, size.height);
@@ -146,8 +116,7 @@ export function JourneyCamera({
       .add(desiredTarget);
 
     if (aspect < 1) {
-      // Keep the portrait dock viewpoint inside the building frontage.
-      desiredPos.lerp(scratch.front.set(18, 6.5, -22), dockWeight);
+      desiredPos.x += 1.2;
     }
 
     if (camera instanceof THREE.PerspectiveCamera) {
