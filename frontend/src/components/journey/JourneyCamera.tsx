@@ -2,7 +2,6 @@ import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 import type { JourneyStage } from "./data/journeyStages";
-import { supplierJourney } from "./supplierJourney";
 
 interface JourneyCameraProps {
   stages: JourneyStage[];
@@ -65,9 +64,7 @@ export function JourneyCamera({
 
     const p = clamp(scrollProgress, 0, 1);
 
-    // Find the bounding keyframe segment
-    // Default to the final segment so an exact p=1 frame resolves to the
-    // final authored camera instead of falling back to stage 01.
+    // Find bounding keyframe segment
     let idx = keyframes.length - 2;
     for (let i = 0; i < keyframes.length - 1; i++) {
       if (p >= keyframes[i]!.p && p <= keyframes[i + 1]!.p) {
@@ -92,7 +89,7 @@ export function JourneyCamera({
       lerp(k1.target[2], k2.target[2], t),
     );
 
-    // ─── STARTING VIEW: WAREHOUSE FRONT FULL VIEW OVERVIEW ───
+    // ─── STARTING VIEW: WAREHOUSE OVERVIEW APPROACH ───
     const warehouseFrontTarget = scratch.frontTarget;
     const overviewHeight = clamp(17.5 * (size.width < 768 ? 1.25 : 1.0), 16.0, 24.0);
     const warehouseFrontPos = scratch.front.set(-6.5, overviewHeight, 43.5);
@@ -105,37 +102,35 @@ export function JourneyCamera({
     desiredPos.lerp(warehouseFrontPos, 1 - approach);
     desiredTarget.lerp(warehouseFrontTarget, 1 - approach);
 
-    // Keep authored targets while preserving horizontal subject space in portrait.
+    // Responsive aspect ratio adjustments
     const aspect = size.width / Math.max(1, size.height);
-    desiredPos
-      .sub(desiredTarget)
-      // Portrait needs a little more breathing room, but the previous 1.8x
-      // expansion made the operational subject look distant and left large
-      // areas of empty floor in the middle stages.
-      .multiplyScalar(clamp(1.08 / aspect, 1, 1.45))
-      .add(desiredTarget);
-
-    if (aspect < 1) {
-      desiredPos.x += 1.2;
+    if (aspect < 1.0) {
+      // Mobile portrait framing adjustment
+      desiredPos
+        .sub(desiredTarget)
+        .multiplyScalar(clamp(1.0 + (1.0 - aspect) * 0.28, 1.0, 1.30))
+        .add(desiredTarget);
+      desiredPos.x += 0.8;
     }
 
     if (camera instanceof THREE.PerspectiveCamera) {
-      const targetFov = aspect < 1 ? 54 : 48;
+      const targetFov = aspect >= 1.5 ? 46 : aspect >= 1.0 ? 50 : 54;
       if (Math.abs(camera.fov - targetFov) > 0.1) {
         camera.fov = lerp(camera.fov, targetFov, 1 - Math.exp(-8 * Math.min(delta, 0.1)));
         camera.updateProjectionMatrix();
       }
     }
 
+    // Parallax mouse sway
     const pointerSmoothing = 1 - Math.exp(-12 * Math.min(delta, 0.1));
     pointer.current.x += (mouseOffset.x - pointer.current.x) * pointerSmoothing;
     pointer.current.y += (mouseOffset.y - pointer.current.y) * pointerSmoothing;
 
-    // Apply gentle mouse parallax
-    desiredPos.x += pointer.current.x * 0.45 * approach;
-    desiredPos.y += pointer.current.y * 0.35 * approach;
+    desiredPos.x += pointer.current.x * 0.35 * approach;
+    desiredPos.y += pointer.current.y * 0.25 * approach;
 
-    const smoothing = 1 - Math.exp(-12 * Math.min(delta, 0.1));
+    // Smooth camera position & lookAt lerp
+    const smoothing = 1 - Math.exp(-14 * Math.min(delta, 0.1));
     if (!initialized.current) {
       if (resumeFromCurrent) {
         camera.getWorldDirection(scratch.direction);
