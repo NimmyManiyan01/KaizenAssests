@@ -60,13 +60,13 @@ export function WarehouseForklift({
       {/* Main Ergonomic Body Shell (Industrial High-Visibility Safety Orange) */}
       <mesh position={[0, 0.72, -0.18]} castShadow receiveShadow>
         <boxGeometry args={[1.32, 0.48, 1.65]} />
-        <meshStandardMaterial color="#e86f18" metalness={0.42} roughness={0.34} />
+        <meshStandardMaterial color="#f97316" metalness={0.35} roughness={0.4} />
       </mesh>
 
       {/* High-Gloss Beveled Battery Hood (Rear Cowl) */}
       <mesh position={[0, 0.94, -0.52]} castShadow receiveShadow>
         <boxGeometry args={[1.18, 0.28, 0.95]} />
-        <meshStandardMaterial color="#c95716" metalness={0.48} roughness={0.32} />
+        <meshStandardMaterial color="#ea580c" metalness={0.4} roughness={0.35} />
       </mesh>
 
       {/* Dual Side Ventilation Louvers / Heat Grilles */}
@@ -337,9 +337,9 @@ export function WarehouseForklift({
           <mesh position={[0, 0.045, 0]}>
             <planeGeometry args={[1.15, 1.35]} />
             <meshStandardMaterial
-              color="#7dd3fc"
-              metalness={0.35}
-              roughness={0.18}
+              color="#38bdf8"
+              metalness={0.9}
+              roughness={0.1}
               transparent
               opacity={0.3}
             />

@@ -230,6 +230,27 @@ export function SecurityRoom({
           <meshStandardMaterial color="#0f172a" roughness={0.5} />
         </mesh>
       </group>
+
+      {/* ─── DIGITAL VERIFICATION HUD BADGE ─── */}
+      <group position={[direction * 3.4, 2.2, 0]}>
+        <Html center distanceFactor={16}>
+          <div className="pointer-events-none whitespace-nowrap rounded-lg bg-slate-950/90 px-3 py-1.5 border border-emerald-500/50 backdrop-blur-md shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+            <div className="flex items-center gap-1.5">
+              <span
+                className={`size-2 rounded-full ${
+                  clearance > 0.15 ? "bg-emerald-400 animate-pulse" : "bg-cyan-400 animate-ping"
+                }`}
+              />
+              <span className="font-mono text-[9px] font-bold text-slate-100 tracking-wider">
+                {clearance > 0.15 ? "GATE PASS: APPROVED ✓" : "ALPR SCAN: KA-01-AB-1234"}
+              </span>
+            </div>
+            <div className="mt-0.5 text-[8px] font-mono text-cyan-300">
+              {clearance > 0.15 ? "BARRIER CLEARANCE ISSUED" : "ASN-90412 • CHECKPOINT 01"}
+            </div>
+          </div>
+        </Html>
+      </group>
     </group>
   );
 }

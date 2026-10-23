@@ -142,11 +142,6 @@ export function LogisticsTruck({
   isReversing = false,
 }: LogisticsTruckProps) {
   const doorAngle = Math.max(0, Math.min(1, doorsOpenProgress)) * 2.2;
-  // The authored journey distance is always positive. Reverse motion needs
-  // the opposite wheel phase so tire rotation stays physically consistent
-  // with the truck's travel direction.
-  const wheelSpin = isReversing ? -wheelRotation : wheelRotation;
-  const steering = Math.max(-0.45, Math.min(0.45, steerAngle));
 
   return (
     <group position={position} rotation={rotation} scale={scale}>
@@ -181,8 +176,8 @@ export function LogisticsTruck({
               key={side}
               position={[side * 1.12, 0, 0]}
               side={side}
-              spin={wheelSpin}
-              steer={steering}
+              spin={wheelRotation}
+              steer={steerAngle}
             />
           ))}
         </group>
@@ -192,7 +187,7 @@ export function LogisticsTruck({
           <group key={z} position={[0, 0.49, z]}>
             <Panel position={[0, 0, 0]} size={[2.25, 0.15, 0.16]} color="#0f172a" />
             {[-1, 1].map((side) => (
-              <Wheel key={side} position={[side * 1.12, 0, 0]} side={side} spin={wheelSpin} />
+              <Wheel key={side} position={[side * 1.12, 0, 0]} side={side} spin={wheelRotation} />
             ))}
           </group>
         ))}

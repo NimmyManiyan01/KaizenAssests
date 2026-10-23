@@ -2,6 +2,7 @@ import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 import type { JourneyStage } from "./data/journeyStages";
+import { supplierJourney } from "./supplierJourney";
 
 interface JourneyCameraProps {
   stages: JourneyStage[];
@@ -52,7 +53,6 @@ export function JourneyCamera({
       target: new THREE.Vector3(),
       front: new THREE.Vector3(),
       frontTarget: new THREE.Vector3(0, 4.8, 10),
-      direction: new THREE.Vector3(),
     }),
     [],
   );
@@ -64,8 +64,8 @@ export function JourneyCamera({
 
     const p = clamp(scrollProgress, 0, 1);
 
-    // Find bounding keyframe segment
-    let idx = keyframes.length - 2;
+    // Find the bounding keyframe segment
+    let idx = 0;
     for (let i = 0; i < keyframes.length - 1; i++) {
       if (p >= keyframes[i]!.p && p <= keyframes[i + 1]!.p) {
         idx = i;
@@ -89,7 +89,7 @@ export function JourneyCamera({
       lerp(k1.target[2], k2.target[2], t),
     );
 
-    // ─── STARTING VIEW: WAREHOUSE OVERVIEW APPROACH ───
+    // ─── STARTING VIEW: WAREHOUSE FRONT FULL VIEW OVERVIEW ───
     const warehouseFrontTarget = scratch.frontTarget;
     const overviewHeight = clamp(17.5 * (size.width < 768 ? 1.25 : 1.0), 16.0, 24.0);
     const warehouseFrontPos = scratch.front.set(-6.5, overviewHeight, 43.5);
@@ -101,40 +101,38 @@ export function JourneyCamera({
 
     desiredPos.lerp(warehouseFrontPos, 1 - approach);
     desiredTarget.lerp(warehouseFrontTarget, 1 - approach);
+    // Hold the security checkpoint in view until the ASN document is revealed.
+    const supplierWeight = 1 - smoothstep(0.85, 1, supplierProgress);
+    const supplier = supplierJourney(supplierProgress);
+    const cameraDistance = size.width < 768 ? 24 : 17;
+    desiredPos.lerp(
+      scratch.front.set(supplier.truck.x - 11, 12, supplier.truck.z + cameraDistance),
+      supplierWeight,
+    );
+    desiredTarget.lerp(
+      scratch.frontTarget.set(
+        (supplier.truck.x + supplier.envelope.x) / 2,
+        2.4,
+        (supplier.truck.z + supplier.envelope.z) / 2,
+      ),
+      supplierWeight,
+    );
+    scratch.frontTarget.set(0, 4.8, 10);
 
-    // Responsive aspect ratio adjustments
-    const aspect = size.width / Math.max(1, size.height);
-    if (aspect < 1.0) {
-      // Mobile portrait framing adjustment
-      desiredPos
-        .sub(desiredTarget)
-        .multiplyScalar(clamp(1.0 + (1.0 - aspect) * 0.28, 1.0, 1.30))
-        .add(desiredTarget);
-      desiredPos.x += 0.8;
-    }
-
-    if (camera instanceof THREE.PerspectiveCamera) {
-      const targetFov = aspect >= 1.5 ? 46 : aspect >= 1.0 ? 50 : 54;
-      if (Math.abs(camera.fov - targetFov) > 0.1) {
-        camera.fov = lerp(camera.fov, targetFov, 1 - Math.exp(-8 * Math.min(delta, 0.1)));
-        camera.updateProjectionMatrix();
-      }
-    }
-
-    // Parallax mouse sway
     const pointerSmoothing = 1 - Math.exp(-12 * Math.min(delta, 0.1));
     pointer.current.x += (mouseOffset.x - pointer.current.x) * pointerSmoothing;
     pointer.current.y += (mouseOffset.y - pointer.current.y) * pointerSmoothing;
 
-    desiredPos.x += pointer.current.x * 0.35 * approach;
-    desiredPos.y += pointer.current.y * 0.25 * approach;
+    // Apply gentle mouse parallax
+    desiredPos.x += pointer.current.x * 0.45 * approach;
+    desiredPos.y += pointer.current.y * 0.35 * approach;
 
-    // Smooth camera position & lookAt lerp
-    const smoothing = 1 - Math.exp(-14 * Math.min(delta, 0.1));
+    const smoothing = 1 - Math.exp(-12 * Math.min(delta, 0.1));
     if (!initialized.current) {
       if (resumeFromCurrent) {
-        camera.getWorldDirection(scratch.direction);
-        currentLookAt.current.copy(camera.position).add(scratch.direction.multiplyScalar(20));
+        const dir = new THREE.Vector3();
+        camera.getWorldDirection(dir);
+        currentLookAt.current.copy(camera.position).add(dir.multiplyScalar(20));
       } else {
         camera.position.copy(desiredPos);
         currentLookAt.current.copy(desiredTarget);
