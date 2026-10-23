@@ -1,5 +1,6 @@
 import { memo, Suspense, useEffect, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import * as THREE from "three";
 import { OrbitControls } from "@react-three/drei";
 import { SceneHtml as Html } from "./SceneHtml";
 import type { JourneyStage } from "./data/journeyStages";
@@ -89,6 +90,21 @@ function smoothstep(min: number, max: number, value: number) {
   return x * x * (3 - 2 * x);
 }
 
+function DynamicEnvironmentTheme({ progress }: { progress: number }) {
+  const { scene } = useThree();
+  useFrame(() => {
+    const factor = smoothstep(0.04, 0.11, progress);
+    const targetBg = new THREE.Color("#dfe4e1").lerp(new THREE.Color("#ffffff"), factor);
+    scene.background = targetBg;
+    if (scene.fog instanceof THREE.Fog) {
+      scene.fog.color = targetBg;
+      scene.fog.near = THREE.MathUtils.lerp(78, 140, factor);
+      scene.fog.far = THREE.MathUtils.lerp(285, 420, factor);
+    }
+  });
+  return null;
+}
+
 export function JourneyCanvas({
   stages,
   activeIndex,
@@ -111,7 +127,7 @@ export function JourneyCanvas({
   const storageSceneVisible = isFreeOrbit || (scrollProgress >= 0.25 && scrollProgress < 0.6);
   const productionSceneVisible = isFreeOrbit || (scrollProgress >= 0.58 && scrollProgress < 0.79);
   const outboundSceneVisible = isFreeOrbit || scrollProgress >= 0.79;
-  const cityEnvironmentVisible = isFreeOrbit || journeyProgress < 0.15;
+  const cityEnvironmentVisible = scrollProgress < 0.11;
   const [manualTruckOffset, setManualTruckOffset] = useState({ x: 0, z: 0 });
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -483,6 +499,7 @@ export function JourneyCanvas({
       >
         <color attach="background" args={["#dfe4e1"]} />
         <fog attach="fog" args={["#dfe4e1", 78, 285]} />
+        <DynamicEnvironmentTheme progress={scrollProgress} />
         <hemisphereLight args={["#fffaf0", "#59615f", 0.72]} />
 
         {/* ─── LIGHTING RIG (DAYLIGHT) ─── */}
