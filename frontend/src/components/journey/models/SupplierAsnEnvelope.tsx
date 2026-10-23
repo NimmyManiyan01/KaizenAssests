@@ -1,4 +1,3 @@
-import { SceneHtml as Html } from "../SceneHtml";
 import { supplierJourney } from "../supplierJourney";
 import type { ThreeElements } from "@react-three/fiber";
 
@@ -92,37 +91,7 @@ export function SupplierAsnEnvelope({ progress, asn, ...groupProps }: SupplierAs
               depthTest={false}
             />
           </mesh>
-          {open > 0.08 && (
-            <Html
-              position={[0, 0.04, 0]}
-              rotation={[-Math.PI / 2, 0, 0]}
-              transform
-              distanceFactor={8}
-              zIndexRange={[20, 0]}
-            >
-              <div className="w-52 rounded-md border border-cyan-400/50 bg-slate-950/95 p-2 text-left font-mono text-[8px] text-white shadow-xl">
-                <div className="mb-1 border-b border-cyan-400/30 pb-1 text-[9px] font-black tracking-widest text-cyan-300">
-                  ASN DOCUMENT
-                </div>
-                <div>ASN: {text(asn?.asn_number)}</div>
-                <div>SUPPLIER: {text(asn?.supplier_name)}</div>
-                <div>PO: {text(asn?.po_number)}</div>
-                <div>EXPECTED: {text(asn?.expected_arrival_at || asn?.expected_arrival_date)}</div>
-                <div>VEHICLE: {text(asn?.vehicle_number)}</div>
-                <div>STATUS: {text(asn?.status)}</div>
-              </div>
-            </Html>
-          )}
         </group>
-        <Html position={[0, 1.5, 0]} center distanceFactor={10} zIndexRange={[20, 0]}>
-          <div className="pointer-events-none whitespace-nowrap rounded-full border border-cyan-400/40 bg-slate-950/85 px-2 py-1 font-mono text-[9px] font-bold tracking-widest text-cyan-300">
-            {open > 0.04
-              ? "ASN RECEIVED BY SECURITY"
-              : arrival > 0.2
-                ? "SECURITY CHECKPOINT"
-                : "ASN SENT"}
-          </div>
-        </Html>
       </group>
     </group>
   );
