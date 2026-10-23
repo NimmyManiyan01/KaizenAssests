@@ -94,12 +94,10 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
     headers.set("Content-Type", "application/json");
   }
 
-  // Inject Bearer Authorization header if token exists
+  // Inject Bearer Authorization header only when a real session token exists.
+  // Unauthenticated requests must reach the backend without a fabricated token.
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
-  } else {
-    // Local dev auto-fallback headers for local environment security dependencies
-    headers.set("Authorization", "Bearer local_dev_mock_token");
   }
 
   // Inject user roles and store context headers from session when available
@@ -191,14 +189,11 @@ export const api = {
       throw new Error("Invalid username or password");
     }
     if (username.startsWith("supplier_") || username === "supplier") {
-      const response = await request<any>(
-        `${BUSINESS_API_URL}/api/v1/auth/supplier-login`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, password }),
-        },
-      );
+      const response = await request<any>(`${BUSINESS_API_URL}/api/v1/auth/supplier-login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
       const supplierUser = {
         token: response.token,
         username: response.username,
@@ -972,8 +967,6 @@ export const api = {
     const headers = new Headers();
     if (token) {
       headers.set("Authorization", `Bearer ${token}`);
-    } else {
-      headers.set("Authorization", "Bearer local_dev_mock_token");
     }
 
     try {
@@ -986,7 +979,7 @@ export const api = {
         throw new Error("Failed to download gate pass");
       }
 
-      let passHtml = await response.text();
+      const passHtml = await response.text();
 
       passWindow.document.open();
       passWindow.document.write(passHtml);
@@ -1012,27 +1005,6 @@ export const api = {
     });
   },
 
-  // Procurement Use Cases
-  async checkSupplierExistence(params: {
-    company_name?: string;
-    gstin?: string;
-    email?: string;
-    phone?: string;
-    account_number?: string;
-    swift?: string;
-  }): Promise<any> {
-    const searchParams = new URLSearchParams();
-    if (params.company_name) searchParams.append("company_name", params.company_name);
-    if (params.gstin) searchParams.append("gstin", params.gstin);
-    if (params.email) searchParams.append("email", params.email);
-    if (params.phone) searchParams.append("phone", params.phone);
-    if (params.account_number) searchParams.append("account_number", params.account_number);
-    if (params.swift) searchParams.append("swift", params.swift);
-    return request<any>(
-      `${BUSINESS_API_URL}/api/v1/procurement/suppliers/check-existence?${searchParams.toString()}`,
-    );
-  },
-
   async getBankDetailsByIfsc(ifsc: string): Promise<{
     ifsc: string;
     bank_name: string;
@@ -1046,62 +1018,6 @@ export const api = {
     return { ifsc: details.IFSC, bank_name: details.BANK, branch_name: details.BRANCH };
   },
 
-  async getSuppliers(filters?: {
-    search?: string;
-    category?: string;
-    material?: string;
-    city?: string;
-    vendor_type?: string;
-    status?: string;
-  }): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/procurement/suppliers`).catch(() => []);
-  },
-
-  async getSupplier(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/suppliers/${id}`).catch(() => null);
-  },
-
-  async updateSupplier(id: string, data: any): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/suppliers/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-  },
-
-  async blockSupplier(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/suppliers/${id}/block`, {
-      method: "POST",
-    });
-  },
-
-  async unblockSupplier(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/suppliers/${id}/unblock`, {
-      method: "POST",
-    });
-  },
-
-  async updateSupplierStatus(id: string, status: string, remarks?: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/suppliers/${id}/status`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status, remarks }),
-    });
-  },
-
-  async createSupplier(data: any): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/suppliers`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(data),
-    });
-  },
-  async getMaterialRequests(department?: string): Promise<any[]> {
-    const q = department ? `?department=${encodeURIComponent(department)}` : "";
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/procurement/material-requests${q}`);
-  },
   async getMaterialRequest(id: string): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/v1/procurement/material-requests/${encodeURIComponent(id)}`,
@@ -1361,6 +1277,15 @@ export const api = {
     });
   },
 
+  async getSupplier(supplierId: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/suppliers/${encodeURIComponent(supplierId)}`);
+  },
+
+  async getSuppliers(params?: { search?: string }): Promise<any> {
+    const query = params?.search ? `?search=${encodeURIComponent(params.search)}` : "";
+    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/suppliers${query}`);
+  },
+
   async getSupplierCategories(): Promise<any[]> {
     return request<any[]>(`${BUSINESS_API_URL}/api/v1/procurement/supplier-categories`);
   },
@@ -1533,7 +1458,9 @@ export const api = {
   },
 
   async getMaterialComponents(status: string = "ACTIVE"): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/gate/materials?status=${encodeURIComponent(status)}`);
+    return request<any[]>(
+      `${BUSINESS_API_URL}/api/gate/materials?status=${encodeURIComponent(status)}`,
+    );
     /*
       { code: "MAT-RAD-001", name: "SKID MOUNTED RADIATOR", category: "Heavy Components", uom: "PCS" },
       { code: "MAT-ECP-002", name: "ENGINE CONTROL PANEL", category: "Control Systems", uom: "PCS" },
@@ -1560,7 +1487,13 @@ export const api = {
     ]; */
   },
 
-  async createMaterialComponent(name: string, uom: string = "PCS", materialCode?: string, category = "General", description = ""): Promise<any> {
+  async createMaterialComponent(
+    name: string,
+    uom: string = "PCS",
+    materialCode?: string,
+    category = "General",
+    description = "",
+  ): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/gate/materials`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1569,15 +1502,25 @@ export const api = {
   },
 
   async updateGateMaterial(id: string, data: any): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
   },
 
   async updateGateMaterialStatus(id: string, status: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
   },
 
   async deleteGateMaterial(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}`, { method: "DELETE" });
+    return request<any>(`${BUSINESS_API_URL}/api/gate/materials/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
   },
 
   async getNextMaterialRequestNumber(): Promise<{
@@ -1619,11 +1562,16 @@ export const api = {
     searchOrParams?: string | { search?: string; supplierId?: string },
     signal?: AbortSignal,
   ): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/procurement/purchase-orders`, { cache: "no-store", signal }).catch(() => []);
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/procurement/purchase-orders`, {
+      cache: "no-store",
+      signal,
+    }).catch(() => []);
   },
 
   async getPurchaseOrder(id: string): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/purchase-orders/${id}`).catch(() => null);
+    return request<any>(`${BUSINESS_API_URL}/api/v1/procurement/purchase-orders/${id}`).catch(
+      () => null,
+    );
   },
   async getPurchaseOrderByNumber(poNumber: string): Promise<any> {
     return request<any>(
@@ -1640,8 +1588,6 @@ export const api = {
     const headers = new Headers();
     if (token) {
       headers.set("Authorization", `Bearer ${token}`);
-    } else {
-      headers.set("Authorization", "Bearer local_dev_mock_token");
     }
 
     const response = await fetch(
@@ -1676,7 +1622,9 @@ export const api = {
       try {
         window.URL.revokeObjectURL(url);
         if (a.parentNode) document.body.removeChild(a);
-      } catch {}
+      } catch {
+        // The object URL may already have been revoked.
+      }
     }, 2000);
   },
 
@@ -2220,7 +2168,7 @@ export const api = {
     status?: string;
     store_code?: string;
   }): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/v1/stores`, {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/stores/`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -2446,7 +2394,6 @@ export const api = {
       rack?: string;
       shelf?: string;
       position?: string;
-      qr_identifier?: string;
       storage_type?: string;
       capacity?: number;
       maximum_weight?: number;
@@ -2714,25 +2661,6 @@ export const api = {
   async getStockStatuses(): Promise<string[]> {
     return request<string[]>(`${BUSINESS_API_URL}/api/storage/inventory/stock-statuses`);
   },
-  async performBinTransfer(data: {
-    material_code: string;
-    batch_number?: string;
-    source_bin_code: string;
-    destination_bin_code: string;
-    quantity: number;
-    reason: string;
-    remarks?: string;
-    mobile_controlled_mode?: boolean;
-    scanned_source_bin_qr?: string;
-    scanned_dest_bin_qr?: string;
-    scanned_material_qr?: string;
-  }): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/bin-transfer`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-  },
   async getMaterialInventoryDetail(materialCode: string): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/storage/inventory/materials/${encodeURIComponent(materialCode)}/detail`,
@@ -2834,17 +2762,6 @@ export const api = {
   async approveMaterialRequest(id: string): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions/${encodeURIComponent(id)}/approve`, {
       method: "POST",
-    });
-  },
-  async createMaterialIssue(data: {
-    requisition_number?: string;
-    assembly_order_number?: string;
-    issued_to?: string;
-  }): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/material-issues`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
     });
   },
   // ============================

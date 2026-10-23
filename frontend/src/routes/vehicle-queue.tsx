@@ -289,6 +289,12 @@ function InboundArrivals() {
   const lookupAsn = async (value: string) => {
     const number = value.trim();
     if (!number) return;
+    if (!/^ASN-\d{4}-\d+$/i.test(number)) {
+      toast.error("Invalid ASN format", {
+        description: "Use the format ASN-YYYY-N, for example ASN-2026-1.",
+      });
+      return;
+    }
     const local = asnRecords.find(
       (asn) => String(asn.asn_number).toLowerCase() === number.toLowerCase(),
     );

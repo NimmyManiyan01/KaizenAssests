@@ -1,14 +1,14 @@
 import * as THREE from "three";
 
 // Procedural foliage cards retain gaps between leaves, unlike solid canopy meshes.
-export function createFoliageGeometry(pine: boolean) {
+export function createFoliageGeometry(pine: boolean, detail = 1) {
   const positions: number[] = [],
     uvs: number[] = [],
     indices: number[] = [];
   const transform = new THREE.Matrix4();
   const quaternion = new THREE.Quaternion();
   const point = new THREE.Vector3();
-  const count = pine ? 38 : 28;
+  const count = Math.max(10, Math.round((pine ? 38 : 28) * detail));
   for (let i = 0; i < count; i++) {
     const theta = i * 2.399963;
     const height = (i + 0.5) / count;

@@ -1,11 +1,11 @@
-import { Html } from "@react-three/drei";
+import { SceneHtml as Html } from "../SceneHtml";
 import { supplierJourney } from "../supplierJourney";
-import type { GroupProps } from "@react-three/fiber";
+import type { ThreeElements } from "@react-three/fiber";
 
-interface SupplierAsnEnvelopeProps extends GroupProps {
+type SupplierAsnEnvelopeProps = ThreeElements["group"] & {
   progress: number;
   asn?: any;
-}
+};
 
 function clamp(value: number, min = 0, max = 1) {
   return Math.min(max, Math.max(min, value));
@@ -18,6 +18,10 @@ function smoothstep(value: number) {
 
 /** A procedural envelope used only for the read-only landing-page story. */
 export function SupplierAsnEnvelope({ progress, asn, ...groupProps }: SupplierAsnEnvelopeProps) {
+  for (const key of Object.keys(groupProps)) {
+    if (key.startsWith("data-") || key.startsWith("aria-"))
+      delete (groupProps as Record<string, unknown>)[key];
+  }
   const delivery = supplierJourney(progress);
   const travel = smoothstep((progress - 0.12) / 0.53);
   const arrival = smoothstep((progress - 0.45) / 0.2);

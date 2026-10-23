@@ -190,8 +190,6 @@ export function DockInspector({
                 roughness={0.1}
               />
             </mesh>
-            {/* Screen Light Glow */}
-            <pointLight color="#38bdf8" intensity={1.5} distance={1.8} />
           </group>
         </group>
       </group>
@@ -234,7 +232,6 @@ export function DockInspector({
                   <cylinderGeometry args={[0.008, 0.04, 1.6, 8]} />
                   <meshBasicMaterial color="#22d3ee" transparent opacity={0.65} />
                 </mesh>
-                <pointLight color="#22d3ee" intensity={2.5} distance={3.5} />
               </group>
             )}
           </group>

@@ -4,6 +4,9 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { JOURNEY_STAGES, type JourneyStage } from "./data/journeyStages";
 import { JourneyCanvas } from "./JourneyCanvas";
 import { api } from "@/lib/api-client";
+import { SceneHtmlProvider } from "./SceneHtml";
+import { QualityContext } from "./quality";
+import type { Quality } from "./quality";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -34,6 +37,9 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
   const [isPlaying, setIsPlaying] = useState(false);
   const [playSpeed, setPlaySpeed] = useState(1);
   const [isFreeOrbit, setIsFreeOrbit] = useState(false);
+  const [quality, setQuality] = useState<Quality>("BALANCED");
+  const [qualitySelection, setQualitySelection] = useState<Quality | "AUTO">("AUTO");
+  const [resumeGuided, setResumeGuided] = useState(false);
 
   const mouseOffset = useRef({ x: 0, y: 0 }).current;
   const targetProgress = useRef(0);
@@ -164,7 +170,9 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
         return {
           ...stage,
           telemetry: stage.telemetry.map((item) =>
-            liveTelemetry[item.label] ? { ...item, value: liveTelemetry[item.label] } : item,
+            liveTelemetry[item.label]
+              ? { ...item, value: liveTelemetry[item.label] ?? item.value }
+              : item,
           ),
         };
       }),
@@ -190,6 +198,12 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
   // Automatic cinematic intro on page load
   useEffect(() => {
     if (!mounted) return;
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      overviewRef.current.val = 1;
+      setOverviewProgress(1);
+      return;
+    }
 
     introTweenRef.current = gsap.to(overviewRef.current, {
       val: 1,
@@ -222,6 +236,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
     if (!mounted) return;
     let frame: number | null = null;
     let previousTime = 0;
+    let lastReportedProgress = -1;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const tick = (time: number) => {
       const delta = previousTime ? Math.min((time - previousTime) / 1000, 0.05) : 1 / 120;
@@ -233,7 +248,12 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
         : current + (target - current) * (1 - Math.exp(-20 * delta));
       const settled = Math.abs(target - next) < 0.00001;
       displayedProgress.current = settled ? target : next;
-      setScrollProgress(displayedProgress.current);
+
+      if (Math.abs(displayedProgress.current - lastReportedProgress) > 0.0008 || settled) {
+        lastReportedProgress = displayedProgress.current;
+        setScrollProgress(displayedProgress.current);
+      }
+
       const nextIndex = Math.min(
         stages.length - 1,
         Math.max(0, Math.round(displayedProgress.current * (stages.length - 1))),
@@ -344,6 +364,9 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
 
   useEffect(() => {
     const replay = () => {
+      setIsPlaying(false);
+      setIsFreeOrbit(false);
+      setResumeGuided(false);
       introTweenRef.current?.kill();
       targetProgress.current = 0;
       displayedProgress.current = 0;
@@ -370,8 +393,9 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
       overviewRef.current.val = 1;
       setOverviewProgress(1);
 
+      const journeyFraction = index === 0 ? 0 : 0.12 + (0.88 * index) / (stages.length - 1);
       const targetFraction =
-        OVERVIEW_SCROLL_FRACTION + (index / (stages.length - 1)) * (1 - OVERVIEW_SCROLL_FRACTION);
+        OVERVIEW_SCROLL_FRACTION + journeyFraction * (1 - OVERVIEW_SCROLL_FRACTION);
       const targetScroll = trigger.start + targetFraction * (trigger.end - trigger.start);
 
       window.scrollTo({
@@ -409,6 +433,8 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
   }, []);
 
   const handleToggleFreeOrbit = useCallback(() => {
+    setIsPlaying(false);
+    setResumeGuided(true);
     setIsFreeOrbit((prev) => !prev);
   }, []);
 
@@ -417,57 +443,98 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
   }, [handleSelectStage]);
 
   return (
-    <section
-      id="wms-flow-journey"
-      ref={pinRef}
-      className="relative w-full h-screen overflow-hidden bg-[#e7e9e5] select-none"
-    >
-      {/* 3D WebGL Canvas Layer (Single Persistent World) */}
-      {mounted ? (
-        <JourneyCanvas
-          stages={liveStages}
-          activeIndex={activeIndex}
-          scrollProgress={scrollProgress}
-          overviewProgress={overviewProgress}
-          selectedAsn={asnRecords.find((asn) => String(asn.id || asn.asn_number) === selectedAsnId)}
-          mouseOffset={mouseOffset}
-          onSelectStage={handleSelectStage}
-          isFreeOrbit={isFreeOrbit}
-        />
-      ) : (
-        <div className="absolute inset-0 bg-[#e7e9e5] flex items-center justify-center">
-          <div className="size-8 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
-        </div>
-      )}
-      {/* Cinematic tagline overlay replaces the operational landing HUD. */}
-      {false ? (
-        <div className="pointer-events-none absolute inset-x-0 top-24 sm:top-28 text-center transition-all duration-500">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-950/70 border border-cyan-500/40 backdrop-blur-md mb-2.5 shadow-[0_0_15px_rgba(6,182,212,0.3)]">
-            <span className="size-2 rounded-full bg-cyan-400 animate-pulse" />
-            <span className="font-mono text-[11px] font-bold tracking-[0.2em] text-cyan-300 uppercase">
-              FACILITY FRONT • FULL PERSPECTIVE
+    <QualityContext.Provider value={quality}>
+      <SceneHtmlProvider>
+        <section
+          id="wms-flow-journey"
+          ref={pinRef}
+          className="relative w-full h-screen overflow-hidden bg-[#e7e9e5] select-none"
+        >
+          {/* 3D WebGL Canvas Layer (Single Persistent World) */}
+          {mounted ? (
+            <JourneyCanvas
+              stages={liveStages}
+              activeIndex={activeIndex}
+              scrollProgress={scrollProgress}
+              overviewProgress={overviewProgress}
+              selectedAsn={asnRecords.find(
+                (asn) => String(asn.id || asn.asn_number) === selectedAsnId,
+              )}
+              mouseOffset={mouseOffset}
+              onSelectStage={handleSelectStage}
+              isFreeOrbit={isFreeOrbit}
+              resumeGuided={resumeGuided}
+              automaticQuality={qualitySelection === "AUTO"}
+              onQualityChange={setQuality}
+            />
+          ) : (
+            <div className="absolute inset-0 bg-[#e7e9e5] flex items-center justify-center">
+              <div className="size-8 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
+            </div>
+          )}
+          <div className="pointer-events-none absolute inset-x-3 bottom-5 z-40 flex flex-wrap items-center justify-center gap-2 text-xs sm:inset-x-6">
+            <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-xl border border-slate-500/30 bg-slate-950/90 p-2 text-white shadow-lg">
+              <button
+                type="button"
+                aria-pressed={isFreeOrbit}
+                className="rounded-lg px-3 py-2 focus-visible:outline-cyan-400"
+                onClick={handleToggleFreeOrbit}
+              >
+                {isFreeOrbit ? "Return to Guided" : "Explore campus"}
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2"
+                onClick={() => {
+                  window.dispatchEvent(new Event("kaizenassests:replay-journey"));
+                  window.scrollTo({
+                    top: 0,
+                    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+                      ? "instant"
+                      : "smooth",
+                  });
+                }}
+              >
+                Replay
+              </button>
+              <label className="flex items-center gap-2 px-2">
+                Quality
+                <select
+                  aria-label="Rendering quality"
+                  value={qualitySelection}
+                  className="rounded bg-slate-800 p-2"
+                  onChange={(event) => {
+                    const value = event.target.value as Quality | "AUTO";
+                    setQualitySelection(value);
+                    if (value !== "AUTO") setQuality(value);
+                  }}
+                >
+                  <option value="AUTO">Auto ({quality.toLowerCase()})</option>
+                  <option value="HIGH">High</option>
+                  <option value="BALANCED">Balanced</option>
+                  <option value="PERFORMANCE">Performance</option>
+                </select>
+              </label>
+            </div>
+            <span className="sr-only" aria-live="polite">
+              {isFreeOrbit
+                ? "Explore mode: drag to orbit, pinch or scroll to zoom."
+                : "Guided mode: scroll to follow the journey."}
             </span>
           </div>
-          <h2 className="text-2xl sm:text-4xl font-black text-white tracking-tight drop-shadow-[0_2px_16px_rgba(0,0,0,0.8)]">
-            Logistics Terminal & Inbound Gate
-          </h2>
-          <p className="mt-1.5 text-xs sm:text-sm text-slate-300 max-w-md mx-auto drop-shadow font-medium px-4">
-            Full view of warehouse front facade, security gate, and inbound approach
-          </p>
-        </div>
-      ) : null}
-
-      <div
-        hidden={scrollProgress < 0.12}
-        className="pointer-events-none absolute inset-x-0 top-[17%] z-30 flex -translate-y-1/2 justify-center px-6 text-center"
-      >
-        <p
-          key={taglineIndex}
-          className="max-w-xl animate-in fade-in duration-700 text-xl font-semibold tracking-tight text-white drop-shadow-[0_3px_18px_rgba(0,0,0,0.9)] sm:text-3xl lg:text-4xl"
-        >
-          {CINEMATIC_TAGLINES[taglineIndex]}
-        </p>
-      </div>
-    </section>
+          <div
+            hidden={scrollProgress < 0.12}
+            className="pointer-events-none absolute inset-x-0 top-[17%] z-30 flex -translate-y-1/2 justify-center px-6 text-center"
+          >
+            <p
+              key={taglineIndex}
+              className="max-w-xl animate-in fade-in duration-700 text-xl font-semibold tracking-tight text-white drop-shadow-[0_3px_18px_rgba(0,0,0,0.9)] sm:text-3xl lg:text-4xl"
+            >
+              {CINEMATIC_TAGLINES[taglineIndex]}
+            </p>
+          </div>
+        </section>
+      </SceneHtmlProvider>
+    </QualityContext.Provider>
   );
 }

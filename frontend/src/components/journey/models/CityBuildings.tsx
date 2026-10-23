@@ -49,7 +49,7 @@ function BuildingParts({
 }
 
 function StreetLights() {
-  const positions = [-30, 0, 30].flatMap((z) => [
+  const positions = [-30, 0, 30].flatMap((z): [number, number][] => [
     [-108, z],
     [108, z],
   ]);

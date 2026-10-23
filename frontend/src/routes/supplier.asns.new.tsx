@@ -304,7 +304,7 @@ function NewAsnPage() {
         setSupplierCompanyName(companyName);
         if (companyName) setSupplierName(companyName);
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         toast.error("Unable to load supplier account details", {
           description: error instanceof Error ? error.message : undefined,
         });

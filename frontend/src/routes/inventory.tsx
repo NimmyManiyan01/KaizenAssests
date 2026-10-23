@@ -86,12 +86,13 @@ export const Route = createFileRoute("/inventory")({
 
 type TabType = "dashboard" | "putaway" | "inventory" | "requests" | "picking" | "locations";
 
-function SimpleWarehouseModule() {
+export function SimpleWarehouseModule() {
   const navigate = useNavigate();
-  const searchParams: any = useSearch({ from: "/inventory" });
+  const searchParams = useSearch({ strict: false });
   const tabOptions: TabType[] = ["dashboard", "putaway", "inventory", "requests", "picking", "locations"];
-  const activeTab: TabType = tabOptions.includes(searchParams?.tab)
-    ? (searchParams.tab === "requests" ? "picking" : searchParams.tab)
+  const requestedTab = tabOptions.find(tab => tab === searchParams.tab);
+  const activeTab: TabType = requestedTab
+    ? (requestedTab === "requests" ? "picking" : requestedTab)
     : "dashboard";
   const pageHeader: Record<TabType, { eyebrow: string; title: string; description: string; icon: typeof Boxes }> = {
     dashboard: {
@@ -644,12 +645,13 @@ function SimpleWarehouseModule() {
         canvas.width = image.naturalWidth;
         canvas.height = image.naturalHeight;
         const context = canvas.getContext("2d", { willReadFrequently: true });
-        if (!context) return toast.error("Could not read the uploaded QR image.");
+        if (!context) { toast.error("Could not read the uploaded QR image."); return; }
         context.drawImage(image, 0, 0);
         const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
         const decoded = jsQR(pixels.data, pixels.width, pixels.height);
-        if (!decoded?.data)
-          return toast.error(`No readable ${field === "material" ? "material" : "rack"} QR found.`);
+        if (!decoded?.data) {
+          toast.error(`No readable ${field === "material" ? "material" : "rack"} QR found.`); return;
+        }
         setPickupConfirmation((current) => ({
           ...current,
           [field === "material" ? "material_scan" : "zone_scan"]: decoded.data,
@@ -1296,7 +1298,7 @@ function SimpleWarehouseModule() {
   };
 
   return (
-    <AppShell activeItem="/inventory">
+    <AppShell>
       <div className="space-y-5 rounded-2xl bg-gradient-to-br from-slate-50 via-blue-50/50 to-teal-50/40 p-3 pb-8 sm:p-5">
         {/* Header Title Bar */}
         <div className="relative isolate flex min-h-[164px] flex-col justify-center gap-4 overflow-hidden rounded-2xl border border-[#0b315c] bg-[#0b315c] px-6 py-5 shadow-sm md:flex-row md:items-center md:justify-between md:px-8">
@@ -1308,7 +1310,7 @@ function SimpleWarehouseModule() {
             </p>
             <h1 className="mt-2 flex items-center gap-2.5 text-[25px] font-semibold tracking-tight md:text-[28px]">
               <PageHeaderIcon className="h-6 w-6 text-[#71b5ff]" />
-              <span className="inline-flex items-center">{pageHeader[activeTab].title}<InformationTooltip help={inventoryHelp[activeTab]} placement="title" className="text-blue-100 hover:text-white" /></span>
+              <span className="inline-flex items-center">{pageHeader[activeTab].title}<InformationTooltip help={inventoryHelp[activeTab] ?? "inventory"} placement="title" className="text-blue-100 hover:text-white" /></span>
             </h1>
             <p className="mt-1.5 text-sm text-blue-50/85">
               {pageHeader[activeTab].description}
@@ -1502,7 +1504,7 @@ function SimpleWarehouseModule() {
                     </ResponsiveContainer>
                   </div>
                   <p className="mt-1 rounded-lg border border-violet-100 bg-white/70 px-3 py-2 text-xs text-slate-600">
-                    {totalOpenTasks === 0 ? "All warehouse queues are clear." : `${busiestQueue.name} has the most open work (${busiestQueue.tasks}). Select its queue in the sidebar to review tasks.`}
+                    {totalOpenTasks === 0 || !busiestQueue ? "All warehouse queues are clear." : `${busiestQueue.name} has the most open work (${busiestQueue.tasks}). Select its queue in the sidebar to review tasks.`}
                   </p>
                 </Card>
               </div>

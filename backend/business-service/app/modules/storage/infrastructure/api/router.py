@@ -2,6 +2,7 @@ import datetime
 import hashlib
 import json
 import logging
+import re
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -53,6 +54,116 @@ from app.modules.store.infrastructure.persistence.models import (
 from app.security.dependencies import CurrentUser, get_current_user, require_permission
 
 router = APIRouter(prefix="/api/storage/putaway-tasks", tags=["storage"])
+stores_compat_router = APIRouter(prefix="/api/v1/stores", tags=["stores"])
+
+
+def _uuid_or_none(value: str) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(value)
+    except (ValueError, AttributeError):
+        return None
+
+
+class StoreCreateRequest(BaseModel):
+    store_name: str = Field(min_length=1, max_length=128)
+    store_code: str = Field(min_length=1, max_length=64)
+    description: str | None = None
+    warehouse_id: str = "Main Warehouse"
+    store_type: str = "RAW_MATERIAL"
+    status: str = "ACTIVE"
+
+
+def _store_payload(store: StoreModel) -> dict[str, Any]:
+    return {
+        "id": str(store.id),
+        "store_code": store.store_code,
+        "store_name": store.store_name,
+        "description": store.description,
+        "warehouse_id": store.warehouse_id,
+        "store_type": store.store_type,
+        "status": store.status,
+    }
+
+
+@stores_compat_router.get("/")
+async def list_stores(
+    status_filter: str | None = Query(None, alias="status"),
+    uow: UnitOfWork = Depends(get_uow),
+    _user: CurrentUser = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    query = select(StoreModel).order_by(StoreModel.store_code)
+    if status_filter:
+        query = query.where(StoreModel.status == status_filter)
+    result = await uow.session.execute(query)
+    return [_store_payload(store) for store in result.scalars().all()]
+
+
+@stores_compat_router.post("/", status_code=status.HTTP_201_CREATED)
+async def create_store(
+    request: StoreCreateRequest,
+    uow: UnitOfWork = Depends(get_uow),
+    _user: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    code = request.store_code.strip().upper()
+    name = request.store_name.strip()
+    existing = await uow.session.scalar(select(StoreModel).where(StoreModel.store_code == code))
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Warehouse code {code} already exists")
+    store = StoreModel(
+        store_code=code,
+        store_name=name,
+        description=request.description,
+        warehouse_id=request.warehouse_id.strip() or "Main Warehouse",
+        store_type=request.store_type,
+        status=request.status,
+    )
+    uow.session.add(store)
+    await uow.session.commit()
+    await uow.session.refresh(store)
+    return _store_payload(store)
+
+
+@stores_compat_router.get("/next-code")
+async def get_next_store_code(
+    uow: UnitOfWork = Depends(get_uow),
+    _user: CurrentUser = Depends(get_current_user),
+) -> dict[str, str]:
+    """Return the next store code for clients still using the store-master flow."""
+    result = await uow.session.execute(select(StoreModel.store_code))
+    highest = 0
+    for (store_code,) in result.all():
+        match = re.search(r"(\d+)$", str(store_code or ""))
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return {"suggested_store_code": f"STR-{highest + 1:03d}"}
+
+
+@stores_compat_router.get("/{store_id}/zones")
+async def list_store_zones(
+    store_id: str,
+    status_filter: str | None = Query(None, alias="status"),
+    uow: UnitOfWork = Depends(get_uow),
+    _user: CurrentUser = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    store = await uow.session.scalar(
+        select(StoreModel).where(
+            or_(StoreModel.id == _uuid_or_none(store_id), StoreModel.store_code == store_id)
+        )
+    )
+    if not store:
+        raise HTTPException(status_code=404, detail="Warehouse not found")
+    query = select(StoreZoneModel).where(StoreZoneModel.store_id == store.id).order_by(StoreZoneModel.zone_code)
+    if status_filter:
+        query = query.where(StoreZoneModel.status == status_filter)
+    result = await uow.session.execute(query)
+    return [{
+        "id": str(zone.id),
+        "store_id": str(zone.store_id),
+        "zone_code": zone.zone_code,
+        "zone_name": zone.zone_name,
+        "description": zone.description,
+        "status": zone.status,
+    } for zone in result.scalars().all()]
 
 
 async def _sync_finished_goods_putaway_status(uow: UnitOfWork, finished_goods_id: uuid.UUID, location_code: str | None, username: str, completed_at: datetime.datetime):

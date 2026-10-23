@@ -3,6 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { createFoliageGeometry, createTreeTexture } from "./treeGeometry";
 import { CityBuildings } from "./CityBuildings";
+import { QUALITY, useQuality } from "../quality";
 
 type Vector = [number, number, number];
 type Instance = { position: Vector; scale: Vector; rotation: Vector; color: string };
@@ -16,12 +17,13 @@ function landscapeHeight(x: number, z: number) {
 }
 
 function VegetationBatch({ items, kind }: { items: Instance[]; kind: Kind }) {
+  const quality = useQuality();
   const ref = useRef<THREE.InstancedMesh>(null);
   const geometry = useMemo(() => {
     if (kind === "trunk") return new THREE.CylinderGeometry(0.45, 1, 1, 10, 3);
     if (kind === "rock") return new THREE.IcosahedronGeometry(1, 1);
-    return createFoliageGeometry(kind === "pine");
-  }, [kind]);
+    return createFoliageGeometry(kind === "pine", QUALITY[quality].foliageCards);
+  }, [kind, quality]);
   const texture = useMemo(() => (kind === "rock" ? null : createTreeTexture(kind)), [kind]);
   const foliage = kind === "leaves" || kind === "pine";
   useEffect(() => () => geometry.dispose(), [geometry]);
@@ -42,7 +44,7 @@ function VegetationBatch({ items, kind }: { items: Instance[]; kind: Kind }) {
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     mesh.computeBoundingSphere();
-  }, [items]);
+  }, [items, geometry]);
   return (
     <instancedMesh ref={ref} args={[geometry, undefined, items.length]} castShadow receiveShadow>
       <meshStandardMaterial
@@ -96,7 +98,7 @@ function WindGrass() {
       transform.scale.set(0.7 + random() * 0.7, height, 0.7 + random() * 0.7);
       transform.updateMatrix();
       matrices.set(transform.matrix.elements, i * 16);
-      color.set(grassColors[Math.floor(random() * grassColors.length)]);
+      color.set(grassColors[Math.floor(random() * grassColors.length)] ?? "#496b43");
       color.toArray(colors, i * 3);
     }
 
@@ -137,7 +139,8 @@ function WindGrass() {
   }, [colors, matrices]);
 
   useFrame(({ clock }) => {
-    if (materialRef.current) materialRef.current.uniforms.uTime.value = clock.elapsedTime;
+    const time = materialRef.current?.uniforms.uTime;
+    if (time) time.value = clock.elapsedTime;
   });
 
   useEffect(() => () => geometry.dispose(), [geometry]);
@@ -178,10 +181,10 @@ function WindGrass() {
 
 export function NatureEnvironment() {
   const terrain = useMemo(() => {
-    const geometry = new THREE.PlaneGeometry(600, 700, 160, 180);
+    const geometry = new THREE.PlaneGeometry(600, 700, 1, 1);
     geometry.rotateX(-Math.PI / 2);
     geometry.translate(0, 0, -170);
-    const vertices = geometry.attributes.position;
+    const vertices = geometry.getAttribute("position");
     const colors = new Float32Array(vertices.count * 3);
     const asphalt = new THREE.Color("#46515b");
     const color = new THREE.Color();
@@ -239,7 +242,7 @@ export function NatureEnvironment() {
             position: [x, y + height * (0.43 + tier * 0.21), z],
             scale: [radius, height * 0.56, radius],
             rotation: [0, angle + tier, 0],
-            color: foliage[(i + tier) % 3],
+            color: foliage[(i + tier) % 3] ?? "#496b43",
           });
         }
       } else {
@@ -271,7 +274,7 @@ export function NatureEnvironment() {
               (1.4 + random() * 0.5) * scale,
             ],
             rotation: [random() * 0.3, theta, random() * 0.25],
-            color: foliage[(i + cluster) % foliage.length],
+            color: foliage[(i + cluster) % foliage.length] ?? "#496b43",
           });
         }
       }
@@ -296,6 +299,9 @@ export function NatureEnvironment() {
         <meshStandardMaterial vertexColors roughness={0.98} metalness={0} />
       </mesh>
       <CityBuildings />
+      <VegetationBatch items={forest.trunks} kind="trunk" />
+      <VegetationBatch items={forest.leaves} kind="leaves" />
+      <VegetationBatch items={forest.pines} kind="pine" />
     </group>
   );
 }

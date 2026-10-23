@@ -1,6 +1,7 @@
 import { memo, Suspense, useEffect, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { Html, OrbitControls } from "@react-three/drei";
+import { OrbitControls } from "@react-three/drei";
+import { SceneHtml as Html } from "./SceneHtml";
 import type { JourneyStage } from "./data/journeyStages";
 import { JourneyCamera } from "./JourneyCamera";
 import { JourneyRoadmap3D } from "./JourneyRoadmap3D";
@@ -8,15 +9,25 @@ import { WarehouseBuilding as WarehouseBuildingModel } from "./models/WarehouseB
 import { GateBarrier as GateBarrierModel } from "./models/GateBarrier";
 import { LogisticsTruck as LogisticsTruckModel } from "./models/LogisticsTruck";
 import { LoadingDock as LoadingDockModel } from "./models/LoadingDock";
+import type { DockStatus } from "./models/LoadingDock";
 import { DockInspector as DockInspectorModel } from "./models/DockInspector";
 import { StorageRack as StorageRackModel } from "./models/StorageRack";
 import { WarehouseForklift as WarehouseForkliftModel } from "./models/WarehouseForklift";
 import { PalletAndCargo as PalletAndCargoModel } from "./models/PalletAndCargo";
 import { ConveyorSystem as ConveyorSystemModel } from "./models/ConveyorSystem";
 import { PumpAssemblyCell as PumpAssemblyCellModel } from "./models/PumpAssemblyCell";
+import { ReceivingInspectionStation as ReceivingInspectionStationModel } from "./models/ReceivingInspectionStation";
 import { NatureEnvironment as NatureEnvironmentModel } from "./models/NatureEnvironment";
 import { SupplierAsnEnvelope as SupplierAsnEnvelopeModel } from "./models/SupplierAsnEnvelope";
 import { supplierJourney } from "./supplierJourney";
+import { ACESFilmicToneMapping, PCFShadowMap } from "three";
+import { IndustrialCampus } from "./models/IndustrialCampus";
+import { CampusSurfaceFinish } from "./models/CampusSurfaceFinish";
+import { CampusDaylight } from "./CampusDaylight";
+import { AdaptiveQuality, QUALITY, useQuality } from "./quality";
+import { SceneDiagnostics } from "./SceneDiagnostics";
+import { ScenePerformanceDiagnostics } from "./ScenePerformanceDiagnostics";
+import type { Quality } from "./quality";
 
 // Compare transform tuples by value so unchanged models skip reconciliation.
 function sameModelProps(previous: object, next: object) {
@@ -47,6 +58,7 @@ const WarehouseForklift = memo(WarehouseForkliftModel, sameModelProps);
 const PalletAndCargo = memo(PalletAndCargoModel, sameModelProps);
 const ConveyorSystem = memo(ConveyorSystemModel, sameModelProps);
 const PumpAssemblyCell = memo(PumpAssemblyCellModel, sameModelProps);
+const ReceivingInspectionStation = memo(ReceivingInspectionStationModel, sameModelProps);
 const NatureEnvironment = memo(NatureEnvironmentModel, sameModelProps);
 const SupplierAsnEnvelope = memo(SupplierAsnEnvelopeModel, sameModelProps);
 
@@ -59,6 +71,9 @@ interface JourneyCanvasProps {
   onSelectStage: (index: number) => void;
   isFreeOrbit?: boolean;
   selectedAsn?: any;
+  automaticQuality: boolean;
+  onQualityChange: (quality: Quality) => void;
+  resumeGuided: boolean;
 }
 
 function lerp(a: number, b: number, t: number) {
@@ -83,9 +98,17 @@ export function JourneyCanvas({
   onSelectStage,
   isFreeOrbit = false,
   selectedAsn,
+  automaticQuality,
+  onQualityChange,
+  resumeGuided,
 }: JourneyCanvasProps) {
+  const quality = useQuality();
   const supplierProgress = clamp(journeyProgress / 0.12, 0, 1);
   const scrollProgress = clamp((journeyProgress - 0.12) / 0.88, 0, 1);
+  const storageSceneVisible = isFreeOrbit || (scrollProgress >= 0.25 && scrollProgress < 0.48);
+  const productionSceneVisible = isFreeOrbit || (scrollProgress >= 0.58 && scrollProgress < 0.79);
+  const outboundSceneVisible = isFreeOrbit || scrollProgress >= 0.79;
+  const cityEnvironmentVisible = isFreeOrbit || journeyProgress < 0.15;
   const [manualTruckOffset, setManualTruckOffset] = useState({ x: 0, z: 0 });
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -121,7 +144,9 @@ export function JourneyCanvas({
   let barrier1Open = 0;
   let dockDoorOpen = 0;
   let truck1Doors = 0;
+  let dockStatus: DockStatus = "APPROACHING";
   let wheelRot = 0;
+  let steerAngle = 0;
   let isReversing = false;
   // Animation progress is intentionally independent of backend snapshot data.
   // The landing page is a scroll-controlled visual journey; API availability
@@ -151,6 +176,7 @@ export function JourneyCanvas({
     // Follow a forward semicircle; the cab always points along the path tangent.
     const angle = smoothstep(0.11, 0.145, inboundProgress) * Math.PI;
     barrier1Open = 1;
+    steerAngle = 0.35;
     truck1Pos = [-4.25 + 4.25 * Math.cos(angle), 0, -10 - 4.25 * Math.sin(angle)];
     truck1Rot = [0, Math.PI + angle, 0];
     wheelRot = (33 + 4.25 * angle) / 0.49;
@@ -170,7 +196,21 @@ export function JourneyCanvas({
     truck1Rot = [0, Math.PI * 2, 0];
     wheelRot = (33 + 4.25 * Math.PI - 7.5) / 0.49;
     dockDoorOpen = 1;
-    truck1Doors = smoothstep(0.1667, 0.185, inboundProgress);
+    // The truck remains closed until the demonstration sequence establishes
+    // secure docking and unloading authorization at the manifest check.
+    truck1Doors = smoothstep(0.22, 0.235, inboundProgress);
+  }
+
+  if (inboundProgress < 0.1667) {
+    dockStatus = "APPROACHING";
+  } else if (inboundProgress < 0.22) {
+    dockStatus = "DOCKED_NOT_AUTHORIZED";
+  } else if (inboundProgress < 0.235) {
+    dockStatus = "READY_TO_UNLOAD";
+  } else if (inboundProgress < 0.39) {
+    dockStatus = "UNLOADING";
+  } else {
+    dockStatus = "COMPLETED";
   }
 
   // ─── SCENE 2: DOCK INSPECTOR (THE MAN CHECKING GOODS LIST BEFORE FORKLIFT PICK) ───
@@ -227,13 +267,13 @@ export function JourneyCanvas({
     forkliftRot = [0, 0, 0];
     forkLiftProgress = 0;
     // Unload only after parking and opening the truck doors.
-    const unload = smoothstep(0.187, 0.203, scrollProgress);
+    const unload = smoothstep(0.22, 0.235, scrollProgress);
     const heading = truck1Rot[1];
     palletPos =
-      scrollProgress < 0.1667
+      scrollProgress < 0.22
         ? [truck1Pos[0] - Math.sin(heading) * 3.3, 0.98, truck1Pos[2] - Math.cos(heading) * 3.3]
         : [-8.5, lerp(0.98, 1.25, unload), lerp(-20.8, -23.8, unload)];
-    palletRot = scrollProgress < 0.1667 ? truck1Rot : [0, 0, 0];
+    palletRot = scrollProgress < 0.22 ? truck1Rot : [0, 0, 0];
   } else if (scrollProgress < 0.255) {
     // AFTER goods list checked: Forklift approaches Dock 02 and slides forks under pallet
     const t = smoothstep(0.225, 0.255, scrollProgress);
@@ -356,7 +396,16 @@ export function JourneyCanvas({
   }
 
   return (
-    <div className="absolute inset-0 -z-10 bg-[#e7e9e5] overflow-hidden">
+    <div
+      className={`absolute inset-0 bg-[#e7e9e5] overflow-hidden ${
+        isFreeOrbit ? "touch-none pointer-events-auto z-10" : "z-0"
+      }`}
+      onWheel={(e) => {
+        if (isFreeOrbit) {
+          e.stopPropagation();
+        }
+      }}
+    >
       <Canvas
         frameloop="always"
         performance={{ min: 0.65, max: 1, debounce: 250 }}
@@ -368,258 +417,290 @@ export function JourneyCanvas({
           stencil: false,
           depth: true,
         }}
-        dpr={[1, 1.5]}
+        dpr={Math.min(
+          typeof window === "undefined" ? 1 : window.devicePixelRatio || 1,
+          QUALITY[quality].dpr,
+        )}
         shadows
+        onCreated={({ gl }) => {
+          gl.toneMapping = ACESFilmicToneMapping;
+          gl.toneMappingExposure = 1;
+          gl.shadowMap.type = PCFShadowMap;
+        }}
       >
         <color attach="background" args={["#e7e9e5"]} />
         <fog attach="fog" args={["#e7e9e5", 90, 300]} />
         <hemisphereLight args={["#fffaf0", "#7e8580", 0.6]} />
 
         {/* ─── LIGHTING RIG (DAYLIGHT) ─── */}
-        <ambientLight intensity={1.2} color="#ffffff" />
-        <directionalLight
-          position={[20, 35, 25]}
-          intensity={2.2}
-          castShadow
-          shadow-mapSize-width={1024}
-          shadow-mapSize-height={1024}
-          shadow-camera-far={180}
-          shadow-camera-left={-30}
-          shadow-camera-right={30}
-          shadow-camera-top={30}
-          shadow-camera-bottom={-30}
-          color="#fffbeb"
-        />
+        <ambientLight intensity={0.35} color="#f4f7fa" />
+        <CampusDaylight />
+        <AdaptiveQuality automatic={automaticQuality} onChange={onQualityChange} />
 
         {/* Key Operational Luminaires */}
         {/* Gate Entry Perimeter Illumination */}
-        <pointLight position={[2, 6, 22]} intensity={3.5} color="#38bdf8" distance={25} />
+        <pointLight position={[2, 6, 22]} intensity={3.5} color="#f4f7fa" distance={25} />
         {/* Receiving Dock Illumination */}
-        <pointLight position={[-4, 7, -22]} intensity={3.5} color="#38bdf8" distance={25} />
+        <pointLight position={[-4, 7, -22]} intensity={3.5} color="#f4f7fa" distance={25} />
         {/* Storage Aisle Illumination */}
-        <pointLight position={[-10, 8, -50]} intensity={2.5} color="#06b6d4" distance={35} />
+        <pointLight position={[-10, 8, -50]} intensity={2.5} color="#f4f7fa" distance={35} />
         {/* Inventory High Matrix Illumination */}
-        <pointLight position={[10, 12, -120]} intensity={3.0} color="#38bdf8" distance={45} />
+        <pointLight position={[10, 12, -120]} intensity={3.0} color="#f4f7fa" distance={45} />
         {/* Robotic Workcell Illumination */}
-        <pointLight position={[-8, 6, -180]} intensity={2.5} color="#2dd4bf" distance={35} />
+        <pointLight position={[-8, 6, -180]} intensity={2.5} color="#f4f7fa" distance={35} />
         {/* Outbound Dispatch Dock Illumination */}
-        <pointLight position={[-4, 7, -210]} intensity={3.5} color="#38bdf8" distance={25} />
+        <pointLight position={[-4, 7, -210]} intensity={3.5} color="#f4f7fa" distance={25} />
         {/* Exit Gate Illumination */}
-        <pointLight position={[2, 6, -248]} intensity={3.5} color="#38bdf8" distance={25} />
+        <pointLight position={[2, 6, -248]} intensity={3.5} color="#f4f7fa" distance={25} />
 
         <Suspense fallback={null}>
-          {/* Nature Environment (Hills & Trees) */}
-          <NatureEnvironment />
+          <SceneDiagnostics>
+            <ScenePerformanceDiagnostics />
+            {/* Nature Environment (Hills & Trees) */}
+            <group visible={cityEnvironmentVisible}>
+              <CampusSurfaceFinish>
+                <NatureEnvironment />
+              </CampusSurfaceFinish>
+            </group>
 
-          {/* Supplier ASN story: sent, carried to security, then opened. */}
-          <SupplierAsnEnvelope
-            // The inbound scene ends at the receiving-dock keyframe. Keep the
-            // envelope timeline local to that scene instead of the whole page.
-            progress={supplierProgress}
-            visible={journeyProgress < 0.12}
-            asn={selectedAsn}
-          />
-
-          {/* Camera Controller: Guided trajectory or Free 3D Orbit */}
-          {isFreeOrbit ? (
-            <OrbitControls
-              makeDefault
-              maxPolarAngle={Math.PI / 2.05}
-              minDistance={3}
-              maxDistance={250}
+            {/* Supplier ASN story: sent, carried to security, then opened. */}
+            <SupplierAsnEnvelope
+              // The inbound scene ends at the receiving-dock keyframe. Keep the
+              // envelope timeline local to that scene instead of the whole page.
+              progress={supplierProgress}
+              visible={journeyProgress < 0.12}
+              asn={selectedAsn}
             />
-          ) : (
-            <JourneyCamera
-              stages={stages}
-              scrollProgress={scrollProgress}
-              overviewProgress={overviewProgress}
-              supplierProgress={supplierProgress}
-              mouseOffset={mouseOffset}
+
+            {/* Camera Controller: Guided trajectory or Free 3D Orbit */}
+            {isFreeOrbit ? (
+              <OrbitControls
+                makeDefault
+                maxPolarAngle={Math.PI / 2.05}
+                minDistance={3}
+                maxDistance={250}
+                enableDamping
+                dampingFactor={0.08}
+              />
+            ) : (
+              <JourneyCamera
+                stages={stages}
+                scrollProgress={scrollProgress}
+                overviewProgress={overviewProgress}
+                supplierProgress={supplierProgress}
+                mouseOffset={mouseOffset}
+                resumeFromCurrent={resumeGuided}
+              />
+            )}
+
+            {/* ─── 3D WAREHOUSE ENVIRONMENT OBJECTS ─── */}
+            <CampusSurfaceFinish>
+              <WarehouseBuilding />
+              <IndustrialCampus />
+            </CampusSurfaceFinish>
+
+            {/* ─── SCENE 1: INBOUND GATE ENTRY ─── */}
+            <GateBarrier
+              position={[0, 0, 15]}
+              barrierOpenProgress={barrier1Open}
+              securitySide="left"
             />
-          )}
 
-          {/* ─── 3D WAREHOUSE ENVIRONMENT OBJECTS ─── */}
-          <WarehouseBuilding />
+            {/* ─── SCENE 1 & 2: INBOUND LOGISTICS TRUCK (FL-8820) ─── */}
+            {/* Drives from the gate to the apron, turns, and backs into the receiving dock. */}
+            <LogisticsTruck
+              position={truck1Pos}
+              rotation={truck1Rot}
+              doorsOpenProgress={truck1Doors}
+              wheelRotation={wheelRot}
+              steerAngle={steerAngle}
+              isReversing={isReversing}
+            />
 
-          {/* ─── SCENE 1: INBOUND GATE ENTRY ─── */}
-          <GateBarrier
-            position={[0, 0, 15]}
-            barrierOpenProgress={barrier1Open}
-            securitySide="left"
-          />
+            {/* ─── SCENE 2: INBOUND RECEIVING DOCK & GRN INSPECTION ─── */}
+            <LoadingDock
+              position={[-8.5, 0, -25]}
+              doorOpenProgress={dockDoorOpen}
+              doorNumber="BAY D-04"
+              pickupLane
+              dockStatus={dockStatus}
+            />
 
-          {/* ─── SCENE 1 & 2: INBOUND LOGISTICS TRUCK (FL-8820) ─── */}
-          {/* Drives from the gate to the apron, turns, and backs into the receiving dock. */}
-          <LogisticsTruck
-            position={truck1Pos}
-            rotation={truck1Rot}
-            doorsOpenProgress={truck1Doors}
-            wheelRotation={wheelRot}
-            isReversing={isReversing}
-          />
+            {/* Warehouse Inspector: The man checking the goods list before forklift pick */}
+            <DockInspector
+              position={inspectorPos}
+              rotation={inspectorRot}
+              inspectionProgress={inspectProgress}
+            />
 
-          {/* ─── SCENE 2: INBOUND RECEIVING DOCK & GRN INSPECTION ─── */}
-          <LoadingDock
-            position={[-8.5, 0, -25]}
-            doorOpenProgress={1}
-            doorNumber="DOCK 02"
-            pickupLane
-          />
+            {/* Illustrative GRN receiving / QC workstation for stages 06–08. */}
+            <group visible={isFreeOrbit || (scrollProgress >= 0.16 && scrollProgress < 0.31)}>
+              <ReceivingInspectionStation progress={scrollProgress} />
+            </group>
 
-          {/* Warehouse Inspector: The man checking the goods list before forklift pick */}
-          <DockInspector
-            position={inspectorPos}
-            rotation={inspectorRot}
-            inspectionProgress={inspectProgress}
-          />
+            {/* ─── SCENE 2 & 3: DYNAMIC RECEIVED GOODS PALLET ─── */}
+            {/* Truck cargo unloads onto the dock, is received by the worker, then collected by forklift. */}
+            <PalletAndCargo
+              position={palletPos}
+              rotation={palletRot}
+              hasCargo={true}
+              boxCount={8}
+              showQr={scrollProgress >= 0.22}
+            />
 
-          {/* ─── SCENE 2 & 3: DYNAMIC RECEIVED GOODS PALLET ─── */}
-          {/* Truck cargo unloads onto the dock, is received by the worker, then collected by forklift. */}
-          <PalletAndCargo
-            position={palletPos}
-            rotation={palletRot}
-            hasCargo={true}
-            boxCount={8}
-            showQr={scrollProgress >= 0.22}
-          />
+            {/* ─── SCENE 3 & 4: STORAGE AISLES & INVENTORY MATRIX ─── */}
+            <group visible={storageSceneVisible}>
+              {/* Left Rack Row 1 (Facing Inward into Aisle) */}
+              <StorageRack
+                position={[-7.5, 0, -68]}
+                rotation={[0, Math.PI / 2, 0]}
+                bays={3}
+                tiers={4}
+              />
+              <StorageRack
+                position={[-7.5, 0, -82]}
+                rotation={[0, Math.PI / 2, 0]}
+                bays={3}
+                tiers={4}
+              />
+              {/* Right Rack Row 1 (Target Aisle - Facing Inward into Aisle) */}
+              <StorageRack
+                position={[8.0, 0, -68]}
+                rotation={[0, -Math.PI / 2, 0]}
+                bays={3}
+                tiers={4}
+              />
+              <StorageRack
+                position={[8.0, 0, -82]}
+                rotation={[0, -Math.PI / 2, 0]}
+                bays={3}
+                tiers={4}
+              />
+              {/* High Inventory Overview Rows (Scene 4 Matrix) */}
+              <StorageRack position={[-16, 0, -108]} bays={4} tiers={4} />
+              <StorageRack position={[0, 0, -108]} bays={4} tiers={4} />
+              <StorageRack position={[16, 0, -108]} bays={4} tiers={4} />
+              <StorageRack position={[-8, 0, -125]} bays={4} tiers={4} />
+              <StorageRack position={[8, 0, -125]} bays={4} tiers={4} />
 
-          {/* ─── SCENE 3 & 4: STORAGE AISLES & INVENTORY MATRIX ─── */}
-          {/* Left Rack Row 1 (Facing Inward into Aisle) */}
-          <StorageRack
-            position={[-7.5, 0, -68]}
-            rotation={[0, Math.PI / 2, 0]}
-            bays={3}
-            tiers={4}
-          />
-          <StorageRack
-            position={[-7.5, 0, -82]}
-            rotation={[0, Math.PI / 2, 0]}
-            bays={3}
-            tiers={4}
-          />
-          {/* Right Rack Row 1 (Target Aisle - Facing Inward into Aisle) */}
-          <StorageRack
-            position={[8.0, 0, -68]}
-            rotation={[0, -Math.PI / 2, 0]}
-            bays={3}
-            tiers={4}
-          />
-          <StorageRack
-            position={[8.0, 0, -82]}
-            rotation={[0, -Math.PI / 2, 0]}
-            bays={3}
-            tiers={4}
-          />
-          {/* High Inventory Overview Rows (Scene 4 Matrix) */}
-          <StorageRack position={[-16, 0, -108]} bays={4} tiers={4} />
-          <StorageRack position={[0, 0, -108]} bays={4} tiers={4} />
-          <StorageRack position={[16, 0, -108]} bays={4} tiers={4} />
-          <StorageRack position={[-8, 0, -125]} bays={4} tiers={4} />
-          <StorageRack position={[8, 0, -125]} bays={4} tiers={4} />
-
-          {/* Stocked inventory matrix: use the same pallet/cargo language as
+              {/* Stocked inventory matrix: use the same pallet/cargo language as
               the receiving aisle so the inventory stage feels like the same
               physical warehouse, not a separate abstract scene. */}
-          <PalletAndCargo
-            position={[8.0, 1.66, -64.8]}
-            rotation={[0, Math.PI / 2, 0]}
-            boxCount={6}
-          />
-          <PalletAndCargo
-            position={[8.0, 3.46, -71.2]}
-            rotation={[0, Math.PI / 2, 0]}
-            boxCount={8}
-          />
-          <PalletAndCargo
-            position={[-7.5, 1.66, -68]}
-            rotation={[0, Math.PI / 2, 0]}
-            boxCount={8}
-          />
-          <PalletAndCargo
-            position={[-7.5, 3.46, -80]}
-            rotation={[0, Math.PI / 2, 0]}
-            boxCount={6}
-          />
-          <PalletAndCargo position={[-16, 1.66, -107.3]} rotation={[0, 0, 0]} boxCount={7} />
-          <PalletAndCargo position={[-16, 3.46, -107.3]} rotation={[0, 0, 0]} boxCount={5} />
-          <PalletAndCargo position={[0, 1.66, -107.3]} rotation={[0, 0, 0]} boxCount={8} />
-          <PalletAndCargo position={[16, 3.46, -107.3]} rotation={[0, 0, 0]} boxCount={6} />
-          <PalletAndCargo position={[-8, 1.66, -124.3]} rotation={[0, 0, 0]} boxCount={6} />
-          <PalletAndCargo position={[8, 3.46, -124.3]} rotation={[0, 0, 0]} boxCount={8} />
+              <PalletAndCargo
+                position={[8.0, 1.66, -64.8]}
+                rotation={[0, Math.PI / 2, 0]}
+                boxCount={6}
+              />
+              <PalletAndCargo
+                position={[8.0, 3.46, -71.2]}
+                rotation={[0, Math.PI / 2, 0]}
+                boxCount={8}
+              />
+              <PalletAndCargo
+                position={[-7.5, 1.66, -68]}
+                rotation={[0, Math.PI / 2, 0]}
+                boxCount={8}
+              />
+              <PalletAndCargo
+                position={[-7.5, 3.46, -80]}
+                rotation={[0, Math.PI / 2, 0]}
+                boxCount={6}
+              />
+              <PalletAndCargo position={[-16, 1.66, -107.3]} rotation={[0, 0, 0]} boxCount={7} />
+              <PalletAndCargo position={[-16, 3.46, -107.3]} rotation={[0, 0, 0]} boxCount={5} />
+              <PalletAndCargo position={[0, 1.66, -107.3]} rotation={[0, 0, 0]} boxCount={8} />
+              <PalletAndCargo position={[16, 3.46, -107.3]} rotation={[0, 0, 0]} boxCount={6} />
+              <PalletAndCargo position={[-8, 1.66, -124.3]} rotation={[0, 0, 0]} boxCount={6} />
+              <PalletAndCargo position={[8, 3.46, -124.3]} rotation={[0, 0, 0]} boxCount={8} />
 
-          {/* Putaway Forklift: Approaches Dock 02, picks cargo, drives down aisle, slots pallet into Bin 01 */}
-          <WarehouseForklift
-            position={forkliftPos}
-            rotation={forkliftRot}
-            forkLiftProgress={forkLiftProgress}
-          />
+              {/* Putaway Forklift: Approaches Dock 02, picks cargo, drives down aisle, slots pallet into Bin 01 */}
+              <WarehouseForklift
+                position={forkliftPos}
+                rotation={forkliftRot}
+                forkLiftProgress={forkLiftProgress}
+              />
 
-          {/* Holographic Laser Scanner & Putaway Verification HUD at Rack Bay 1 */}
-          {scrollProgress >= 0.365 && (
-            <group position={[7.4, 2.5, -68.0]}>
-              {/* Holographic Bin Bounding Box */}
-              <mesh rotation={[0, -Math.PI / 2, 0]}>
-                <planeGeometry args={[1.5, 1.3]} />
-                <meshBasicMaterial
-                  color={scrollProgress >= 0.39 ? "#10b981" : "#06b6d4"}
-                  wireframe
-                  transparent
-                  opacity={scrollProgress >= 0.39 ? 0.85 : 0.45}
-                />
-              </mesh>
-              {/* Laser Scan Line Sweeping Across Boxes */}
-              {scrollProgress < 0.39 && (
-                <mesh
-                  position={[0.02, Math.sin(scrollProgress * 60) * 0.4, 0]}
-                  rotation={[0, -Math.PI / 2, 0]}
-                >
-                  <planeGeometry args={[1.4, 0.03]} />
-                  <meshBasicMaterial color="#22d3ee" transparent opacity={0.9} />
-                </mesh>
-              )}
-              {/* In-Scene 3D Floating Putaway Verification Tag */}
-              <Html fullscreen zIndexRange={[45, 0]} style={{ pointerEvents: "none" }}>
-                <div className="absolute bottom-6 left-4 max-w-[calc(100vw-2rem)] bg-slate-950/90 border border-emerald-500/70 px-4 py-3 rounded shadow-xl shadow-emerald-500/20 backdrop-blur pointer-events-none text-left sm:bottom-8 sm:left-8">
-                  <div className="flex items-center justify-center gap-1.5 font-mono text-[10px] text-emerald-400 font-bold tracking-wider">
-                    <span
-                      className={`w-2 h-2 rounded-full ${scrollProgress >= 0.39 ? "bg-emerald-400" : "bg-cyan-400 animate-pulse"}`}
+              {/* Holographic Laser Scanner & Putaway Verification HUD at Rack Bay 1 */}
+              {scrollProgress >= 0.365 && (
+                <group position={[7.4, 2.5, -68.0]}>
+                  {/* Holographic Bin Bounding Box */}
+                  <mesh rotation={[0, -Math.PI / 2, 0]}>
+                    <planeGeometry args={[1.5, 1.3]} />
+                    <meshBasicMaterial
+                      color={scrollProgress >= 0.39 ? "#10b981" : "#06b6d4"}
+                      wireframe
+                      transparent
+                      opacity={scrollProgress >= 0.39 ? 0.85 : 0.45}
                     />
-                    {scrollProgress >= 0.39
-                      ? "BIN AISLE-04-B1 : STORED ✓"
-                      : "PUTAWAY : SLOTTING BIN..."}
-                  </div>
-                  <div className="text-[9px] font-mono text-slate-400 mt-0.5">
-                    PLT-77291 • RACK-B-08 • TIER 01
-                    {scrollProgress >= 0.39 && (
-                      <div className="mt-1 text-emerald-300">INVENTORY UPDATED / AVAILABLE</div>
-                    )}
-                  </div>
-                </div>
-              </Html>
+                  </mesh>
+                  {/* Laser Scan Line Sweeping Across Boxes */}
+                  {scrollProgress < 0.39 && (
+                    <mesh
+                      position={[0.02, Math.sin(scrollProgress * 60) * 0.4, 0]}
+                      rotation={[0, -Math.PI / 2, 0]}
+                    >
+                      <planeGeometry args={[1.4, 0.03]} />
+                      <meshBasicMaterial color="#22d3ee" transparent opacity={0.9} />
+                    </mesh>
+                  )}
+                  {/* In-Scene 3D Floating Putaway Verification Tag */}
+                  <Html fullscreen zIndexRange={[45, 0]} style={{ pointerEvents: "none" }}>
+                    <div className="absolute bottom-6 left-4 max-w-[calc(100vw-2rem)] bg-slate-950/90 border border-emerald-500/70 px-4 py-3 rounded shadow-xl shadow-emerald-500/20 backdrop-blur pointer-events-none text-left sm:bottom-8 sm:left-8">
+                      <div className="flex items-center justify-center gap-1.5 font-mono text-[10px] text-emerald-400 font-bold tracking-wider">
+                        <span
+                          className={`w-2 h-2 rounded-full ${scrollProgress >= 0.39 ? "bg-emerald-400" : "bg-cyan-400 animate-pulse"}`}
+                        />
+                        {scrollProgress >= 0.39
+                          ? "BIN AISLE-04-B1 : STORED ✓"
+                          : "PUTAWAY : SLOTTING BIN..."}
+                      </div>
+                      <div className="text-[9px] font-mono text-slate-400 mt-0.5">
+                        PLT-77291 • RACK-B-08 • TIER 01
+                        {scrollProgress >= 0.39 && (
+                          <div className="mt-1 text-emerald-300">INVENTORY UPDATED / AVAILABLE</div>
+                        )}
+                      </div>
+                    </div>
+                  </Html>
+                </group>
+              )}
+
+              {/* ─── SCENE 5: PRODUCTION ASSEMBLY ─── */}
+              {/* Automated Production Line Conveyor */}
             </group>
-          )}
+            <group visible={productionSceneVisible}>
+              <ConveyorSystem position={[0.35, 0, -165]} length={16} width={1.1} height={0.96} />
+              {/* Dual-Robot Automated Assembly & Goods-Box Packaging Station */}
+              <PumpAssemblyCell position={[-0.8, 0, -165]} />
+            </group>
 
-          {/* ─── SCENE 5: PRODUCTION ASSEMBLY ─── */}
-          {/* Automated Production Line Conveyor */}
-          <ConveyorSystem position={[0.35, 0, -165]} length={16} width={1.1} height={0.96} />
-          {/* Dual-Robot Automated Assembly & Goods-Box Packaging Station */}
-          <PumpAssemblyCell position={[-0.8, 0, -165]} />
+            {/* ─── SCENE 6: OUTBOUND DISPATCH DOCK ─── */}
+            <group visible={outboundSceneVisible}>
+              <LoadingDock
+                position={[-8.5, 0, -212]}
+                doorOpenProgress={1}
+                doorNumber="BAY 12"
+                dockStatus={scrollProgress >= 0.825 ? "COMPLETED" : "APPROACHING"}
+              />
+              {/* Outbound Trailer docked and being loaded */}
+              <LogisticsTruck
+                position={truckExitPos}
+                rotation={[0, departureHeading, 0]}
+                doorsOpenProgress={departureDoors}
+                wheelRotation={departureDistance / 0.49}
+              />
+              {/* Outbound Wrapped Pallets ready for trailer */}
+              <PalletAndCargo position={[-8.5, 1.25, -210]} isWrapped={true} boxCount={8} />
+              <PalletAndCargo position={[-6.0, 1.25, -210]} isWrapped={true} boxCount={8} />
+            </group>
 
-          {/* ─── SCENE 6: OUTBOUND DISPATCH DOCK ─── */}
-          <LoadingDock position={[-8.5, 0, -212]} doorOpenProgress={1} doorNumber="BAY 06" />
-          {/* Outbound Trailer docked and being loaded */}
-          <LogisticsTruck
-            position={truckExitPos}
-            rotation={[0, departureHeading, 0]}
-            doorsOpenProgress={departureDoors}
-            wheelRotation={departureDistance / 0.49}
-          />
-          {/* Outbound Wrapped Pallets ready for trailer */}
-          <PalletAndCargo position={[-8.5, 1.25, -210]} isWrapped={true} boxCount={8} />
-          <PalletAndCargo position={[-6.0, 1.25, -210]} isWrapped={true} boxCount={8} />
-
-          {/* ─── SCENE 7: DEPARTURE GATE EXIT ─── */}
-          <GateBarrier position={[0, 0, -252]} barrierOpenProgress={barrier2Open} gateType="exit" />
+            {/* ─── SCENE 7: DEPARTURE GATE EXIT ─── */}
+            <GateBarrier
+              position={[0, 0, -252]}
+              barrierOpenProgress={barrier2Open}
+              gateType="exit"
+            />
+          </SceneDiagnostics>
         </Suspense>
       </Canvas>
     </div>

@@ -32,7 +32,13 @@ export function OutboundGateExitPage({ title = "Gate Exit", subtitle = "Verify o
   const approve = async (order: any) => {
     setBusy(order.id);
     try {
-      await api.confirmOutboundGateExit(order.id, { vehicle_verified: true, driver_verified: true, remarks: remarks[order.id] });
+      await api.confirmOutboundGateExit(order.id, {
+        gate_pass_id: order.gate_pass_id || order.id,
+        vehicle_verified: true,
+        driver_verified: true,
+        loaded_goods_verified: true,
+        remarks: remarks[order.id],
+      });
       toast.success(`Gate exit approved for ${order.dispatch_number || order.order_number || "dispatch"}`);
       await load();
     } catch (error) { toast.error("Gate exit approval failed", { description: error instanceof Error ? error.message : undefined }); }

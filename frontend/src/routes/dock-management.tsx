@@ -448,12 +448,18 @@ function DockManagement() {
     }
     setActionBusy(true);
     const data = new FormData(event.currentTarget);
+    const direction = String(data.get("direction") || createDockDirection);
+    if (direction !== "INBOUND" && direction !== "OUTBOUND" && direction !== "BOTH") {
+      setActionBusy(false);
+      toast.error("Select a valid dock direction.");
+      return;
+    }
     try {
       await api.createDock({
         dock_code: String(data.get("dock_code") || createDockCode),
         dock_name: String(data.get("dock_name") || createDockName),
         dock_type: effectiveDockType,
-        direction: String(data.get("direction") || createDockDirection),
+        direction,
         location: "",
         description: "",
         status: "AVAILABLE",

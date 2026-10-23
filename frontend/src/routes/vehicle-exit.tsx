@@ -104,7 +104,9 @@ export interface OutboundGateExitException {
   loading_record_reference?: string | null;
 }
 
-export interface OutboundDispatch {
+export interface OutboundDispatch extends Pick<OutboundGateExitException,
+  "gate_exit_vehicle_verified" | "gate_exit_driver_verified" | "gate_exit_loaded_goods_verified" |
+  "gate_exit_security_officer" | "gate_exit_remarks" | "gate_exit_completed_at" | "loaded_goods" | "loading_record_reference"> {
   id: string;
   dispatch_number: string;
   customer_name: string;

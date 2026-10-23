@@ -98,6 +98,7 @@ type GrnLineItem = {
   item_code: string;
   po_quantity: number;
   received_quantity: number;
+  receivedQuantity?: number;
   good_quantity: number;
   damaged_quantity: number;
   rejected_quantity?: number;
@@ -2253,7 +2254,8 @@ function GrnPageWorkflow() {
 
       for (const [idx, m] of batchMaterials.entries()) {
         const rowKey = grnMaterialKey(m, idx);
-        const batchesForLine = materialBatches[rowKey] || materialBatches[grnMaterialKey(materials[idx], idx)] || materialBatches[m.item_code];
+        const previousLine = materials[idx];
+        const batchesForLine = materialBatches[rowKey] || (previousLine ? materialBatches[grnMaterialKey(previousLine, idx)] : undefined) || materialBatches[m.item_code];
         if (Number(m.good_quantity || 0) > 0 && (!batchesForLine?.length || batchesForLine.reduce((sum, batch) => sum + Number(batch.batch_quantity || 0), 0) !== Number(m.good_quantity))) {
           throw new Error(`Save batches totaling the approved quantity for ${m.material_name || m.item_code} before continuing.`);
         }
@@ -3681,16 +3683,16 @@ function GrnPageWorkflow() {
           {activeTab === "dashboard" && (
             <>
               <Button
-                variant={activeTab === "records" ? "default" : "outline"}
+                variant="outline"
                 className="rounded-xl"
                 onClick={() => {
-                  const nextTab = activeTab === "records" ? "dashboard" : "records";
+                  const nextTab = "records";
                   setActiveTab(nextTab);
                   navigate({ to: "/grn", search: { tab: nextTab, page: 1 } });
                 }}
               >
                 <ClipboardList className="size-4" />{" "}
-                {activeTab === "records" ? "Dashboard View" : "All GRN Records"}
+                All GRN Records
               </Button>
               <Button
                 className="rounded-xl shadow-glow bg-primary text-primary-foreground font-bold"

@@ -205,14 +205,14 @@ function DispatchPickingPackingPage() {
         canvas.width = image.naturalWidth;
         canvas.height = image.naturalHeight;
         const context = canvas.getContext("2d");
-        if (!context) return toast.error("Could not read uploaded QR image");
+        if (!context) { toast.error("Could not read uploaded QR image"); return; }
         context.drawImage(image, 0, 0);
         const result = jsQR(
           context.getImageData(0, 0, canvas.width, canvas.height).data,
           canvas.width,
           canvas.height,
         );
-        if (!result?.data) return toast.error("No QR code found in the uploaded image");
+        if (!result?.data) { toast.error("No QR code found in the uploaded image"); return; }
         setFinishedGoodsQr(result.data);
         toast.success("Finished-goods QR loaded");
       };

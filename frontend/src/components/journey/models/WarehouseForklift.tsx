@@ -17,7 +17,6 @@ export function WarehouseForklift({
   const innerMastRef = useRef<THREE.Group>(null);
   const leftPistonRef = useRef<THREE.Mesh>(null);
   const rightPistonRef = useRef<THREE.Mesh>(null);
-  const beaconLightRef = useRef<THREE.PointLight>(null);
   const beaconMeshRef = useRef<THREE.Mesh>(null);
 
   // Synchronized kinematic elevation & dynamic safety strobe
@@ -41,9 +40,6 @@ export function WarehouseForklift({
     // 4. Rotating amber warning beacon strobe pulse
     const t = clock.getElapsedTime();
     const strobe = (Math.sin(t * 12) + 1) * 0.5;
-    if (beaconLightRef.current) {
-      beaconLightRef.current.intensity = 1.2 + strobe * 2.8;
-    }
     if (beaconMeshRef.current) {
       const mat = beaconMeshRef.current.material as THREE.MeshStandardMaterial;
       if (mat) mat.emissiveIntensity = 1.5 + strobe * 3.5;
@@ -361,14 +357,6 @@ export function WarehouseForklift({
               <planeGeometry args={[0.1, 0.08]} />
               <meshStandardMaterial color="#ffffff" emissive="#38bdf8" emissiveIntensity={4.0} />
             </mesh>
-            {/* Forward Illumination Beam */}
-            <pointLight
-              position={[0, 0, 0.8]}
-              color="#e0f2fe"
-              intensity={2.8}
-              distance={16}
-              decay={1.8}
-            />
           </group>
         ))}
 
@@ -419,18 +407,7 @@ export function WarehouseForklift({
               opacity={0.9}
             />
           </mesh>
-          <pointLight
-            ref={beaconLightRef}
-            position={[0, 0.18, 0]}
-            color="#f59e0b"
-            intensity={2.5}
-            distance={10}
-            decay={2}
-          />
         </group>
-
-        {/* Modern Warehouse Blue Safety Floor Spotlight (Casts blue spot behind forklift) */}
-        <pointLight position={[0, 0.4, -0.7]} color="#0284c7" intensity={2.0} distance={6} />
       </group>
 
       {/* ══════════════════════════════════════════════════════════════════

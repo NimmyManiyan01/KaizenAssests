@@ -2,6 +2,36 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { LogisticsTruck } from "./LogisticsTruck";
+import { Detailed } from "@react-three/drei";
+import { StaticMeshBatch } from "../StaticMeshBatch";
+import { useQuality } from "../quality";
+
+function DistantTruck() {
+  return (
+    <group scale={0.65}>
+      <mesh position={[0, 1.9, -0.7]} castShadow>
+        <boxGeometry args={[2.35, 2.3, 7.8]} />
+        <meshStandardMaterial color="#d1dae1" metalness={0.3} roughness={0.65} />
+      </mesh>
+      <mesh position={[0, 1.4, 4.2]} castShadow>
+        <boxGeometry args={[2.1, 2.2, 1.9]} />
+        <meshStandardMaterial color="#dce3e8" metalness={0.3} roughness={0.65} />
+      </mesh>
+      <mesh position={[0, 1.9, 5.16]}>
+        <boxGeometry args={[1.8, 0.7, 0.025]} />
+        <meshStandardMaterial color="#344955" roughness={0.25} />
+      </mesh>
+      {[-1.1, 1.1].flatMap((x) =>
+        [-3.4, -2, 3.6].map((z) => (
+          <mesh key={`${x}:${z}`} position={[x, 0.5, z]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[0.49, 0.49, 0.3, 8]} />
+            <meshStandardMaterial color="#20252a" roughness={0.9} />
+          </mesh>
+        )),
+      )}
+    </group>
+  );
+}
 
 function TrafficCar({ color }: { color: string }) {
   return (
@@ -55,17 +85,20 @@ function makeRoute() {
 }
 
 export function CityTraffic() {
+  const quality = useQuality();
+  const distanceLimit = quality === "HIGH" ? 110 : quality === "BALANCED" ? 70 : 45;
   const vehicles = useRef<Array<THREE.Group | null>>([]);
   const distance = useRef(0);
   const route = useMemo(makeRoute, []);
   const length = useMemo(() => route.getLength(), [route]);
+  const scratch = useMemo(() => ({ point: new THREE.Vector3(), tangent: new THREE.Vector3() }), []);
   useFrame((_, delta) => {
     distance.current = (distance.current + Math.min(delta, 0.05) * 8) % length;
     vehicles.current.forEach((vehicle, index) => {
       if (!vehicle) return;
       const progress = (distance.current / length + index / 12) % 1;
-      vehicle.position.copy(route.getPoint(progress));
-      const tangent = route.getTangent(progress);
+      vehicle.position.copy(route.getPoint(progress, scratch.point));
+      const tangent = route.getTangent(progress, scratch.tangent);
       vehicle.rotation.y = Math.atan2(tangent.x, tangent.z);
     });
   });
@@ -79,7 +112,12 @@ export function CityTraffic() {
           }}
         >
           {index % 4 === 0 ? (
-            <LogisticsTruck scale={0.65} />
+            <Detailed distances={[0, distanceLimit]} hysteresis={0.15}>
+              <StaticMeshBatch>
+                <LogisticsTruck scale={0.65} />
+              </StaticMeshBatch>
+              <DistantTruck />
+            </Detailed>
           ) : (
             <TrafficCar
               color={["#d1d5db", "#3c6675", "#ac4b3e", "#d6c8a5"][index % 4] ?? "#d1d5db"}

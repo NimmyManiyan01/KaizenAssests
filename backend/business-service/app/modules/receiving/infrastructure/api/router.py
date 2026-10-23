@@ -130,6 +130,8 @@ async def list_grns(
                 grn_id=str(g.id),
                 grn_number=g.grn_number,
                 po_number=g.po_number,
+                asn_number=g.asn_number,
+                gate_entry_number=g.gate_entry_number,
                 supplier_name=g.supplier_name,
                 supplier_company_name=g.supplier_company_name or g.supplier_name,
                 supplier_email=getattr(g, "supplier_email", None) or "",

@@ -274,6 +274,7 @@ DEFAULT_MATERIAL_COMPONENTS = [
 ]
 
 _custom_materials_store: list[dict] = []
+_ALLOWED_MATERIAL_UOMS = frozenset({"PCS", "BUNDLE", "SET", "KG", "LITER", "METER", "BOX"})
 
 @preview_router.get("/materials")
 async def get_material_components(status_filter: str = Query(default="ACTIVE", alias="status"), uow: UnitOfWork = Depends(get_uow)) -> list[dict]:
@@ -296,13 +297,20 @@ async def get_material_components(status_filter: str = Query(default="ACTIVE", a
 @preview_router.post("/materials")
 async def add_material_component(
     payload: dict = Body(...),
+    _user: CurrentUser = Depends(require_permission("gate:write")),
     uow: UnitOfWork = Depends(get_uow)
 ) -> dict:
     mat_name = str(payload.get("name") or payload.get("material_name") or "").strip()
     if not mat_name:
         raise HTTPException(status_code=400, detail="Material name is required.")
+    if len(mat_name) < 2 or len(mat_name) > 100:
+        raise HTTPException(status_code=422, detail="Material name must be between 2 and 100 characters.")
+    if "status" in payload:
+        raise HTTPException(status_code=422, detail="Material status is managed by the server.")
 
     uom = str(payload.get("uom") or payload.get("base_uom") or "PCS").upper()
+    if uom not in _ALLOWED_MATERIAL_UOMS:
+        raise HTTPException(status_code=422, detail="Invalid material UOM.")
     category = str(payload.get("category") or "General").strip()
     material_code = str(payload.get("material_code") or payload.get("code") or "").strip().upper()
     if not material_code:
@@ -319,10 +327,16 @@ async def add_material_component(
         category=category,
         description=str(payload.get("description") or "").strip() or None,
         base_uom=uom,
-        status=str(payload.get("status") or "Active").title(),
+        status="Active",
     )
     uow.session.add(material)
-    await uow.session.commit()
+    try:
+        await uow.session.commit()
+    except IntegrityError as exc:
+        await uow.session.rollback()
+        if getattr(exc.orig, "constraint_name", None) == "uq_material_normalized_name":
+            raise HTTPException(status_code=409, detail="Material code or material name already exists.") from exc
+        raise
     return {"id": str(material.id), "code": material.material_code, "name": material.material_name, "category": material.category, "uom": material.base_uom, "status": material.status, "created_at": material.created_at.isoformat() if material.created_at else None, "updated_at": material.updated_at.isoformat() if material.updated_at else None}
 
 
@@ -399,6 +413,11 @@ async def get_next_asn_number(uow: UnitOfWork = Depends(get_uow)) -> dict:
 @preview_router.get("/asn/{reference}")
 async def get_expected_delivery(reference: str, uow: UnitOfWork = Depends(get_uow)) -> dict:
     normalized_reference = reference.strip().upper()
+    if not re.fullmatch(r"ASN-\d{4}-\d+", normalized_reference):
+        raise HTTPException(
+            status_code=422,
+            detail="ASN number must use format ASN-YYYY-N, for example ASN-2026-1",
+        )
     filters = [func.upper(AsnModel.asn_number) == normalized_reference]
     try:
         filters.append(AsnModel.id == uuid.UUID(reference))
