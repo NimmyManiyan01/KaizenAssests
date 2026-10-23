@@ -37,8 +37,8 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
   const [isPlaying, setIsPlaying] = useState(false);
   const [playSpeed, setPlaySpeed] = useState(1);
   const [isFreeOrbit, setIsFreeOrbit] = useState(false);
-  const [quality, setQuality] = useState<Quality>("BALANCED");
-  const [qualitySelection, setQualitySelection] = useState<Quality | "AUTO">("AUTO");
+  const [quality, setQuality] = useState<Quality>("HIGH");
+  const [qualitySelection, setQualitySelection] = useState<Quality | "AUTO">("HIGH");
   const [resumeGuided, setResumeGuided] = useState(false);
   const mouseOffset = useRef({ x: 0, y: 0 }).current;
   const targetProgress = useRef(0);
@@ -433,56 +433,6 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
               <div className="size-8 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
             </div>
           )}
-          <div className="pointer-events-none absolute inset-x-3 bottom-5 z-40 flex flex-wrap items-center justify-center gap-2 text-xs sm:inset-x-6">
-            <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-xl border border-slate-500/30 bg-slate-950/90 p-2 text-white shadow-lg">
-              <button
-                type="button"
-                aria-pressed={isFreeOrbit}
-                className="rounded-lg px-3 py-2 focus-visible:outline-cyan-400"
-                onClick={handleToggleFreeOrbit}
-              >
-                {isFreeOrbit ? "Return to Guided" : "Explore campus"}
-              </button>
-              <button
-                type="button"
-                className="rounded-lg px-3 py-2"
-                onClick={() => {
-                  window.dispatchEvent(new Event("kaizenassests:replay-journey"));
-                  window.scrollTo({
-                    top: 0,
-                    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-                      ? "instant"
-                      : "smooth",
-                  });
-                }}
-              >
-                Replay
-              </button>
-              <label className="flex items-center gap-2 px-2">
-                Quality
-                <select
-                  aria-label="Rendering quality"
-                  value={qualitySelection}
-                  className="rounded bg-slate-800 p-2"
-                  onChange={(event) => {
-                    const value = event.target.value as Quality | "AUTO";
-                    setQualitySelection(value);
-                    if (value !== "AUTO") setQuality(value);
-                  }}
-                >
-                  <option value="AUTO">Auto ({quality.toLowerCase()})</option>
-                  <option value="HIGH">High</option>
-                  <option value="BALANCED">Balanced</option>
-                  <option value="PERFORMANCE">Performance</option>
-                </select>
-              </label>
-            </div>
-            <span className="sr-only" aria-live="polite">
-              {isFreeOrbit
-                ? "Explore mode: drag to orbit, pinch or scroll to zoom."
-                : "Guided mode: scroll to follow the journey."}
-            </span>
-          </div>
           <div
             hidden={scrollProgress < 0.12}
             className="pointer-events-none absolute inset-x-0 top-[17%] z-30 flex -translate-y-1/2 justify-center px-6 text-center"

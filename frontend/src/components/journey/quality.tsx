@@ -9,7 +9,7 @@ export const QUALITY = {
   PERFORMANCE: { dpr: 0.8, shadow: 512, foliageCards: 0.4, distantShadow: 40 },
 } as const;
 
-export const QualityContext = createContext<Quality>("BALANCED");
+export const QualityContext = createContext<Quality>("HIGH");
 export const useQuality = () => useContext(QualityContext);
 
 export function AdaptiveQuality({
