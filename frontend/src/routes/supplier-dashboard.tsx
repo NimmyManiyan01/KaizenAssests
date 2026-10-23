@@ -416,7 +416,7 @@ function SupplierDashboard() {
   }, [asns, trendDays]);
 
   return (
-    <AppShell>
+    <AppShell title="Supplier Portal" subtitle="Manage ASNs, dispatches, and material catalog">
       <div className="space-y-4">
         {/* Top Banner Card with Top-Right Create ASN CTA */}
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-gradient-to-r from-white via-slate-50 to-sky-50 p-4 shadow-xs">

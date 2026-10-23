@@ -131,10 +131,10 @@ const statusGroups: Record<string, string[]> = {
 };
 function issuedQuantity(request: AssemblyMaterialRequest, item: AssemblyMaterialRequestItem) {
   if (item.issued_quantity != null) return item.issued_quantity;
-  const issuedItems = (request.issue_transaction || request.material_issue)?.items || [];
-  const matching = issuedItems.filter((issued) => issued.material_code === item.material_code);
-  if (matching.length && matching.every((issued) => issued.issued_quantity != null)) {
-    return matching.reduce((sum, issued) => sum + Number(issued.issued_quantity), 0);
+  const issuedItems = ((request as any).issue_transaction || (request as any).material_issue)?.items || [];
+  const matching = issuedItems.filter((issued: any) => issued.material_code === item.material_code);
+  if (matching.length && matching.every((issued: any) => issued.issued_quantity != null)) {
+    return matching.reduce((sum: number, issued: any) => sum + Number(issued.issued_quantity), 0);
   }
   return null;
 }

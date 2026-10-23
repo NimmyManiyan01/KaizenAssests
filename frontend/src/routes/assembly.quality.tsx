@@ -164,7 +164,7 @@ function AssemblyQualityPage() {
         failed_quantity: 0,
         rework_quantity: 0,
         held_quantity: 0,
-      });
+      } as any);
 
       toast.success(res.message || `Quality inspection completed for ${inspectItem.order_number}`);
       setInspectItem(null);

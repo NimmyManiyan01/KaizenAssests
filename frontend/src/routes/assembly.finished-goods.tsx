@@ -63,7 +63,7 @@ function AssemblyFinishedGoodsPage() {
     try {
       const res = await api.getAssemblyFinishedGoods({
         group_by: "product",
-      });
+      } as any);
       setItems(res || []);
     } catch (err: any) {
       if (!background)
@@ -164,14 +164,14 @@ function AssemblyFinishedGoodsPage() {
     if (!search.trim()) return items;
     const q = search.toLowerCase().trim();
     return items.filter(
-      (fg) =>
+      (fg: any) =>
         fg.order_number?.toLowerCase().includes(q) ||
         fg.product_name?.toLowerCase().includes(q) ||
         fg.product_code?.toLowerCase().includes(q) ||
         fg.serial_number?.toLowerCase().includes(q) ||
         fg.batch_number?.toLowerCase().includes(q) ||
         fg.location_code?.toLowerCase().includes(q) ||
-        fg.batches?.some((batch) =>
+        fg.batches?.some((batch: any) =>
           [batch.batch_number, batch.order_number, batch.serial_number, batch.location_code].some(
             (value) => value?.toLowerCase().includes(q),
           ),
@@ -185,7 +185,7 @@ function AssemblyFinishedGoodsPage() {
       return Number.isFinite(value) ? value : Infinity;
     };
     return detailsFg
-      ? [...(detailsFg.batches || [detailsFg])].sort(
+      ? [...((detailsFg as any).batches || [detailsFg])].sort(
           (a, b) => timestamp(a) - timestamp(b) || a.id.localeCompare(b.id),
         )
       : [];
@@ -335,10 +335,10 @@ function AssemblyFinishedGoodsPage() {
                       </td>
 
                       {[
-                        fg.produced_quantity ?? fg.quantity,
-                        fg.available_quantity ?? fg.quantity,
-                        fg.reserved_quantity ?? 0,
-                        fg.dispatched_quantity ?? 0,
+                        (fg as any).produced_quantity ?? fg.quantity,
+                        (fg as any).available_quantity ?? fg.quantity,
+                        (fg as any).reserved_quantity ?? 0,
+                        (fg as any).dispatched_quantity ?? 0,
                       ].map((quantity, index) => (
                         <td
                           key={index}
@@ -354,12 +354,12 @@ function AssemblyFinishedGoodsPage() {
                         <span
                           className={cn(
                             "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold",
-                            (fg.available_quantity ?? 0) > 0
+                            ((fg as any).available_quantity ?? 0) > 0
                               ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
                               : "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300",
                           )}
                         >
-                          {(fg.available_quantity ?? 0) > 0 ? "AVAILABLE" : "OUT OF STOCK"}
+                          {((fg as any).available_quantity ?? 0) > 0 ? "AVAILABLE" : "OUT OF STOCK"}
                         </span>
                       </td>
 
@@ -397,9 +397,9 @@ function AssemblyFinishedGoodsPage() {
               </DialogDescription>
               <dl className="grid grid-cols-3 gap-3 pt-3 text-left text-xs">
                 {[
-                  ["Produced", detailsFg?.produced_quantity ?? detailsFg?.quantity],
-                  ["Available", detailsFg?.available_quantity],
-                  ["Reserved", detailsFg?.reserved_quantity],
+                  ["Produced", (detailsFg as any)?.produced_quantity ?? detailsFg?.quantity],
+                  ["Available", (detailsFg as any)?.available_quantity],
+                  ["Reserved", (detailsFg as any)?.reserved_quantity],
                 ].map(([label, value]) => (
                   <div key={String(label)} className="rounded-xl bg-muted/40 p-3">
                     <dt className="text-muted-foreground">{label}</dt>

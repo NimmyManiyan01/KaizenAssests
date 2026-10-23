@@ -497,42 +497,5 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
         </section>
       </SceneHtmlProvider>
     </QualityContext.Provider>
-=======
-  return (
-    <section
-      id="wms-flow-journey"
-      ref={pinRef}
-      className="relative w-full h-screen overflow-hidden bg-[#e7e9e5] select-none"
-    >
-      {/* 3D WebGL Canvas Layer (Single Persistent World) */}
-      {mounted ? (
-        <JourneyCanvas
-          stages={liveStages}
-          activeIndex={activeIndex}
-          scrollProgress={scrollProgress}
-          overviewProgress={overviewProgress}
-          selectedAsn={asnRecords.find((asn) => String(asn.id || asn.asn_number) === selectedAsnId)}
-          mouseOffset={mouseOffset}
-          onSelectStage={handleSelectStage}
-        />
-      ) : (
-        <div className="absolute inset-0 bg-[#e7e9e5] flex items-center justify-center">
-          <div className="size-8 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
-        </div>
-      )}
-
-      <div
-        hidden={scrollProgress < 0.12}
-        className="pointer-events-none absolute inset-x-0 top-[17%] z-30 flex -translate-y-1/2 justify-center px-6 text-center"
-      >
-        <p
-          key={taglineIndex}
-          className="max-w-xl animate-in fade-in duration-700 text-xl font-semibold tracking-tight text-white drop-shadow-[0_3px_18px_rgba(0,0,0,0.9)] sm:text-3xl lg:text-4xl"
-        >
-          {CINEMATIC_TAGLINES[taglineIndex]}
-        </p>
-      </div>
-    </section>
->>>>>>> origin/main
   );
 }

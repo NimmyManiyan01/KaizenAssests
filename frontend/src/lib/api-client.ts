@@ -37,6 +37,8 @@ function getApiErrorMessage(payload: unknown, fallback: string): string {
   return fallback;
 }
 
+export type AssistantChatMessage = { role: "user" | "assistant"; content: string };
+
 export function resolveMediaUrl(path?: string | null): string {
   if (!path) return "";
   const trimmed = path.trim();
@@ -366,6 +368,40 @@ export const api = {
   },
   async getDockHistory(): Promise<any[]> {
     return request<any[]>(`${BUSINESS_API_URL}/api/v1/warehouse/dock-history`);
+  },
+  async getRackMaterials(zoneId: string, capacityId: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/racks/${encodeURIComponent(capacityId)}/materials`).catch(() => []);
+  },
+  async getRackHistory(zoneId: string, capacityId: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/racks/${encodeURIComponent(capacityId)}/history`).catch(() => []);
+  },
+  async updateRackCapacity(zoneId: string, capacityId: string, quantity: number): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/racks/${encodeURIComponent(capacityId)}/capacity`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quantity }),
+    });
+  },
+  async emptyRack(zoneId: string, capacityId: string, reason: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/racks/${encodeURIComponent(capacityId)}/empty`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    });
+  },
+  async moveRackMaterial(zoneId: string, capacityId: string, payload: any): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/racks/${encodeURIComponent(capacityId)}/move`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  },
+  async assistantChat(message: string, history?: AssistantChatMessage[]): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assistant/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, history }),
+    });
   },
   async getDockTypes(): Promise<string[]> {
     return request<string[]>(`${BUSINESS_API_URL}/api/v1/warehouse/dock-types`);
@@ -1019,13 +1055,6 @@ export const api = {
     if (status) params.append("status", status);
     const qs = params.toString() ? `?${params.toString()}` : "";
     return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions${qs}`);
-  },
-  async getAssemblyMaterialRequests(search?: string, status?: string): Promise<any[]> {
-    const params = new URLSearchParams();
-    if (search) params.set("search", search);
-    if (status) params.set("status", status);
-    const qs = params.toString() ? `?${params.toString()}` : "";
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/material-requests${qs}`);
   },
   async getAssemblyRequisition(id: string): Promise<any> {
     return request<any>(
@@ -2617,8 +2646,6 @@ export const api = {
       method: "POST",
     });
   },
-=======
->>>>>>> origin/main
   // ============================
   // GRN / RECEIVING
   // ============================
@@ -3017,6 +3044,13 @@ export const api = {
   async getAssemblyLines(): Promise<AssemblyLineOption[]> {
     return request<AssemblyLineOption[]>(`${BUSINESS_API_URL}/api/v1/assembly/lines`, {
       cache: "no-store",
+    });
+  },
+  async addProductBOMMaterial(productCode: string, payload: any): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/products/${encodeURIComponent(productCode)}/bom`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
   },
   async getAssemblyOrders(params?: {

@@ -54,7 +54,6 @@ export function OutboundGateExitPage({
       toast.success(
         `Gate exit approved for ${order.dispatch_number || order.order_number || "dispatch"}`,
       );
->>>>>>> origin/main
       await load();
     } catch (error) {
       toast.error("Gate exit approval failed", {

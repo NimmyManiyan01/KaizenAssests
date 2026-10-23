@@ -72,7 +72,6 @@ export function SimpleWarehouseModule() {
   const activeTab: TabType = requestedTab
     ? (requestedTab as any === "requests" ? "picking" : requestedTab)
     : "dashboard";
-    : "dashboard";
 
   // Data States (All coming strictly from backend)
   const [loading, setLoading] = useState<boolean>(true);
@@ -1022,8 +1021,7 @@ export function SimpleWarehouseModule() {
               bin_name: code,
               rack: code,
               position: "",
-              qr_identifier: `QR-RACK-${storeCode}-${selectedZoneObj?.zone_code}-${code}`,
-            }),
+            } as any),
           ),
         );
         setNewBinRows([{ rack: "", position: "", bin_code: "" }]);
@@ -1033,11 +1031,12 @@ export function SimpleWarehouseModule() {
       } else if (createLocationType === "bin") {
         const row = newBinRows[0];
         if (
+          !row ||
           !newBinForm.store_id ||
           !newBinForm.zone_id ||
-          !row.rack.trim() ||
-          !row.position.trim() ||
-          !row.bin_code.trim()
+          !row.rack?.trim() ||
+          !row.position?.trim() ||
+          !row.bin_code?.trim()
         ) {
           toast.error("Select warehouse, zone, rack, shelf/position, and bin code.");
           return;
@@ -1061,15 +1060,12 @@ export function SimpleWarehouseModule() {
           toast.error(`Bin code '${row.bin_code}' already exists in this zone.`);
           return;
         }
-        const store = stores.find((s) => s.id === newBinForm.store_id);
-        const zone = zones.find((z) => z.id === newBinForm.zone_id);
         await api.createBin(newBinForm.zone_id, {
           bin_code: row.bin_code.trim(),
           bin_name: row.bin_code.trim(),
           rack: row.rack.trim(),
           position: row.position.trim(),
-          qr_identifier: `QR-BIN-${store?.store_code}-${zone?.zone_code}-${row.bin_code.trim()}`,
-        });
+        } as any);
         toast.success(`Bin ${row.bin_code} created with a unique QR.`);
       }
       setCreateLocationType(null);
@@ -1314,7 +1310,7 @@ export function SimpleWarehouseModule() {
   };
 
   return (
-    <AppShell>
+    <AppShell title="Warehouse Control System" subtitle="Monitor inventory, putaway, material requests, and picking">
       <div className="space-y-5 rounded-2xl bg-gradient-to-br from-slate-50 via-blue-50/50 to-teal-50/40 p-3 pb-8 sm:p-5">
         {/* Header Title Bar */}
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
@@ -1322,10 +1318,9 @@ export function SimpleWarehouseModule() {
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-400">
               Warehouse Operations
             </p>
-            <h1 className="mt-2 flex items-center gap-2.5 text-[25px] font-semibold tracking-tight md:text-[28px]">
-              <PageHeaderIcon className="h-6 w-6 text-[#71b5ff]" />
-              <span className="inline-flex items-center">{pageHeader[activeTab].title}<InformationTooltip help={inventoryHelp[activeTab] ?? "inventory"} placement="title" className="text-blue-100 hover:text-white" /></span>
-            </h1>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              <Boxes className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
+              Warehouse Dashboard
             </h1>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               Monitor inventory, putaway, material requests, and picking activity.
@@ -1487,71 +1482,6 @@ export function SimpleWarehouseModule() {
               </Card>
             </div>
 
-            <section aria-labelledby="warehouse-analytics-title" className="space-y-3">
-              <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <h2 id="warehouse-analytics-title" className="text-lg font-bold text-slate-900">Warehouse analytics</h2>
-                  <p className="text-sm text-slate-600">A quick view of available stock and work waiting in your queues.</p>
-                </div>
-                <p className="text-xs font-medium text-slate-500">Based on the latest loaded records</p>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                <Card className="border-cyan-200 bg-gradient-to-br from-cyan-50/80 via-white to-sky-50/60 p-5 shadow-sm dark:border-cyan-900/60 dark:bg-cyan-950/20">
-                  <div className="mb-2">
-                    <h3 className="font-bold text-slate-900 dark:text-slate-100">Stock records by category</h3>
-                    <p className="text-sm text-slate-600 dark:text-slate-400">Counts inventory records with available stock in each material category.</p>
-                  </div>
-                  {inventoryByCategory.length ? (
-                    <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(150px,0.8fr)]">
-                      <div className="h-[250px] min-w-0">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie data={inventoryByCategory} dataKey="value" nameKey="name" innerRadius={58} outerRadius={92} paddingAngle={3}>
-                              {inventoryByCategory.map((entry, index) => (
-                                <Cell key={entry.name} fill={["#0284c7", "#0d9488", "#4f46e5", "#d97706", "#db2777", "#64748b"][index % 6]} />
-                              ))}
-                            </Pie>
-                            <Tooltip formatter={(value) => [Number(value).toLocaleString(), "Stock records"]} />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-                      <div className="space-y-2">
-                        {inventoryByCategory.map((entry, index) => (
-                          <div key={entry.name} className="flex items-center justify-between gap-3 rounded-lg border border-white/80 bg-white/75 px-3 py-2 text-sm shadow-sm">
-                            <span className="flex min-w-0 items-center gap-2 text-slate-700"><span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: ["#0284c7", "#0d9488", "#4f46e5", "#d97706", "#db2777", "#64748b"][index % 6] }} /><span className="truncate">{entry.name}</span></span>
-                            <span className="shrink-0 font-semibold tabular-nums text-slate-900">{entry.value.toLocaleString()} records</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="grid h-[250px] place-items-center rounded-xl border border-dashed border-cyan-200 bg-white/60 text-center text-sm text-slate-500">No available stock to chart yet.</div>
-                  )}
-                </Card>
-
-                <Card className="border-violet-200 bg-gradient-to-br from-violet-50/80 via-white to-indigo-50/60 p-5 shadow-sm dark:border-violet-900/60 dark:bg-violet-950/20">
-                  <div className="mb-2 flex items-start justify-between gap-3">
-                    <div><h3 className="font-bold text-slate-900 dark:text-slate-100">Open work by queue</h3><p className="text-sm text-slate-600 dark:text-slate-400">Compare tasks waiting for warehouse action.</p></div>
-                    <span className="rounded-full border border-violet-200 bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-800">{totalOpenTasks} open items</span>
-                  </div>
-                  <div className="h-[250px] min-w-0">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={openWorkByType} margin={{ top: 12, right: 12, left: -18, bottom: 4 }}>
-                        <CartesianGrid stroke="#e2e8f0" strokeDasharray="4 4" vertical={false} />
-                        <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: "#475569", fontSize: 12 }} />
-                        <YAxis allowDecimals={false} width={38} tickLine={false} axisLine={false} tick={{ fill: "#64748b", fontSize: 11 }} />
-                        <Tooltip cursor={{ fill: "#eef2ff" }} formatter={(value) => [value, "Open tasks"]} />
-                        <Bar dataKey="tasks" name="Open tasks" radius={[6, 6, 0, 0]} maxBarSize={58}>
-                          {openWorkByType.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                  </p>
-                </Card>
-              </div>
-            </section>
           </TabsContent>
 
           {/* ========================================================================= */}
@@ -3501,7 +3431,7 @@ export function SimpleWarehouseModule() {
                     <label className="font-semibold text-slate-700">Rack</label>
                     <Input
                       placeholder="Enter rack"
-                      value={newBinRows[0].rack}
+                      value={newBinRows[0]?.rack ?? ""}
                       onChange={(e) =>
                         setNewBinRows((rows) =>
                           rows.map((row, i) => (i === 0 ? { ...row, rack: e.target.value } : row)),
@@ -3513,7 +3443,7 @@ export function SimpleWarehouseModule() {
                     <label className="font-semibold text-slate-700">Shelf / Position</label>
                     <Input
                       placeholder="Enter shelf or position"
-                      value={newBinRows[0].position}
+                      value={newBinRows[0]?.position ?? ""}
                       onChange={(e) =>
                         setNewBinRows((rows) =>
                           rows.map((row, i) =>
@@ -3527,7 +3457,7 @@ export function SimpleWarehouseModule() {
                     <label className="font-semibold text-slate-700">Bin Code</label>
                     <Input
                       placeholder="Enter bin code"
-                      value={newBinRows[0].bin_code}
+                      value={newBinRows[0]?.bin_code ?? ""}
                       onChange={(e) =>
                         setNewBinRows((rows) =>
                           rows.map((row, i) =>
@@ -3608,10 +3538,10 @@ export function SimpleWarehouseModule() {
                   <div className="font-mono font-bold text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 p-2 rounded border border-indigo-200 text-xs">
                     {newBinForm.store_id &&
                     newBinForm.zone_id &&
-                    newBinRows[0].rack &&
-                    newBinRows[0].position &&
-                    newBinRows[0].bin_code
-                      ? `QR-LOC-${stores.find((s) => s.id === newBinForm.store_id)?.store_code}-${zones.find((z) => z.id === newBinForm.zone_id)?.zone_code}-${newBinRows[0].rack}-${newBinRows[0].position}-${newBinRows[0].bin_code}`
+                    newBinRows[0]?.rack &&
+                    newBinRows[0]?.position &&
+                    newBinRows[0]?.bin_code
+                      ? `QR-LOC-${stores.find((s) => s.id === newBinForm.store_id)?.store_code}-${zones.find((z) => z.id === newBinForm.zone_id)?.zone_code}-${newBinRows[0]?.rack}-${newBinRows[0]?.position}-${newBinRows[0]?.bin_code}`
                       : "Select a warehouse and zone and enter rack, position, and bin code."}
                   </div>
                 </div>
@@ -3659,21 +3589,23 @@ export function SimpleWarehouseModule() {
                 <div className="grid grid-cols-3 gap-3">
                   <Input
                     placeholder="Rack"
-                    value={newBinRows[0].rack}
-                    onChange={(e) => setNewBinRows([{ ...newBinRows[0], rack: e.target.value }])}
+                    value={newBinRows[0]?.rack ?? ""}
+                    onChange={(e) =>
+                      setNewBinRows((prev) => [{ rack: e.target.value, position: prev[0]?.position ?? "", bin_code: prev[0]?.bin_code ?? "" }])
+                    }
                   />
                   <Input
                     placeholder="Shelf / Position"
-                    value={newBinRows[0].position}
+                    value={newBinRows[0]?.position ?? ""}
                     onChange={(e) =>
-                      setNewBinRows([{ ...newBinRows[0], position: e.target.value }])
+                      setNewBinRows((prev) => [{ rack: prev[0]?.rack ?? "", position: e.target.value, bin_code: prev[0]?.bin_code ?? "" }])
                     }
                   />
                   <Input
                     placeholder="Bin Code"
-                    value={newBinRows[0].bin_code}
+                    value={newBinRows[0]?.bin_code ?? ""}
                     onChange={(e) =>
-                      setNewBinRows([{ ...newBinRows[0], bin_code: e.target.value }])
+                      setNewBinRows((prev) => [{ rack: prev[0]?.rack ?? "", position: prev[0]?.position ?? "", bin_code: e.target.value }])
                     }
                   />
                 </div>

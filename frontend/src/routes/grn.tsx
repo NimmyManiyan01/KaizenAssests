@@ -5434,7 +5434,7 @@ function GrnPageWorkflow() {
                                     const num = parseInt(valStr, 10);
                                     if (!isNaN(num) && num > 0) {
                                       const isFloat = appQty % 1 !== 0;
-                                      const newBatches = [];
+                                      const newBatches: any[] = [];
                                       if (isFloat) {
                                         const baseQty = Number((appQty / num).toFixed(2));
                                         let sum = 0;

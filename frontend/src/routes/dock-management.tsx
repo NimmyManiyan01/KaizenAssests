@@ -394,7 +394,7 @@ function DockManagement() {
       if (Array.isArray(smRes)) {
         setStoreManagers(smRes);
       }
-      setStores(Array.isArray(storesRes) ? storesRes : storesRes?.items || []);
+      setStores(Array.isArray(storesRes) ? storesRes : (storesRes as any)?.items || []);
 
       if (overviewRes) {
         setMetrics(overviewRes);
