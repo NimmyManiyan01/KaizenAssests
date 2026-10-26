@@ -477,16 +477,6 @@ function Notifications() {
   };
 
   const handleOpenNotificationDetails = (n: any) => {
-    // Some older notification records contain the shared warehouse dashboard
-    // as their target. Keep procurement users in their own dashboard context.
-    const notificationLink = n.link;
-    const isGrnLinked = String(n.link || "").startsWith("/grn");
-    const isDockAllocation =
-      userRole !== "GRN" &&
-      !isGrnLinked &&
-      (n.title?.toUpperCase().includes("DOCK ALLOCAT") ||
-        n.title?.toUpperCase().includes("DOCK CONFIRMED"));
-
     const isDamage =
       n.title?.toLowerCase().includes("damage") ||
       n.message?.toLowerCase().includes("damage") ||
@@ -499,22 +489,12 @@ function Notifications() {
       n.message?.toLowerCase().includes("grn") ||
       n.message?.toLowerCase().includes("inspection");
 
-    if (isGrnLinked) {
-      window.location.href = n.link;
-    } else if (isDamage) {
+    if (isDamage) {
       setSelectedDamageNotif(n);
       setShowDamageModal(true);
     } else if (isGrnOrQuality) {
       setSelectedGrnNotif(n);
       setShowGrnModal(true);
-    } else if (isDockAllocation) {
-      // Dock allocation card is rendered directly on page
-    } else if (
-      notificationLink &&
-      (userRole === "PROCUREMENT" ||
-        !["/warehouse-dashboard", "/receiving"].includes(notificationLink))
-    ) {
-      window.location.href = notificationLink;
     } else {
       setSelectedGrnNotif(n);
       setShowGrnModal(true);
@@ -685,7 +665,7 @@ function Notifications() {
                 key={`${n.type || n.notification_type || "workflow"}-${n.id || "notification"}-${index}`}
                 onClick={() => handleOpenNotificationDetails(n)}
                 className={cn(
-                  "relative overflow-hidden border-border/50 p-5 cursor-pointer hover:border-primary/40 transition-all space-y-4",
+                  "relative overflow-hidden border-border/50 p-5 transition-all space-y-4",
                   !n.is_read && "bg-primary-soft/5 border-primary/20",
                   isDamage && "border-rose-500/30 bg-rose-500/5 hover:border-rose-500/60",
                 )}

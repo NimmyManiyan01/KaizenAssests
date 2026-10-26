@@ -61,7 +61,7 @@ import {
 } from "@/lib/input-validation";
 
 export const Route = createFileRoute("/supplier/asns/new")({
-  beforeLoad: () => {},
+  beforeLoad: () => { },
   component: NewAsnPage,
 });
 
@@ -148,9 +148,8 @@ function StatusTooltip({ status }: { status: string }) {
   const description = statusDescriptions[normalizedStatus];
   const badge = (
     <span
-      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${
-        statusStyles[normalizedStatus] || "border-border bg-muted text-muted-foreground"
-      }`}
+      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusStyles[normalizedStatus] || "border-border bg-muted text-muted-foreground"
+        }`}
     >
       {normalizedStatus.replaceAll("_", " ")}
     </span>
@@ -290,11 +289,11 @@ function NewAsnPage() {
           : result?.items || result?.suppliers || [];
         const supplier = supplierRows.length
           ? supplierRows.find(
-              (item: any) =>
-                String(item.id) === String(currentUser?.supplierId) ||
-                String(item.username || item.supplier_name || "").toLowerCase() ===
-                  String(currentUser?.username || "").toLowerCase(),
-            )
+            (item: any) =>
+              String(item.id) === String(currentUser?.supplierId) ||
+              String(item.username || item.supplier_name || "").toLowerCase() ===
+              String(currentUser?.username || "").toLowerCase(),
+          )
           : result;
         const companyName =
           supplier?.registered_company_name ||
@@ -501,11 +500,11 @@ function NewAsnPage() {
         shipped_quantity: "",
         remaining_quantity: Number(
           line.remaining_quantity ??
-            line.remaining ??
-            line.balance_quantity ??
-            line.ordered_quantity ??
-            line.quantity ??
-            0,
+          line.remaining ??
+          line.balance_quantity ??
+          line.ordered_quantity ??
+          line.quantity ??
+          0,
         ),
         uom: line.uom || line.unit_of_measure || "PCS",
       })),
@@ -516,7 +515,7 @@ function NewAsnPage() {
     e.preventDefault();
     if (submitInFlightRef.current) return;
     if (!isValidAsnVehicleNumber(vehicleNumber) || !isValidAsnDriverName(driverName) ||
-        !isValidAsnDriverMobileNumber(driverMobile)) {
+      !isValidAsnDriverMobileNumber(driverMobile)) {
       setAssignmentTouched({ vehicle: true, driver: true, contact: true });
       setIsModalOpen(false);
       setIsAssignmentOpen(true);
@@ -688,9 +687,9 @@ function NewAsnPage() {
     setSupplierName(asn.supplier_name || "");
     setExpectedArrivalDate(
       asn.delivery_date ||
-        asn.expected_arrival_date ||
-        asn.expected_arrival_at?.split("T")[0] ||
-        "",
+      asn.expected_arrival_date ||
+      asn.expected_arrival_at?.split("T")[0] ||
+      "",
     );
     setVehicleNumber(asn.vehicle_number || "");
     setDriverName(asn.driver_name || "");
@@ -730,9 +729,9 @@ function NewAsnPage() {
   const arrivalRange: DateRange | undefined =
     arrivalFrom || arrivalTo
       ? {
-          from: arrivalFrom ? new Date(`${arrivalFrom}T00:00:00`) : undefined,
-          to: arrivalTo ? new Date(`${arrivalTo}T00:00:00`) : undefined,
-        }
+        from: arrivalFrom ? new Date(`${arrivalFrom}T00:00:00`) : undefined,
+        to: arrivalTo ? new Date(`${arrivalTo}T00:00:00`) : undefined,
+      }
       : undefined;
   const arrivalRangeLabel =
     arrivalFrom && arrivalTo
@@ -948,9 +947,9 @@ function NewAsnPage() {
                           <td className="px-4 py-3 text-muted-foreground">
                             {displayFilterDate(
                               asn.delivery_date ||
-                                asn.expected_arrival_date ||
-                                asn.expected_arrival_at?.split("T")[0] ||
-                                "",
+                              asn.expected_arrival_date ||
+                              asn.expected_arrival_at?.split("T")[0] ||
+                              "",
                             ) || "—"}
                           </td>
                           <td className="whitespace-nowrap px-4 py-3">
@@ -1289,7 +1288,7 @@ function NewAsnPage() {
                     }
                   >
                     {assignmentSubmitting && <Loader2 className="mr-2 size-4 animate-spin" />}
-                    Continue to ASN Details
+                    Next
                   </Button>
                 </div>
               </form>
@@ -1509,13 +1508,13 @@ function NewAsnPage() {
                                 current.map((item, index) =>
                                   index === idx
                                     ? {
-                                        ...item,
-                                        material_id: material?.id || "",
-                                        item_code: material?.code || "",
-                                        material_name: material?.name || "",
-                                        shipped_quantity: item.shipped_quantity,
-                                        uom: material?.uom || "",
-                                      }
+                                      ...item,
+                                      material_id: material?.id || "",
+                                      item_code: material?.code || "",
+                                      material_name: material?.name || "",
+                                      shipped_quantity: item.shipped_quantity,
+                                      uom: material?.uom || "",
+                                    }
                                     : item,
                                 ),
                               );
