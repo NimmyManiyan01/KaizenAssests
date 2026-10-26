@@ -585,7 +585,7 @@ export function AppShell({
               <button
                 type="button"
                 aria-label="Close navigation menu"
-                className="grid size-9 place-items-center rounded-xl text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                className="grid size-9 place-items-center rounded-xl text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 onClick={() => setMobileSidebarOpen(false)}
               >
                 <PanelLeftClose className="size-[18px]" />
@@ -612,7 +612,7 @@ export function AppShell({
                     className={cn(
                       "group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-sidebar-foreground transition-all",
                       "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                      active && "bg-primary-soft text-primary shadow-soft",
+                      active && "bg-sidebar-primary text-sidebar-primary-foreground",
                     )}
                   >
                     <item.icon className={cn("size-[18px] shrink-0", active && "text-primary")} />
@@ -649,29 +649,29 @@ export function AppShell({
           {!desktopSidebarCollapsed ? (
             <>
               <div className="flex items-center gap-3 min-w-0">
-                <div className="relative flex h-10 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-blue-500/10 to-teal/20 p-1 border border-primary/30 shadow-glow">
+                <div className="relative flex h-10 w-12 shrink-0 items-center justify-center rounded-xl bg-white p-1 border border-sidebar-border">
                   <img
                     src={logoUrl}
                     alt="KGS Logo"
-                    className="h-full w-full object-contain drop-shadow-[0_2px_6px_rgba(6,182,212,0.4)]"
+                    className="h-full w-full object-contain"
                   />
                 </div>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-bold tracking-wider uppercase bg-gradient-to-r from-primary via-blue-600 to-teal bg-clip-text text-transparent">
+                  <p className="truncate text-sm font-bold tracking-wider uppercase text-sidebar-foreground">
                     KaizenAssests
                   </p>
-                  <p className="truncate text-[10px] font-mono text-muted-foreground font-semibold">
+                  <p className="truncate text-[10px] font-mono text-sidebar-foreground/80 font-semibold">
                     Pune DC · Plant 1200
                   </p>
                 </div>
               </div>
             </>
           ) : (
-            <div className="relative flex size-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-blue-500/10 to-teal/20 p-1 border border-primary/30 shadow-glow">
+            <div className="relative flex size-10 shrink-0 items-center justify-center rounded-xl bg-white p-1 border border-sidebar-border">
               <img
                 src={logoUrl}
                 alt="KGS Logo"
-                className="h-full w-full object-contain drop-shadow-[0_2px_6px_rgba(6,182,212,0.4)]"
+                className="h-full w-full object-contain"
               />
             </div>
           )}
@@ -696,7 +696,7 @@ export function AppShell({
                 className={cn(
                   "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground transition-all",
                   "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                  active && "bg-primary-soft text-primary shadow-soft",
+                  active && "bg-sidebar-primary text-sidebar-primary-foreground",
                 )}
               >
                 <item.icon className={cn("size-[18px] shrink-0", active && "text-primary")} />
@@ -713,8 +713,8 @@ export function AppShell({
 
       </aside>
 
-      <div className={cn("flex min-w-0 flex-1 flex-col", isWarehouseWorkspace && "bg-[#eef5fd] dark:bg-[#151d2a]")}>
-        <header className={cn("sticky top-0 z-30 glass-strong", isWarehouseWorkspace && "border-b border-[#d7e5f7] bg-white/95 dark:border-slate-700 dark:bg-slate-900/95")}>
+      <div className={cn("flex min-w-0 flex-1 flex-col", isWarehouseWorkspace && "bg-background dark:bg-[#151d2a]")}>
+        <header className={cn("sticky top-0 z-30 border-b border-border bg-card", isWarehouseWorkspace && "border-b border-border bg-card dark:border-slate-700 dark:bg-slate-900/95")}>
           <div className="flex h-16 items-center gap-3 px-4 lg:px-7">
             <button
               type="button"
@@ -922,7 +922,7 @@ export function AppShell({
         <main className={cn("page-enter flex-1 px-4 py-6 lg:px-7", isWarehouseWorkspace && "px-5 py-5 lg:px-8 lg:py-6")}>
           <div className={cn("mx-auto w-full max-w-[1360px]", isWarehouseWorkspace && "max-w-[1680px]")}>
             {(title || subtitle || actions) && (
-              <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+              <div className={cn("mb-6 flex flex-wrap items-end justify-between gap-4", path === "/supplier-dashboard" && "supplier-heading-image")}>
                 <div>
                   {title && <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">{title}{pageHelp[path] && <InformationTooltip help={pageHelp[path]} placement="title" />}</h1>}
                   {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}

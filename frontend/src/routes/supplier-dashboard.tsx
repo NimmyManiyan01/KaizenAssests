@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   CheckCircle2,
+  Clock3,
   ChevronDown,
   CircleHelp,
   Eye,
@@ -41,12 +42,25 @@ const todayDate = () => {
 };
 
 const statuses: Record<string, string> = {
-  SUBMITTED: "bg-sky-50 text-sky-700 border-sky-200",
-  APPROVED: "bg-sky-50 text-sky-700 border-sky-200",
-  PENDING: "bg-amber-50 text-amber-700 border-amber-200",
-  CANCELLED: "bg-rose-50 text-rose-700 border-rose-200",
-  COMPLETED: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  VEHICLE_EXITED: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  SUBMITTED: "supplier-status-submitted",
+  APPROVED: "supplier-status-active",
+  PENDING: "supplier-status-waiting",
+  AWAITING_DOCK: "supplier-status-waiting",
+  AWAITING_ARRIVAL: "supplier-status-waiting",
+  GATE_ENTRY_CREATED: "supplier-status-waiting",
+  DOCK_ALLOCATED: "supplier-status-active",
+  DOCK_ASSIGNED: "supplier-status-active",
+  RECEIVING: "supplier-status-active",
+  OCCUPIED: "supplier-status-active",
+  IN_PROGRESS: "supplier-status-active",
+  UNLOADING_IN_PROGRESS: "supplier-status-active",
+  QUALITY_INSPECTION_REQUIRED: "supplier-status-waiting",
+  GRN_PENDING: "supplier-status-waiting",
+  CANCELLED: "supplier-status-rejected",
+  REJECTED: "supplier-status-rejected",
+  COMPLETED: "supplier-status-complete",
+  GRN_POSTED: "supplier-status-complete",
+  VEHICLE_EXITED: "supplier-status-complete",
 };
 
 const statusDescriptions: Record<string, string> = {
@@ -307,13 +321,13 @@ function SupplierDashboard() {
     {
       title: "Total deliveries",
       value: asns.length,
-      icon: FileText,
+      icon: Truck,
       tooltip: "Total number of delivery notices registered in the system.",
     },
     {
       title: "Awaiting arrival",
       value: submitted,
-      icon: Truck,
+      icon: Clock3,
       tooltip: "Delivery notices submitted and waiting for the vehicle to check in at the gate.",
     },
     {
@@ -380,6 +394,24 @@ function SupplierDashboard() {
     }));
   }, [asns, trendDays]);
 
+  const kpiCharts = useMemo(() => {
+    const days = Array.from({ length: 7 }, (_, index) => {
+      const day = new Date();
+      day.setHours(0, 0, 0, 0);
+      day.setDate(day.getDate() - (6 - index));
+      return day;
+    });
+    return ["deliveries", "arrival", "vehicles"].map((kind) => days.map((day) => {
+      const matching = asns.filter((asn) => {
+        const date = new Date(asn.submitted_at || asn.created_at || asn.shipment_date || "");
+        return !Number.isNaN(date.getTime()) && date.toDateString() === day.toDateString();
+      });
+      if (kind === "vehicles") return new Set(matching.map((asn) => asn.vehicle_number).filter(Boolean)).size;
+      if (kind === "arrival") return matching.filter((asn) => String(asn.status || "SUBMITTED").toUpperCase() === "SUBMITTED").length;
+      return matching.length;
+    }));
+  }, [asns]);
+
   return (
     <TooltipProvider delayDuration={150}>
       <AppShell
@@ -422,14 +454,14 @@ function SupplierDashboard() {
           </div>
         }
       >
-        <div className="space-y-5">
+        <div className="supplier-visual-content space-y-5">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {metrics.map(({ title, value, icon: Icon, tooltip }) => (
+            {metrics.map(({ title, value, icon: Icon, tooltip }, metricIndex) => (
               <div
                 key={title}
-                className="flex min-h-24 items-center justify-between rounded-xl border border-border bg-card px-4 py-3.5"
+                className="supplier-visual-kpi flex min-h-24 items-center justify-between rounded-xl border border-border bg-card px-4 py-3.5"
               >
-                <div>
+                <div className="supplier-kpi-copy">
                   <div className="flex items-center gap-1.5">
                     <p className="text-sm font-medium text-muted-foreground">{title}</p>
 
@@ -452,8 +484,13 @@ function SupplierDashboard() {
                   </p>
                 </div>
 
-                <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <div className="supplier-kpi-icon flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
                   <Icon className="size-4" aria-hidden="true" />
+                </div>
+                <div className="supplier-kpi-spark" role="img" aria-label={`${title}, last seven days: ${kpiCharts[metricIndex].join(", ")}`}>
+                  {kpiCharts[metricIndex].map((count, day) => (
+                    <span key={day} style={{ height: `${count > 0 ? Math.max(12, count / Math.max(1, ...kpiCharts[metricIndex]) * 100) : 3}%`, opacity: count > 0 ? 0.35 + day * 0.09 : 0.12 }} />
+                  ))}
                 </div>
               </div>
             ))}
@@ -513,7 +550,6 @@ function SupplierDashboard() {
                     <th scope="col" className="px-3.5 py-3">
                       <div className="inline-flex items-center gap-1">
                         <span>Status</span>
-                        <InformationTooltip help="workflowStatus" />
                       </div>
                     </th>
                     <th scope="col" className="px-3.5 py-3">
@@ -598,14 +634,14 @@ function SupplierDashboard() {
                         <td className="px-3.5 py-3">
                           <div className="inline-flex items-center gap-1.5">
                             <span
-                              className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${
+                              className={`supplier-delivery-status inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${
                                 statuses[status] || "bg-muted text-muted-foreground border-border"
                               }`}
                             >
+                              <span className="supplier-status-dot" aria-hidden="true" />
                               {status.replaceAll("_", " ")}
                             </span>
-                            <InformationTooltip help="workflowStatus" />
-                          </div>
+                              </div>
                         </td>
                         <td className="px-3.5 py-3 text-muted-foreground">
                           {asn.created_at

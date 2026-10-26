@@ -476,47 +476,13 @@ function Notifications() {
     }
   };
 
-  const handleOpenNotificationDetails = (n: any) => {
-    // Some older notification records contain the shared warehouse dashboard
-    // as their target. Keep procurement users in their own dashboard context.
-    const notificationLink = n.link;
-    const isGrnLinked = String(n.link || "").startsWith("/grn");
-    const isDockAllocation =
-      userRole !== "GRN" &&
-      !isGrnLinked &&
-      (n.title?.toUpperCase().includes("DOCK ALLOCAT") ||
-        n.title?.toUpperCase().includes("DOCK CONFIRMED"));
-
-    const isDamage =
-      n.title?.toLowerCase().includes("damage") ||
-      n.message?.toLowerCase().includes("damage") ||
-      n.type === "damaged_goods";
-
-    const isGrnOrQuality =
-      n.title?.toLowerCase().includes("grn") ||
-      n.title?.toLowerCase().includes("quality") ||
-      n.title?.toLowerCase().includes("receiving") ||
-      n.message?.toLowerCase().includes("grn") ||
-      n.message?.toLowerCase().includes("inspection");
-
-    if (isGrnLinked) {
-      window.location.href = n.link;
-    } else if (isDamage) {
-      setSelectedDamageNotif(n);
+  const handleOpenNotificationDetails = (notification: any) => {
+    const isDamage = /damage/i.test(`${notification.title || ""} ${notification.message || ""}`) || notification.type === "damaged_goods";
+    if (isDamage) {
+      setSelectedDamageNotif(notification);
       setShowDamageModal(true);
-    } else if (isGrnOrQuality) {
-      setSelectedGrnNotif(n);
-      setShowGrnModal(true);
-    } else if (isDockAllocation) {
-      // Dock allocation card is rendered directly on page
-    } else if (
-      notificationLink &&
-      (userRole === "PROCUREMENT" ||
-        !["/warehouse-dashboard", "/receiving"].includes(notificationLink))
-    ) {
-      window.location.href = notificationLink;
     } else {
-      setSelectedGrnNotif(n);
+      setSelectedGrnNotif(notification);
       setShowGrnModal(true);
     }
   };
@@ -1190,31 +1156,7 @@ function Notifications() {
 
           {/* FOOTER */}
           <DialogFooter className="pt-4 border-t flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              {damageDetails?.poNumber && (
-                <Button
-                  variant="outline"
-                  className="rounded-xl font-bold text-xs"
-                  onClick={() => {
-                    setShowDamageModal(false);
-                    window.location.href = `/purchase-order?po_number=${damageDetails.poNumber}`;
-                  }}
-                >
-                  <ExternalLink className="mr-1.5 size-3.5" /> View Purchase Order (
-                  {damageDetails.poNumber})
-                </Button>
-              )}
-              <Button
-                variant="outline"
-                className="rounded-xl font-bold text-xs"
-                onClick={() => {
-                  setShowDamageModal(false);
-                  window.location.href = `/grn?tab=records`;
-                }}
-              >
-                <FileText className="mr-1.5 size-3.5" /> Open GRN Console
-              </Button>
-            </div>
+
 
             <Button
               variant="default"
@@ -1423,31 +1365,7 @@ function Notifications() {
 
           {/* FOOTER */}
           <DialogFooter className="pt-4 border-t flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              {grnDetails?.poNumber && (
-                <Button
-                  variant="outline"
-                  className="rounded-xl font-bold text-xs"
-                  onClick={() => {
-                    setShowGrnModal(false);
-                    window.location.href = `/purchase-order?po_number=${grnDetails.poNumber}`;
-                  }}
-                >
-                  <ExternalLink className="mr-1.5 size-3.5" /> View Purchase Order (
-                  {grnDetails.poNumber})
-                </Button>
-              )}
-              <Button
-                variant="outline"
-                className="rounded-xl font-bold text-xs"
-                onClick={() => {
-                  setShowGrnModal(false);
-                  window.location.href = "/grn?tab=records";
-                }}
-              >
-                <FileText className="mr-1.5 size-3.5" /> Open GRN Records
-              </Button>
-            </div>
+
 
             <Button
               variant="default"
