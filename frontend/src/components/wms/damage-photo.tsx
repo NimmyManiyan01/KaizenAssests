@@ -299,34 +299,18 @@ function PhotoEditor({
   return (
     <div className="min-w-[260px] space-y-3" aria-busy={uploading}>
       {!cameraOpen && (
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            disabled={uploading || capturing}
-            onClick={() => {
-              setError("");
-              setReady(false);
-              setCameraOpen(true);
-            }}
-          >
-            Open Camera
-          </Button>
-          <label className="inline-flex h-9 cursor-pointer items-center justify-center rounded-md border border-input bg-background px-4 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground">
-            Upload Photo
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              className="sr-only"
-              disabled={uploading || capturing}
-              onChange={(event) => {
-                const selected = event.target.files?.[0];
-                if (selected) choose(selected);
-                event.currentTarget.value = "";
-              }}
-            />
-          </label>
-        </div>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={uploading || capturing}
+          onClick={() => {
+            setError("");
+            setReady(false);
+            setCameraOpen(true);
+          }}
+        >
+          Open Camera
+        </Button>
       )}
 
       {cameraOpen && (

@@ -69,7 +69,7 @@ const roleModules: Record<string, { label: string; links: { label: string; to: s
 
 function getModule() {
   const roles = getUserInfo()?.roles || [];
-  return roles.map((role) => roleModules[role]).find(Boolean) || { label: "Warehouse", links: roleModules.WAREHOUSE?.links ?? [] };
+  return roles.map((role) => roleModules[role]).find(Boolean) || roleModules.WAREHOUSE;
 }
 
 function getShortcutIcon(label: string) {
@@ -152,7 +152,7 @@ export function SecureAssistant() {
     const actualIdx = messages.length - 1 - lastUserIdx;
     const lastUserMsg = messages[actualIdx];
     const prevHistory = messages.slice(0, actualIdx);
-    if (lastUserMsg) void handleSend(lastUserMsg.content, prevHistory);
+    void handleSend(lastUserMsg.content, prevHistory);
   };
 
   const clearChat = () => {

@@ -33,9 +33,6 @@ yarn-error.log*
 .pnpm-debug.log*
 dist/
 dist-ssr/
-build/
-output/
-.playwright-cli/
 *.local
 .output/
 .nitro/

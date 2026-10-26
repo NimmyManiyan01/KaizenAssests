@@ -1,7 +1,5 @@
 import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
-import QRCode from "qrcode";
+import { useEffect, useState } from "react";
 import {
   ArrowRight,
   Clock3,
@@ -10,8 +8,6 @@ import {
   Loader2,
   LogOut,
   PlusCircle,
-  Printer,
-  QrCode,
   Search,
   ShieldCheck,
   Truck,
@@ -36,10 +32,7 @@ function GateDashboard() {
   const [loading, setLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedPassModal, setSelectedPassModal] = useState<any | null>(null);
   const [selectedDetailsDrawer, setSelectedDetailsDrawer] = useState<any | null>(null);
-  const autoOpenedSearch = useRef<string | null>(null);
-  const [gatePassQr, setGatePassQr] = useState<string | null>(null);
 
   const loadDashboard = async () => {
     try {
@@ -56,31 +49,6 @@ function GateDashboard() {
     const timer = window.setInterval(loadDashboard, 5_000);
     return () => window.clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    const gatePassId =
-      selectedPassModal?.gate_entry_no ||
-      selectedPassModal?.gate_entry_number ||
-      selectedPassModal?.gate_pass_number ||
-      selectedPassModal?.id;
-    if (!gatePassId) {
-      setGatePassQr(null);
-      return;
-    }
-
-    let active = true;
-    void QRCode.toDataURL(String(gatePassId), { width: 240, margin: 1 })
-      .then((dataUrl) => {
-        if (active) setGatePassQr(dataUrl);
-      })
-      .catch(() => {
-        if (active) setGatePassQr(null);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [selectedPassModal]);
 
   const entries = Array.isArray(dashboardData?.gateEntries) ? dashboardData.gateEntries : []; /*
     {
@@ -129,31 +97,13 @@ function GateDashboard() {
 
   useEffect(() => {
     const query = routeSearch.search?.trim();
-    if (
-      !query ||
-      !entries.length ||
-      selectedDetailsDrawer ||
-      autoOpenedSearch.current === query.toLowerCase()
-    )
-      return;
+    if (!query || !entries.length || selectedDetailsDrawer) return;
     const match = entries.find((entry: any) =>
-      [
-        entry.gate_entry_no,
-        entry.gate_entry_number,
-        entry.gate_pass_number,
-        entry.asn_number,
-        entry.vehicle_number,
-        entry.created_at,
-        entry.arrival_time,
-        entry.id,
-      ]
+      [entry.gate_entry_no, entry.gate_entry_number, entry.gate_pass_number, entry.vehicle_number, entry.id]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase() === query.toLowerCase()),
     );
-    if (match) {
-      autoOpenedSearch.current = query.toLowerCase();
-      setSelectedDetailsDrawer(match);
-    }
+    if (match) setSelectedDetailsDrawer(match);
   }, [routeSearch.search, entries, selectedDetailsDrawer]);
 
   const filteredEntries = entries.filter((e: any) => {
@@ -165,8 +115,7 @@ function GateDashboard() {
     const veh = String(e.vehicle_number || "").toLowerCase();
     const sup = String(e.supplier_name || e.vendor || "").toLowerCase();
     const asn = String(e.asn_number || "").toLowerCase();
-    const entryDate = String(e.created_at || e.arrival_time || "").toLowerCase();
-    return gp.includes(q) || veh.includes(q) || asn.includes(q) || entryDate.includes(q);
+    return gp.includes(q) || veh.includes(q) || sup.includes(q) || asn.includes(q);
   });
 
   const metrics = dashboardData?.stats || dashboardData?.metrics || dashboardData || {};
@@ -184,16 +133,6 @@ function GateDashboard() {
     metrics.totalExits ??
     metrics.totalGateExits ??
     entries.filter((e: any) => String(e.status).toUpperCase() === "VEHICLE_EXITED").length;
-
-  const handlePrintPass = (pass: any) => {
-    toast.success(
-      `Print job sent for Gate Pass ${pass.gate_entry_no || pass.gate_entry_number || pass.gate_pass_number || pass.id}`,
-      {
-        description: "Opening print preview...",
-      },
-    );
-    window.print();
-  };
 
   return (
     <AppShell
@@ -257,7 +196,7 @@ function GateDashboard() {
               <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
               <input
                 type="text"
-                placeholder="Search ASN, gate pass, vehicle, date..."
+                placeholder="Search Gate Pass, Vehicle, Supplier, ASN..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="h-9 w-full rounded-xl border bg-background pl-9 pr-3 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary"
@@ -313,29 +252,6 @@ function GateDashboard() {
                               <Eye className="mr-1 size-3.5" /> Details
                             </Button>
 
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 px-2 text-xs font-bold text-sky-600"
-                              onClick={() =>
-                                setSelectedPassModal({
-                                  ...e,
-                                  gate_pass_number:
-                                    e.gate_entry_no || e.gate_entry_number || e.gate_pass_number,
-                                })
-                              }
-                            >
-                              <QrCode className="mr-1 size-3.5" /> Gate Pass
-                            </Button>
-
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 px-2 text-xs font-bold text-emerald-600"
-                              onClick={() => handlePrintPass(e)}
-                            >
-                              <Printer className="mr-1 size-3.5" /> Print
-                            </Button>
                           </div>
                         </td>
                       </tr>
@@ -346,81 +262,6 @@ function GateDashboard() {
             </div>
           </CardContent>
         </Card>
-
-        {/* Gate Pass Modal Preview */}
-        <Dialog open={Boolean(selectedPassModal)} onOpenChange={() => setSelectedPassModal(null)}>
-          <DialogContent className="max-w-md rounded-2xl bg-card p-6 shadow-2xl">
-            <DialogHeader>
-              <DialogTitle className="text-center font-black text-primary uppercase text-sm">
-                KAIZENTRIX GATE PASS TICKET
-              </DialogTitle>
-            </DialogHeader>
-
-            {selectedPassModal && (
-              <div className="space-y-4">
-                <div className="rounded-xl bg-muted/40 p-4 border space-y-2 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground font-semibold">Gate Pass ID:</span>
-                    <span className="font-mono font-bold text-primary">
-                      {selectedPassModal.gate_pass_number || selectedPassModal.gate_entry_no || "—"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground font-semibold">Vehicle Plate:</span>
-                    <span className="font-bold text-foreground">
-                      {selectedPassModal.vehicle_number}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground font-semibold">Supplier:</span>
-                    <span className="font-bold text-foreground text-right">
-                      {selectedPassModal.supplier_name}
-                    </span>
-                  </div>
-                  <div className="flex justify-between border-t pt-2">
-                    <span className="text-muted-foreground font-semibold">Allocated Dock:</span>
-                    <span className="font-bold text-emerald-600">
-                      {selectedPassModal.dock_number || selectedPassModal.dock_name || "—"}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border-2 border-dashed border-primary/40 bg-muted/20 p-4 text-center">
-                  {gatePassQr ? (
-                    <img
-                      src={gatePassQr}
-                      alt={`Scannable QR code for ${selectedPassModal.gate_pass_number || selectedPassModal.gate_entry_no || selectedPassModal.id}`}
-                      className="mx-auto size-40 rounded-lg bg-white p-2"
-                    />
-                  ) : (
-                    <div className="mx-auto flex size-40 items-center justify-center rounded-lg bg-white text-xs text-muted-foreground">
-                      Generating QR code...
-                    </div>
-                  )}
-                  <p className="font-mono text-xs font-bold mt-2 text-primary">
-                    {selectedPassModal.gate_pass_number || selectedPassModal.gate_entry_no || "—"}
-                  </p>
-                </div>
-
-                <div className="flex gap-2">
-                  <Button
-                    className="flex-1 rounded-xl font-bold"
-                    onClick={() => handlePrintPass(selectedPassModal)}
-                  >
-                    <Printer className="mr-2 size-4" /> Print Ticket
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="flex-1 rounded-xl"
-                    onClick={() => setSelectedPassModal(null)}
-                  >
-                    Close
-                  </Button>
-                </div>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
 
         {/* View Details Drawer / Modal */}
         <Dialog
@@ -456,6 +297,12 @@ function GateDashboard() {
                     <span className="font-bold text-foreground">
                       {selectedDetailsDrawer.driver_name || "Suresh Gowda"} (
                       {selectedDetailsDrawer.driver_contact || "+91 98450 12345"})
+                    </span>
+                  </p>
+                  <p className="flex justify-between">
+                    <span className="text-muted-foreground">Invoice Number:</span>{" "}
+                    <span className="font-bold text-foreground">
+                      {selectedDetailsDrawer.invoice_number || "INV-2026-9901"}
                     </span>
                   </p>
                   <p className="flex justify-between">

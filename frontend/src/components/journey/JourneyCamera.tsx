@@ -10,7 +10,6 @@ interface JourneyCameraProps {
   overviewProgress?: number;
   supplierProgress?: number;
   mouseOffset: { x: number; y: number };
-  resumeFromCurrent?: boolean;
 }
 
 function lerp(a: number, b: number, t: number) {
@@ -32,10 +31,9 @@ export function JourneyCamera({
   overviewProgress = 1,
   supplierProgress = 1,
   mouseOffset,
-  resumeFromCurrent = false,
 }: JourneyCameraProps) {
   const { camera, scene, size } = useThree();
-  const initialized = useRef(resumeFromCurrent);
+  const initialized = useRef(false);
 
   const keyframes = useMemo(() => {
     if (!stages || stages.length === 0) return [];
@@ -67,14 +65,13 @@ export function JourneyCamera({
     // Find the bounding keyframe segment
     let idx = 0;
     for (let i = 0; i < keyframes.length - 1; i++) {
-      if (p >= keyframes[i]!.p && p <= keyframes[i + 1]!.p) {
+      if (p >= keyframes[i].p && p <= keyframes[i + 1].p) {
         idx = i;
         break;
       }
     }
     const k1 = keyframes[idx];
     const k2 = keyframes[idx + 1] || k1;
-    if (!k1 || !k2) return;
     const t = k2.p > k1.p ? smoothstep(k1.p, k2.p, p) : 0;
 
     const desiredPos = scratch.position.set(
@@ -122,21 +119,15 @@ export function JourneyCamera({
     const pointerSmoothing = 1 - Math.exp(-12 * Math.min(delta, 0.1));
     pointer.current.x += (mouseOffset.x - pointer.current.x) * pointerSmoothing;
     pointer.current.y += (mouseOffset.y - pointer.current.y) * pointerSmoothing;
-
+    
     // Apply gentle mouse parallax
     desiredPos.x += pointer.current.x * 0.45 * approach;
     desiredPos.y += pointer.current.y * 0.35 * approach;
 
     const smoothing = 1 - Math.exp(-12 * Math.min(delta, 0.1));
     if (!initialized.current) {
-      if (resumeFromCurrent) {
-        const dir = new THREE.Vector3();
-        camera.getWorldDirection(dir);
-        currentLookAt.current.copy(camera.position).add(dir.multiplyScalar(20));
-      } else {
-        camera.position.copy(desiredPos);
-        currentLookAt.current.copy(desiredTarget);
-      }
+      camera.position.copy(desiredPos);
+      currentLookAt.current.copy(desiredTarget);
       initialized.current = true;
     } else {
       camera.position.lerp(desiredPos, smoothing);

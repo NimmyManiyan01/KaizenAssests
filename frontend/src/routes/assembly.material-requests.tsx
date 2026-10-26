@@ -446,14 +446,13 @@ function AssemblyMaterialRequestsPage() {
       toast.error("Production quantity must be greater than 0.");
       return;
     }
-    const submittedDate = formData.required_date ?? "";
-    const dateError = completionDateError(submittedDate);
+    const dateError = completionDateError(formData.required_date);
     setRequiredDateError(dateError);
     if (dateError) return;
 
-    const requiredDate = /^\d{2}-\d{2}-\d{4}$/.test(submittedDate)
-      ? submittedDate.split("-").reverse().join("-")
-      : submittedDate;
+    const requiredDate = /^\d{2}-\d{2}-\d{4}$/.test(formData.required_date)
+      ? formData.required_date.split("-").reverse().join("-")
+      : formData.required_date;
 
     try {
       setCreating(true);
@@ -1554,7 +1553,7 @@ function AssemblyMaterialRequestsPage() {
                                 onChange={(e) => {
                                   const val = Number(e.target.value);
                                   const updated = [...receiptItems];
-                                  if (updated[idx]) updated[idx].received_quantity = val;
+                                  updated[idx].received_quantity = val;
                                   setReceiptItems(updated);
                                 }}
                                 className="h-7 text-right font-bold text-foreground text-xs rounded-lg"

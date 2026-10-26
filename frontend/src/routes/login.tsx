@@ -55,7 +55,6 @@ function LoginPage() {
         else {
           try {
             const [u, p] = atob(magicToken).split(":");
-            if (!u || !p) throw new Error("Malformed access link credentials");
             data = await api.login(u, p);
           } catch {
             data = await api.magicLogin(magicToken);
@@ -81,10 +80,10 @@ function LoginPage() {
     e.preventDefault();
     const normalizedEmployeeId = employeeId.trim();
     if (!normalizedEmployeeId || !password.trim()) {
-      toast.error("Please enter both Employee ID and password"); return;
+      return toast.error("Please enter both Employee ID and password");
     }
     if (normalizedEmployeeId.length > 100 || password.length > 128) {
-      toast.error("Employee ID or password exceeds the allowed length"); return;
+      return toast.error("Employee ID or password exceeds the allowed length");
     }
     setIsLoading(true);
     try {
@@ -252,7 +251,6 @@ function LoginPage() {
               Remember me on this device
             </label>
             <button
-              type="submit"
               disabled={isLoading}
               className="relative flex h-[54px] w-full items-center justify-center rounded-xl bg-[linear-gradient(160deg,#278eff,#0763ff_65%,#0545c0)] text-xl font-bold text-white shadow-[0_2px_3px_#1057b533] disabled:opacity-60 min-[1000px]:h-[3.1vw] min-[1000px]:rounded-[.8vw] min-[1000px]:text-[1.2vw] [&_svg]:w-[22px] min-[1000px]:[&_svg]:w-[1.3vw]"
             >

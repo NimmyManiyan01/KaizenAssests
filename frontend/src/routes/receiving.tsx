@@ -195,7 +195,7 @@ const INITIAL_RECORDS: InboundRecord[] = [
 
 function ReceivingControlCenter() {
   const [records, setRecords] = useState<InboundRecord[]>(INITIAL_RECORDS);
-  const [selectedRecord, setSelectedRecord] = useState<InboundRecord | null>(INITIAL_RECORDS[0] ?? null);
+  const [selectedRecord, setSelectedRecord] = useState<InboundRecord | null>(INITIAL_RECORDS[0]);
   const [searchQuery, setSearchQuery] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("ALL");
   const [activeTab, setActiveTab] = useState("overview");
