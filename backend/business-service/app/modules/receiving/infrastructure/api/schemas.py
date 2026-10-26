@@ -163,8 +163,6 @@ class GrnContextResponse(ApiModel):
 
     po_id: str | None = None
     po_number: str | None = None
-    asn_number: str | None = None
-    gate_entry_number: str | None = None
 
     grn_id: str | None = None
     grn_number: str | None = None
@@ -755,8 +753,6 @@ class GrnSummaryResponse(ApiModel):
     grn_number: str | None = None
 
     po_number: str | None = None
-    asn_number: str | None = None
-    gate_entry_number: str | None = None
     supplier_name: str | None = None
     supplier_company_name: str | None = None
     supplier_email: str | None = None

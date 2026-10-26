@@ -3,14 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
@@ -215,79 +208,30 @@ function FinishedGoodsPickupGatePage() {
           <DialogContent className="w-[min(92vw,520px)] rounded-2xl">
             <DialogHeader>
               <DialogTitle>FG Pickup Vehicle Exit</DialogTitle>
-              <DialogDescription>
-                Enter or scan the original gate pass. Exit is enabled only after the pass and
-                required documents are verified.
-              </DialogDescription>
+              <DialogDescription>Enter or scan the original gate pass. Exit is enabled only after the pass and required documents are verified.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div>
                 <Label htmlFor="fg-exit-pass">Gate Pass Number</Label>
                 <div className="flex gap-2">
-                  <Input
-                    id="fg-exit-pass"
-                    autoFocus
-                    className="font-mono uppercase"
-                    value={exitPass}
-                    onChange={(e) => setExitPass(e.target.value.toUpperCase())}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        void lookupExitPass();
-                      }
-                    }}
-                    placeholder="Scan or enter pass"
-                  />
-                  <Button type="button" variant="outline" onClick={() => void lookupExitPass()}>
-                    Verify
-                  </Button>
+                  <Input id="fg-exit-pass" autoFocus className="font-mono uppercase" value={exitPass} onChange={(e) => setExitPass(e.target.value.toUpperCase())} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void lookupExitPass(); } }} placeholder="Scan or enter pass" />
+                  <Button type="button" variant="outline" onClick={() => void lookupExitPass()}>Verify</Button>
                 </div>
               </div>
               {exitDetails && (
                 <Card className="grid gap-2 border bg-muted/20 p-4 text-sm sm:grid-cols-2">
-                  <p>
-                    <span className="text-muted-foreground">Request:</span>{" "}
-                    {exitDetails.request_number}
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">Status:</span> {exitDetails.status}
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">Vehicle:</span>{" "}
-                    {exitDetails.vehicle_number}
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">Driver:</span> {exitDetails.driver_name}
-                  </p>
-                  <p className="sm:col-span-2">
-                    <span className="text-muted-foreground">Entry:</span>{" "}
-                    {exitDetails.entered_at
-                      ? new Date(exitDetails.entered_at).toLocaleString()
-                      : "—"}
-                  </p>
+                  <p><span className="text-muted-foreground">Request:</span> {exitDetails.request_number}</p>
+                  <p><span className="text-muted-foreground">Status:</span> {exitDetails.status}</p>
+                  <p><span className="text-muted-foreground">Vehicle:</span> {exitDetails.vehicle_number}</p>
+                  <p><span className="text-muted-foreground">Driver:</span> {exitDetails.driver_name}</p>
+                  <p className="sm:col-span-2"><span className="text-muted-foreground">Entry:</span> {exitDetails.entered_at ? new Date(exitDetails.entered_at).toLocaleString() : "—"}</p>
                 </Card>
               )}
-              {exitDetails && (
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={exitDocs}
-                    onChange={(e) => setExitDocs(e.target.checked)}
-                  />{" "}
-                  Packing list and dispatch documents verified
-                </label>
-              )}
+              {exitDetails && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={exitDocs} onChange={(e) => setExitDocs(e.target.checked)} /> Packing list and dispatch documents verified</label>}
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setExitOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                disabled={!exitDetails || !exitDocs || exitBusy}
-                onClick={() => void confirmExit()}
-              >
-                {exitBusy ? "Recording exit…" : "Confirm Exit"}
-              </Button>
+              <Button variant="outline" onClick={() => setExitOpen(false)}>Cancel</Button>
+              <Button disabled={!exitDetails || !exitDocs || exitBusy} onClick={() => void confirmExit()}>{exitBusy ? "Recording exit…" : "Confirm Exit"}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -296,28 +240,19 @@ function FinishedGoodsPickupGatePage() {
             {success && (
               <Card className="border-emerald-200 bg-emerald-50 p-4 text-emerald-900">
                 <div className="flex items-center justify-between gap-2 font-semibold">
-                  <CheckCircle2 className="size-5" /> Pickup gate pass generated:{" "}
-                  {success.gate_pass_number}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      setExitPass(success.gate_pass_number);
-                      setExitOpen(true);
-                    }}
-                  >
+                  <CheckCircle2 className="size-5" /> Pickup gate pass generated: {success.gate_pass_number}
+                  <Button size="sm" variant="outline" onClick={() => { setExitPass(success.gate_pass_number); setExitOpen(true); }}>
                     Exit Vehicle
                   </Button>
                 </div>
                 <p className="mt-1 text-sm">
-                  Request {success.request_number} is now{" "}
-                  {statusLabel(success.status || "INSIDE_FACILITY")}.
+                  Request {success.request_number} is now {statusLabel(success.status || "INSIDE_FACILITY")}.
                 </p>
               </Card>
             )}
             <Card className="border-0 p-1 shadow-none">
               <form onSubmit={submit} className="space-y-5">
-                <div className="grid gap-4">
+        <div className="grid gap-4">
                   <div>
                     <Label htmlFor="pickup-request">Dispatch Number *</Label>
                     <Input
@@ -350,28 +285,24 @@ function FinishedGoodsPickupGatePage() {
                       Enter the request number and press Enter to auto-fill the details.
                     </p>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                      <div>
-                        <Label htmlFor="finished-goods">Finished goods</Label>
-                        <Input
-                          id="finished-goods"
-                          readOnly
-                          value={
-                            selected
-                              ? `${selected.product_name || "—"} · ${selected.quantity || 0} ${selected.uom || "PCS"}`
-                              : ""
-                          }
-                          placeholder="Auto-filled from dispatch"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="expected-pickup">Expected pickup</Label>
-                        <Input
-                          id="expected-pickup"
-                          readOnly
-                          value={selected?.expected_pickup_date || ""}
-                          placeholder="Auto-filled from dispatch"
-                        />
-                      </div>
+                        <div>
+                          <Label htmlFor="finished-goods">Finished goods</Label>
+                          <Input
+                            id="finished-goods"
+                            readOnly
+                            value={selected ? `${selected.product_name || "—"} · ${selected.quantity || 0} ${selected.uom || "PCS"}` : ""}
+                            placeholder="Auto-filled from dispatch"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="expected-pickup">Expected pickup</Label>
+                          <Input
+                            id="expected-pickup"
+                            readOnly
+                            value={selected?.expected_pickup_date || ""}
+                            placeholder="Auto-filled from dispatch"
+                          />
+                        </div>
                     </div>
                     <div className="hidden">
                       {filteredRequests

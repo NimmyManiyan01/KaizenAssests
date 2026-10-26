@@ -1,10 +1,10 @@
-import { createFileRoute, useSearch } from "@tanstack/react-router";
+import { InformationTooltip } from "@/components/ui/information-tooltip";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   Eye,
   Loader2,
   PackagePlus,
-  Pencil,
   Plus,
   Search,
   Trash2,
@@ -44,14 +44,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api-client";
 
 export const Route = createFileRoute("/supplier-materials")({ component: SupplierMaterials });
 const UOMS = ["PCS", "BUNDLE", "SET", "KG", "LITER", "METER", "BOX"];
 const emptyForm = { code: "", name: "", category: "", description: "", uom: "PCS" };
 
+
 function SupplierMaterials() {
-  const routeSearch = useSearch({ strict: false }) as { search?: string };
   const [materials, setMaterials] = useState<any[]>([]);
   const [query, setQuery] = useState("");
   const [uomFilter, setUomFilter] = useState("ALL");
@@ -66,10 +67,6 @@ function SupplierMaterials() {
     type: "status" | "delete";
     material: any;
   } | null>(null);
-
-  useEffect(() => {
-    if (typeof routeSearch.search === "string") setQuery(routeSearch.search);
-  }, [routeSearch.search]);
 
   const loadMaterials = async () => {
     setLoading(true);
@@ -216,204 +213,61 @@ function SupplierMaterials() {
     else await deleteMaterial(action.material);
   };
   return (
-    <AppShell
-      title="Materials"
-      subtitle="Create and manage the materials available for your ASN submissions."
-      actions={
-        <Button onClick={openAdd} className="rounded-xl">
-          <Plus className="mr-2 size-4" /> Add Material
-        </Button>
-      }
-    >
-      <Card className="rounded-2xl border-border/70 shadow-sm">
-        <CardHeader className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <PackagePlus className="size-4 text-sky-600" /> Material Catalog
-          </CardTitle>
-          <div className="flex flex-wrap gap-2">
-            <div className="relative w-full sm:w-64">
-              <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search code or name..."
-                className="pl-9"
-              />
-            </div>
-            <Select value={uomFilter} onValueChange={setUomFilter}>
-              <SelectTrigger className="w-28">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">All UOM</SelectItem>
-                {uoms.map((v) => (
-                  <SelectItem key={v} value={v}>
-                    {v}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setQuery("");
-                setUomFilter("ALL");
-              }}
-            >
-              Clear Filters
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="pb-4">
-          {error ? (
-            <div className="flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-700">
-              <span>{error}</span>
-              <Button variant="outline" onClick={() => void loadMaterials()}>
-                Retry
+    <TooltipProvider delayDuration={150}>
+      <AppShell
+        title={
+          <span className="inline-flex items-center gap-2">
+            Materials
+          </span>
+        }
+        subtitle="Create and manage the materials available for your ASN submissions."
+        actions={
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={openAdd}
+                className="h-10 rounded-lg bg-primary text-sm font-medium text-primary-foreground shadow-none hover:bg-primary/90"
+              >
+                <Plus className="size-4" /> Add Material
               </Button>
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-xl border">
-              <table className="w-full min-w-[800px] text-left text-sm">
-                <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
-                  <tr>
-                    {["Material Code", "Material Name", "UOM", "Status", "Actions"].map((title) => (
-                      <th key={title} className="px-4 py-3">
-                        {title}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {loading ? (
-                    <tr>
-                      <td colSpan={5} className="px-4 py-10 text-center">
-                        <Loader2 className="mx-auto size-5 animate-spin" />
-                      </td>
-                    </tr>
-                  ) : !filtered.length ? (
-                    <tr>
-                      <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
-                        {materials.length
-                          ? "No materials match your filters."
-                          : "No materials found."}
-                      </td>
-                    </tr>
-                  ) : (
-                    filtered.map((m) => (
-                      <tr key={m.id || m.code} className="hover:bg-muted/30">
-                        <td className="px-4 py-3 font-mono font-bold text-sky-700">{m.code}</td>
-                        <td className="px-4 py-3 font-semibold">{m.name}</td>
-                        <td className="px-4 py-3">{m.uom}</td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${
-                              String(m.status).toUpperCase() === "ACTIVE"
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                : "border-slate-200 bg-slate-100 text-slate-600"
-                            }`}
-                          >
-                            {String(m.status).toUpperCase() === "ACTIVE" ? "Active" : "Inactive"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                title="Material actions"
-                                aria-label={`Actions for ${m.name}`}
-                              >
-                                <MoreHorizontal className="size-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-40">
-                              <DropdownMenuItem onClick={() => setDetails(m)}>
-                                <Eye /> View
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => openEdit(m)}>
-                                <Pencil /> Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => setPendingAction({ type: "status", material: m })}
-                              >
-                                {String(m.status).toUpperCase() === "ACTIVE" ? (
-                                  <ToggleLeft />
-                                ) : (
-                                  <ToggleRight />
-                                )}
-                                {String(m.status).toUpperCase() === "ACTIVE"
-                                  ? "Deactivate"
-                                  : "Activate"}
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                className="text-rose-600 focus:text-rose-700"
-                                onClick={() => setPendingAction({ type: "delete", material: m })}
-                              >
-                                <Trash2 /> Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <p className="mt-3 text-xs text-muted-foreground">
-            Showing {filtered.length} of {materials.length} materials
-          </p>
-        </CardContent>
-      </Card>
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="rounded-2xl sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{editing ? "Edit Material" : "Add Material"}</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={saveMaterial} className="space-y-4">
-            <div>
-              <Label>Material Name *</Label>
-              <Input
-                value={form.name}
-                onChange={(e) => {
-                  setForm({
-                    ...form,
-                    name: e.target.value,
-                    code: editing ? form.code : "",
-                  });
-                  if (!editing && e.target.value.trim()) generateMaterialCode(e.target.value);
-                }}
-                onBlur={() => generateMaterialCode()}
-                placeholder="Enter material name"
-              />
-            </div>
-            <div>
-              <Label>Material Code *</Label>
-              <Input
-                value={form.code}
-                disabled={Boolean(editing)}
-                readOnly={!editing}
-                onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
-                placeholder="Generated after entering material name"
-                className={!editing ? "bg-muted font-mono font-bold text-sky-700" : ""}
-              />
-              {!editing && (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Generated automatically after entering the material name.
-                </p>
-              )}
-            </div>
-            <div>
-              <Label>Base UOM *</Label>
-              <Select value={form.uom} onValueChange={(value) => setForm({ ...form, uom: value })}>
-                <SelectTrigger>
+            </TooltipTrigger>
+            <TooltipContent
+              side="bottom"
+              className="rounded-lg border border-border bg-popover text-xs font-medium text-popover-foreground shadow-soft"
+            >
+              Add a new material to your supplier catalog.
+            </TooltipContent>
+          </Tooltip>
+        }
+      >
+        <Card className="rounded-xl border-border bg-card shadow-sm">
+          <CardHeader className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+            <CardTitle className="flex items-center gap-2 text-base font-semibold">
+              <PackagePlus className="size-4 text-primary" /> Material catalog
+            </CardTitle>
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+              <div className="relative w-full sm:w-64">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search materials"
+                  aria-label="Search materials by code or name"
+                  className="h-10 rounded-lg pl-9 text-sm"
+                />
+              </div>
+              <Select value={uomFilter} onValueChange={setUomFilter}>
+                <SelectTrigger
+                  aria-label="Filter materials by unit of measurement"
+                  className="h-10 w-28 rounded-lg text-sm"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="ALL">All UOM</SelectItem>
                   {uoms.map((v) => (
                     <SelectItem key={v} value={v}>
                       {v}
@@ -421,66 +275,313 @@ function SupplierMaterials() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
-                Cancel
-              </Button>
               <Button
-                type="submit"
-                disabled={saving || !form.code.trim() || !form.name.trim() || !form.uom}
+                type="button"
+                variant="outline"
+                className="h-10 rounded-lg text-sm"
+                onClick={() => {
+                  setQuery("");
+                  setUomFilter("ALL");
+                }}
               >
-                {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-                {editing ? "Save Changes" : "Save Material"}
+                Clear Filters
               </Button>
             </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={Boolean(details)} onOpenChange={(open) => !open && setDetails(null)}>
-        <DialogContent className="rounded-2xl sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Material Details</DialogTitle>
-          </DialogHeader>
-          {details && (
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              {[
-                ["Material Code", details.code],
-                ["Material Name", details.name],
-                ["UOM", details.uom],
-              ].map(([label, value]) => (
-                <div key={String(label)}>
-                  <p className="text-xs text-muted-foreground">{label}</p>
-                  <p className="font-semibold">{String(value)}</p>
+          </CardHeader>
+          <CardContent className="px-0 pb-0">
+            {error ? (
+              <div
+                role="alert"
+                className="mx-4 mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/25 bg-danger-soft p-4 text-sm text-destructive sm:mx-5"
+              >
+                <span>{error}</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 rounded-lg"
+                  onClick={() => void loadMaterials()}
+                >
+                  Try again
+                </Button>
+              </div>
+            ) : (
+              <>
+                <div className="mx-4 overflow-x-auto rounded-lg border border-border sm:mx-5">
+                  <table className="w-full min-w-[800px] text-left text-sm">
+                    <thead className="border-b border-border bg-muted/60 text-xs font-medium text-muted-foreground">
+                      <tr>
+                        <th scope="col" className="px-4 py-3">
+                          <span className="inline-flex items-center gap-1.5">
+                            Material Code
+
+                          </span>
+                        </th>
+                        <th scope="col" className="px-4 py-3">
+                          Material name
+                        </th>
+                        <th scope="col" className="px-4 py-3">
+                          <span className="inline-flex items-center gap-1.5">
+                            UOM
+                            <InformationTooltip help="quantity" />
+                          </span>
+                        </th>
+                        <th scope="col" className="px-4 py-3">
+                          Status
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-right">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/70">
+                      {loading ? (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            className="px-4 py-10 text-center text-sm text-muted-foreground"
+                          >
+                            <span className="inline-flex items-center gap-2" role="status">
+                              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                              Loading materials…
+                            </span>
+                          </td>
+                        </tr>
+                      ) : !filtered.length ? (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            className="px-4 py-10 text-center text-sm text-muted-foreground"
+                          >
+                            {materials.length
+                              ? "No materials match your search or UOM filter."
+                              : "No materials in your catalog yet."}
+                          </td>
+                        </tr>
+                      ) : (
+                        filtered.map((m) => (
+                          <tr key={m.id || m.code} className="transition-colors hover:bg-muted/40">
+                            <td className="px-4 py-3 font-mono font-medium text-primary">
+                              {m.code || "—"}
+                            </td>
+                            <td className="px-4 py-3 text-foreground">{m.name || "—"}</td>
+                            <td className="px-4 py-3 text-foreground">{m.uom || "—"}</td>
+                            <td className="px-4 py-3">
+                              <Badge
+                                variant="outline"
+                                className={`rounded-full font-medium ${
+                                  String(m.status).toUpperCase() === "ACTIVE"
+                                    ? "border-success/30 bg-success-soft text-success"
+                                    : String(m.status).toUpperCase() === "INACTIVE"
+                                      ? "border-border bg-muted text-muted-foreground"
+                                      : "border-border bg-background text-muted-foreground"
+                                }`}
+                              >
+                                {String(m.status).toUpperCase() === "ACTIVE"
+                                  ? "Active"
+                                  : String(m.status).toUpperCase() === "INACTIVE"
+                                    ? "Inactive"
+                                    : "—"}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <DropdownMenu>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        title="Material actions"
+                                        aria-label={`Actions for ${m.name}`}
+                                      >
+                                        <MoreHorizontal className="size-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                  </TooltipTrigger>
+                                  <TooltipContent
+                                    side="left"
+                                    className="rounded-lg border border-border bg-popover text-xs font-medium text-popover-foreground shadow-soft"
+                                  >
+                                    View or manage this material.
+                                  </TooltipContent>
+                                </Tooltip>
+                                <DropdownMenuContent align="end" className="w-40">
+                                  <DropdownMenuItem onClick={() => setDetails(m)}>
+                                    <Eye /> View
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      setPendingAction({ type: "status", material: m })
+                                    }
+                                  >
+                                    {String(m.status).toUpperCase() === "ACTIVE" ? (
+                                      <ToggleLeft />
+                                    ) : (
+                                      <ToggleRight />
+                                    )}
+                                    {String(m.status).toUpperCase() === "ACTIVE"
+                                      ? "Deactivate"
+                                      : "Activate"}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                    onClick={() =>
+                                      setPendingAction({ type: "delete", material: m })
+                                    }
+                                  >
+                                    <Trash2 /> Delete
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
                 </div>
-              ))}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-      <AlertDialog
-        open={Boolean(pendingAction)}
-        onOpenChange={(open) => !open && setPendingAction(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {pendingAction?.type === "delete" ? "Delete material?" : "Change material status?"}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {pendingAction?.type === "delete"
-                ? `Delete ${pendingAction.material?.code}? This cannot be undone. Materials referenced by transactions will be deactivated instead.`
-                : `Deactivate this material? It will no longer be available for new ASN submissions.`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void confirmPendingAction()}>
-              {pendingAction?.type === "delete" ? "Delete" : "Confirm"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </AppShell>
+                {!loading && !error && (
+                  <div
+                    className="border-t border-border px-4 py-3 text-xs text-muted-foreground sm:px-5"
+                    aria-live="polite"
+                  >
+                    {filtered.length === materials.length
+                      ? `${filtered.length} ${filtered.length === 1 ? "material" : "materials"}`
+                      : `${filtered.length} of ${materials.length} materials`}
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogContent className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-lg overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
+            <DialogHeader>
+              <DialogTitle>{editing ? "Edit Material" : "Add Material"}</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={saveMaterial} className="space-y-4">
+              <div>
+                <Label htmlFor="supplier-material-name">Material name *</Label>
+                <Input
+                  id="supplier-material-name"
+                  value={form.name}
+                  onChange={(e) => {
+                    setForm({
+                      ...form,
+                      name: e.target.value,
+                      code: editing ? form.code : "",
+                    });
+                    if (!editing && e.target.value.trim()) generateMaterialCode(e.target.value);
+                  }}
+                  onBlur={() => generateMaterialCode()}
+                  placeholder="Enter material name"
+                  className="mt-1.5 h-10 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <Label htmlFor="supplier-material-code">Material code *</Label>
+                <Input
+                  id="supplier-material-code"
+                  value={form.code}
+                  disabled={Boolean(editing)}
+                  readOnly={!editing}
+                  onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
+                  placeholder="Generated after entering material name"
+                  className={`mt-1.5 h-10 rounded-lg text-sm ${
+                    !editing ? "bg-muted font-mono font-medium text-primary" : ""
+                  }`}
+                />
+                {!editing && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Generated automatically after entering the material name.
+                  </p>
+                )}
+              </div>
+              <div>
+                <Label htmlFor="supplier-material-uom">Base UOM *</Label>
+                <Select
+                  value={form.uom}
+                  onValueChange={(value) => setForm({ ...form, uom: value })}
+                >
+                  <SelectTrigger id="supplier-material-uom" className="mt-1.5 h-10 rounded-lg">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {uoms.map((v) => (
+                      <SelectItem key={v} value={v}>
+                        {v}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 rounded-lg"
+                  onClick={() => setDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  className="h-10 rounded-lg"
+                  disabled={saving || !form.code.trim() || !form.name.trim() || !form.uom}
+                >
+                  {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+                  {editing ? "Save Changes" : "Save Material"}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={Boolean(details)} onOpenChange={(open) => !open && setDetails(null)}>
+          <DialogContent className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-lg overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
+            <DialogHeader>
+              <DialogTitle>Material Details</DialogTitle>
+            </DialogHeader>
+            {details && (
+              <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+                {[
+                  ["Material Code", details.code],
+                  ["Material Name", details.name],
+                  ["UOM", details.uom],
+                ].map(([label, value]) => (
+                  <div key={String(label)}>
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="font-semibold">{String(value)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+        <AlertDialog
+          open={Boolean(pendingAction)}
+          onOpenChange={(open) => !open && setPendingAction(null)}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {pendingAction?.type === "delete" ? "Delete material?" : "Change material status?"}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {pendingAction?.type === "delete"
+                  ? `Delete ${pendingAction.material?.code}? This cannot be undone. Materials referenced by transactions will be deactivated instead.`
+                  : `Deactivate this material? It will no longer be available for new ASN submissions.`}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => void confirmPendingAction()}>
+                {pendingAction?.type === "delete" ? "Delete" : "Confirm"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </AppShell>
+    </TooltipProvider>
   );
 }

@@ -62,7 +62,7 @@ class Settings(BaseSettings):
 
     # --- Gemini document extraction ------------------------------------------
     gemini_api_key: str = Field(default="")
-    gemini_model: str = Field(default="gemini-3.8-flash")
+    gemini_model: str = Field(default="gemini-3.1-flash-lite-preview")
 
     # --- CORS ------------------------------------------------------------------
     cors_allow_origins: List[str] = Field(default_factory=lambda: ["http://localhost:8080", "http://127.0.0.1:8080"])

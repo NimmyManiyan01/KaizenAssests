@@ -36,7 +36,6 @@ from app.modules.receiving.infrastructure.persistence.models import (
     GrnModel,
     InventoryReceiptPostingModel,
 )
-from app.modules.quarantine.infrastructure.persistence.models import QuarantineRecordModel
 from app.modules.storage.infrastructure.persistence.models import (
     AssemblyRequisitionItemModel,
     AssemblyRequisitionModel,
@@ -1993,27 +1992,8 @@ async def perform_takeaway(
     elif cleaned_mat_code.upper().startswith("QR-"):
         cleaned_mat_code = cleaned_mat_code[3:]
 
-    # A GRN material QR used for warehouse movement must resolve to its own
-    # persisted batch record. Do not silently downgrade an unknown QR to an
-    # item-code-only movement.
-    qr_batch = await uow.session.scalar(
-        select(GrnBatchQrModel).where(
-            or_(
-                GrnBatchQrModel.qr_code == mat_raw,
-                GrnBatchQrModel.qr_payload == mat_raw,
-            )
-        )
-    )
-    looks_like_batch_qr = (
-        mat_raw.upper().startswith("QR-BATCH-")
-        or "BATCH:" in mat_raw.upper()
-        or "BATCH NUMBER:" in mat_raw.upper()
-    )
-    if looks_like_batch_qr and (qr_batch is None or qr_batch.batch_id is None):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Material QR is not linked to a persisted GRN batch record.",
-        )
+    # If cleaned_mat_code is not directly matched, check GrnBatchQr, HandlingUnit, or PutawayTask
+    qr_batch = await uow.session.scalar(select(GrnBatchQrModel).where(GrnBatchQrModel.qr_code == mat_raw))
     if qr_batch and qr_batch.item_code:
         cleaned_mat_code = qr_batch.item_code
         if not batch_number:

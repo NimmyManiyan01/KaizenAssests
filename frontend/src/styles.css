@@ -274,9 +274,7 @@
 }
 
 @layer base {
-  button,
-  a,
-  [role="button"] {
+  button, a, [role="button"] {
     -webkit-tap-highlight-color: transparent;
   }
 

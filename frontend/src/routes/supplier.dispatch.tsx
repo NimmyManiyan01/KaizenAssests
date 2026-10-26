@@ -1,7 +1,8 @@
+import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
-import { Eye, Plus, RefreshCw, X } from "lucide-react";
-import { AppShell } from "@/components/wms/app-shell";
+import { Eye, Loader2, Plus, RefreshCw, X } from "lucide-react";
+import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -9,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
 import {
+  localDateInput,
+  pickupDateError,
   isValidMobileNumber,
   isValidPersonName,
   isValidVehicleNumber,
@@ -31,19 +34,28 @@ function SupplierDispatchPage() {
   const [driverName, setDriverName] = React.useState("");
   const [driverContact, setDriverContact] = React.useState("");
   const [expectedPickupDate, setExpectedPickupDate] = React.useState("");
+  const [pickupDateTouched, setPickupDateTouched] = React.useState(false);
   const [finishedGoods, setFinishedGoods] = React.useState<
     Array<{ code: string; name: string; quantity: number; uom: string }>
   >([]);
+  const [finishedGoodsLoading, setFinishedGoodsLoading] = React.useState(false);
+  const [finishedGoodsError, setFinishedGoodsError] = React.useState<string>();
   const [goods, setGoods] = React.useState([{ name: "", quantity: "", custom: false }]);
   const [dispatchHistory, setDispatchHistory] = React.useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = React.useState(true);
+  const [historyError, setHistoryError] = React.useState<string>();
   const [selectedDispatch, setSelectedDispatch] = React.useState<any | null>(null);
   const dispatchDetailsKey = "kaizen-supplier-dispatch-details";
 
   const loadAssemblyFinishedGoods = React.useCallback(async () => {
+    setFinishedGoodsLoading(true);
+    setFinishedGoodsError(undefined);
     try {
       const rows = await api.getAssemblyFinishedGoods();
-      const available = (Array.isArray(rows) ? rows : [])
+      if (!Array.isArray(rows)) {
+        throw new Error("Finished goods response was invalid.");
+      }
+      const available = rows
         .filter(
           (row: any) =>
             ["AVAILABLE", "QC_APPROVED"].includes(String(row.status).toUpperCase()) &&
@@ -53,25 +65,37 @@ function SupplierDispatchPage() {
           code: row.product_code,
           name: row.product_name || row.product_code,
           quantity: Number(row.quantity),
-          uom: row.uom || "PCS",
+          uom: row.uom || "",
         }))
         .filter(
           (row, index, all) => all.findIndex((candidate) => candidate.code === row.code) === index,
         );
       setFinishedGoods(available);
-    } catch {
+    } catch (error) {
       setFinishedGoods([]);
+      const message =
+        error instanceof Error ? error.message : "Unable to load finished goods from Assembly";
+      setFinishedGoodsError(message);
+      toast.error("Could not load finished goods", { description: message });
+    } finally {
+      setFinishedGoodsLoading(false);
     }
   }, []);
 
   const loadDispatchHistory = React.useCallback(async () => {
     setHistoryLoading(true);
+    setHistoryError(undefined);
     try {
       const response = await api.getSupplierFinishedGoodsDispatchRequests();
-      setDispatchHistory(response || []);
+      if (!Array.isArray(response)) {
+        throw new Error("Dispatch history response was invalid.");
+      }
+      setDispatchHistory(response);
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to load dispatch history";
+      setHistoryError(message);
       toast.error("Could not load dispatch history", {
-        description: error instanceof Error ? error.message : undefined,
+        description: message,
       });
     } finally {
       setHistoryLoading(false);
@@ -109,11 +133,9 @@ function SupplierDispatchPage() {
       );
       return;
     }
-    const pickupDate = /^\d{2}-\d{2}-\d{4}$/.test(expectedPickupDate)
-      ? expectedPickupDate.split("-").reverse().join("-")
-      : expectedPickupDate;
-    if (!pickupDate.trim()) {
-      toast.error("Enter a valid expected pickup date");
+    if (pickupDateError(expectedPickupDate)) {
+      setPickupDateTouched(true);
+      document.getElementById("pickup-date")?.focus();
       return;
     }
     const selectedGood = finishedGoods.find(
@@ -132,7 +154,7 @@ function SupplierDispatchPage() {
         vehicle_number: vehicle,
         driver_name: driver,
         driver_contact: contact,
-        expected_pickup_date: pickupDate,
+        expected_pickup_date: expectedPickupDate,
         /* request metadata is persisted by the supplier request endpoint */
         /* legacy dispatch fields below are intentionally ignored */
         order_number: `SUP-DISPATCH-${Date.now()}`,
@@ -188,8 +210,10 @@ function SupplierDispatchPage() {
       actions={
         <Button
           type="button"
+          className="h-10 rounded-lg"
           onClick={() => {
             void loadAssemblyFinishedGoods();
+            setPickupDateTouched(false);
             setOpen(true);
           }}
         >
@@ -197,43 +221,80 @@ function SupplierDispatchPage() {
         </Button>
       }
     >
-      <Card className="overflow-hidden border-border/70 shadow-sm">
-        <CardHeader className="flex-row items-center justify-between space-y-0">
+      <Card className="overflow-hidden rounded-xl border-border bg-card shadow-sm">
+        <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <CardTitle>Dispatch history</CardTitle>
-            <CardDescription>Track dispatches created by the supplier.</CardDescription>
+            <CardDescription>
+              Track dispatches created by the supplier.
+              {!historyLoading && !historyError && (
+                <>
+                  {" "}
+                  {dispatchHistory.length} dispatch{dispatchHistory.length === 1 ? "" : "es"}.
+                </>
+              )}
+            </CardDescription>
           </div>
-          <Button variant="outline" size="sm" onClick={() => void loadDispatchHistory()}>
-            <RefreshCw className="mr-2 size-4" />
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 rounded-lg"
+            disabled={historyLoading}
+            onClick={() => void loadDispatchHistory()}
+          >
+            {historyLoading ? (
+              <Loader2 className="mr-2 size-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 size-4" />
+            )}
             Refresh
           </Button>
         </CardHeader>
         <CardContent className="p-0">
           {historyLoading ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">
+            <div
+              className="flex min-h-48 items-center justify-center text-sm text-muted-foreground"
+              role="status"
+            >
+              <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
               Loading dispatch history…
             </div>
+          ) : historyError ? (
+            <div className="p-6 text-center sm:p-8" role="alert">
+              <p className="font-medium text-destructive">Dispatch history could not be loaded.</p>
+              <p className="mt-2 text-sm text-muted-foreground">{historyError}</p>
+              <Button
+                type="button"
+                className="mt-4 h-10 rounded-lg"
+                onClick={() => void loadDispatchHistory()}
+              >
+                Try again
+              </Button>
+            </div>
           ) : dispatchHistory.length === 0 ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">
-              No dispatches created yet.
+            <div className="p-8 text-center">
+              <h3 className="text-base font-semibold">No dispatches yet</h3>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Dispatches you create will appear here.
+              </p>
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="border-y bg-muted/30 text-xs uppercase text-muted-foreground">
+              <table className="w-full min-w-[760px] text-left text-sm">
+                <thead className="border-y bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   <tr>
-                    <th className="px-5 py-3">Dispatch</th>
-                    <th className="px-5 py-3">Finished goods</th>
-                    <th className="px-5 py-3">Vehicle</th>
-                    <th className="px-5 py-3">Driver</th>
-                    <th className="px-5 py-3">Status</th>
-                    <th className="px-5 py-3">Created</th>
-                    <th className="px-5 py-3">Action</th>
+                    <th className="whitespace-nowrap px-5 py-3">Dispatch</th>
+                    <th className="whitespace-nowrap px-5 py-3">Finished goods</th>
+                    <th className="whitespace-nowrap px-5 py-3">Vehicle</th>
+                    <th className="whitespace-nowrap px-5 py-3">Driver</th>
+                    <th className="whitespace-nowrap px-5 py-3">Status</th>
+                    <th className="whitespace-nowrap px-5 py-3">Created</th>
+                    <th className="whitespace-nowrap px-5 py-3">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {dispatchHistory.map((dispatch) => (
-                    <tr key={dispatch.id}>
+                    <tr key={dispatch.id} className="transition-colors hover:bg-muted/20">
                       <td className="px-5 py-3 font-mono font-semibold text-primary">
                         {dispatch.dispatch_number || dispatch.order_number || "—"}
                       </td>
@@ -241,7 +302,7 @@ function SupplierDispatchPage() {
                         {(dispatch.items || [])
                           .map(
                             (item: any) =>
-                              `${item.material_name || item.material_code} (${item.quantity_ordered ?? 0})`,
+                              `${item.material_name || item.material_code || "Finished good"} (${item.quantity_ordered ?? "—"}${item.uom ? ` ${item.uom}` : ""})`,
                           )
                           .join(", ") || "—"}
                       </td>
@@ -251,7 +312,9 @@ function SupplierDispatchPage() {
                       <td className="px-5 py-3">
                         {dispatch.driver_name || dispatch.contact_person || "—"}
                       </td>
-                      <td className="px-5 py-3">{dispatch.status || "—"}</td>
+                      <td className="px-5 py-3">
+                        <StatusBadge status={dispatch.status || "—"} />
+                      </td>
                       <td className="px-5 py-3">
                         {dispatch.created_at
                           ? new Date(dispatch.created_at).toLocaleDateString()
@@ -259,8 +322,9 @@ function SupplierDispatchPage() {
                       </td>
                       <td className="px-5 py-3">
                         <Button
+                          type="button"
                           variant="outline"
-                          size="sm"
+                          className="h-9 rounded-lg"
                           onClick={() => setSelectedDispatch(dispatch)}
                         >
                           <Eye className="mr-1.5 size-4" />
@@ -276,44 +340,56 @@ function SupplierDispatchPage() {
         </CardContent>
       </Card>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Create Dispatch</DialogTitle>
           </DialogHeader>
           <form onSubmit={submitDispatch} className="space-y-5">
-            <div>
-              <Label htmlFor="pickup-date">Expected pickup date</Label>
+            <div className="space-y-1.5">
+              <span className="inline-flex items-center"><Label htmlFor="pickup-date">Expected pickup date *</Label><InformationTooltip help="pickupDate" /></span>
               <Input
                 id="pickup-date"
+                className="h-10 rounded-lg"
                 required
                 type="date"
+                min={localDateInput()}
+                max="9999-12-31"
                 value={expectedPickupDate}
                 onChange={(e) => setExpectedPickupDate(e.target.value)}
+                onBlur={() => setPickupDateTouched(true)}
+                aria-invalid={pickupDateTouched && !!pickupDateError(expectedPickupDate)}
+                aria-describedby="pickup-date-error"
               />
+              {pickupDateTouched && pickupDateError(expectedPickupDate) && (
+                <p id="pickup-date-error" role="alert" className="text-xs text-rose-600">{pickupDateError(expectedPickupDate)}</p>
+              )}
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div>
-                <Label htmlFor="vehicle-number">Vehicle number</Label>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="vehicle-number">Vehicle number *</Label>
                 <Input
                   id="vehicle-number"
+                  className="h-10 rounded-lg"
                   required
                   value={vehicleNumber}
                   onChange={(e) => setVehicleNumber(sanitizeVehicleNumber(e.target.value))}
                 />
               </div>
-              <div>
-                <Label htmlFor="driver-name">Driver name</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="driver-name">Driver name *</Label>
                 <Input
                   id="driver-name"
+                  className="h-10 rounded-lg"
                   required
                   value={driverName}
                   onChange={(e) => setDriverName(sanitizePersonName(e.target.value))}
                 />
               </div>
-              <div>
-                <Label htmlFor="driver-contact">Driver contact</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="driver-contact">Driver contact *</Label>
                 <Input
                   id="driver-contact"
+                  className="h-10 rounded-lg"
                   required
                   type="tel"
                   maxLength={10}
@@ -323,53 +399,100 @@ function SupplierDispatchPage() {
               </div>
             </div>
             <div className="space-y-3">
-              <h3 className="font-semibold">Finished goods</h3>
-              {goods.map((item, index) => (
-                <div className="flex gap-2" key={index}>
-                  <select
-                    required
-                    className="h-10 w-full min-w-[220px] flex-[2] rounded-md border bg-background px-3 text-sm"
-                    value={item.name}
-                    onChange={(e) =>
-                      setGoods((rows) =>
-                        rows.map((row, i) =>
-                          i === index ? { ...row, name: e.target.value, custom: false } : row,
-                        ),
-                      )
-                    }
+              <div>
+                <h3 className="font-semibold">Finished goods</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Choose from available stock in Assembly and enter the quantity being dispatched.
+                </p>
+              </div>
+              {finishedGoodsError && (
+                <div
+                  className="flex flex-col gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 sm:flex-row sm:items-center sm:justify-between"
+                  role="alert"
+                >
+                  <p className="text-sm text-destructive">
+                    Finished goods could not be loaded. {finishedGoodsError}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 rounded-lg"
+                    disabled={finishedGoodsLoading}
+                    onClick={() => void loadAssemblyFinishedGoods()}
                   >
-                    <option value="">
-                      {finishedGoods.length
-                        ? "Select finished good"
-                        : "No finished goods available in Assembly"}
-                    </option>
-                    {finishedGoods.map((good) => (
-                      <option key={good.code} value={good.name}>
-                        {good.name} ({good.quantity} {good.uom})
+                    {finishedGoodsLoading && <Loader2 className="mr-2 size-4 animate-spin" />}
+                    Retry
+                  </Button>
+                </div>
+              )}
+              {!finishedGoodsLoading && !finishedGoodsError && finishedGoods.length === 0 && (
+                <p className="rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+                  No finished goods are currently available in Assembly.
+                </p>
+              )}
+              {goods.map((item, index) => (
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto]" key={index}>
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`finished-good-${index}`}>Finished good *</Label>
+                    <select
+                      id={`finished-good-${index}`}
+                      required
+                      disabled={finishedGoodsLoading || finishedGoods.length === 0}
+                      className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                      value={item.name}
+                      onChange={(e) =>
+                        setGoods((rows) =>
+                          rows.map((row, i) =>
+                            i === index ? { ...row, name: e.target.value, custom: false } : row,
+                          ),
+                        )
+                      }
+                    >
+                      <option value="">
+                        {finishedGoodsLoading
+                          ? "Loading finished goods…"
+                          : finishedGoodsError
+                            ? "Finished goods unavailable"
+                            : finishedGoods.length
+                              ? "Select a finished good"
+                              : "No finished goods available"}
                       </option>
-                    ))}
-                  </select>
-                  <Input
-                    required
-                    className="min-w-0 flex-1"
-                    min="0.01"
-                    step="any"
-                    type="number"
-                    placeholder="Quantity"
-                    value={item.quantity}
-                    onChange={(e) =>
-                      setGoods((rows) =>
-                        rows.map((row, i) =>
-                          i === index ? { ...row, quantity: e.target.value } : row,
-                        ),
-                      )
-                    }
-                  />
+                      {finishedGoods.map((good) => (
+                        <option key={good.code} value={good.name}>
+                          {good.name} ({good.quantity}
+                          {good.uom ? ` ${good.uom}` : ""})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`finished-good-quantity-${index}`}>Quantity *</Label>
+                    <Input
+                      id={`finished-good-quantity-${index}`}
+                      aria-label={`Quantity for finished good ${index + 1}`}
+                      required
+                      className="h-10 rounded-lg text-right"
+                      min="0.01"
+                      step="any"
+                      type="number"
+                      placeholder="Quantity"
+                      value={item.quantity}
+                      onChange={(e) =>
+                        setGoods((rows) =>
+                          rows.map((row, i) =>
+                            i === index ? { ...row, quantity: e.target.value } : row,
+                          ),
+                        )
+                      }
+                    />
+                  </div>
                   {goods.length > 1 && (
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
+                      className="mt-auto rounded-lg"
+                      aria-label={`Remove finished good ${index + 1}`}
                       onClick={() => setGoods((rows) => rows.filter((_, i) => i !== index))}
                     >
                       <X className="size-4" />
@@ -378,11 +501,21 @@ function SupplierDispatchPage() {
                 </div>
               ))}
             </div>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+            <div className="flex flex-col-reverse justify-end gap-2 sm:flex-row">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 rounded-lg"
+                onClick={() => setOpen(false)}
+              >
                 Cancel
               </Button>
-              <Button type="submit" disabled={submitting}>
+              <Button
+                type="submit"
+                className="h-10 rounded-lg"
+                disabled={submitting || finishedGoodsLoading || finishedGoods.length === 0 || !!pickupDateError(expectedPickupDate)}
+              >
+                {submitting && <Loader2 className="mr-2 size-4 animate-spin" />}
                 {submitting ? "Creating…" : "Create Dispatch"}
               </Button>
             </div>
@@ -393,13 +526,13 @@ function SupplierDispatchPage() {
         open={Boolean(selectedDispatch)}
         onOpenChange={(value) => !value && setSelectedDispatch(null)}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Dispatch details</DialogTitle>
           </DialogHeader>
           {selectedDispatch && (
             <div className="space-y-4 text-sm">
-              <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-3">
+              <div className="grid grid-cols-1 gap-4 rounded-lg border border-border bg-muted/20 p-4 sm:grid-cols-2">
                 <div>
                   <p className="text-xs text-muted-foreground">Dispatch number</p>
                   <p className="font-mono font-semibold">
@@ -408,7 +541,7 @@ function SupplierDispatchPage() {
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Status</p>
-                  <p className="font-semibold">{selectedDispatch.status || "—"}</p>
+                  <StatusBadge status={selectedDispatch.status || "—"} />
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Vehicle number</p>
@@ -430,15 +563,23 @@ function SupplierDispatchPage() {
                       : "—"}
                   </p>
                 </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Expected pickup</p>
+                  <p>
+                    {selectedDispatch.expected_pickup_date
+                      ? new Date(selectedDispatch.expected_pickup_date).toLocaleDateString()
+                      : "—"}
+                  </p>
+                </div>
               </div>
               <div>
                 <h3 className="mb-2 font-semibold">Finished goods</h3>
-                <div className="overflow-hidden rounded-lg border">
-                  <table className="w-full text-left">
-                    <thead className="bg-muted/30 text-xs uppercase text-muted-foreground">
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full min-w-[420px] text-left text-sm">
+                    <thead className="bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                       <tr>
                         <th className="px-3 py-2">Material</th>
-                        <th className="px-3 py-2">Quantity</th>
+                        <th className="px-3 py-2 text-right">Quantity</th>
                         <th className="px-3 py-2">UOM</th>
                       </tr>
                     </thead>
@@ -448,10 +589,19 @@ function SupplierDispatchPage() {
                           <td className="px-3 py-2">
                             {item.material_name || item.material_code || "—"}
                           </td>
-                          <td className="px-3 py-2">{item.quantity_ordered ?? 0}</td>
-                          <td className="px-3 py-2">{item.uom || "PCS"}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {item.quantity_ordered ?? "—"}
+                          </td>
+                          <td className="px-3 py-2">{item.uom || "—"}</td>
                         </tr>
                       ))}
+                      {!selectedDispatch.items?.length && (
+                        <tr>
+                          <td colSpan={3} className="px-3 py-4 text-center text-muted-foreground">
+                            No finished goods listed for this dispatch.
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>

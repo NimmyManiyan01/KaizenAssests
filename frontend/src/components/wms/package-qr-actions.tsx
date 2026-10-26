@@ -32,7 +32,7 @@ export function PackageQrActions({ packageNumber }: { packageNumber?: string }) 
   const print = () => {
     if (!ready || !image) return;
     const popup = window.open("", "_blank", "width=700,height=700");
-    if (!popup) { toast.error("Allow pop-ups to print the package QR."); return; }
+    if (!popup) return toast.error("Allow pop-ups to print the package QR.");
     const doc = popup.document;
     doc.title = `Package QR - ${image.number}`;
     const style = doc.createElement("style");

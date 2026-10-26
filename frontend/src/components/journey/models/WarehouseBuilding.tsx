@@ -1,10 +1,9 @@
 import { WarehouseCompound } from "./WarehouseCompound";
 import { WarehouseRoof } from "./WarehouseRoof";
-import { StaticMeshBatch } from "../StaticMeshBatch";
 
 export function WarehouseBuilding() {
   return (
-    <StaticMeshBatch>
+    <group>
       <WarehouseCompound />
       <WarehouseRoof />
       {/* ─── GROUND / FLOORS ─── */}
@@ -71,7 +70,13 @@ export function WarehouseBuilding() {
       {[-8, 0, 8].map((lx, i) => (
         <mesh key={i} position={[lx, 0.01, -145]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.15, 280]} />
-          <meshStandardMaterial color="#ddd4a9" transparent opacity={0.35} />
+          <meshStandardMaterial
+            color="#06b6d4"
+            emissive="#0891b2"
+            emissiveIntensity={0.4}
+            transparent
+            opacity={0.35}
+          />
         </mesh>
       ))}
 
@@ -92,7 +97,7 @@ export function WarehouseBuilding() {
           <group key={x} position={[x, 0, 0]}>
             <mesh position={[0, -4.15, 0.64]} castShadow>
               <boxGeometry args={[16, 1.7, 0.12]} />
-              <meshStandardMaterial color="#243747" roughness={0.82} metalness={0.15} />
+              <meshStandardMaterial color="#247984" roughness={0.55} />
             </mesh>
             {Array.from({ length: 15 }, (_, i) => (
               <mesh key={i} position={[i - 7, 0.7, 0.64]} castShadow>
@@ -105,12 +110,12 @@ export function WarehouseBuilding() {
         {/* Lintel Beam above Portal */}
         <mesh position={[0, 3.5, 0]} castShadow receiveShadow>
           <boxGeometry args={[16, 3, 1.4]} />
-          <meshStandardMaterial color="#243747" roughness={0.65} metalness={0.3} />
+          <meshStandardMaterial color="#187d86" roughness={0.45} metalness={0.3} />
         </mesh>
         {/* Illuminated Nexus Portal Header Sign */}
         <mesh position={[0, 3.6, 0.75]}>
           <boxGeometry args={[8, 0.9, 0.1]} />
-          <meshStandardMaterial color="#101923" emissive="#36c8e5" emissiveIntensity={0.15} />
+          <meshStandardMaterial color="#0f172a" emissive="#38bdf8" emissiveIntensity={1.8} />
         </mesh>
       </group>
 
@@ -148,6 +153,6 @@ export function WarehouseBuilding() {
           ))}
         </group>
       ))}
-    </StaticMeshBatch>
+    </group>
   );
 }

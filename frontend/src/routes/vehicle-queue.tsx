@@ -16,14 +16,7 @@ import {
 } from "lucide-react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
@@ -148,17 +141,10 @@ function InboundArrivals() {
   const [submittingWebEntry, setSubmittingWebEntry] = useState(false);
   const [generatedGatePass, setGeneratedGatePass] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (typeof search?.search === "string") setSearchQuery(search.search);
-  }, [search?.search]);
-
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      const [arrivalRows, dockRows] = await Promise.all([
-        api.getInboundArrivals(true),
-        api.getDocks(),
-      ]);
+      const [arrivalRows, dockRows] = await Promise.all([api.getInboundArrivals(true), api.getDocks()]);
       setArrivals(arrivalRows);
       setDocks(dockRows);
     } catch (error) {
@@ -186,19 +172,14 @@ function InboundArrivals() {
       arrival.supplier_name,
       arrival.vehicle_number,
       arrival.driver_name,
-    ].some((value) =>
-      String(value || "")
-        .toLowerCase()
-        .includes(query),
-    );
+    ].some((value) => String(value || "").toLowerCase().includes(query));
   });
   const totalArrivalPages = Math.max(1, Math.ceil(filteredArrivals.length / arrivalsPerPage));
   const visibleArrivals = filteredArrivals.slice(
     (arrivalPage - 1) * arrivalsPerPage,
     arrivalPage * arrivalsPerPage,
   );
-  const firstVisibleArrival =
-    filteredArrivals.length === 0 ? 0 : (arrivalPage - 1) * arrivalsPerPage + 1;
+  const firstVisibleArrival = filteredArrivals.length === 0 ? 0 : (arrivalPage - 1) * arrivalsPerPage + 1;
   const lastVisibleArrival = Math.min(arrivalPage * arrivalsPerPage, filteredArrivals.length);
 
   useEffect(() => {
@@ -308,12 +289,6 @@ function InboundArrivals() {
   const lookupAsn = async (value: string) => {
     const number = value.trim();
     if (!number) return;
-    if (!/^ASN-\d{4}-\d+$/i.test(number)) {
-      toast.error("Invalid ASN format", {
-        description: "Use the format ASN-YYYY-N, for example ASN-2026-1.",
-      });
-      return;
-    }
     const local = asnRecords.find(
       (asn) => String(asn.asn_number).toLowerCase() === number.toLowerCase(),
     );
@@ -418,7 +393,10 @@ function InboundArrivals() {
     const upper = (statusStr || "").toUpperCase().trim();
     // Security may release an inbound vehicle only after receiving/GRN is
     // complete and the warehouse has released its dock assignment.
-    return ["RECEIVING_COMPLETED", "DOCK_RELEASED"].includes(upper);
+    return [
+      "RECEIVING_COMPLETED",
+      "DOCK_RELEASED",
+    ].includes(upper);
   };
 
   async function approveGateExit(arrival: Arrival) {
@@ -434,23 +412,17 @@ function InboundArrivals() {
     );
     if (!matchingArrival) {
       setExitVerified(false);
-      toast.error("Gate pass not found", {
-        description: "Enter or scan the active gate pass for this vehicle.",
-      });
+      toast.error("Gate pass not found", { description: "Enter or scan the active gate pass for this vehicle." });
       return;
     }
     if (matchingArrival.id !== exitTarget?.id) {
       setExitVerified(false);
-      toast.error("Wrong gate pass", {
-        description: "This pass does not belong to the selected vehicle.",
-      });
+      toast.error("Wrong gate pass", { description: "This pass does not belong to the selected vehicle." });
       return;
     }
     if (!isEligibleForInboundExit(matchingArrival.status)) {
       setExitVerified(false);
-      toast.error("Vehicle is not ready for exit", {
-        description: "GRN/receiving must be completed and the dock must be released first.",
-      });
+      toast.error("Vehicle is not ready for exit", { description: "GRN/receiving must be completed and the dock must be released first." });
       return;
     }
     setExitTarget(matchingArrival);
@@ -478,7 +450,7 @@ function InboundArrivals() {
       setExitVerified(false);
     } catch (error: any) {
       toast.error("Gate exit approval failed", {
-        description:
+          description:
           error?.message || "Ensure receiving/unloading is complete before approving vehicle exit.",
       });
     } finally {
@@ -574,10 +546,7 @@ function InboundArrivals() {
             >
               Previous
             </Button>
-            <span
-              aria-label="Current page"
-              className="min-w-8 text-center font-medium text-foreground"
-            >
+            <span aria-label="Current page" className="min-w-8 text-center font-medium text-foreground">
               {arrivalPage}
             </span>
             <Button
@@ -599,61 +568,21 @@ function InboundArrivals() {
         <DialogContent className="max-w-md rounded-2xl bg-card p-6 shadow-2xl">
           <DialogHeader>
             <DialogTitle>Vehicle Gate Exit</DialogTitle>
-            <DialogDescription>
-              Enter the gate pass generated during gate entry to complete vehicle exit.
-            </DialogDescription>
+            <DialogDescription>Enter the gate pass generated during gate entry to complete vehicle exit.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-3">
             <div>
               <Label htmlFor="exit-gate-pass">Gate Pass Number *</Label>
               <div className="flex gap-2">
-                <Input
-                  id="exit-gate-pass"
-                  value={exitPass}
-                  onChange={(e) => {
-                    setExitPass(e.target.value.toUpperCase());
-                    setExitVerified(false);
-                  }}
-                  placeholder="Enter or scan gate pass number"
-                  autoFocus
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={!exitPass.trim()}
-                  onClick={verifyGatePass}
-                >
-                  Verify
-                </Button>
+                <Input id="exit-gate-pass" value={exitPass} onChange={(e) => { setExitPass(e.target.value.toUpperCase()); setExitVerified(false); }} placeholder="Enter or scan gate pass number" autoFocus />
+                <Button type="button" variant="outline" disabled={!exitPass.trim()} onClick={verifyGatePass}>Verify</Button>
               </div>
             </div>
-            {exitVerified && exitTarget && (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
-                <p>
-                  <b>Gate pass verified:</b> {exitTarget.gate_entry_number}
-                </p>
-                <p>
-                  <b>Vehicle:</b> {exitTarget.vehicle_number || "—"}
-                </p>
-                <p>
-                  <b>Driver:</b> {exitTarget.driver_name || "—"}
-                </p>
-                <p>
-                  <b>Status:</b> {exitTarget.status.replaceAll("_", " ")}
-                </p>
-              </div>
-            )}
+            {exitVerified && exitTarget && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950"><p><b>Gate pass verified:</b> {exitTarget.gate_entry_number}</p><p><b>Vehicle:</b> {exitTarget.vehicle_number || "—"}</p><p><b>Driver:</b> {exitTarget.driver_name || "—"}</p><p><b>Status:</b> {exitTarget.status.replaceAll("_", " ")}</p></div>}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setExitTarget(null)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={!exitVerified || Boolean(assigning)}
-              onClick={() => void confirmGateExit()}
-            >
-              {assigning ? "Processing…" : "Confirm Exit"}
-            </Button>
+            <Button variant="outline" onClick={() => setExitTarget(null)}>Cancel</Button>
+            <Button disabled={!exitVerified || Boolean(assigning)} onClick={() => void confirmGateExit()}>{assigning ? "Processing…" : "Confirm Exit"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1038,10 +967,7 @@ function InboundArrivals() {
                   )}
                   {uploadedVehiclePhoto && (
                     <p className="mt-1 text-[10px] font-bold text-emerald-600">
-                      ✓{" "}
-                      {uploadedVehiclePhoto.startsWith("vehicle-photo-")
-                        ? "vehicle-photo-captured"
-                        : uploadedVehiclePhoto}
+                      ✓ {uploadedVehiclePhoto.startsWith("vehicle-photo-") ? "vehicle-photo-captured" : uploadedVehiclePhoto}
                     </p>
                   )}
                   {vehiclePhotoPreview && (
@@ -1208,10 +1134,7 @@ function InboundArrivals() {
                   />
                   {uploadedVehiclePhoto && (
                     <p className="text-[10px] font-bold text-emerald-600 mt-1">
-                      ✓{" "}
-                      {uploadedVehiclePhoto.startsWith("vehicle-photo-")
-                        ? "vehicle-photo-captured"
-                        : uploadedVehiclePhoto}
+                      ✓ {uploadedVehiclePhoto.startsWith("vehicle-photo-") ? "vehicle-photo-captured" : uploadedVehiclePhoto}
                     </p>
                   )}
                 </div>
@@ -1305,28 +1228,15 @@ function InboundArrivals() {
             </Button>
             <Button
               className="w-full rounded-xl"
-              disabled={
-                !arrivals.some(
-                  (arrival) =>
-                    arrival.gate_entry_number === generatedGatePass &&
-                    isEligibleForInboundExit(arrival.status),
-                )
-              }
+              disabled={!arrivals.some((arrival) => arrival.gate_entry_number === generatedGatePass && isEligibleForInboundExit(arrival.status))}
               title="Exit becomes available after GRN/receiving is complete and the dock is released"
               onClick={async () => {
                 const rows = await api.getInboundArrivals();
-                const arrival = rows.find(
-                  (row: Arrival) => row.gate_entry_number === generatedGatePass,
-                );
+                const arrival = rows.find((row: Arrival) => row.gate_entry_number === generatedGatePass);
                 setGeneratedGatePass(null);
                 if (arrival && isEligibleForInboundExit(arrival.status)) setExitTarget(arrival);
-                else if (arrival)
-                  toast.error("Exit is not ready", {
-                    description:
-                      "GRN/receiving must be completed and the dock must be released first.",
-                  });
-                else
-                  toast.error("Gate pass was created, but its active visit could not be loaded.");
+                else if (arrival) toast.error("Exit is not ready", { description: "GRN/receiving must be completed and the dock must be released first." });
+                else toast.error("Gate pass was created, but its active visit could not be loaded.");
               }}
             >
               Exit Vehicle
@@ -1422,13 +1332,7 @@ function ArrivalRows({
         </td>
         <td className="px-4 py-4">
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              className="rounded-lg whitespace-nowrap"
-              onClick={onToggle}
-              aria-label={`View details for ${arrival.gate_entry_number || arrival.asn_number}`}
-            >
+            <Button size="sm" variant="outline" className="rounded-lg whitespace-nowrap" onClick={onToggle} aria-label={`View details for ${arrival.gate_entry_number || arrival.asn_number}`}>
               <Eye className="size-3.5" /> Details
             </Button>
             {!isExited && (
@@ -1438,11 +1342,7 @@ function ArrivalRows({
                 disabled={busy || !isEligibleForInboundExit(arrival.status)}
                 onClick={() => onApproveExit(arrival)}
                 aria-label={`Exit vehicle ${arrival.vehicle_number || ""}`}
-                title={
-                  isEligibleForInboundExit(arrival.status)
-                    ? "Enter and verify the gate pass to complete vehicle exit"
-                    : "Vehicle is not ready for exit"
-                }
+                title={isEligibleForInboundExit(arrival.status) ? "Enter and verify the gate pass to complete vehicle exit" : "Vehicle is not ready for exit"}
               >
                 <ShieldCheck className="size-3.5" /> Exit
               </Button>

@@ -113,7 +113,6 @@ export function JourneyRoadmap3D({
       {/* ─── 4. THE 7 MILESTONE NODES ALONG THE ROADMAP ─── */}
       {stages.map((stage, idx) => {
         const pt = milestonePoints[idx];
-        if (!pt) return null;
         const isActive = idx === activeIndex;
         const isCompleted = idx < activeIndex;
 
