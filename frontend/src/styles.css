@@ -348,12 +348,42 @@
   }
 }
 
+@keyframes dock-banner-blink {
+  0%, 100% {
+    opacity: 1;
+    border-color: rgba(245, 158, 11, 0.95);
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.4), 0 4px 14px -2px rgba(245, 158, 11, 0.3);
+  }
+  50% {
+    opacity: 0.55;
+    border-color: rgba(239, 68, 68, 0.8);
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.25), 0 4px 20px -2px rgba(239, 68, 68, 0.35);
+  }
+}
+
+@keyframes dock-badge-blink {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.97);
+  }
+}
+
 @layer utilities {
   .animate-fade-up {
     animation: wms-fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
   }
   .animate-pulse-ring {
     animation: wms-pulse-ring 2s infinite;
+  }
+  .animate-dock-blink {
+    animation: dock-banner-blink 1.3s ease-in-out infinite;
+  }
+  .animate-dock-badge-blink {
+    animation: dock-badge-blink 1s ease-in-out infinite;
   }
   .page-enter {
     animation: wms-fade-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;

@@ -477,7 +477,9 @@ function Notifications() {
   };
 
   const handleOpenNotificationDetails = (notification: any) => {
-    const isDamage = /damage/i.test(`${notification.title || ""} ${notification.message || ""}`) || notification.type === "damaged_goods";
+    const isDamage =
+      /damage/i.test(`${notification.title || ""} ${notification.message || ""}`) ||
+      notification.type === "damaged_goods";
     if (isDamage) {
       setSelectedDamageNotif(notification);
       setShowDamageModal(true);
@@ -651,7 +653,7 @@ function Notifications() {
                 key={`${n.type || n.notification_type || "workflow"}-${n.id || "notification"}-${index}`}
                 onClick={() => handleOpenNotificationDetails(n)}
                 className={cn(
-                  "relative overflow-hidden border-border/50 p-5 cursor-pointer hover:border-primary/40 transition-all space-y-4",
+                  "relative overflow-hidden border-border/50 p-5 transition-all space-y-4",
                   !n.is_read && "bg-primary-soft/5 border-primary/20",
                   isDamage && "border-rose-500/30 bg-rose-500/5 hover:border-rose-500/60",
                 )}

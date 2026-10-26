@@ -26,6 +26,8 @@ import {
   Tag,
   Download,
   Printer,
+  Truck,
+  ArrowRight,
 } from "lucide-react";
 import { AssemblyRequisitionsPanel } from "@/components/wms/assembly-requisitions-panel";
 import { AppShell } from "@/components/wms/app-shell";
@@ -1168,6 +1170,10 @@ function SimpleWarehouseModule() {
   const pendingPickingCount = pickupTasks.filter(
     (p) => p.status === "PENDING" || p.status === "IN_PROGRESS",
   ).length;
+  const pendingDockAllocationsCount = dockRequests.length;
+  const availableDocksCount = docks.filter((d) => d.status === "AVAILABLE").length;
+  const occupiedDocksCount = docks.filter((d) => ["OCCUPIED", "RESERVED"].includes(d.status)).length;
+  const totalDocksCount = docks.length;
   const inventoryByCategory = useMemo(() => {
     const totals = new Map<string, number>();
     for (const item of inventorySummary) {
@@ -1391,6 +1397,109 @@ function SimpleWarehouseModule() {
           {/* 1. DASHBOARD TAB */}
           {/* ========================================================================= */}
           <TabsContent value="dashboard" className="mt-5 space-y-4">
+            {/* Horizontal Dock Allocation Status Banner */}
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => navigate({ to: "/dock-management" })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  navigate({ to: "/dock-management" });
+                }
+              }}
+              title={
+                pendingDockAllocationsCount > 0
+                  ? "Docks need to be allocated! Click to open Dock Allocation."
+                  : "Click to open Dock Management & Allocation."
+              }
+              aria-label={
+                pendingDockAllocationsCount > 0
+                  ? `${pendingDockAllocationsCount} vehicle allocations pending. Click to open dock allocation.`
+                  : "Dock allocation status operational. Click to open dock management."
+              }
+              className={cn(
+                "group relative flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl border p-4 sm:px-5 sm:py-3.5 transition-all duration-300 cursor-pointer shadow-xs hover:shadow-md",
+                pendingDockAllocationsCount > 0
+                  ? "animate-dock-blink border-amber-400 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/15 text-amber-950 dark:border-amber-500/70 dark:bg-amber-950/40 dark:text-amber-100 ring-2 ring-amber-400/40"
+                  : "border-slate-200 bg-gradient-to-r from-sky-50/80 via-white to-blue-50/60 text-slate-800 hover:border-blue-300 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100 dark:hover:border-slate-700"
+              )}
+            >
+              <div className="flex items-center gap-3.5">
+                <div
+                  className={cn(
+                    "flex size-11 shrink-0 items-center justify-center rounded-xl border transition-transform duration-300 group-hover:scale-105",
+                    pendingDockAllocationsCount > 0
+                      ? "border-amber-400 bg-amber-500 text-white shadow-sm"
+                      : "border-blue-200 bg-blue-100 text-blue-700 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-300"
+                  )}
+                >
+                  <Truck className="size-5" />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Dock Allocation Status
+                    </span>
+                    {pendingDockAllocationsCount > 0 ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-amber-900 dark:text-amber-200 border border-amber-400/50 animate-dock-badge-blink">
+                        <span className="relative flex h-2 w-2">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-75" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-600" />
+                        </span>
+                        Allocation Required ({pendingDockAllocationsCount})
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 border border-emerald-300/60 dark:border-emerald-800">
+                        <CheckCircle2 className="size-3 text-emerald-600 dark:text-emerald-400" />
+                        All Docks Operational
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    {pendingDockAllocationsCount > 0 ? (
+                      <span>
+                        {pendingDockAllocationsCount}{" "}
+                        {pendingDockAllocationsCount === 1 ? "vehicle" : "vehicles"}{" "}
+                        waiting for dock assignment
+                        {dockRequests[0]?.vehicle_number && (
+                          <span className="ml-1 font-mono font-normal text-xs text-amber-900/80 dark:text-amber-200/80">
+                            (Latest: {dockRequests[0].vehicle_number})
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      <span>
+                        All approved vehicles assigned · {availableDocksCount} of {totalDocksCount} docks available
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {pendingDockAllocationsCount > 0
+                      ? `${availableDocksCount} dock${availableDocksCount === 1 ? "" : "s"} ready for allocation. Click to open dock allocation.`
+                      : `Active utilization: ${occupiedDocksCount} occupied / in-service. Click to open dock management.`}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-2 self-end sm:self-center">
+                <Button
+                  size="sm"
+                  variant={pendingDockAllocationsCount > 0 ? "default" : "outline"}
+                  className={cn(
+                    "pointer-events-none rounded-lg text-xs font-semibold shadow-xs transition-colors",
+                    pendingDockAllocationsCount > 0
+                      ? "bg-amber-600 hover:bg-amber-700 text-white border-transparent"
+                      : "border-slate-200 dark:border-slate-700"
+                  )}
+                  tabIndex={-1}
+                >
+                  <span>{pendingDockAllocationsCount > 0 ? "Allocate Dock" : "Manage Docks"}</span>
+                  <ArrowRight className="ml-1.5 size-3.5 transition-transform duration-200 group-hover:translate-x-1" />
+                </Button>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <Card className="rounded-xl border-emerald-200 border-t-4 border-t-emerald-600 bg-gradient-to-br from-emerald-50 to-white p-4 shadow-sm dark:border-emerald-900/60 dark:bg-emerald-950/30">
                 <div className="flex items-center justify-between"><div className="flex items-center"><span className="text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">Available stock</span><InformationTooltip help="availableStockKpi" /></div><CheckCircle2 className="size-5 text-emerald-600" /></div>
