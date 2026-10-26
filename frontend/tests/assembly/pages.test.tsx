@@ -910,9 +910,10 @@ describe("Material request date submission", () => {
     await userEvent.click(screen.getByRole("button", { name: "New Material Request" }));
     const dialog = await screen.findByRole("dialog");
     await within(dialog).findByText("MAT-LAPT-001");
+    const validDate = localDateInput();
     const dateInput = dialog.querySelector('input[type="date"]') as HTMLInputElement;
     await userEvent.clear(dateInput);
-    await userEvent.type(dateInput, "2026-10-24");
+    await userEvent.type(dateInput, validDate);
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Submit Request to Warehouse" }),
     );
@@ -920,7 +921,7 @@ describe("Material request date submission", () => {
       expect(api.createAssemblyMaterialRequest).toHaveBeenCalledWith({
         product_code: "FG-LAPT-001",
         target_quantity: 10,
-        required_date: "2026-10-24",
+        required_date: validDate,
         remarks: "",
       }),
     );
