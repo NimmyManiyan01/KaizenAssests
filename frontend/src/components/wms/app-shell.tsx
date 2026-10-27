@@ -574,7 +574,7 @@ export function AppShell({
           <aside className="relative flex h-full w-[min(84vw,320px)] flex-col border-r border-sidebar-border bg-sidebar shadow-2xl">
             <div className="flex h-16 items-center justify-between gap-2 border-b border-sidebar-border/40 px-4">
               <div className="flex min-w-0 items-center gap-3">
-                <div className="relative flex h-11 w-14 shrink-0 items-center justify-center rounded-xl bg-white p-1 shadow-sm border border-sidebar-border/70">
+                <div className="relative flex h-12 w-16 shrink-0 items-center justify-center rounded-xl bg-white p-1 shadow-sm border border-sidebar-border/70">
                   <img
                     src={logoUrl}
                     alt="KGS Logo"
@@ -653,7 +653,7 @@ export function AppShell({
           {!desktopSidebarCollapsed ? (
             <>
               <div className="flex items-center gap-3 min-w-0">
-                <div className="relative flex h-11 w-14 shrink-0 items-center justify-center rounded-xl bg-white p-1 shadow-sm border border-sidebar-border/70">
+                <div className="relative flex h-12 w-16 shrink-0 items-center justify-center rounded-xl bg-white p-1 shadow-sm border border-sidebar-border/70">
                   <img
                     src={logoUrl}
                     alt="KGS Logo"
@@ -671,7 +671,7 @@ export function AppShell({
               </div>
             </>
           ) : (
-            <div className="relative flex h-11 w-12 shrink-0 items-center justify-center rounded-xl bg-white p-1 shadow-sm border border-sidebar-border/70">
+            <div className="relative flex h-12 w-14 shrink-0 items-center justify-center rounded-xl bg-white p-1 shadow-sm border border-sidebar-border/70">
               <img
                 src={logoUrl}
                 alt="KGS Logo"
