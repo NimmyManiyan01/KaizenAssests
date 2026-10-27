@@ -562,7 +562,7 @@ export function AppShell({
   const desktopSidebarCollapsed = !sidebarHovered;
 
   return (
-    <div className="flex min-h-screen w-full bg-background">
+    <div className={cn("flex min-h-screen w-full bg-background", isWarehouseWorkspace && "warehouse-visual-workspace", (isAssemblyRoute || path.startsWith("/assembly/")) && "assembly-visual-workspace")}>
       {mobileSidebarOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
           <button
@@ -926,7 +926,7 @@ export function AppShell({
         <main className={cn("page-enter flex-1 px-4 py-6 lg:px-7", isWarehouseWorkspace && "px-5 py-5 lg:px-8 lg:py-6")}>
           <div className={cn("mx-auto w-full max-w-[1360px]", isWarehouseWorkspace && "max-w-[1680px]")}>
             {(title || subtitle || actions) && (
-              <div className={cn("mb-6 flex flex-wrap items-end justify-between gap-4", path === "/supplier-dashboard" && "supplier-heading-image")}>
+              <div className={cn("mb-6 flex flex-wrap items-end justify-between gap-4", path === "/supplier-dashboard" && "supplier-heading-image", path === "/assembly-dashboard" && "assembly-dashboard-hero")}>
                 <div>
                   {title && <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">{title}{pageHelp[path] && <InformationTooltip help={pageHelp[path]} placement="title" />}</h1>}
                   {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
