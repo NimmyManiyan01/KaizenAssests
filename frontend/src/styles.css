@@ -1125,7 +1125,7 @@ body:has(.supplier-visual-content) main { background: #F4F7FB; }
 .supplier-asn-material-menu [role="option"][data-highlighted],
 .supplier-asn-material-menu [role="option"][data-state="checked"] { background: #EAF3FC; color: #064B87; }
 /* Warehouse presentation is isolated from supplier, GRN and other modules. */
-.warehouse-visual-workspace {
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) {
   --background: #F4F7FB;
   --foreground: #172B4D;
   --card: #FFFFFF;
@@ -1143,12 +1143,12 @@ body:has(.supplier-visual-content) main { background: #F4F7FB; }
   background: #F4F7FB;
   color: #172B4D;
 }
-.warehouse-visual-workspace main { background: #F4F7FB; }
-.warehouse-visual-workspace > div > header { background: #FFFFFF; border-color: #DFE7F0; }
-.warehouse-visual-workspace aside { background: #064B87; color: #FFFFFF; }
-.warehouse-visual-workspace aside nav a { min-height: 46px; border-radius: 12px; box-shadow: none; }
-.warehouse-visual-workspace aside nav a[class*="bg-sidebar-primary"] { background: #0866B1; color: #FFFFFF; }
-.warehouse-visual-workspace aside nav a svg { color: currentColor; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main { background: #F4F7FB; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) > div > header { background: #FFFFFF; border-color: #DFE7F0; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) aside { background: #064B87; color: #FFFFFF; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) aside nav a { min-height: 46px; border-radius: 12px; box-shadow: none; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) aside nav a[class*="bg-sidebar-primary"] { background: #0866B1; color: #FFFFFF; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) aside nav a svg { color: currentColor; }
 .warehouse-module-hero { min-height: 148px; background: #F4F7FB; color: #172B4D; }
 .warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-module-hero { min-height: 200px; }
 .warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-hero-eyebrow { display: none; }
@@ -1175,49 +1175,49 @@ body:has(.supplier-visual-content) main { background: #F4F7FB; }
 .warehouse-module-hero > div:last-child { align-self: center; }
 .warehouse-module-hero > div:last-child button { height: 44px; width: 44px; border: 1px solid #DFE7F0; border-radius: 11px; background: #FFFFFF; color: #064B87; box-shadow: none; }
 .warehouse-module-hero > div:last-child button:hover { background: #EAF3FC; }
-.warehouse-visual-workspace main [data-slot="card"],
-.warehouse-visual-workspace main [class*="bg-card"][class*="border"],
-.warehouse-visual-workspace main [class*="bg-gradient-"][class*="border"],
-.warehouse-visual-workspace main article {
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main [data-slot="card"],
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main [class*="bg-card"][class*="border"],
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main [class*="bg-gradient-"][class*="border"],
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main article {
   background-color: #FFFFFF;
   background-image: none;
   border-color: #DFE7F0;
   border-radius: 16px;
   box-shadow: 0 2px 6px rgb(23 43 77 / .035);
 }
-.warehouse-visual-workspace main [class*="border-t-4"] { border-top-width: 1px; }
-.warehouse-visual-workspace main h2 { color: #172B4D; font-size: 18px; font-weight: 600; line-height: 1.4; letter-spacing: -.01em; }
-.warehouse-visual-workspace main h3,
-.warehouse-visual-workspace main h4 { color: #172B4D; font-weight: 600; line-height: 1.4; }
-.warehouse-visual-workspace main [class*="font-black"],
-.warehouse-visual-workspace main [class*="font-extrabold"] { font-weight: 600; }
-.warehouse-visual-workspace main [class*="text-slate-900"] { color: #172B4D; }
-.warehouse-visual-workspace main [class*="text-slate-500"],
-.warehouse-visual-workspace main [class*="text-slate-600"] { color: #55585B; }
-.warehouse-visual-workspace main table { font-size: 13px; }
-.warehouse-visual-workspace main thead,
-.warehouse-visual-workspace main thead tr { background: #EAF1F8; }
-.warehouse-visual-workspace main th { padding: 14px 16px; color: #172B4D; font-size: 12px; font-weight: 600; line-height: 1.4; letter-spacing: .01em; border-color: #DFE7F0; }
-.warehouse-visual-workspace main td { padding: 14px 16px; vertical-align: middle; border-color: #DFE7F0; }
-.warehouse-visual-workspace main tbody tr { border-color: #DFE7F0; }
-.warehouse-visual-workspace main tbody tr:hover { background: #F4F8FD; }
-.warehouse-visual-workspace main button { box-shadow: none; }
-.warehouse-visual-workspace main button[class*="bg-primary"],
-.warehouse-visual-workspace main button[class*="bg-indigo-600"],
-.warehouse-visual-workspace main button[class*="bg-blue-600"] { background: #0866B1; color: #FFFFFF; }
-.warehouse-visual-workspace main button[class*="bg-primary"]:hover:not(:disabled),
-.warehouse-visual-workspace main button[class*="bg-indigo-600"]:hover:not(:disabled) { background: #064B87; }
-.warehouse-visual-workspace main input:not([type="checkbox"]):not([type="radio"]),
-.warehouse-visual-workspace main select,
-.warehouse-visual-workspace main [role="combobox"] { min-height: 42px; border-color: #DFE7F0; border-radius: 10px; background: #FFFFFF; color: #172B4D; font-size: 14px; box-shadow: none; }
-.warehouse-visual-workspace main input:focus-visible,
-.warehouse-visual-workspace main select:focus-visible { outline: 2px solid #0866B126; outline-offset: 1px; border-color: #0866B1; }
-.warehouse-visual-workspace .animate-dock-blink,
-.warehouse-visual-workspace .animate-dock-badge-blink { animation: none; }
-.warehouse-visual-workspace main [class*="animate-ping"] { animation: none; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main [class*="border-t-4"] { border-top-width: 1px; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main h2 { color: #172B4D; font-size: 18px; font-weight: 600; line-height: 1.4; letter-spacing: -.01em; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main h3,
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main h4 { color: #172B4D; font-weight: 600; line-height: 1.4; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main [class*="font-black"],
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main [class*="font-extrabold"] { font-weight: 600; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main [class*="text-slate-900"] { color: #172B4D; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main [class*="text-slate-500"],
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main [class*="text-slate-600"] { color: #55585B; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main table { font-size: 13px; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main thead,
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main thead tr { background: #EAF1F8; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main th { padding: 14px 16px; color: #172B4D; font-size: 12px; font-weight: 600; line-height: 1.4; letter-spacing: .01em; border-color: #DFE7F0; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main td { padding: 14px 16px; vertical-align: middle; border-color: #DFE7F0; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main tbody tr { border-color: #DFE7F0; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main tbody tr:hover { background: #F4F8FD; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main button { box-shadow: none; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main button[class*="bg-primary"],
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main button[class*="bg-indigo-600"],
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main button[class*="bg-blue-600"] { background: #0866B1; color: #FFFFFF; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main button[class*="bg-primary"]:hover:not(:disabled),
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main button[class*="bg-indigo-600"]:hover:not(:disabled) { background: #064B87; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main input:not([type="checkbox"]):not([type="radio"]),
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main select,
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main [role="combobox"] { min-height: 42px; border-color: #DFE7F0; border-radius: 10px; background: #FFFFFF; color: #172B4D; font-size: 14px; box-shadow: none; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main input:focus-visible,
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main select:focus-visible { outline: 2px solid #0866B126; outline-offset: 1px; border-color: #0866B1; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) .animate-dock-blink,
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) .animate-dock-badge-blink { animation: none; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main [class*="animate-ping"] { animation: none; }
 /* Radix portals inherit the module treatment only while a warehouse page is open. */
-body:has(.warehouse-visual-workspace) [role="dialog"],
-body:has(.warehouse-visual-workspace) [role="alertdialog"] {
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="dialog"],
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="alertdialog"] {
   border: 1px solid #DFE7F0;
   border-radius: 18px;
   background: #FFFFFF;
@@ -1225,32 +1225,32 @@ body:has(.warehouse-visual-workspace) [role="alertdialog"] {
   font-family: var(--font-sans);
   box-shadow: 0 20px 60px rgb(23 43 77 / .14);
 }
-body:has(.warehouse-visual-workspace) [role="dialog"] h2,
-body:has(.warehouse-visual-workspace) [role="alertdialog"] h2 { color: #172B4D; font-size: 21px; font-weight: 700; line-height: 1.35; letter-spacing: -.015em; }
-body:has(.warehouse-visual-workspace) [role="dialog"] label { color: #172B4D; font-size: 14px; font-weight: 600; }
-body:has(.warehouse-visual-workspace) [role="dialog"] input:not([type="checkbox"]):not([type="radio"]),
-body:has(.warehouse-visual-workspace) [role="dialog"] select,
-body:has(.warehouse-visual-workspace) [role="dialog"] textarea,
-body:has(.warehouse-visual-workspace) [role="dialog"] [role="combobox"] { min-height: 44px; border-color: #DFE7F0; border-radius: 10px; background: #FFFFFF; color: #172B4D; font-size: 14px; box-shadow: none; }
-body:has(.warehouse-visual-workspace) [role="dialog"] input[readonly] { background: #EAF3FC; color: #064B87; }
-body:has(.warehouse-visual-workspace) [role="dialog"] [aria-invalid="true"] { border-color: #BC2034; }
-body:has(.warehouse-visual-workspace) [role="dialog"] input:focus-visible,
-body:has(.warehouse-visual-workspace) [role="dialog"] select:focus-visible,
-body:has(.warehouse-visual-workspace) [role="dialog"] textarea:focus-visible { outline: 2px solid #0866B126; outline-offset: 1px; border-color: #0866B1; }
-body:has(.warehouse-visual-workspace) [role="dialog"] button,
-body:has(.warehouse-visual-workspace) [role="alertdialog"] button { box-shadow: none; }
-body:has(.warehouse-visual-workspace) [role="dialog"] button[type="submit"] { background: #0866B1; color: #FFFFFF; }
-body:has(.warehouse-visual-workspace) [role="listbox"],
-body:has(.warehouse-visual-workspace) [role="menu"] { border: 1px solid #DFE7F0; border-radius: 12px; background: #FFFFFF; color: #172B4D; font-family: var(--font-sans); box-shadow: 0 8px 24px rgb(23 43 77 / .10); }
-body:has(.warehouse-visual-workspace) [role="option"][data-highlighted],
-body:has(.warehouse-visual-workspace) [role="option"][data-state="checked"],
-body:has(.warehouse-visual-workspace) [role="menuitem"][data-highlighted] { background: #EAF3FC; color: #064B87; }
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="dialog"] h2,
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="alertdialog"] h2 { color: #172B4D; font-size: 21px; font-weight: 700; line-height: 1.35; letter-spacing: -.015em; }
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="dialog"] label { color: #172B4D; font-size: 14px; font-weight: 600; }
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="dialog"] input:not([type="checkbox"]):not([type="radio"]),
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="dialog"] select,
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="dialog"] textarea,
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="dialog"] [role="combobox"] { min-height: 44px; border-color: #DFE7F0; border-radius: 10px; background: #FFFFFF; color: #172B4D; font-size: 14px; box-shadow: none; }
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="dialog"] input[readonly] { background: #EAF3FC; color: #064B87; }
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="dialog"] [aria-invalid="true"] { border-color: #BC2034; }
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="dialog"] input:focus-visible,
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="dialog"] select:focus-visible,
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="dialog"] textarea:focus-visible { outline: 2px solid #0866B126; outline-offset: 1px; border-color: #0866B1; }
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="dialog"] button,
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="alertdialog"] button { box-shadow: none; }
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="dialog"] button[type="submit"] { background: #0866B1; color: #FFFFFF; }
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="listbox"],
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="menu"] { border: 1px solid #DFE7F0; border-radius: 12px; background: #FFFFFF; color: #172B4D; font-family: var(--font-sans); box-shadow: 0 8px 24px rgb(23 43 77 / .10); }
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="option"][data-highlighted],
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="option"][data-state="checked"],
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="menuitem"][data-highlighted] { background: #EAF3FC; color: #064B87; }
 @media (max-width: 1023px) {
   .warehouse-module-hero h1 { font-size: 27px; }
   .warehouse-module-hero > div:nth-child(3) { max-width: 72%; }
 }
 @media (max-width: 639px) {
-  .warehouse-visual-workspace main { padding: 16px; }
+  :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main { padding: 16px; }
   .warehouse-module-hero { padding: 20px 0; min-height: 136px; }
   .warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-module-hero { min-height: 190px; padding: 20px; }
   .warehouse-module-hero > div:nth-child(3) { max-width: 100%; }
@@ -1259,8 +1259,167 @@ body:has(.warehouse-visual-workspace) [role="menuitem"][data-highlighted] { back
   .warehouse-module-hero h1 { font-size: 25px; }
   .warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-module-hero h1 { font-size: 28px; }
   .warehouse-module-hero > div:last-child { align-self: flex-start; }
-  .warehouse-visual-workspace main th,
-  .warehouse-visual-workspace main td { padding: 12px; }
-  body:has(.warehouse-visual-workspace) [role="dialog"],
-  body:has(.warehouse-visual-workspace) [role="alertdialog"] { max-width: calc(100vw - 24px); border-radius: 16px; }
+  :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main th,
+  :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace) main td { padding: 12px; }
+  body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="dialog"],
+  body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace)) [role="alertdialog"] { max-width: calc(100vw - 24px); border-radius: 16px; }
+}
+
+/* Gate dashboard: supplier-style banner, exact supplied gate photograph. */
+.gate-dashboard-hero {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 200px;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 24px;
+  padding: 20px 28px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #F4F7FB;
+}
+.gate-dashboard-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 16px;
+  background: url("./assets/gate-entry-hero.png") center 68% / cover no-repeat;
+  opacity: 1;
+}
+.gate-dashboard-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(90deg, #F4F7FBFA 0%, #F4F7FBF0 14%, rgba(244, 247, 251, 0.72) 25%, rgba(244, 247, 251, 0.15) 36%, transparent 48%);
+}
+.gate-dashboard-hero > div { position: relative; min-width: 0; z-index: 1; }
+.gate-dashboard-hero > div:first-child { max-width: 440px; }
+.gate-dashboard-hero h1 { color: #172B4D; font-size: clamp(28px, 2.25vw, 38px); font-weight: 700; line-height: 1.2; letter-spacing: -.025em; }
+.gate-dashboard-hero > div:first-child > p { max-width: 440px; margin-top: 10px; color: #55585B; font-size: 14px; line-height: 1.6; }
+.gate-dashboard-hero > div:last-child {
+  position: relative;
+  z-index: 2;
+  align-self: center;
+  justify-self: end;
+}
+.gate-dashboard-hero a,
+.gate-dashboard-hero button {
+  display: inline-flex;
+  align-items: center;
+  height: 44px;
+  min-height: 44px;
+  padding-inline: 18px;
+  border-radius: 12px;
+  background: #0866B1;
+  color: #FFFFFF;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(6, 75, 135, 0.25);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.gate-dashboard-hero a:hover,
+.gate-dashboard-hero button:hover {
+  background: #064B87;
+}
+.gate-visual-workspace main [class*="shadow-soft"] { box-shadow: 0 2px 6px rgb(23 43 77 / .035); }
+.gate-visual-workspace main [class*="rounded-3xl"] { border-radius: 16px; }
+.gate-visual-workspace main [class*="font-black"] { font-weight: 600; }
+.gate-visual-workspace main [class*="border"][class*="bg-white"] { border-color: #DFE7F0; }
+.gate-visual-workspace main a[class*="bg-primary"] { background: #0866B1; color: #FFFFFF; box-shadow: none; }
+.gate-visual-workspace main a[class*="bg-primary"]:hover { background: #064B87; }
+.gate-visual-workspace header input { height: 44px; border-color: #DFE7F0; background: #FFFFFF; border-radius: 12px; box-shadow: none; }
+body:has(.gate-visual-workspace) [role="dialog"] h3 { color: #172B4D; font-weight: 600; }
+body:has(.gate-visual-workspace) [role="dialog"] [class*="font-black"] { font-weight: 600; }
+body:has(.gate-visual-workspace) [role="dialog"] [class*="border"] { border-color: #DFE7F0; }
+body:has(.gate-visual-workspace) [role="dialog"] [aria-invalid="true"] { border-color: #BC2034; }
+@media (max-width: 1023px) {
+  .gate-dashboard-hero { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 20px; }
+  .gate-dashboard-hero::before { background-position: center 68%; opacity: .6; }
+  .gate-dashboard-hero::after { background: linear-gradient(90deg, #F4F7FBFA 0%, #F4F7FBF0 35%, rgba(244, 247, 251, 0.5) 70%, rgba(244, 247, 251, 0.2) 100%); }
+  .gate-dashboard-hero > div:last-child { justify-self: start; }
+}
+@media (max-width: 639px) {
+  .gate-dashboard-hero { min-height: 190px; padding: 18px; }
+  .gate-dashboard-hero h1 { font-size: 26px; }
+  .gate-dashboard-hero::before { opacity: .35; }
+  .gate-dashboard-hero::after { background: linear-gradient(90deg, #F4F7FBFA 0%, #F4F7FBF5 50%, rgba(244, 247, 251, 0.7) 100%); }
+  .gate-dashboard-hero > div:last-child { justify-content: flex-start; }
+  .gate-dashboard-hero > div:last-child > div { justify-content: flex-start; }
+}
+
+/* Assembly uses the supplier presentation without changing operational logic. */
+.assembly-dashboard-hero {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto;
+  align-items: center;
+  gap: 20px;
+  min-height: 200px;
+  padding: 20px 24px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #F4F7FB;
+}
+.assembly-dashboard-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 16px;
+  background: url("./assets/assembly-operations-hero.png") center 48% / cover no-repeat;
+  opacity: .9;
+  mask-image: linear-gradient(90deg,transparent 0%,#000 30%,#000 100%);
+}
+.assembly-dashboard-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 16px;
+  background: linear-gradient(90deg,#F4F7FBF5 0%,#F4F7FBE6 18%,#F4F7FBAA 34%,#F4F7FB15 75%);
+}
+.assembly-dashboard-hero > div { position: relative; z-index: 1; min-width: 0; }
+.assembly-dashboard-hero > div:first-child { max-width: 580px; }
+.assembly-dashboard-hero h1 { color: #172B4D; font-size: clamp(28px,2.25vw,38px); font-weight: 700; line-height: 1.2; letter-spacing: -.025em; }
+.assembly-dashboard-hero > div:first-child > p { max-width: 490px; margin-top: 10px; color: #55585B; font-size: 14px; line-height: 1.6; }
+.assembly-dashboard-hero > div:last-child,
+.assembly-dashboard-hero > div:last-child > div { justify-content: flex-end; gap: 12px; }
+.assembly-dashboard-hero > div:last-child button,
+.assembly-dashboard-hero > div:last-child a { min-height: 44px; border-radius: 11px; box-shadow: none; font-size: 14px; font-weight: 600; }
+.assembly-dashboard-hero > div:last-child button:not([class*="bg-primary"]) { background: #FFFFFFF2; border: 1px solid #DFE7F0; color: #064B87; }
+.assembly-visual-workspace main [class*="bg-white"][class*="border"] { border-color: #DFE7F0; background-color: #FFFFFF; box-shadow: 0 2px 6px rgb(23 43 77 / .035); }
+.assembly-visual-workspace main [class*="shadow-soft"] { box-shadow: 0 2px 6px rgb(23 43 77 / .035); }
+.assembly-visual-workspace main a[class*="bg-primary"] { background: #0866B1; color: #FFFFFF; box-shadow: none; }
+.assembly-visual-workspace main a[class*="bg-primary"]:hover { background: #064B87; }
+.assembly-visual-workspace main button[class*="border"],
+.assembly-visual-workspace main a[class*="border"] { border-color: #DFE7F0; }
+.assembly-visual-workspace main [class*="rounded-3xl"] { border-radius: 16px; }
+.assembly-visual-workspace header input { height: 44px; border-color: #DFE7F0; border-radius: 12px; background: #FFFFFF; box-shadow: none; }
+body:has(.assembly-visual-workspace) [role="dialog"] h3 { color: #172B4D; font-weight: 600; }
+body:has(.assembly-visual-workspace) [role="dialog"] [class*="font-black"] { font-weight: 600; }
+body:has(.assembly-visual-workspace) [role="dialog"] [class*="border"] { border-color: #DFE7F0; }
+body:has(.assembly-visual-workspace) [role="dialog"] [aria-invalid="true"] { border-color: #BC2034; }
+@media (max-width: 1023px) {
+  .assembly-dashboard-hero { grid-template-columns: minmax(0, 1fr); }
+  .assembly-dashboard-hero::before { opacity: .55; }
+}
+@media (max-width: 639px) {
+  .assembly-dashboard-hero { min-height: 220px; padding: 20px 16px; }
+  .assembly-dashboard-hero h1 { font-size: 28px; }
+  .assembly-dashboard-hero::before { opacity: .3; }
+  .assembly-dashboard-hero::after { background: linear-gradient(90deg,#F4F7FBF2,#F4F7FB66); }
+  .assembly-dashboard-hero > div:last-child,
+  .assembly-dashboard-hero > div:last-child > div { justify-content: flex-start; flex-wrap: wrap; }
 }
