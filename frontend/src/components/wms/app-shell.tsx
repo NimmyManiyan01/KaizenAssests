@@ -615,7 +615,7 @@ export function AppShell({
                       active && "bg-sidebar-primary text-sidebar-primary-foreground",
                     )}
                   >
-                    <item.icon className={cn("size-[18px] shrink-0", active && "text-primary")} />
+                    <item.icon className={cn("size-[18px] shrink-0 transition-colors", active ? "text-white" : "text-sidebar-foreground/80 group-hover:text-sidebar-foreground")} />
                     <span className="truncate">{item.label}</span>
                     {(item as any).badge && (
                       <span className="ml-auto grid size-5 place-items-center rounded-full bg-destructive text-[10px] font-semibold text-destructive-foreground">
@@ -699,7 +699,7 @@ export function AppShell({
                   active && "bg-sidebar-primary text-sidebar-primary-foreground",
                 )}
               >
-                <item.icon className={cn("size-[18px] shrink-0", active && "text-primary")} />
+                <item.icon className={cn("size-[18px] shrink-0 transition-colors", active ? "text-white" : "text-sidebar-foreground/80 group-hover:text-sidebar-foreground")} />
                 {!desktopSidebarCollapsed && <span className="truncate">{item.label}</span>}
                 {!desktopSidebarCollapsed && (item as any).badge && (
                   <span className="ml-auto grid size-5 place-items-center rounded-full bg-destructive text-[10px] font-semibold text-destructive-foreground">
