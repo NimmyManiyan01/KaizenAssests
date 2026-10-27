@@ -433,11 +433,12 @@ body:has(.supplier-visual-content) {
   --card: #FFFFFF;
   --primary: #0866B1;
   --primary-foreground: #FFFFFF;
-  --sidebar: #064B87;
-  --sidebar-accent: #0866B1;
+  --sidebar: #1A3D66;
+  --sidebar-accent: #234E7E;
   --sidebar-primary: #0866B1;
-  --sidebar-foreground: #FFFFFF;
+  --sidebar-foreground: #C2D6EC;
   --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
 }
 /* Respect the existing collapsed/expanded classes and hover handlers. */
 body:has(.supplier-visual-content) aside[class*="w-[264px]"] { width: 260px; }
@@ -446,23 +447,29 @@ body:has(.supplier-visual-content) aside nav a {
   border-radius: 12px;
   margin-bottom: 4px;
   box-shadow: none;
+  color: var(--sidebar-foreground);
 }
 body:has(.supplier-visual-content) aside nav a svg {
+  color: currentColor;
+}
+body:has(.supplier-visual-content) aside nav a[class*="bg-sidebar-primary"] svg,
+body:has(.supplier-visual-content) aside nav a:hover svg {
   color: #FFFFFF !important;
 }
 body:has(.supplier-visual-content) main { background: #F4F7FB; }
 .supplier-heading-image {
-  --hero-actions-width: 320px;
   position: relative;
   isolation: isolate;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--hero-actions-width);
+  grid-template-columns: minmax(0, 1fr) auto;
   min-height: 200px;
   align-items: center;
   gap: 24px;
   margin-bottom: 24px;
+  padding: 18px 24px;
   background-color: #F4F7FB;
   border-radius: 16px;
+  overflow: hidden;
 }
 .supplier-heading-image::before {
   content: "";
@@ -470,10 +477,10 @@ body:has(.supplier-visual-content) main { background: #F4F7FB; }
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background: url("./assets/supplier-warehouse-hero.png") right 50% / cover no-repeat;
+  background: url("./assets/supplier-warehouse-hero.png") right center / cover no-repeat;
   opacity: 0.95;
   mask-image:
-    linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.05) 14%, rgba(0, 0, 0, 0.7) 30%, #000 44%, #000 100%),
+    linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.05) 12%, rgba(0, 0, 0, 0.6) 28%, #000 42%, #000 100%),
     linear-gradient(180deg, transparent 0%, #000 4%, #000 92%, transparent 100%);
   mask-composite: intersect;
 }
@@ -483,10 +490,8 @@ body:has(.supplier-visual-content) main { background: #F4F7FB; }
 .supplier-heading-image > div:last-child {
   position: relative;
   z-index: 2;
-  width: 100%;
-  min-width: 0;
   align-self: center;
-  justify-content: flex-end;
+  justify-self: end;
 }
 .supplier-heading-image > div:last-child > div {
   display: flex;
