@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api, resolveMediaUrl } from "@/lib/api-client";
 import { getUserInfo } from "@/lib/auth-utils";
 import { isValidVehicleNumber } from "@/lib/input-validation";
@@ -25,6 +27,7 @@ function Page() {
     [busy, setBusy] = useState<string>(),
     [error, setError] = useState<string>();
   const [forms, setForms] = useState<Record<string, any>>({});
+  const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
   const roles: string[] = getUserInfo()?.roles || [];
   const has = (role: string) => roles.includes(role) || roles.includes("ADMIN");
   const load = useCallback(async () => {
@@ -115,12 +118,12 @@ function Page() {
           </p>
         </Card>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {claims.map((c) => {
             const f = forms[c.id] || {};
             const s = c.shipment;
             return (
-              <Card key={c.id} className="rounded-xl border-border bg-card p-4 shadow-sm sm:p-5">
+              <Card key={c.id} className="rounded-xl border-border bg-card p-3 shadow-sm sm:p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h3 className="font-mono text-base font-semibold text-foreground">
@@ -135,7 +138,7 @@ function Page() {
                   <StatusBadge status={c.status} />
                 </div>
                 {(c.damage_reason || c.remarks || c.photos?.length) && (
-                  <div className="mt-4 rounded-lg border border-border bg-muted/30 p-4">
+                  <div className="mt-3 rounded-lg border border-border bg-muted/30 p-3">
                     <p className="text-sm font-semibold text-foreground">Damage evidence</p>
                     {c.damage_reason && (
                       <p className="mt-2 text-sm">
@@ -150,18 +153,25 @@ function Page() {
                     {c.photos?.length > 0 && (
                       <div className="mt-3 flex flex-wrap gap-3">
                         {c.photos.map((photo: any, index: number) => (
-                          <img
+                          <button
+                            type="button"
                             key={`${photo.file_path}-${index}`}
-                            src={resolveMediaUrl(photo.file_path)}
-                            alt={`Damage evidence ${index + 1}`}
-                            className="h-28 w-36 rounded-lg border object-cover"
-                          />
+                            aria-label={`View damage evidence ${index + 1} for ${c.claim_number || "claim"}`}
+                            onClick={() => setPreviewPhoto(resolveMediaUrl(photo.file_path))}
+                            className="overflow-hidden rounded-lg border border-border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary hover:border-primary"
+                          >
+                            <img
+                              src={resolveMediaUrl(photo.file_path)}
+                              alt={`Damage evidence ${index + 1}`}
+                              className="h-20 w-28 object-cover"
+                            />
+                          </button>
                         ))}
                       </div>
                     )}
                   </div>
                 )}
-                <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+                <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
                   <div>
                     <span className="text-muted-foreground">Original GRN</span>
                     <p className="font-medium">{c.grn_number || "—"}</p>
@@ -182,39 +192,43 @@ function Page() {
                   </div>
                 </div>
                 {has("SUPPLIER") && !c.response && (
-                  <div className="mt-4 grid gap-4 rounded-lg border border-border bg-muted/20 p-4 md:grid-cols-2">
+                  <div className="mt-3 grid gap-3 rounded-lg border border-border bg-muted/20 p-3 md:grid-cols-2">
                     <div className="space-y-1.5">
                       <Label htmlFor={`claim-${c.id}-response`}>Your response *</Label>
-                      <select
-                        id={`claim-${c.id}-response`}
-                        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                        value={f.response || ""}
-                        onChange={(e) => patch(c.id, { response: e.target.value, validation: "" })}
+                      <Select
+                        value={f.response || "unselected"}
+                        onValueChange={(value) => patch(c.id, { response: value === "unselected" ? "" : value, validation: "" })}
                       >
-                        <option value="">Select response</option>
-                        <option value="ACCEPT">Accept</option>
-                        <option value="REJECT">Reject</option>
-                        <option value="PARTIALLY_ACCEPT">Partially Accept</option>
-                        <option value="REQUEST_MORE_INFORMATION">Request More Information</option>
-                      </select>
+                        <SelectTrigger id={`claim-${c.id}-response`} className="damage-return-select-trigger h-11 rounded-[10px] border-[#DFE7F0] bg-white text-sm text-[#172B4D] shadow-none">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="damage-return-select-menu">
+                          <SelectItem value="unselected">Select response</SelectItem>
+                          <SelectItem value="ACCEPT">Accept</SelectItem>
+                          <SelectItem value="REJECT">Reject</SelectItem>
+                          <SelectItem value="PARTIALLY_ACCEPT">Partially Accept</SelectItem>
+                          <SelectItem value="REQUEST_MORE_INFORMATION">Request More Information</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor={`claim-${c.id}-resolution`}>Resolution</Label>
-                      <select
-                        id={`claim-${c.id}-resolution`}
-                        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                        value={f.resolution || ""}
-                        onChange={(e) =>
-                          patch(c.id, { resolution: e.target.value, validation: "" })
+                      <Select
+                        value={f.resolution || "unselected"}
+                        onValueChange={(value) =>
+                          patch(c.id, { resolution: value === "unselected" ? "" : value, validation: "" })
                         }
                       >
-                        <option value="">Select resolution</option>
-                        {resolutions.map((r) => (
-                          <option key={r.value} value={r.value}>
-                            {r.label}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger id={`claim-${c.id}-resolution`} className="damage-return-select-trigger h-11 rounded-[10px] border-[#DFE7F0] bg-white text-sm text-[#172B4D] shadow-none">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="damage-return-select-menu">
+                          <SelectItem value="unselected">Select resolution</SelectItem>
+                          {resolutions.map((r) => (
+                            <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor={`claim-${c.id}-remarks`}>Supplier remarks</Label>
@@ -256,7 +270,7 @@ function Page() {
                 {has("SUPPLIER") &&
                   ["REPLACEMENT", "RETURN_REPLACEMENT"].includes(c.resolution) &&
                   !s && (
-                    <div className="mt-4 grid gap-3 rounded-lg border border-border bg-muted/20 p-4 sm:grid-cols-[minmax(0,1fr)_auto]">
+                    <div className="mt-3 grid gap-3 rounded-lg border border-border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1fr)_auto]">
                       <Input
                         aria-label="Replacement vehicle number"
                         className="h-10 rounded-lg"
@@ -283,7 +297,7 @@ function Page() {
                     </div>
                   )}
                 {s && (
-                  <div className="mt-4 rounded-lg border border-border bg-muted/20 p-4">
+                  <div className="mt-3 rounded-lg border border-border bg-muted/20 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <strong>{s.shipment_number || "Replacement shipment"}</strong>
                       <StatusBadge status={s.status} />
@@ -425,7 +439,7 @@ function Page() {
                   </div>
                 )}
                 {c.return && (
-                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 p-4">
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 p-3">
                     <span className="text-sm font-medium">
                       {c.return.return_number} · {c.return.status.replaceAll("_", " ")}
                     </span>
@@ -467,6 +481,18 @@ function Page() {
           })}
         </div>
       )}
+      <Dialog open={Boolean(previewPhoto)} onOpenChange={(open) => !open && setPreviewPhoto(null)}>
+        <DialogContent className="w-[calc(100vw-24px)] max-w-3xl max-h-[calc(100dvh-24px)] gap-0 overflow-y-auto rounded-2xl border-[#DFE7F0] bg-white p-0 text-[#172B4D]">
+          <DialogHeader className="border-b border-[#DFE7F0] bg-[#F4F8FD] px-5 py-5 pr-12 text-left">
+            <DialogTitle className="text-lg font-semibold">Damage Photo Evidence</DialogTitle>
+          </DialogHeader>
+          {previewPhoto && (
+            <div className="m-4 flex items-center justify-center overflow-hidden rounded-xl border border-[#DFE7F0] bg-[#F4F7FB]">
+              <img src={previewPhoto} alt="Enlarged damage evidence" className="max-h-[70dvh] max-w-full object-contain" />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }

@@ -456,7 +456,7 @@ function SupplierMaterials() {
           </CardContent>
         </Card>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-lg overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
+          <DialogContent id="supplier-material-form-dialog" className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-lg overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
             <DialogHeader>
               <DialogTitle>{editing ? "Edit Material" : "Add Material"}</DialogTitle>
             </DialogHeader>
@@ -569,7 +569,7 @@ function SupplierMaterials() {
               </AlertDialogTitle>
               <AlertDialogDescription>
                 {pendingAction?.type === "delete"
-                  ? `Delete ${pendingAction.material?.code}? This cannot be undone. Materials referenced by transactions will be deactivated instead.`
+                  ? `Delete ${pendingAction.material?.code} from the catalog? This cannot be undone. Existing transaction history will be preserved.`
                   : `Deactivate this material? It will no longer be available for new ASN submissions.`}
               </AlertDialogDescription>
             </AlertDialogHeader>

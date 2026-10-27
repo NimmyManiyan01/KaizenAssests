@@ -309,7 +309,7 @@ function PhotoEditor({
             setCameraOpen(true);
           }}
         >
-          Open Camera
+          {file ? "Retake" : "Open Camera"}
         </Button>
       )}
 

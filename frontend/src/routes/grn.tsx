@@ -3639,7 +3639,7 @@ function GrnPageWorkflow() {
 
   return (
     <AppShell
-      title="GRN Operations Dashboard"
+      title="GRN / Quality Inspection"
       subtitle="Manage goods receipts, quality checks, and GRN records"
       actions={
         <>

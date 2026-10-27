@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { ArrowLeft, Download, Eye, Loader2, Printer } from "lucide-react";
+import { ArrowLeft, Download, Eye, Loader2, Printer, Trash2 } from "lucide-react";
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog";
 import { api } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -98,6 +99,20 @@ export function RackOccupancyCards({ bins, allBins, zone, onAddMaterial, onUpdat
   bins: RackBin[]; allBins: RackBin[]; zone?: ZoneInfo; onAddMaterial: () => void; onUpdated: () => Promise<unknown>;
 }) {
   const [selection, setSelection] = useState<{ bin: RackBin; mode: Mode } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<RackBin | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  async function confirmDelete() {
+    if (!deleteTarget?.rack_capacity?.id || deleting) return;
+    setDeleting(true); setDeleteError("");
+    try {
+      await api.deleteRack(deleteTarget.zone_id, deleteTarget.rack_capacity.id);
+      setDeleteTarget(null);
+      toast.success("Rack deleted");
+      try { await onUpdated(); } catch { toast.error("Rack deleted. Refresh to update the rack list."); }
+    } catch (err: any) { setDeleteError(err.message || "Unable to delete this rack."); }
+    finally { setDeleting(false); }
+  }
   const [content, setContent] = useState<Details | null>(null);
   const [history, setHistory] = useState<HistoryEvent[] | null>(null);
   const [historyError, setHistoryError] = useState("");
@@ -180,6 +195,19 @@ export function RackOccupancyCards({ bins, allBins, zone, onAddMaterial, onUpdat
   const qrBin = selectedBins.find(b => b.id === qrBinId) || selection?.bin;
   const ready = hasCapacity(content);
   return <>
+    <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open && !deleting) setDeleteTarget(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {deleteTarget?.rack}?</AlertDialogTitle>
+          <AlertDialogDescription>This removes the empty rack and its bin locations. This cannot be undone. Racks referenced by warehouse tasks cannot be deleted.</AlertDialogDescription>
+        </AlertDialogHeader>
+        {deleteError && <p role="alert" className="text-sm text-destructive">{deleteError}</p>}
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+          <AlertDialogAction disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={event => { event.preventDefault(); void confirmDelete(); }}>{deleting ? "Deleting…" : "Delete Rack"}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     <div className="grid gap-4 p-4 xl:grid-cols-2">
       {groups.map(bin => {
         const rack = bin.rack_capacity;
@@ -190,6 +218,7 @@ export function RackOccupancyCards({ bins, allBins, zone, onAddMaterial, onUpdat
           <div className="mt-auto flex flex-wrap justify-end gap-2 border-t border-indigo-100 pt-4 dark:border-indigo-900">
             <Button size="sm" disabled={!configured} onClick={onAddMaterial}>Add Material</Button>
             <Button size="sm" variant="outline" onClick={() => void openDetails(bin)}>View Details</Button>
+            <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" disabled={!configured || rack.occupied_quantity > 0} onClick={() => { setDeleteError(""); setDeleteTarget(bin); }}><Trash2 className="size-4" />Delete Rack</Button>
           </div>
         </article>;
       })}

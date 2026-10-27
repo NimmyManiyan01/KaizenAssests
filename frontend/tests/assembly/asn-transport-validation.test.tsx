@@ -44,7 +44,7 @@ describe("ASN transport validation", () => {
     const vehicle = await screen.findByLabelText("Vehicle Number *");
     const driver = screen.getByLabelText("Driver Name *");
     const contact = screen.getByLabelText("Driver Contact *");
-    const next = screen.getByRole("button", { name: "Continue to ASN Details" });
+    const next = screen.getByRole("button", { name: "Next" });
     expect(next).toBeDisabled();
     fireEvent.change(driver, { target: { value: "123" } });
     fireEvent.blur(driver);

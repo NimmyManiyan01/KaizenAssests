@@ -25,6 +25,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -61,7 +62,7 @@ import {
 } from "@/lib/input-validation";
 
 export const Route = createFileRoute("/supplier/asns/new")({
-  beforeLoad: () => {},
+  beforeLoad: () => { },
   component: NewAsnPage,
 });
 
@@ -148,9 +149,8 @@ function StatusTooltip({ status }: { status: string }) {
   const description = statusDescriptions[normalizedStatus];
   const badge = (
     <span
-      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${
-        statusStyles[normalizedStatus] || "border-border bg-muted text-muted-foreground"
-      }`}
+      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusStyles[normalizedStatus] || "border-border bg-muted text-muted-foreground"
+        }`}
     >
       {normalizedStatus.replaceAll("_", " ")}
     </span>
@@ -290,11 +290,11 @@ function NewAsnPage() {
           : result?.items || result?.suppliers || [];
         const supplier = supplierRows.length
           ? supplierRows.find(
-              (item: any) =>
-                String(item.id) === String(currentUser?.supplierId) ||
-                String(item.username || item.supplier_name || "").toLowerCase() ===
-                  String(currentUser?.username || "").toLowerCase(),
-            )
+            (item: any) =>
+              String(item.id) === String(currentUser?.supplierId) ||
+              String(item.username || item.supplier_name || "").toLowerCase() ===
+              String(currentUser?.username || "").toLowerCase(),
+          )
           : result;
         const companyName =
           supplier?.registered_company_name ||
@@ -501,11 +501,11 @@ function NewAsnPage() {
         shipped_quantity: "",
         remaining_quantity: Number(
           line.remaining_quantity ??
-            line.remaining ??
-            line.balance_quantity ??
-            line.ordered_quantity ??
-            line.quantity ??
-            0,
+          line.remaining ??
+          line.balance_quantity ??
+          line.ordered_quantity ??
+          line.quantity ??
+          0,
         ),
         uom: line.uom || line.unit_of_measure || "PCS",
       })),
@@ -516,7 +516,7 @@ function NewAsnPage() {
     e.preventDefault();
     if (submitInFlightRef.current) return;
     if (!isValidAsnVehicleNumber(vehicleNumber) || !isValidAsnDriverName(driverName) ||
-        !isValidAsnDriverMobileNumber(driverMobile)) {
+      !isValidAsnDriverMobileNumber(driverMobile)) {
       setAssignmentTouched({ vehicle: true, driver: true, contact: true });
       setIsModalOpen(false);
       setIsAssignmentOpen(true);
@@ -688,9 +688,9 @@ function NewAsnPage() {
     setSupplierName("MTU");
     setExpectedArrivalDate(
       asn.delivery_date ||
-        asn.expected_arrival_date ||
-        asn.expected_arrival_at?.split("T")[0] ||
-        "",
+      asn.expected_arrival_date ||
+      asn.expected_arrival_at?.split("T")[0] ||
+      "",
     );
     setVehicleNumber(asn.vehicle_number || "");
     setDriverName(asn.driver_name || "");
@@ -730,9 +730,9 @@ function NewAsnPage() {
   const arrivalRange: DateRange | undefined =
     arrivalFrom || arrivalTo
       ? {
-          from: arrivalFrom ? new Date(`${arrivalFrom}T00:00:00`) : undefined,
-          to: arrivalTo ? new Date(`${arrivalTo}T00:00:00`) : undefined,
-        }
+        from: arrivalFrom ? new Date(`${arrivalFrom}T00:00:00`) : undefined,
+        to: arrivalTo ? new Date(`${arrivalTo}T00:00:00`) : undefined,
+      }
       : undefined;
   const arrivalRangeLabel =
     arrivalFrom && arrivalTo
@@ -844,7 +844,14 @@ function NewAsnPage() {
                 </div>
               )}
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1080px] text-left text-sm">
+                <table className="w-full min-w-[1360px] table-fixed text-left text-sm">
+                  <colgroup>
+                    <col className="w-[13%]" /><col className="w-[10%]" />
+                    <col className="w-[12%]" /><col className="w-[12%]" />
+                    <col className="w-[12%]" /><col className="w-[13%]" />
+                    <col className="w-[10%]" /><col className="w-[12%]" />
+                    <col className="w-[6%]" />
+                  </colgroup>
                   <thead className="border-b border-border bg-muted/60 text-xs font-medium text-muted-foreground">
                     <tr>
                       <th scope="col" className="px-4 py-3">
@@ -864,9 +871,11 @@ function NewAsnPage() {
                       </th>
                       <th scope="col" className="px-4 py-3">
                         <span className="inline-flex items-center gap-1.5">
-                          Driver Name &amp; Mobile
-
+                          Driver Name
                         </span>
+                      </th>
+                      <th scope="col" className="px-4 py-3 whitespace-nowrap">
+                        Driver Number
                       </th>
                       <th scope="col" className="px-4 py-3">
                         <span className="inline-flex items-center gap-1.5">
@@ -886,7 +895,7 @@ function NewAsnPage() {
                           <InformationTooltip help="quantity" />
                         </span>
                       </th>
-                      <th scope="col" className="w-44 px-4 py-3 text-right">
+                      <th scope="col" className="px-3 py-3 text-right">
                         <span className="inline-flex items-center justify-end gap-1.5">
                           Actions
 
@@ -898,7 +907,7 @@ function NewAsnPage() {
                     {loading ? (
                       <tr>
                         <td
-                          colSpan={8}
+                          colSpan={9}
                           className="px-4 py-10 text-center text-sm text-muted-foreground"
                         >
                           <span className="inline-flex items-center gap-2" role="status">
@@ -910,7 +919,7 @@ function NewAsnPage() {
                     ) : loadError ? (
                       <tr>
                         <td
-                          colSpan={8}
+                          colSpan={9}
                           className="px-4 py-10 text-center text-sm text-muted-foreground"
                         >
                           Delivery notices could not be loaded. Use Try again above to retry.
@@ -919,7 +928,7 @@ function NewAsnPage() {
                     ) : !filteredList.length ? (
                       <tr>
                         <td
-                          colSpan={8}
+                          colSpan={9}
                           className="px-4 py-10 text-center text-sm text-muted-foreground"
                         >
                           {asnList.length
@@ -934,23 +943,21 @@ function NewAsnPage() {
                             {asn.asn_number || "—"}
                           </td>
                           <td className="px-4 py-3 text-foreground">{asn.supplier_name || "—"}</td>
-                          <td className="px-4 py-3 font-mono text-foreground">
+                          <td className="px-4 py-3 align-middle whitespace-nowrap font-mono text-foreground">
                             {asn.vehicle_number || "—"}
                           </td>
-                          <td className="px-4 py-3">
-                            <span className="text-foreground">{asn.driver_name || "—"}</span>
-                            {asn.driver_contact && (
-                              <span className="ml-1 font-mono text-muted-foreground">
-                                ({asn.driver_contact})
-                              </span>
-                            )}
+                          <td className="px-4 py-3 align-middle break-words text-foreground">
+                            {asn.driver_name || "?"}
+                          </td>
+                          <td className="px-4 py-3 align-middle whitespace-nowrap font-mono tabular-nums text-foreground">
+                            {asn.driver_contact || "?"}
                           </td>
                           <td className="px-4 py-3 text-muted-foreground">
                             {displayFilterDate(
                               asn.delivery_date ||
-                                asn.expected_arrival_date ||
-                                asn.expected_arrival_at?.split("T")[0] ||
-                                "",
+                              asn.expected_arrival_date ||
+                              asn.expected_arrival_at?.split("T")[0] ||
+                              "",
                             ) || "—"}
                           </td>
                           <td className="whitespace-nowrap px-4 py-3">
@@ -965,7 +972,7 @@ function NewAsnPage() {
                             ) || 0}{" "}
                             units
                           </td>
-                          <td className="w-20 px-4 py-3 text-right">
+                          <td className="px-3 py-3 align-middle text-right">
                             <DropdownMenu>
                               <TapTooltip text="View, download, or manage this ASN, depending on available actions.">
                                 <DropdownMenuTrigger asChild>
@@ -1023,7 +1030,7 @@ function NewAsnPage() {
             open={Boolean(selectedAsn)}
             onOpenChange={(open) => !open && setSelectedAsn(null)}
           >
-            <DialogContent className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-2xl overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
+            <DialogContent id="supplier-management-asn-details-dialog" className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-2xl overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
               <DialogHeader>
                 <DialogTitle className="text-lg font-black text-primary">ASN Details</DialogTitle>
               </DialogHeader>
@@ -1131,7 +1138,7 @@ function NewAsnPage() {
               if (!assignmentSubmitting) setIsAssignmentOpen(open);
             }}
           >
-            <DialogContent className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-xl overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
+            <DialogContent id="supplier-transport-dialog" className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-xl overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
               <DialogHeader>
                 <DialogTitle className="text-lg font-black text-primary">
                   Assign vehicle and driver
@@ -1289,7 +1296,7 @@ function NewAsnPage() {
                     }
                   >
                     {assignmentSubmitting && <Loader2 className="mr-2 size-4 animate-spin" />}
-                    Continue to ASN Details
+                    Next
                   </Button>
                 </div>
               </form>
@@ -1305,7 +1312,7 @@ function NewAsnPage() {
               if (!open) setAsnSubmitted(false);
             }}
           >
-            <DialogContent className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-2xl overflow-y-auto rounded-xl bg-card p-4 shadow-lg sm:p-6">
+            <DialogContent id="supplier-create-asn-dialog" className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-2xl overflow-y-auto rounded-xl bg-card p-4 shadow-lg sm:p-6">
               <DialogHeader>
                 <DialogTitle className="font-black text-lg text-primary uppercase border-b pb-2">
                   CREATE ADVANCE SHIPPING NOTICE (ASN)
@@ -1475,22 +1482,13 @@ function NewAsnPage() {
                       >
                         <div className="min-w-0 space-y-1.5">
                           <Label htmlFor={`material-${idx}`}>Material *</Label>
-                          <select
-                            id={`material-${idx}`}
+                          <Select
                             required
                             disabled={materialLoading || Boolean(materialLoadError)}
                             value={line.item_id || line.material_id || ""}
-                            onBlur={() => {
-                              if (!line.material_id) {
-                                setAsnFormErrors((errors) => ({
-                                  ...errors,
-                                  [`material-${idx}`]: "Select a material from Material Master.",
-                                }));
-                              }
-                            }}
-                            onChange={(event) => {
+                            onValueChange={(value) => {
                               const material = materialCatalog.find(
-                                (item) => String(item.id) === event.target.value,
+                                (item) => String(item.id) === value,
                               );
                               if (
                                 material &&
@@ -1507,13 +1505,13 @@ function NewAsnPage() {
                                 current.map((item, index) =>
                                   index === idx
                                     ? {
-                                        ...item,
-                                        material_id: material?.id || "",
-                                        item_code: material?.code || "",
-                                        material_name: material?.name || "",
-                                        shipped_quantity: item.shipped_quantity,
-                                        uom: material?.uom || "",
-                                      }
+                                      ...item,
+                                      material_id: material?.id || "",
+                                      item_code: material?.code || "",
+                                      material_name: material?.name || "",
+                                      shipped_quantity: item.shipped_quantity,
+                                      uom: material?.uom || "",
+                                    }
                                     : item,
                                 ),
                               );
@@ -1524,21 +1522,34 @@ function NewAsnPage() {
                               }));
                               setSubmissionError("");
                             }}
+                          >
+                            <SelectTrigger
+                            id={`material-${idx}`}
+                            onBlur={() => {
+                              if (!line.material_id) {
+                                setAsnFormErrors((errors) => ({
+                                  ...errors,
+                                  [`material-${idx}`]: "Select a material from Material Master.",
+                                }));
+                              }
+                            }}
                             aria-invalid={Boolean(asnFormErrors[`material-${idx}`])}
                             aria-describedby={
                               asnFormErrors[`material-${idx}`] ? `material-${idx}-error` : undefined
                             }
-                            className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                            className="h-11 w-full min-w-0 rounded-[10px] border-[#DFE7F0] bg-white px-3 text-sm text-[#172B4D] shadow-none disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            <option value="">
-                              {materialLoading ? "Loading materials…" : "Select material"}
-                            </option>
+                              <SelectValue placeholder={materialLoading ? "Loading materials…" : "Select material"} />
+                            </SelectTrigger>
+                            <SelectContent className="supplier-asn-material-menu">
+                            <SelectItem value="__clear_selection__">Select material</SelectItem>
                             {materialCatalog.map((material) => (
-                              <option key={material.id} value={material.id}>
+                              <SelectItem key={material.id} value={String(material.id)}>
                                 {material.name} ({material.code})
-                              </option>
+                              </SelectItem>
                             ))}
-                          </select>
+                            </SelectContent>
+                          </Select>
                           {asnFormErrors[`material-${idx}`] && (
                             <p
                               id={`material-${idx}-error`}

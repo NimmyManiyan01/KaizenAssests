@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.database.session import UnitOfWork, get_uow
@@ -103,7 +103,7 @@ class BinCreateRequest(BaseModel):
 
     bin_name: str = Field(min_length=1, max_length=128)
     bin_code: str = Field(min_length=1, max_length=64)
-    rack: str = Field(min_length=1, max_length=64)
+    rack: str | None = Field(default=None, max_length=64)
     position: str | None = Field(default=None, max_length=64)
     qr_identifier: str | None = Field(default=None, max_length=128)
     storage_type: str = Field(default="GENERAL", max_length=64)
@@ -461,6 +461,13 @@ async def list_zone_bins(
     return rows
 
 
+async def _next_rack_code(session, zone_id):
+    codes = list((await session.execute(select(StoreRackModel.rack_code).where(StoreRackModel.zone_id == zone_id))).scalars().all())
+    codes.extend((await session.execute(select(StoreBinModel.rack).where(StoreBinModel.zone_id == zone_id))).scalars().all())
+    sequences = [int(match.group(1)) for code in codes if (match := re.fullmatch(r"RACK-(\d+)", str(code).upper()))]
+    return f"RACK-{max(sequences, default=0) + 1:03d}"
+
+
 @zone_router.get("/{zone_id}/bins/next-code")
 async def next_bin_code(
     zone_id: str,
@@ -476,7 +483,7 @@ async def next_bin_code(
         match = re.search(r"(?:-BIN-|BIN-)(\d+)$", str(code).upper())
         if match:
             max_sequence = max(max_sequence, int(match.group(1)))
-    return {"suggested_bin_code": f"{zone.zone_code}-BIN-{max_sequence + 1:03d}"}
+    return {"suggested_bin_code": f"{zone.zone_code}-BIN-{max_sequence + 1:03d}", "suggested_rack_code": await _next_rack_code(uow.session, zone.id)}
 
 
 @zone_router.post("/{zone_id}/bins", status_code=status.HTTP_201_CREATED)
@@ -492,6 +499,8 @@ async def create_zone_bin(
         raise HTTPException(404, "Zone not found")
     if str(zone.status).upper() != "ACTIVE":
         raise HTTPException(status_code=409, detail="Cannot add a bin to an inactive zone")
+    if not payload.rack:
+        payload.rack = await _next_rack_code(uow.session, zone.id)
     if not re.fullmatch(rf"{re.escape(zone.zone_code)}-BIN-\d{{3,}}", payload.bin_code):
         raise HTTPException(
             status_code=422,
@@ -590,6 +599,46 @@ async def _lock_rack(uow, rack):
         func.upper(StoreBinModel.rack) == rack.rack_code).order_by(StoreBinModel.id).with_for_update())
     return await uow.session.scalar(select(StoreRackModel).where(StoreRackModel.id == rack.id)
         .with_for_update().execution_options(populate_existing=True))
+
+
+@zone_router.delete("/{zone_id}/racks/{rack_id}")
+async def delete_rack(zone_id: str, rack_id: str,
+    user: CurrentUser = Depends(get_current_user), uow: UnitOfWork = Depends(get_uow)):
+    from app.modules.storage.infrastructure.persistence.models import InventoryLocationBalanceModel as Balance, StorageLocationModel as Location
+    _require_location_write(user)
+    rack = await _rack_in_zone(uow, zone_id, rack_id)
+    rack = await _lock_rack(uow, rack)
+    if rack is None:
+        raise HTTPException(404, "Rack not found")
+    if rack.occupied_quantity > 0:
+        raise HTTPException(409, "Move all material out of this rack before deleting it.")
+    bins = (await uow.session.scalars(select(StoreBinModel).where(
+        StoreBinModel.zone_id == rack.zone_id, func.upper(StoreBinModel.rack) == rack.rack_code).with_for_update())).all()
+    from app.modules.storage.infrastructure.persistence.models import PutawayTaskModel, PutawayLocationAssignmentModel
+    if bins:
+        for model in (PutawayTaskModel, PutawayLocationAssignmentModel):
+            if await uow.session.scalar(select(model.id).where(model.destination_bin_id.in_([item.id for item in bins])).limit(1)):
+                raise HTTPException(409, "This rack is referenced by warehouse tasks and cannot be deleted.")
+    locations = (await uow.session.scalars(select(Location).where(Location.bin_id.in_([item.id for item in bins])).with_for_update())).all() if bins else []
+    if any(item.occupied_quantity > 0 for item in bins + locations):
+        raise HTTPException(409, "Move all material out of this rack before deleting it.")
+    if locations and await uow.session.scalar(select(Balance.id).where(
+        Balance.storage_location_id.in_([item.id for item in locations])).limit(1)):
+        raise HTTPException(409, "This rack has inventory references and cannot be deleted.")
+    try:
+        for location in locations:
+            await uow.session.delete(location)
+        await uow.session.flush()
+        for item in bins:
+            await uow.session.delete(item)
+        await uow.session.flush()
+        await uow.session.execute(delete(RackOccupancyEventModel).where(RackOccupancyEventModel.rack_id == rack.id))
+        await uow.session.delete(rack)
+        await uow.session.flush()
+    except IntegrityError as exc:
+        await uow.rollback()
+        raise HTTPException(409, "This rack is referenced by warehouse tasks or history and cannot be deleted.") from exc
+    return {"id": rack_id, "deleted": True}
 
 
 @zone_router.put("/{zone_id}/racks/{rack_id}")
