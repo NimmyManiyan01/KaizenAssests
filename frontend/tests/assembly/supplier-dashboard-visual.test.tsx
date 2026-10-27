@@ -42,3 +42,18 @@ it("keeps search and Create ASN navigation and exposes data-backed mini charts",
   expect(screen.queryByRole("button", { name: "ASN-A" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "ASN-B" })).toBeVisible();
 });
+
+it("keeps Supplier Guide sections, module links and Close behaviour intact", async () => {
+  const Page = Route.options.component as any;
+  render(<Page />);
+  await screen.findByRole("button", { name: "ASN-A" });
+  fireEvent.click(screen.getByRole("button", { name: "Supplier Guide" }));
+  const guide = await screen.findByRole("dialog", { name: "Supplier Guide" });
+  expect(guide).toHaveAttribute("id", "supplier-asn-help-dialog");
+  expect(guide.querySelectorAll("details")).toHaveLength(5);
+  expect(guide.querySelector("details")).toHaveAttribute("open");
+  expect(within(guide).getAllByRole("link", { name: /Go to Module: ASN Management/ })[0]).toHaveAttribute("href", "/supplier/asns");
+  expect(within(guide).queryByRole("link", { name: "Create ASN" })).not.toBeInTheDocument();
+  fireEvent.click(within(guide).getAllByRole("button", { name: "Close" })[0]);
+  expect(screen.queryByRole("dialog", { name: "Supplier Guide" })).not.toBeInTheDocument();
+});

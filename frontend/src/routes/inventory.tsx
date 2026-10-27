@@ -57,20 +57,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import QRCode from "qrcode";
 import jsQR from "jsqr";
-import warehouseHero from "@/assets/login-warehouse.png";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import warehouseHero from "@/assets/warehouse-operations-hero.png";
 
 export const Route = createFileRoute("/inventory")({
   head: () => ({
@@ -1010,7 +997,7 @@ function SimpleWarehouseModule() {
     try {
       const nextCode = await api.getNextBinCode(zone.id);
       setNewBinForm({ zone_id: zone.id });
-      setNewBinRows([{ rack: "", position: "", capacity: "", bin_code: nextCode.suggested_bin_code }]);
+      setNewBinRows([{ rack: nextCode.suggested_rack_code, position: "", capacity: "", bin_code: nextCode.suggested_bin_code }]);
     } catch (err: any) {
       toast.error(err.message || "Unable to prepare the next bin code.");
       return;
@@ -1059,7 +1046,7 @@ function SimpleWarehouseModule() {
           !Number.isSafeInteger(Number(row.capacity)) || Number(row.capacity) <= 0 ||
           !row.bin_code.trim()
         ) {
-          toast.error("Enter a rack code and a positive whole Maximum Capacity (PCS).");
+          toast.error("Enter a positive whole Maximum Capacity (PCS). Reopen the form if codes are missing.");
           return;
         }
         if (
@@ -1068,17 +1055,12 @@ function SimpleWarehouseModule() {
           !isValidIdentifier(row.rack) ||
           !isValidIdentifier(row.bin_code)
         ) {
-          toast.error("Rack, position, and bin codes must be 1–64 characters using letters, numbers, underscores, or hyphens.");
-          return;
-        }
-        if (row.position.trim() && (row.position.trim().length > 64 || !isValidIdentifier(row.position))) {
-          toast.error("Shelf / Position must use up to 64 letters, numbers, underscores, or hyphens.");
+          toast.error("Rack and bin codes must be 1–64 characters using letters, numbers, underscores, or hyphens.");
           return;
         }
         const existingBins = await api.getZoneBins(newBinForm.zone_id);
         const normalizedBinCode = row.bin_code.trim().toUpperCase();
         const normalizedRack = row.rack.trim().toUpperCase();
-        const normalizedPosition = row.position.trim().toUpperCase() || undefined;
         if ((existingBins || []).some((b: any) => String(b.bin_code).toUpperCase() === normalizedBinCode)) {
           toast.error(`Bin code '${row.bin_code}' already exists in this zone.`);
           return;
@@ -1100,8 +1082,6 @@ function SimpleWarehouseModule() {
         await api.createBin(newBinForm.zone_id, {
           bin_code: normalizedBinCode,
           bin_name: normalizedBinCode,
-          rack: normalizedRack,
-          position: normalizedPosition,
           capacity: Number(row.capacity),
           qr_identifier: `QR-${normalizedBinCode}`,
         });
@@ -1174,27 +1154,6 @@ function SimpleWarehouseModule() {
   const availableDocksCount = docks.filter((d) => d.status === "AVAILABLE").length;
   const occupiedDocksCount = docks.filter((d) => ["OCCUPIED", "RESERVED"].includes(d.status)).length;
   const totalDocksCount = docks.length;
-  const inventoryByCategory = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const item of inventorySummary) {
-      const category = String(item.category || item.material_category || item.material_group || "Other").trim() || "Other";
-      const quantity = Number(item.available ?? item.available_quantity ?? item.on_hand_quantity ?? item.total_quantity ?? 0);
-      if (quantity > 0) totals.set(category, (totals.get(category) || 0) + 1);
-    }
-    const sorted = Array.from(totals, ([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-    if (sorted.length <= 6) return sorted;
-    const visible = sorted.slice(0, 5);
-    visible.push({ name: "Other categories", value: sorted.slice(5).reduce((sum, item) => sum + item.value, 0) });
-    return visible;
-  }, [inventorySummary]);
-  const openWorkByType = [
-    { name: "Putaway", tasks: pendingPutawayCount, fill: "#d97706" },
-    { name: "Requests", tasks: pendingRequestsCount, fill: "#2563eb" },
-    { name: "Picking", tasks: pendingPickingCount, fill: "#7c3aed" },
-  ];
-  const totalOpenTasks = openWorkByType.reduce((total, queue) => total + queue.tasks, 0);
-  const busiestQueue = [...openWorkByType].sort((a, b) => b.tasks - a.tasks)[0];
   const groupedPutawayTasks = useMemo(() => {
     const groups = new Map<string, any>();
     for (const task of putawayTasks) {
@@ -1303,13 +1262,13 @@ function SimpleWarehouseModule() {
 
   return (
     <AppShell activeItem="/inventory">
-      <div className="space-y-5 rounded-2xl bg-gradient-to-br from-slate-50 via-blue-50/50 to-teal-50/40 p-3 pb-8 sm:p-5">
+      <div className="warehouse-module-content space-y-5" data-warehouse-tab={activeTab}>
         {/* Header Title Bar */}
-        <div className="relative isolate flex min-h-[164px] flex-col justify-center gap-4 overflow-hidden rounded-2xl border border-[#0b315c] bg-[#0b315c] px-6 py-5 shadow-sm md:flex-row md:items-center md:justify-between md:px-8">
-          <div aria-hidden="true" className="absolute inset-0 -z-20 bg-cover bg-[center_43%]" style={{ backgroundImage: `url(${warehouseHero})` }} />
-          <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[linear-gradient(90deg,#071d3df2_0%,#0b315ce8_38%,#0b315ca8_68%,#0b315c32_100%)]" />
+        <div className="warehouse-module-hero relative isolate flex min-h-[164px] flex-col justify-center gap-4 overflow-hidden rounded-2xl px-6 py-5 md:flex-row md:items-center md:justify-between md:px-8">
+          <div aria-hidden="true" className="warehouse-hero-image absolute inset-0 -z-20 bg-cover bg-[center_43%]" style={{ backgroundImage: `url(${warehouseHero})` }} />
+          <div aria-hidden="true" className="warehouse-hero-overlay absolute inset-0 -z-10" />
           <div className="relative max-w-3xl text-white">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-200">
+            <p className="warehouse-hero-eyebrow text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-200">
               Warehouse Control <span className="px-1 text-blue-300/70">/</span> {pageHeader[activeTab].eyebrow}
             </p>
             <h1 className="mt-2 flex items-center gap-2.5 text-[25px] font-semibold tracking-tight md:text-[28px]">
@@ -1549,73 +1508,7 @@ function SimpleWarehouseModule() {
               </Card>
             </div>
 
-            <section aria-labelledby="warehouse-analytics-title" className="space-y-3">
-              <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <h2 id="warehouse-analytics-title" className="text-lg font-bold text-slate-900">Warehouse analytics</h2>
-                  <p className="text-sm text-slate-600">A quick view of available stock and work waiting in your queues.</p>
-                </div>
-                <p className="text-xs font-medium text-slate-500">Based on the latest loaded records</p>
-              </div>
 
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                <Card className="border-cyan-200 bg-gradient-to-br from-cyan-50/80 via-white to-sky-50/60 p-5 shadow-sm dark:border-cyan-900/60 dark:bg-cyan-950/20">
-                  <div className="mb-2">
-                    <h3 className="font-bold text-slate-900 dark:text-slate-100">Stock records by category</h3>
-                    <p className="text-sm text-slate-600 dark:text-slate-400">Counts inventory records with available stock in each material category.</p>
-                  </div>
-                  {inventoryByCategory.length ? (
-                    <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(150px,0.8fr)]">
-                      <div className="h-[250px] min-w-0">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie data={inventoryByCategory} dataKey="value" nameKey="name" innerRadius={58} outerRadius={92} paddingAngle={3}>
-                              {inventoryByCategory.map((entry, index) => (
-                                <Cell key={entry.name} fill={["#0284c7", "#0d9488", "#4f46e5", "#d97706", "#db2777", "#64748b"][index % 6]} />
-                              ))}
-                            </Pie>
-                            <Tooltip formatter={(value) => [Number(value).toLocaleString(), "Stock records"]} />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-                      <div className="space-y-2">
-                        {inventoryByCategory.map((entry, index) => (
-                          <div key={entry.name} className="flex items-center justify-between gap-3 rounded-lg border border-white/80 bg-white/75 px-3 py-2 text-sm shadow-sm">
-                            <span className="flex min-w-0 items-center gap-2 text-slate-700"><span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: ["#0284c7", "#0d9488", "#4f46e5", "#d97706", "#db2777", "#64748b"][index % 6] }} /><span className="truncate">{entry.name}</span></span>
-                            <span className="shrink-0 font-semibold tabular-nums text-slate-900">{entry.value.toLocaleString()} records</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="grid h-[250px] place-items-center rounded-xl border border-dashed border-cyan-200 bg-white/60 text-center text-sm text-slate-500">No available stock to chart yet.</div>
-                  )}
-                </Card>
-
-                <Card className="border-violet-200 bg-gradient-to-br from-violet-50/80 via-white to-indigo-50/60 p-5 shadow-sm dark:border-violet-900/60 dark:bg-violet-950/20">
-                  <div className="mb-2 flex items-start justify-between gap-3">
-                    <div><h3 className="font-bold text-slate-900 dark:text-slate-100">Open work by queue</h3><p className="text-sm text-slate-600 dark:text-slate-400">Compare tasks waiting for warehouse action.</p></div>
-                    <span className="rounded-full border border-violet-200 bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-800">{totalOpenTasks} open items</span>
-                  </div>
-                  <div className="h-[250px] min-w-0">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={openWorkByType} margin={{ top: 12, right: 12, left: -18, bottom: 4 }}>
-                        <CartesianGrid stroke="#e2e8f0" strokeDasharray="4 4" vertical={false} />
-                        <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: "#475569", fontSize: 12 }} />
-                        <YAxis allowDecimals={false} width={38} tickLine={false} axisLine={false} tick={{ fill: "#64748b", fontSize: 11 }} />
-                        <Tooltip cursor={{ fill: "#eef2ff" }} formatter={(value) => [value, "Open tasks"]} />
-                        <Bar dataKey="tasks" name="Open tasks" radius={[6, 6, 0, 0]} maxBarSize={58}>
-                          {openWorkByType.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <p className="mt-1 rounded-lg border border-violet-100 bg-white/70 px-3 py-2 text-xs text-slate-600">
-                    {totalOpenTasks === 0 ? "All warehouse queues are clear." : `${busiestQueue.name} has the most open work (${busiestQueue.tasks}). Select its queue in the sidebar to review tasks.`}
-                  </p>
-                </Card>
-              </div>
-            </section>
           </TabsContent>
           <TabsContent value="putaway" className="space-y-6 mt-6">
             <Card className="overflow-x-auto border-amber-200 bg-gradient-to-br from-amber-50/80 via-white to-orange-50/50 p-5 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/20">
@@ -2097,7 +1990,7 @@ function SimpleWarehouseModule() {
                   <Building2 className="h-5 w-5 text-indigo-600" /> Zones & Racks
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Zone → Rack → Shelf/Position → Bin
+                  Zone → Rack → Bin
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -3200,7 +3093,7 @@ function SimpleWarehouseModule() {
             <DialogDescription>
               {createLocationType === "zone" && (editingZone ? "Update the zone name. The generated zone code remains unchanged." : "Define a storage zone.")}
               {createLocationType === "bin" &&
-                "Configure the rack capacity and optional shelf / position. A bin code and QR code are generated automatically."}
+                "Configure the rack capacity. Rack, bin, and QR codes are generated automatically."}
             </DialogDescription>
           </DialogHeader>
 
@@ -3243,16 +3136,12 @@ function SimpleWarehouseModule() {
                 </div>
                 <div className="grid grid-cols-1 items-start gap-x-4 gap-y-4 sm:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="new-rack-code" className="block text-sm leading-5">Rack Code *</Label>
-                    <Input id="new-rack-code" className="h-11 w-full" required maxLength={64} placeholder="RACK-001" value={newBinRows[0].rack} onChange={e => setNewBinRows([{ ...newBinRows[0], rack: e.target.value.toUpperCase() }])} />
+                    <Label htmlFor="new-rack-code" className="block text-sm leading-5">Rack Code (auto-generated)</Label>
+                    <Input id="new-rack-code" className="h-11 w-full" readOnly value={newBinRows[0].rack} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="new-rack-capacity" className="block text-sm leading-5">Maximum Capacity (PCS) *</Label>
                     <Input id="new-rack-capacity" className="h-11 w-full" type="number" min={1} max={2147483647} step={1} required placeholder="80" value={newBinRows[0].capacity} onChange={e => setNewBinRows([{ ...newBinRows[0], capacity: e.target.value }])} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="new-rack-position" className="block text-sm leading-5">Shelf / Position (optional)</Label>
-                    <Input id="new-rack-position" className="h-11 w-full" maxLength={64} placeholder="e.g. SHELF-001" value={newBinRows[0].position} onChange={e => setNewBinRows([{ ...newBinRows[0], position: e.target.value.toUpperCase() }])} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="new-rack-bin-code" className="block text-sm leading-5">Bin Code (auto-generated)</Label>

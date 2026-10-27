@@ -25,6 +25,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -843,7 +844,14 @@ function NewAsnPage() {
                 </div>
               )}
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1080px] text-left text-sm">
+                <table className="w-full min-w-[1360px] table-fixed text-left text-sm">
+                  <colgroup>
+                    <col className="w-[13%]" /><col className="w-[10%]" />
+                    <col className="w-[12%]" /><col className="w-[12%]" />
+                    <col className="w-[12%]" /><col className="w-[13%]" />
+                    <col className="w-[10%]" /><col className="w-[12%]" />
+                    <col className="w-[6%]" />
+                  </colgroup>
                   <thead className="border-b border-border bg-muted/60 text-xs font-medium text-muted-foreground">
                     <tr>
                       <th scope="col" className="px-4 py-3">
@@ -863,9 +871,11 @@ function NewAsnPage() {
                       </th>
                       <th scope="col" className="px-4 py-3">
                         <span className="inline-flex items-center gap-1.5">
-                          Driver Name &amp; Mobile
-
+                          Driver Name
                         </span>
+                      </th>
+                      <th scope="col" className="px-4 py-3 whitespace-nowrap">
+                        Driver Number
                       </th>
                       <th scope="col" className="px-4 py-3">
                         <span className="inline-flex items-center gap-1.5">
@@ -885,7 +895,7 @@ function NewAsnPage() {
                           <InformationTooltip help="quantity" />
                         </span>
                       </th>
-                      <th scope="col" className="w-44 px-4 py-3 text-right">
+                      <th scope="col" className="px-3 py-3 text-right">
                         <span className="inline-flex items-center justify-end gap-1.5">
                           Actions
 
@@ -897,7 +907,7 @@ function NewAsnPage() {
                     {loading ? (
                       <tr>
                         <td
-                          colSpan={8}
+                          colSpan={9}
                           className="px-4 py-10 text-center text-sm text-muted-foreground"
                         >
                           <span className="inline-flex items-center gap-2" role="status">
@@ -909,7 +919,7 @@ function NewAsnPage() {
                     ) : loadError ? (
                       <tr>
                         <td
-                          colSpan={8}
+                          colSpan={9}
                           className="px-4 py-10 text-center text-sm text-muted-foreground"
                         >
                           Delivery notices could not be loaded. Use Try again above to retry.
@@ -918,7 +928,7 @@ function NewAsnPage() {
                     ) : !filteredList.length ? (
                       <tr>
                         <td
-                          colSpan={8}
+                          colSpan={9}
                           className="px-4 py-10 text-center text-sm text-muted-foreground"
                         >
                           {asnList.length
@@ -933,16 +943,14 @@ function NewAsnPage() {
                             {asn.asn_number || "—"}
                           </td>
                           <td className="px-4 py-3 text-foreground">{asn.supplier_name || "—"}</td>
-                          <td className="px-4 py-3 font-mono text-foreground">
+                          <td className="px-4 py-3 align-middle whitespace-nowrap font-mono text-foreground">
                             {asn.vehicle_number || "—"}
                           </td>
-                          <td className="px-4 py-3">
-                            <span className="text-foreground">{asn.driver_name || "—"}</span>
-                            {asn.driver_contact && (
-                              <span className="ml-1 font-mono text-muted-foreground">
-                                ({asn.driver_contact})
-                              </span>
-                            )}
+                          <td className="px-4 py-3 align-middle break-words text-foreground">
+                            {asn.driver_name || "?"}
+                          </td>
+                          <td className="px-4 py-3 align-middle whitespace-nowrap font-mono tabular-nums text-foreground">
+                            {asn.driver_contact || "?"}
                           </td>
                           <td className="px-4 py-3 text-muted-foreground">
                             {displayFilterDate(
@@ -964,7 +972,7 @@ function NewAsnPage() {
                             ) || 0}{" "}
                             units
                           </td>
-                          <td className="w-20 px-4 py-3 text-right">
+                          <td className="px-3 py-3 align-middle text-right">
                             <DropdownMenu>
                               <TapTooltip text="View, download, or manage this ASN, depending on available actions.">
                                 <DropdownMenuTrigger asChild>
@@ -1022,7 +1030,7 @@ function NewAsnPage() {
             open={Boolean(selectedAsn)}
             onOpenChange={(open) => !open && setSelectedAsn(null)}
           >
-            <DialogContent className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-2xl overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
+            <DialogContent id="supplier-management-asn-details-dialog" className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-2xl overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
               <DialogHeader>
                 <DialogTitle className="text-lg font-black text-primary">ASN Details</DialogTitle>
               </DialogHeader>
@@ -1130,7 +1138,7 @@ function NewAsnPage() {
               if (!assignmentSubmitting) setIsAssignmentOpen(open);
             }}
           >
-            <DialogContent className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-xl overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
+            <DialogContent id="supplier-transport-dialog" className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-xl overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
               <DialogHeader>
                 <DialogTitle className="text-lg font-black text-primary">
                   Assign vehicle and driver
@@ -1304,7 +1312,7 @@ function NewAsnPage() {
               if (!open) setAsnSubmitted(false);
             }}
           >
-            <DialogContent className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-2xl overflow-y-auto rounded-xl bg-card p-4 shadow-lg sm:p-6">
+            <DialogContent id="supplier-create-asn-dialog" className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-2xl overflow-y-auto rounded-xl bg-card p-4 shadow-lg sm:p-6">
               <DialogHeader>
                 <DialogTitle className="font-black text-lg text-primary uppercase border-b pb-2">
                   CREATE ADVANCE SHIPPING NOTICE (ASN)
@@ -1476,22 +1484,13 @@ function NewAsnPage() {
                       >
                         <div className="min-w-0 space-y-1.5">
                           <Label htmlFor={`material-${idx}`}>Material *</Label>
-                          <select
-                            id={`material-${idx}`}
+                          <Select
                             required
                             disabled={materialLoading || Boolean(materialLoadError)}
                             value={line.item_id || line.material_id || ""}
-                            onBlur={() => {
-                              if (!line.material_id) {
-                                setAsnFormErrors((errors) => ({
-                                  ...errors,
-                                  [`material-${idx}`]: "Select a material from Material Master.",
-                                }));
-                              }
-                            }}
-                            onChange={(event) => {
+                            onValueChange={(value) => {
                               const material = materialCatalog.find(
-                                (item) => String(item.id) === event.target.value,
+                                (item) => String(item.id) === value,
                               );
                               if (
                                 material &&
@@ -1525,21 +1524,34 @@ function NewAsnPage() {
                               }));
                               setSubmissionError("");
                             }}
+                          >
+                            <SelectTrigger
+                            id={`material-${idx}`}
+                            onBlur={() => {
+                              if (!line.material_id) {
+                                setAsnFormErrors((errors) => ({
+                                  ...errors,
+                                  [`material-${idx}`]: "Select a material from Material Master.",
+                                }));
+                              }
+                            }}
                             aria-invalid={Boolean(asnFormErrors[`material-${idx}`])}
                             aria-describedby={
                               asnFormErrors[`material-${idx}`] ? `material-${idx}-error` : undefined
                             }
-                            className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                            className="h-11 w-full min-w-0 rounded-[10px] border-[#DFE7F0] bg-white px-3 text-sm text-[#172B4D] shadow-none disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            <option value="">
-                              {materialLoading ? "Loading materials…" : "Select material"}
-                            </option>
+                              <SelectValue placeholder={materialLoading ? "Loading materials…" : "Select material"} />
+                            </SelectTrigger>
+                            <SelectContent className="supplier-asn-material-menu">
+                            <SelectItem value="__clear_selection__">Select material</SelectItem>
                             {materialCatalog.map((material) => (
-                              <option key={material.id} value={material.id}>
+                              <SelectItem key={material.id} value={String(material.id)}>
                                 {material.name} ({material.code})
-                              </option>
+                              </SelectItem>
                             ))}
-                          </select>
+                            </SelectContent>
+                          </Select>
                           {asnFormErrors[`material-${idx}`] && (
                             <p
                               id={`material-${idx}-error`}

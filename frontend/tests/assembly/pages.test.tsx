@@ -144,13 +144,13 @@ describe("Assembly dashboard", () => {
     expect(screen.queryByText("Manage Orders")).not.toBeInTheDocument();
     expect(screen.queryByText("Assembly overview")).not.toBeInTheDocument();
   });
-  it("refreshes all dashboard sources", async () => {
+  it("loads all dashboard sources without the removed Refresh button", async () => {
     show(Dashboard);
     await screen.findByText("23");
-    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
-    await waitFor(() => expect(api.getAssemblyDashboard).toHaveBeenCalledTimes(2));
-    expect(api.getAssemblyMaterialRequests).toHaveBeenCalledTimes(2);
-    expect(api.getAssemblyFinishedGoodsInventorySummary).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("button", { name: "Refresh" })).not.toBeInTheDocument();
+    expect(api.getAssemblyDashboard).toHaveBeenCalledTimes(1);
+    expect(api.getAssemblyMaterialRequests).toHaveBeenCalledTimes(1);
+    expect(api.getAssemblyFinishedGoodsInventorySummary).toHaveBeenCalledTimes(1);
   });
   it("reports a partial API failure without showing a fake inventory zero", async () => {
     api.getAssemblyFinishedGoodsInventorySummary.mockRejectedValue(new Error("offline"));

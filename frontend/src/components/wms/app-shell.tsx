@@ -44,6 +44,7 @@ import { pageHelp } from "@/lib/information-help";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api-client";
+import { isDashboardSearchVisible } from "@/lib/dashboard-search";
 import logoUrl from "@/assets/Logo.png";
 import { toast } from "sonner";
 import { getUserInfo, type UserInfo } from "@/lib/auth-utils";
@@ -341,6 +342,7 @@ export function AppShell({
   const location = useRouterState({ select: (s) => s.location });
   const path = location.pathname;
   const searchStr = location.searchStr || "";
+  const showHeaderSearch = isDashboardSearchVisible(path, searchStr);
   const fullHref = path + searchStr;
   const navigate = useNavigate();
   const [user, setUser] = useState<UserInfo | null>(null);
@@ -352,7 +354,7 @@ export function AppShell({
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const executeSearch = async (term: string) => {
-    if (!term || !term.trim()) {
+    if (!showHeaderSearch || !term || !term.trim()) {
       setSearchResults([]);
       setShowSearch(false);
       return;
@@ -371,7 +373,7 @@ export function AppShell({
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
-      if (searchTerm.length >= 1) {
+      if (showHeaderSearch && searchTerm.length >= 1) {
         void executeSearch(searchTerm);
       } else {
         setSearchResults([]);
@@ -379,7 +381,7 @@ export function AppShell({
       }
     }, 200);
     return () => clearTimeout(delayDebounceFn);
-  }, [searchTerm]);
+  }, [searchTerm, showHeaderSearch]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -392,7 +394,7 @@ export function AppShell({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if (showHeaderSearch && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
@@ -403,7 +405,7 @@ export function AppShell({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchTerm]);
+  }, [searchTerm, showHeaderSearch]);
   const isGrnUser =
     mounted &&
     (user?.roles?.includes("GRN") ||
@@ -562,7 +564,7 @@ export function AppShell({
   const desktopSidebarCollapsed = !sidebarHovered;
 
   return (
-    <div className={cn("flex min-h-screen w-full bg-background", isWarehouseWorkspace && "warehouse-visual-workspace", (isAssemblyRoute || path.startsWith("/assembly/")) && "assembly-visual-workspace")}>
+    <div className={cn("flex min-h-screen w-full bg-background", isWarehouseWorkspace && "warehouse-visual-workspace", (isAssemblyRoute || path.startsWith("/assembly/")) && "assembly-visual-workspace", (isGateSecurityRoute || path.startsWith("/gate/")) && "gate-visual-workspace", isGrnRoute && "grn-visual-workspace")}>
       {mobileSidebarOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
           <button
@@ -571,7 +573,7 @@ export function AppShell({
             className="absolute inset-0 bg-background/70 backdrop-blur-sm"
             onClick={() => setMobileSidebarOpen(false)}
           />
-          <aside className="relative flex h-full w-[min(84vw,320px)] flex-col border-r border-sidebar-border bg-sidebar shadow-2xl">
+          <aside className="wms-sidebar relative flex h-full w-[min(84vw,320px)] flex-col border-r border-sidebar-border bg-sidebar shadow-2xl">
             <div className="flex h-16 items-center justify-between gap-2 border-b border-sidebar-border/40 px-4">
               <div className="flex min-w-0 items-center gap-3">
                 <div className="relative flex h-10 w-14 shrink-0 items-center justify-center rounded-xl bg-white p-1.5 shadow-sm border border-sidebar-border/70">
@@ -640,7 +642,7 @@ export function AppShell({
         onMouseEnter={() => setSidebarHovered(true)}
         onMouseLeave={() => setSidebarHovered(false)}
         className={cn(
-          "sticky top-0 hidden h-screen shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 md:flex",
+          "wms-sidebar sticky top-0 hidden h-screen shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 md:flex",
           desktopSidebarCollapsed ? "w-[76px]" : "w-[264px]",
         )}
       >
@@ -729,7 +731,7 @@ export function AppShell({
               <Warehouse className="size-4 transition-opacity duration-150 group-hover:opacity-0 group-focus-visible:opacity-0" />
               <Menu className="absolute size-4 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100" />
             </button>
-            <form
+            {showHeaderSearch && <form
               onSubmit={handleSearchSubmit}
               className={cn("relative hidden max-w-md flex-1 items-center sm:flex", isSupplierRoute && "supplier-header-search")}
             >
@@ -856,7 +858,7 @@ export function AppShell({
                   </div>
                 </>
               )}
-            </form>
+            </form>}
 
             <div className="ml-auto flex items-center gap-1.5">
                     <Link
@@ -926,7 +928,7 @@ export function AppShell({
         <main className={cn("page-enter flex-1 px-4 py-6 lg:px-7", isWarehouseWorkspace && "px-5 py-5 lg:px-8 lg:py-6")}>
           <div className={cn("mx-auto w-full max-w-[1360px]", isWarehouseWorkspace && "max-w-[1680px]")}>
             {(title || subtitle || actions) && (
-              <div className={cn("mb-6 flex flex-wrap items-end justify-between gap-4", path === "/supplier-dashboard" && "supplier-heading-image", path === "/assembly-dashboard" && "assembly-dashboard-hero")}>
+              <div className={cn("mb-6 flex flex-wrap items-end justify-between gap-4", path === "/supplier-dashboard" && "supplier-heading-image", path === "/assembly-dashboard" && "assembly-dashboard-hero", path === "/gate-dashboard" && "gate-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") === "dashboard" && "grn-dashboard-hero")}>
                 <div>
                   {title && <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">{title}{pageHelp[path] && <InformationTooltip help={pageHelp[path]} placement="title" />}</h1>}
                   {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}

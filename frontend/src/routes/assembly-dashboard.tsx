@@ -237,16 +237,6 @@ function AssemblyDashboard() {
       subtitle="Operational monitoring, production tracking & quality status"
       actions={
         <div className="flex flex-wrap items-center gap-2.5">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => loadDashboard(true)}
-            disabled={refreshing}
-            className="rounded-xl text-xs gap-1.5 shadow-2xs hover:bg-muted/80"
-          >
-            <RefreshCw className={cn("size-3.5", refreshing && "animate-spin text-primary")} />
-            Refresh
-          </Button>
           <AssemblyWorkflowHelp />
           <Button
             size="sm"

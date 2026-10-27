@@ -2409,10 +2409,13 @@ export const api = {
       `${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/bins${query ? `?${query}` : ""}`,
     );
   },
-  async getNextBinCode(zoneId: string): Promise<{ suggested_bin_code: string }> {
+  async getNextBinCode(zoneId: string): Promise<{ suggested_bin_code: string; suggested_rack_code: string }> {
     return request<any>(
       `${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/bins/next-code`,
     );
+  },
+  async deleteRack(zoneId: string, rackId: string): Promise<{ deleted: boolean }> {
+    return request(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}/racks/${encodeURIComponent(rackId)}`, { method: "DELETE" });
   },
   async moveRackMaterial(zoneId: string, rackId: string, data: {
     source_scan: string; material_scan: string; quantity: number; reason: string; destination_scan?: string;

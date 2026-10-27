@@ -18,6 +18,7 @@ import { AppShell } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -696,27 +697,22 @@ function SupplierDashboard() {
                   Delivery notices submitted in the selected period.
                 </p>
               </div>
-              <label className="relative inline-flex h-10 items-center rounded-lg border border-border bg-background pl-3 pr-8 text-sm font-medium text-foreground transition-colors hover:border-slate-400 focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 cursor-pointer">
-                <span className="sr-only">ASN activity range</span>
-                <span aria-hidden="true">
-                  {trendDays === 7
-                    ? "Last 7 Days"
-                    : trendDays === 30
-                      ? "Last 30 Days"
-                      : "Last 90 Days"}
-                </span>
-                <select
+              <Select
+                value={String(trendDays)}
+                onValueChange={(value) => setTrendDays(Number(value) as 7 | 30 | 90)}
+              >
+                <SelectTrigger
                   aria-label="ASN activity range"
-                  className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
-                  value={trendDays}
-                  onChange={(event) => setTrendDays(Number(event.target.value) as 7 | 30 | 90)}
+                  className="h-11 w-[156px] gap-3 rounded-[10px] border-[#DFE7F0] bg-white text-sm font-medium text-[#172B4D] shadow-none hover:border-[#B3C8D9] focus:ring-2 focus:ring-[#0866B1]/20"
                 >
-                  <option value={7}>Last 7 Days</option>
-                  <option value={30}>Last 30 Days</option>
-                  <option value={90}>Last 90 Days</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2.5 size-4 text-muted-foreground" aria-hidden="true" />
-              </label>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="supplier-activity-range-menu rounded-xl border-[#DFE7F0] bg-white p-1 text-[#172B4D] shadow-[0_8px_24px_rgb(23_43_77_/_0.10)]">
+                  <SelectItem value="7">Last 7 Days</SelectItem>
+                  <SelectItem value="30">Last 30 Days</SelectItem>
+                  <SelectItem value="90">Last 90 Days</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {asnsLoading && asns.length === 0 ? (
@@ -756,7 +752,7 @@ function SupplierDashboard() {
           </section>
 
           <Dialog open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}>
-            <DialogContent className="max-w-lg rounded-2xl bg-card p-6 shadow-2xl">
+            <DialogContent id="supplier-asn-details-dialog" className="max-w-lg rounded-2xl bg-card p-6 shadow-2xl">
               <DialogHeader>
                 <DialogTitle className="font-black text-lg text-primary">
                   ASN Details · {selected?.asn_number || "—"}
@@ -1160,14 +1156,6 @@ function SupplierDashboard() {
                 >
                   Close
                 </Button>
-                <Link
-                  to="/supplier/asns/new"
-                  search={{ open: "create" }}
-                  onClick={() => setIsDeliveryHelpOpen(false)}
-                  className="inline-flex h-10 items-center justify-center rounded-xl bg-sky-600 px-5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2"
-                >
-                  Create ASN
-                </Link>
               </div>
             </DialogContent>
           </Dialog>

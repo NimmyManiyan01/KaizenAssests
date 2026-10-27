@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api-client";
 import {
   localDateInput,
@@ -340,7 +341,7 @@ function SupplierDispatchPage() {
         </CardContent>
       </Card>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
+        <DialogContent id="supplier-create-dispatch-dialog" className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Create Dispatch</DialogTitle>
           </DialogHeader>
@@ -434,36 +435,37 @@ function SupplierDispatchPage() {
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto]" key={index}>
                   <div className="space-y-1.5">
                     <Label htmlFor={`finished-good-${index}`}>Finished good *</Label>
-                    <select
-                      id={`finished-good-${index}`}
+                    <Select
                       required
                       disabled={finishedGoodsLoading || finishedGoods.length === 0}
-                      className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                       value={item.name}
-                      onChange={(e) =>
+                      onValueChange={(value) =>
                         setGoods((rows) =>
                           rows.map((row, i) =>
-                            i === index ? { ...row, name: e.target.value, custom: false } : row,
+                            i === index ? { ...row, name: value === "__clear_selection__" ? "" : value, custom: false } : row,
                           ),
                         )
                       }
                     >
-                      <option value="">
-                        {finishedGoodsLoading
+                      <SelectTrigger id={`finished-good-${index}`} className="h-11 min-w-0 rounded-[10px] border-[#DFE7F0] bg-white text-sm text-[#172B4D] shadow-none">
+                        <SelectValue placeholder={finishedGoodsLoading
                           ? "Loading finished goods…"
                           : finishedGoodsError
                             ? "Finished goods unavailable"
                             : finishedGoods.length
                               ? "Select a finished good"
-                              : "No finished goods available"}
-                      </option>
+                              : "No finished goods available"} />
+                      </SelectTrigger>
+                      <SelectContent className="supplier-dispatch-goods-menu">
+                      <SelectItem value="__clear_selection__">Select a finished good</SelectItem>
                       {finishedGoods.map((good) => (
-                        <option key={good.code} value={good.name}>
+                        <SelectItem key={good.code} value={good.name}>
                           {good.name} ({good.quantity}
                           {good.uom ? ` ${good.uom}` : ""})
-                        </option>
+                        </SelectItem>
                       ))}
-                    </select>
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor={`finished-good-quantity-${index}`}>Quantity *</Label>
