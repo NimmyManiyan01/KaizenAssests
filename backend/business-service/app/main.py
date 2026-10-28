@@ -40,6 +40,8 @@ from app.modules.store.infrastructure.api.location_router import (
     store_router as store_location_router,
     zone_router as zone_location_router,
 )
+from app.middleware.audit_log import AuditLogMiddleware
+from app.modules.admin.infrastructure.api.router import router as admin_router
 from app.workers.notification_consumer import start_notification_consumer
 from app.workers.outbox_relay import relay_once
 
@@ -529,8 +531,11 @@ async def lifespan(app: FastAPI):
             except Exception: pass
 
         for col in [
-            ("role", "VARCHAR(64) NOT NULL DEFAULT 'Store Manager'"),
+            ("role", "VARCHAR(64) NOT NULL DEFAULT 'WAREHOUSE_MANAGER'"),
+            ("shift_name", "VARCHAR(64)"),
+            ("assembly_unit_code", "VARCHAR(64)"),
             ("applications", "JSONB NOT NULL DEFAULT '[\"WMS\"]'::jsonb"),
+            ("page_permissions", "JSONB NOT NULL DEFAULT '{}'::jsonb"),
             ("auth_token_hash", "VARCHAR(128)"),
             ("last_login", "TIMESTAMP WITH TIME ZONE"),
         ]:
@@ -1597,11 +1602,11 @@ async def lifespan(app: FastAPI):
             )
             logger.info("Ensured table 'store_zone' exists")
 
-            # Phase 3: Store Manager User Accounts DDL
+            # Warehouse-wide managed user accounts (legacy table name retained
+            # for in-place upgrades).
             await run_ddl("""
                 CREATE TABLE IF NOT EXISTS store_manager_user (
                     id UUID PRIMARY KEY,
-                    store_id UUID NOT NULL REFERENCES store(id) ON DELETE RESTRICT,
                     employee_id VARCHAR(64) UNIQUE NOT NULL,
                     username VARCHAR(64) UNIQUE NOT NULL,
                     full_name VARCHAR(128) NOT NULL,
@@ -1611,7 +1616,6 @@ async def lifespan(app: FastAPI):
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 );
-                CREATE INDEX IF NOT EXISTS ix_store_manager_user_store_id ON store_manager_user (store_id);
                 CREATE INDEX IF NOT EXISTS ix_store_manager_user_employee_id ON store_manager_user (employee_id);
                 CREATE INDEX IF NOT EXISTS ix_store_manager_user_username ON store_manager_user (username);
                 CREATE INDEX IF NOT EXISTS ix_store_manager_user_email ON store_manager_user (email);
@@ -1726,6 +1730,7 @@ def create_app() -> FastAPI:
             origins.append(o)
 
     app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(AuditLogMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
@@ -1755,6 +1760,7 @@ def create_app() -> FastAPI:
     app.include_router(dispatch_router)
     app.include_router(search_router)
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+    app.include_router(admin_router)
     app.include_router(assistant_router)
     app.include_router(store_location_router)
     app.include_router(zone_location_router)

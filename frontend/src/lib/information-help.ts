@@ -72,6 +72,13 @@ export const pageHelp: Record<string, HelpId> = {
   "/assembly/dispatch": "dispatch", "/dispatch-orders": "dispatch", "/dispatch-picking-packing": "dispatch",
   "/dispatch-loading": "loading", "/dispatch-gate-out": "gateExit", "/dispatch-exceptions": "dispatch",
   "/notifications": "notifications",
+  "/admin": "warehouse",
+  "/admin/users": "warehouse",
+  "/admin/suppliers": "supplier",
+  "/admin/audit": "qc",
+  "/admin_/audit": "qc",
+  "/admin_/users": "warehouse",
+  "/admin_/suppliers": "supplier",
 };
 export const inventoryHelp: Record<string, HelpId> = {
   dashboard: "warehouse", putaway: "putaway", inventory: "inventory", requests: "requisitions",

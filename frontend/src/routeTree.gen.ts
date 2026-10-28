@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AssemblyDashboardRouteImport } from './routes/assembly-dashboard'
 import { Route as DamageClaimsRouteImport } from './routes/damage-claims'
 import { Route as DispatchExceptionsRouteImport } from './routes/dispatch-exceptions'
@@ -31,6 +32,9 @@ import { Route as SupplierMaterialsRouteImport } from './routes/supplier-materia
 import { Route as VehicleExitRouteImport } from './routes/vehicle-exit'
 import { Route as VehicleQueueRouteImport } from './routes/vehicle-queue'
 import { Route as WarehouseDashboardRouteImport } from './routes/warehouse-dashboard'
+import { Route as AdminAuditRouteImport } from './routes/admin_.audit'
+import { Route as AdminSuppliersRouteImport } from './routes/admin_.suppliers'
+import { Route as AdminUsersRouteImport } from './routes/admin_.users'
 import { Route as AssemblyDispatchRouteImport } from './routes/assembly.dispatch'
 import { Route as AssemblyFinishedGoodsRouteImport } from './routes/assembly.finished-goods'
 import { Route as AssemblyMaterialRequestsRouteImport } from './routes/assembly.material-requests'
@@ -52,6 +56,11 @@ import { Route as SupplierAsnsNewRouteImport } from './routes/supplier.asns.new'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AssemblyDashboardRoute = AssemblyDashboardRouteImport.update({
@@ -159,6 +168,21 @@ const WarehouseDashboardRoute = WarehouseDashboardRouteImport.update({
   path: '/warehouse-dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminAuditRoute = AdminAuditRouteImport.update({
+  id: '/admin_/audit',
+  path: '/admin/audit',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminSuppliersRoute = AdminSuppliersRouteImport.update({
+  id: '/admin_/suppliers',
+  path: '/admin/suppliers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminUsersRoute = AdminUsersRouteImport.update({
+  id: '/admin_/users',
+  path: '/admin/users',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AssemblyDispatchRoute = AssemblyDispatchRouteImport.update({
   id: '/assembly/dispatch',
   path: '/assembly/dispatch',
@@ -253,6 +277,7 @@ const SupplierAsnsNewRoute = SupplierAsnsNewRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/assembly-dashboard': typeof AssemblyDashboardRoute
   '/damage-claims': typeof DamageClaimsRoute
   '/dispatch-exceptions': typeof DispatchExceptionsRoute
@@ -274,6 +299,9 @@ export interface FileRoutesByFullPath {
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
+  '/admin/audit': typeof AdminAuditRoute
+  '/admin/suppliers': typeof AdminSuppliersRoute
+  '/admin/users': typeof AdminUsersRoute
   '/assembly/dispatch': typeof AssemblyDispatchRoute
   '/assembly/finished-goods': typeof AssemblyFinishedGoodsRoute
   '/assembly/material-requests': typeof AssemblyMaterialRequestsRoute
@@ -294,6 +322,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/assembly-dashboard': typeof AssemblyDashboardRoute
   '/damage-claims': typeof DamageClaimsRoute
   '/dispatch-exceptions': typeof DispatchExceptionsRoute
@@ -315,6 +344,9 @@ export interface FileRoutesByTo {
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
+  '/admin/audit': typeof AdminAuditRoute
+  '/admin/suppliers': typeof AdminSuppliersRoute
+  '/admin/users': typeof AdminUsersRoute
   '/assembly/dispatch': typeof AssemblyDispatchRoute
   '/assembly/finished-goods': typeof AssemblyFinishedGoodsRoute
   '/assembly/material-requests': typeof AssemblyMaterialRequestsRoute
@@ -336,6 +368,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/assembly-dashboard': typeof AssemblyDashboardRoute
   '/damage-claims': typeof DamageClaimsRoute
   '/dispatch-exceptions': typeof DispatchExceptionsRoute
@@ -357,6 +390,9 @@ export interface FileRoutesById {
   '/vehicle-exit': typeof VehicleExitRoute
   '/vehicle-queue': typeof VehicleQueueRoute
   '/warehouse-dashboard': typeof WarehouseDashboardRoute
+  '/admin_/audit': typeof AdminAuditRoute
+  '/admin_/suppliers': typeof AdminSuppliersRoute
+  '/admin_/users': typeof AdminUsersRoute
   '/assembly/dispatch': typeof AssemblyDispatchRoute
   '/assembly/finished-goods': typeof AssemblyFinishedGoodsRoute
   '/assembly/material-requests': typeof AssemblyMaterialRequestsRoute
@@ -379,6 +415,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin'
     | '/assembly-dashboard'
     | '/damage-claims'
     | '/dispatch-exceptions'
@@ -400,6 +437,9 @@ export interface FileRouteTypes {
     | '/vehicle-exit'
     | '/vehicle-queue'
     | '/warehouse-dashboard'
+    | '/admin/audit'
+    | '/admin/suppliers'
+    | '/admin/users'
     | '/assembly/dispatch'
     | '/assembly/finished-goods'
     | '/assembly/material-requests'
@@ -420,6 +460,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/admin'
     | '/assembly-dashboard'
     | '/damage-claims'
     | '/dispatch-exceptions'
@@ -441,6 +482,9 @@ export interface FileRouteTypes {
     | '/vehicle-exit'
     | '/vehicle-queue'
     | '/warehouse-dashboard'
+    | '/admin/audit'
+    | '/admin/suppliers'
+    | '/admin/users'
     | '/assembly/dispatch'
     | '/assembly/finished-goods'
     | '/assembly/material-requests'
@@ -461,6 +505,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/admin'
     | '/assembly-dashboard'
     | '/damage-claims'
     | '/dispatch-exceptions'
@@ -482,6 +527,9 @@ export interface FileRouteTypes {
     | '/vehicle-exit'
     | '/vehicle-queue'
     | '/warehouse-dashboard'
+    | '/admin_/audit'
+    | '/admin_/suppliers'
+    | '/admin_/users'
     | '/assembly/dispatch'
     | '/assembly/finished-goods'
     | '/assembly/material-requests'
@@ -503,6 +551,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
   AssemblyDashboardRoute: typeof AssemblyDashboardRoute
   DamageClaimsRoute: typeof DamageClaimsRoute
   DispatchExceptionsRoute: typeof DispatchExceptionsRoute
@@ -524,6 +573,9 @@ export interface RootRouteChildren {
   VehicleExitRoute: typeof VehicleExitRoute
   VehicleQueueRoute: typeof VehicleQueueRoute
   WarehouseDashboardRoute: typeof WarehouseDashboardRoute
+  AdminAuditRoute: typeof AdminAuditRoute
+  AdminSuppliersRoute: typeof AdminSuppliersRoute
+  AdminUsersRoute: typeof AdminUsersRoute
   AssemblyDispatchRoute: typeof AssemblyDispatchRoute
   AssemblyFinishedGoodsRoute: typeof AssemblyFinishedGoodsRoute
   AssemblyMaterialRequestsRoute: typeof AssemblyMaterialRequestsRoute
@@ -549,6 +601,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/assembly-dashboard': {
@@ -698,6 +757,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WarehouseDashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin_/audit': {
+      id: '/admin_/audit'
+      path: '/admin/audit'
+      fullPath: '/admin/audit'
+      preLoaderRoute: typeof AdminAuditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin_/suppliers': {
+      id: '/admin_/suppliers'
+      path: '/admin/suppliers'
+      fullPath: '/admin/suppliers'
+      preLoaderRoute: typeof AdminSuppliersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin_/users': {
+      id: '/admin_/users'
+      path: '/admin/users'
+      fullPath: '/admin/users'
+      preLoaderRoute: typeof AdminUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/assembly/dispatch': {
       id: '/assembly/dispatch'
       path: '/assembly/dispatch'
@@ -834,6 +914,7 @@ const SupplierAsnsRouteWithChildren = SupplierAsnsRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
   AssemblyDashboardRoute: AssemblyDashboardRoute,
   DamageClaimsRoute: DamageClaimsRoute,
   DispatchExceptionsRoute: DispatchExceptionsRoute,
@@ -855,6 +936,9 @@ const rootRouteChildren: RootRouteChildren = {
   VehicleExitRoute: VehicleExitRoute,
   VehicleQueueRoute: VehicleQueueRoute,
   WarehouseDashboardRoute: WarehouseDashboardRoute,
+  AdminAuditRoute: AdminAuditRoute,
+  AdminSuppliersRoute: AdminSuppliersRoute,
+  AdminUsersRoute: AdminUsersRoute,
   AssemblyDispatchRoute: AssemblyDispatchRoute,
   AssemblyFinishedGoodsRoute: AssemblyFinishedGoodsRoute,
   AssemblyMaterialRequestsRoute: AssemblyMaterialRequestsRoute,

@@ -49,6 +49,7 @@ import { searchModule } from "@/lib/module-search";
 import logoUrl from "@/assets/Logo.png";
 import { toast } from "sonner";
 import { getUserInfo, type UserInfo } from "@/lib/auth-utils";
+import { getPageAccess } from "@/lib/page-permissions";
 import { SecureAssistant } from "@/components/wms/secure-assistant";
 
 function getUserDisplayName(user: UserInfo | null): string {
@@ -213,6 +214,19 @@ const supplierNav = [
 
 const managerNav: any[] = [];
 
+const adminNav: NavItem[] = [
+  { label: "Dashboard", to: "/admin", icon: LayoutDashboard },
+  { label: "User Management", to: "/admin/users", icon: Users },
+  { label: "Audit Log", to: "/admin/audit", icon: ClipboardList },
+  { label: "Suppliers", to: "/admin/suppliers", icon: Truck },
+  { label: "Gate Security", to: "/gate-dashboard", icon: ShieldCheck },
+  { label: "GRN / Receiving", to: "/grn?tab=dashboard", icon: FileCheck2 },
+  { label: "Warehouse", to: "/inventory?tab=dashboard", icon: Warehouse },
+  { label: "Assembly", to: "/assembly-dashboard", icon: Factory },
+  { label: "Dispatch", to: "/dispatch-picking-packing", icon: Boxes },
+  { label: "Reports", to: "/reports", icon: BarChart3 },
+];
+
 const gateSecurityNav = [
   { label: "Dashboard", to: "/gate-dashboard", icon: LayoutDashboard },
   { label: "Vehicle Entry & Exit", to: "/vehicle-queue", icon: PlusCircle },
@@ -291,6 +305,12 @@ function getNotificationRole(user: { username?: string; roles?: string[] } | nul
 
 function getStrictRoleNav(user: { username?: string; roles?: string[] } | null): NavItem[] {
   if (!user) return [];
+  if (
+    hasUserRole(user, "ADMIN") ||
+    hasUserRole(user, "SUPERUSER") ||
+    hasUserRole(user, "SUPER_ADMIN")
+  )
+    return adminNav;
   if (hasUserRole(user, "SUPPLIER")) return supplierNav;
   if (hasUserRole(user, "GATE_SECURITY") || hasUserRole(user, "GATE_OPERATOR"))
     return gateSecurityNav;
@@ -348,6 +368,19 @@ export function AppShell({
   const fullHref = path + searchStr;
   const navigate = useNavigate();
   const [user, setUser] = useState<UserInfo | null>(null);
+  const [adminModules, setAdminModules] = useState<any[]>([]);
+  const isAdmin = Boolean(user?.roles?.some((role) =>
+    ["ADMIN", "SUPERUSER", "SUPER_ADMIN"].includes(role.toUpperCase()),
+  ));
+  useEffect(() => {
+    if (!isAdmin) {
+      setAdminModules([]);
+      return;
+    }
+    void api.getAdminOverview()
+      .then((overview) => setAdminModules(overview?.modules || []))
+      .catch(() => setAdminModules([]));
+  }, [isAdmin]);
   const { unreadCount: unreadNotifications, alert: notificationAlert, dismissAlert } = useNotificationAlerts(user ? getNotificationRole(user) : null, user?.username);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -489,31 +522,58 @@ export function AppShell({
       "/arrival-success",
     ].some((route) => path.startsWith(route)) ||
     (isGateSecurityUser && (isSharedOperationsRoute || isNotificationsRoute));
-  const resolvedNav = isSupplierRoute
+  const adminNavByModule = adminNav.flatMap((item) => {
+    const itemPath = item.to.split("?")[0];
+    const module = adminModules.find((candidate) => candidate.route?.split("?")[0] === itemPath);
+    if (!module) return [item];
+    if ((module.assembly_units || []).length) {
+      return [
+        item,
+        ...module.assembly_units.map((unit: any) => ({
+          label: `${unit.name} (${unit.code})`,
+          to: `/assembly-dashboard?unit=${encodeURIComponent(unit.code)}`,
+          icon: Factory,
+        })),
+      ];
+    }
+    return [item];
+  });
+  const resolvedNav = isAdmin
+    ? adminNavByModule
+    : isSupplierRoute
     ? supplierNav
-    : isAssemblyUser || isAssemblyRoute
-      ? assemblyNav
-      : isStoreUser || isStoreRoute
-        ? storeManagerNav
-        : isGrnUser || isGrnRoute
-          ? grnNav
-          : isSupplierRoute
-            ? supplierNav
-            : isGateSecurityRoute
-              ? gateSecurityNav
-              : isWarehouseRoute
-                ? warehouseNav
-                : mounted && user?.roles?.includes("DISPATCH")
-                  ? dispatchNav
-                  : mounted && user?.roles?.includes("ASSEMBLY")
-                    ? assemblyNav
-                    : mounted && user?.roles?.includes("SUPPLIER")
-                      ? supplierNav
-                      : isGateSecurityUser
-                        ? gateSecurityNav
-                        : warehouseNav;
+    : path.startsWith("/admin")
+      ? adminNav
+      : isAssemblyUser || isAssemblyRoute
+        ? assemblyNav
+        : isStoreUser || isStoreRoute
+          ? storeManagerNav
+          : isGrnUser || isGrnRoute
+            ? grnNav
+            : isSupplierRoute
+              ? supplierNav
+              : isGateSecurityRoute
+                ? gateSecurityNav
+                : isWarehouseRoute
+                  ? warehouseNav
+                  : mounted && user?.roles?.includes("DISPATCH")
+                    ? dispatchNav
+                    : mounted && user?.roles?.includes("ASSEMBLY")
+                      ? assemblyNav
+                      : mounted && user?.roles?.includes("SUPPLIER")
+                        ? supplierNav
+                        : isGateSecurityUser
+                          ? gateSecurityNav
+                          : warehouseNav;
   const navigationPending = !mounted && isSharedOperationsRoute;
-  const nav = navigationPending ? [] : resolvedNav;
+  const nav = navigationPending
+    ? []
+    : resolvedNav.filter((item) => {
+        const [itemPath, itemSearch = ""] = item.to.split("?");
+        return getPageAccess(user?.page_permissions, itemPath, itemSearch) !== null;
+      });
+  const currentPageAccess = getPageAccess(user?.page_permissions, path, searchStr);
+  const isReadOnlyPage = currentPageAccess === "READ";
   useEffect(() => {
     setMobileSidebarOpen(false);
   }, [fullHref]);
@@ -944,10 +1004,24 @@ export function AppShell({
                   {title && <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">{title}{pageHelp[path] && <InformationTooltip help={pageHelp[path]} placement="title" />}</h1>}
                   {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
                 </div>
-                {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+                {actions && (
+                  <fieldset
+                    disabled={isReadOnlyPage}
+                    className="flex flex-wrap items-center gap-2 border-0 p-0"
+                  >
+                    {actions}
+                  </fieldset>
+                )}
               </div>
             )}
-            {children}
+            {isReadOnlyPage && (
+              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+                Read-only access: you can view this page but cannot perform actions.
+              </div>
+            )}
+            <fieldset disabled={isReadOnlyPage} className="min-w-0 border-0 p-0">
+              {children}
+            </fieldset>
           </div>
         </main>
       </div>

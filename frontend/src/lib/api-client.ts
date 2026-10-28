@@ -3219,8 +3219,12 @@ export const api = {
       method: "DELETE",
     });
   },
-  async getAssemblyDashboard(): Promise<AssemblyDashboardResponse> {
-    return request<AssemblyDashboardResponse>(`${BUSINESS_API_URL}/api/v1/assembly/dashboard`, {
+  async getAssemblyDashboard(adminUser?: string | null, assemblyUnit?: string | null): Promise<AssemblyDashboardResponse> {
+    const params = new URLSearchParams();
+    if (adminUser) params.set("admin_user", adminUser);
+    if (assemblyUnit) params.set("assembly_unit", assemblyUnit);
+    const query = params.size ? `?${params.toString()}` : "";
+    return request<AssemblyDashboardResponse>(`${BUSINESS_API_URL}/api/v1/assembly/dashboard${query}`, {
       cache: "no-store",
     });
   },
@@ -3687,6 +3691,55 @@ export const api = {
     const qStr = role ? `?role=${encodeURIComponent(role)}` : "";
     return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/notifications${qStr}`);
   },
+  async getAdminOverview(): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/admin/overview`);
+  },
+  async getAdminAuditLogs(filters?: { module?: string; actor?: string; action?: string; result?: string; limit?: number }): Promise<{ total: number; items: any[] }> {
+    const params = new URLSearchParams();
+    if (filters?.module) params.set("module", filters.module);
+    if (filters?.actor) params.set("actor", filters.actor);
+    if (filters?.action) params.set("action", filters.action);
+    if (filters?.result) params.set("result", filters.result);
+    params.set("limit", String(filters?.limit || 100));
+    return request(`${BUSINESS_API_URL}/api/v1/admin/audit-logs?${params.toString()}`);
+  },
+  async getAdminUsers(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/admin/users`);
+  },
+  async getAdminRoles(): Promise<Array<{ value: string; label: string }>> {
+    return request<Array<{ value: string; label: string }>>(
+      `${BUSINESS_API_URL}/api/v1/admin/roles`,
+    );
+  },
+  async getAdminAssemblyUnits(): Promise<Array<{ id: string; code: string; name: string; description?: string | null; status: string }>> {
+    return request(`${BUSINESS_API_URL}/api/v1/admin/assembly-units`);
+  },
+  async createAdminAssemblyUnit(payload: { unit_code: string; unit_name: string; description?: string }): Promise<any> {
+    return request(`${BUSINESS_API_URL}/api/v1/admin/assembly-units`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  async getAdminStores(): Promise<Array<{ id: string; code: string; name: string }>> {
+    return request<Array<{ id: string; code: string; name: string }>>(
+      `${BUSINESS_API_URL}/api/v1/admin/stores`,
+    );
+  },
+  async getAdminSuppliers(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/admin/suppliers`);
+  },
+  async createAdminUser(payload: Record<string, unknown>): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/admin/users`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  async updateAdminUser(userId: string, payload: Record<string, unknown>): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/admin/users/${encodeURIComponent(userId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
   async assistantChat(
     message: string,
     history: AssistantChatMessage[] = [],
@@ -3960,6 +4013,8 @@ export interface AssemblyActivityItem {
 }
 
 export interface AssemblyDashboardResponse {
+  viewed_user?: { id: string; full_name: string; employee_id: string } | null;
+  assembly_unit?: string | null;
   kpis: AssemblyKPIs;
   active_orders: AssemblyOrder[];
   needs_attention: AssemblyAttentionItem[];
