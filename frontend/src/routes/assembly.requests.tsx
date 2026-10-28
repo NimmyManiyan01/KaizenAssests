@@ -383,14 +383,12 @@ function AssemblyRequestsPage() {
               </SelectContent>
             </Select>
 
-            <Button
+            <Button aria-label="Refresh" title="Refresh"
               variant="outline"
               size="sm"
               onClick={fetchData}
               className="h-9 rounded-xl text-xs"
-            >
-              Refresh
-            </Button>
+            ></Button>
           </div>
         </div>
 

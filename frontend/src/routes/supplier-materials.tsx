@@ -56,6 +56,7 @@ function SupplierMaterials() {
   const [materials, setMaterials] = useState<any[]>([]);
   const [query, setQuery] = useState("");
   const [uomFilter, setUomFilter] = useState("ALL");
+  const [materialPage, setMaterialPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -99,6 +100,12 @@ function SupplierMaterials() {
       ),
     [materials, query, uomFilter],
   );
+  const pageCount = Math.max(1, Math.ceil(filtered.length / 10));
+  const currentPage = Math.min(materialPage, pageCount);
+  const pageStart = (currentPage - 1) * 10;
+  const pagedMaterials = filtered.slice(pageStart, pageStart + 10);
+  useEffect(() => { setMaterialPage(1); }, [query, uomFilter]);
+  useEffect(() => { setMaterialPage(page => Math.min(page, pageCount)); }, [pageCount]);
   const uoms = [...new Set([...UOMS, ...materials.map((m) => m.uom).filter(Boolean)])];
   const openAdd = async () => {
     setEditing(null);
@@ -358,7 +365,7 @@ function SupplierMaterials() {
                           </td>
                         </tr>
                       ) : (
-                        filtered.map((m) => (
+                        pagedMaterials.map((m) => (
                           <tr key={m.id || m.code} className="transition-colors hover:bg-muted/40">
                             <td className="px-4 py-3 font-mono font-medium text-primary">
                               {m.code || "—"}
@@ -443,12 +450,15 @@ function SupplierMaterials() {
                 </div>
                 {!loading && !error && (
                   <div
-                    className="border-t border-border px-4 py-3 text-xs text-muted-foreground sm:px-5"
+                    className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm text-muted-foreground sm:px-5"
                     aria-live="polite"
                   >
-                    {filtered.length === materials.length
-                      ? `${filtered.length} ${filtered.length === 1 ? "material" : "materials"}`
-                      : `${filtered.length} of ${materials.length} materials`}
+                    <span>Showing {filtered.length ? pageStart + 1 : 0}–{Math.min(pageStart + 10, filtered.length)} of {filtered.length} materials</span>
+                    <nav aria-label="Material catalog pagination" className="flex items-center gap-3">
+                      <Button size="sm" variant="outline" disabled={currentPage === 1} onClick={() => setMaterialPage(currentPage - 1)}>Previous</Button>
+                      <span>{currentPage} / {pageCount}</span>
+                      <Button size="sm" variant="outline" disabled={currentPage === pageCount} onClick={() => setMaterialPage(currentPage + 1)}>Next</Button>
+                    </nav>
                   </div>
                 )}
               </>

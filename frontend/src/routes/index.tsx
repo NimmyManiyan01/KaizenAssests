@@ -60,12 +60,12 @@ function HomePage() {
             onClick={goToDashboard}
             className="flex items-center gap-3.5 text-left group cursor-pointer focus:outline-none"
           >
-            <div className="relative flex items-center justify-center h-11 px-3.5 rounded-2xl bg-gradient-to-r from-cyan-500/10 via-blue-500/10 to-indigo-500/10 border border-cyan-500/30 backdrop-blur-md shadow-[0_0_20px_rgba(6,182,212,0.25)] transition-all duration-300 group-hover:scale-105 group-hover:border-cyan-400/60 group-hover:shadow-[0_0_30px_rgba(6,182,212,0.5)]">
+            <div className="relative flex items-center justify-center h-12 px-3.5 rounded-2xl bg-gradient-to-r from-cyan-500/10 via-blue-500/10 to-indigo-500/10 border border-cyan-500/30 backdrop-blur-md shadow-[0_0_20px_rgba(6,182,212,0.25)] transition-all duration-300 group-hover:scale-105 group-hover:border-cyan-400/60 group-hover:shadow-[0_0_30px_rgba(6,182,212,0.5)]">
               <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-cyan-500/20 to-indigo-500/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 blur-sm -z-10" />
               <img
                 src={logoUrl}
-                alt="Kaizentrix Logo"
-                className="h-8 w-auto object-contain drop-shadow-[0_2px_8px_rgba(6,182,212,0.45)]"
+                alt="GTVP Logo"
+                className="h-9 w-auto object-contain drop-shadow-[0_2px_8px_rgba(6,182,212,0.45)]"
               />
             </div>
             <div className="flex flex-col">

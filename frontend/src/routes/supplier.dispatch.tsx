@@ -43,6 +43,12 @@ function SupplierDispatchPage() {
   const [finishedGoodsError, setFinishedGoodsError] = React.useState<string>();
   const [goods, setGoods] = React.useState([{ name: "", quantity: "", custom: false }]);
   const [dispatchHistory, setDispatchHistory] = React.useState<any[]>([]);
+  const [historyPage, setHistoryPage] = React.useState(1);
+  const historyPageCount = Math.max(1, Math.ceil(dispatchHistory.length / 10));
+  const currentHistoryPage = Math.min(historyPage, historyPageCount);
+  const historyStart = (currentHistoryPage - 1) * 10;
+  const pagedDispatches = dispatchHistory.slice(historyStart, historyStart + 10);
+  React.useEffect(() => { setHistoryPage(page => Math.min(page, historyPageCount)); }, [historyPageCount]);
   const [historyLoading, setHistoryLoading] = React.useState(true);
   const [historyError, setHistoryError] = React.useState<string>();
   const [selectedDispatch, setSelectedDispatch] = React.useState<any | null>(null);
@@ -236,7 +242,7 @@ function SupplierDispatchPage() {
               )}
             </CardDescription>
           </div>
-          <Button
+          <Button data-refresh-control="true" size="icon" aria-label="Refresh" title="Refresh"
             type="button"
             variant="outline"
             className="h-10 rounded-lg"
@@ -246,7 +252,7 @@ function SupplierDispatchPage() {
             {historyLoading ? (
               <Loader2 className="mr-2 size-4 animate-spin" />
             ) : (
-              <RefreshCw className="mr-2 size-4" />
+              <RefreshCw className="size-4" />
             )}
             Refresh
           </Button>
@@ -294,7 +300,7 @@ function SupplierDispatchPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {dispatchHistory.map((dispatch) => (
+                  {pagedDispatches.map((dispatch) => (
                     <tr key={dispatch.id} className="transition-colors hover:bg-muted/20">
                       <td className="px-5 py-3 font-mono font-semibold text-primary">
                         {dispatch.dispatch_number || dispatch.order_number || "—"}
@@ -336,6 +342,16 @@ function SupplierDispatchPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {!historyLoading && !historyError && dispatchHistory.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm">
+              <p className="text-muted-foreground">Showing {historyStart + 1}–{Math.min(historyStart + 10, dispatchHistory.length)} of {dispatchHistory.length} dispatches</p>
+              <nav aria-label="Dispatch history pagination" className="flex items-center gap-3">
+                <Button size="sm" variant="outline" disabled={currentHistoryPage === 1} onClick={() => setHistoryPage(currentHistoryPage - 1)}>Previous</Button>
+                <span aria-live="polite">{currentHistoryPage} / {historyPageCount}</span>
+                <Button size="sm" variant="outline" disabled={currentHistoryPage === historyPageCount} onClick={() => setHistoryPage(currentHistoryPage + 1)}>Next</Button>
+              </nav>
             </div>
           )}
         </CardContent>

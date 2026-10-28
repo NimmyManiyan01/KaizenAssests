@@ -3265,6 +3265,12 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+  async updateProductBOMMaterial(productCode: string, data: { material_code: string; quantity_per_unit: number }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/products/${encodeURIComponent(productCode)}/bom/materials`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+    });
+  },
+
   async addProductBOMMaterial(productCode: string, data: { material_code: string; quantity_per_unit: number }): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/products/${encodeURIComponent(productCode)}/bom/materials`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),

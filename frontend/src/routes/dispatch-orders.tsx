@@ -521,9 +521,8 @@ function DispatchOrdersPage() {
       subtitle="Advanced filtering, stock reservation, and outbound finished goods order management"
       actions={
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="rounded-xl" onClick={() => void loadData()}>
-            <RefreshCw className="size-4" /> Refresh
-          </Button>
+          <Button data-refresh-control="true" size="icon" aria-label="Refresh" title="Refresh" variant="outline" className="rounded-xl" onClick={() => void loadData()}>
+            <RefreshCw className="size-4" /></Button>
           <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
             <DialogTrigger asChild>
               <Button className="rounded-xl shadow-glow" onClick={handleOpenCreate}>

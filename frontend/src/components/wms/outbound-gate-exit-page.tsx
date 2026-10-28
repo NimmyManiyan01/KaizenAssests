@@ -69,9 +69,16 @@ export function OutboundGateExitPage({
       title={title}
       subtitle={subtitle}
       actions={
-        <Button variant="outline" className="rounded-xl" onClick={() => void load()}>
-          <RefreshCw className="size-4 mr-2" />
-          Refresh
+        <Button
+          data-refresh-control="true"
+          size="icon"
+          aria-label="Refresh"
+          title="Refresh"
+          variant="outline"
+          className="rounded-xl"
+          onClick={() => void load()}
+        >
+          <RefreshCw className="size-4" />
         </Button>
       }
     >

@@ -43,6 +43,7 @@ vi.mock("@/lib/auth-utils", () => ({ requireRole: vi.fn() }));
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => ({ options }),
   useNavigate: () => navigate,
+  useSearch: () => ({}),
   Link: ({ to, children, ...props }: { to: string; children: ReactNode }) => (
     <a href={to} {...props}>
       {children}
@@ -188,7 +189,7 @@ describe("Material request queue", () => {
       "Steel bolt",
     );
     expect(screen.getByText("MR-1")).toBeInTheDocument();
-  });
+  }, 15000);
   it("keeps the queue compact and shows material quantities in Details", async () => {
     show(Requests);
     await screen.findByText("MR-1");

@@ -494,6 +494,20 @@ function Notifications() {
     : null;
 
   const grnDetails = selectedGrnNotif ? parseGrnNotificationDetails(selectedGrnNotif) : null;
+  const asnDispatch = String(selectedGrnNotif?.message || "").match(
+    /^ASN\s+(\S+)\s+dispatched by\s+(.+?)\.\s*Vehicle:\s*(.+?)\s*·\s*Driver:\s*(.+?)\s*\(([^)]*)\)\s*·\s*ETA:\s*(.+?)\s*·\s*Materials:\s*([\s\S]+)\s*$/i,
+  );
+  const asnDispatchFields = asnDispatch ? [
+    ["ASN reference", asnDispatch[1]],
+    ["Supplier", asnDispatch[2]],
+    ["Vehicle number", asnDispatch[3]],
+    ["Driver", asnDispatch[4]],
+    ["Driver contact", asnDispatch[5]],
+    ["Expected arrival", Number.isNaN(new Date(asnDispatch[6]).getTime())
+      ? asnDispatch[6]
+      : new Date(asnDispatch[6]).toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" })],
+    ["Materials", asnDispatch[7]],
+  ] : [];
 
   const getPhotosForMaterial = (matString: string, itemCode?: string) => {
     const cleanMat = (matString || "").toLowerCase();
@@ -1173,13 +1187,13 @@ function Notifications() {
 
       {/* ✨ GRN & QUALITY NOTIFICATION DETAILS MODAL */}
       <Dialog open={showGrnModal} onOpenChange={setShowGrnModal}>
-        <DialogContent className="max-w-4xl rounded-3xl p-6 space-y-6 max-h-[90vh] overflow-y-auto border shadow-2xl">
+        <DialogContent className="max-w-2xl rounded-2xl p-6 gap-4 max-h-[90vh] overflow-y-auto border shadow-2xl">
           {/* HEADER */}
           <DialogHeader className="border-b pb-4 flex flex-row items-center justify-between">
             <div>
               <div className="flex items-center gap-2">
                 <span className="px-3 py-1 rounded-full text-xs font-black bg-primary/10 text-primary border border-primary/20 flex items-center gap-1.5 uppercase tracking-wider">
-                  <FileText className="size-3.5" /> {grnDetails?.statusText || "GRN Details"}
+                  <FileText className="size-3.5" /> {asnDispatch ? "ASN Dispatched" : grnDetails?.statusText || "GRN Details"}
                 </span>
                 {grnDetails?.grnNumber && (
                   <span className="px-2.5 py-0.5 rounded-md font-mono text-xs font-bold bg-muted text-foreground">
@@ -1202,7 +1216,10 @@ function Notifications() {
           </DialogHeader>
 
           {/* DETAILS GRID */}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 bg-muted/30 rounded-2xl p-4 border text-xs font-sans">
+          {!asnDispatch && (grnDetails?.grnNumber || grnDetails?.poNumber ||
+            (grnDetails?.supplierName && grnDetails.supplierName !== "Supplier") ||
+            grnDetails?.vehicleNumber) && (
+          <div className="grid gap-4 sm:grid-cols-2 bg-muted/20 rounded-xl p-4 border text-sm font-sans [&>div]:min-w-0 [&_span]:break-words">
             {grnDetails?.grnNumber && (
               <div className="space-y-0.5">
                 <span className="text-[10px] font-extrabold uppercase text-muted-foreground tracking-wider block">
@@ -1225,7 +1242,7 @@ function Notifications() {
               </div>
             )}
 
-            {grnDetails?.supplierName && (
+            {grnDetails?.supplierName && grnDetails.supplierName !== "Supplier" && (
               <div className="space-y-0.5">
                 <span className="text-[10px] font-extrabold uppercase text-muted-foreground tracking-wider block">
                   Supplier Name
@@ -1248,8 +1265,10 @@ function Notifications() {
             )}
           </div>
 
+          )}
+
           {/* BALANCES KPI GRID IF PRESENT */}
-          {grnDetails?.totals && (
+          {grnDetails?.totals && (grnDetails.grnNumber || (grnDetails.items?.length ?? 0) > 0) && (
             <div className="grid gap-3 sm:grid-cols-4">
               <div className="rounded-xl border bg-muted/20 p-3">
                 <span className="text-[10px] font-bold uppercase text-muted-foreground block">
@@ -1354,7 +1373,20 @@ function Notifications() {
           )}
 
           {/* MESSAGE BODY (FALLBACK / REMARKS) */}
-          {(!grnDetails?.items || grnDetails.items.length === 0) && (
+          {asnDispatch && (
+            <section className="rounded-xl border bg-muted/10 p-4">
+              <h3 className="mb-4 text-sm font-semibold">Shipment details</h3>
+              <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+                {asnDispatchFields.map(([label, value]) => (
+                  <div key={label} className={`min-w-0 ${label === "Materials" ? "border-t pt-4 sm:col-span-2" : ""}`}>
+                    <dt className="text-xs text-muted-foreground">{label}</dt>
+                    <dd className="mt-1 whitespace-pre-line break-words text-sm font-semibold leading-relaxed">{value || "—"}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          )}
+          {!asnDispatch && (!grnDetails?.items || grnDetails.items.length === 0) && (
             <div className="rounded-2xl border bg-card p-4 space-y-1">
               <span className="text-[10px] font-black uppercase text-muted-foreground tracking-wider block">
                 Notification Message

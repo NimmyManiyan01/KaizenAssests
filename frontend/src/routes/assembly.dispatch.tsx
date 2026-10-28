@@ -296,16 +296,14 @@ function AssemblyDispatchPage() {
       title="FG Dispatch"
       subtitle="Supplier pickup verification, picking, packing and loading from the Assembly FG Area"
       actions={
-        <Button
+        <Button data-refresh-control="true" aria-label="Refresh" title="Refresh"
           variant="outline"
           size="sm"
           className="rounded-xl gap-2"
           disabled={busy || loading}
           onClick={() => void act(async () => {})}
         >
-          <RefreshCw className="size-4" />
-          Refresh
-        </Button>
+          <RefreshCw className="size-4" /></Button>
       }
     >
       <div className="min-w-0 space-y-5">
@@ -321,7 +319,11 @@ function AssemblyDispatchPage() {
           className="min-w-0 rounded-2xl border border-border/70 bg-card p-4 sm:p-5 shadow-soft space-y-4"
           aria-label="Supplier pickup requests"
         >
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="border-b border-border/60 pb-4">
+            <h2 className="text-lg font-semibold">Dispatch requests</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Review pickup requests and track dispatch progress.</p>
+          </div>
+          <div className="flex flex-col items-stretch justify-between gap-4 xl:flex-row xl:items-center">
             <div role="group" aria-label="Dispatch status" className="flex flex-wrap gap-2">
               {[
                 ["ALL", "All"],
@@ -334,7 +336,7 @@ function AssemblyDispatchPage() {
                   key={key}
                   size="sm"
                   variant={filter === key ? "default" : "outline"}
-                  className="rounded-xl text-xs"
+                  className="min-h-10 rounded-xl px-3 text-sm"
                   aria-pressed={filter === key}
                   onClick={() => setFilter(key!)}
                 >
@@ -342,14 +344,14 @@ function AssemblyDispatchPage() {
                 </Button>
               ))}
             </div>
-            <div className="relative w-full sm:w-72">
-              <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+            <div className="relative w-full min-w-0 xl:w-96 xl:shrink-0">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <Input
                 aria-label="Search dispatch requests"
                 placeholder="Search request, supplier or vehicle..."
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                className="pl-9 rounded-xl text-xs"
+                className="h-11 pl-9 rounded-xl text-sm"
               />
             </div>
           </div>
@@ -359,7 +361,7 @@ function AssemblyDispatchPage() {
             </p>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-border/70">
-              <table className="w-full min-w-[750px] text-left text-xs">
+              <table className="w-full min-w-[900px] table-fixed text-left text-sm [&_th]:align-middle [&_td]:align-middle">
                 <thead className="bg-muted/50 text-[11px] uppercase text-muted-foreground">
                   <tr>
                     {[
