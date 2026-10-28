@@ -39,7 +39,7 @@ export function OutboundGateExitPage({ title = "Gate Exit", subtitle = "Verify o
     finally { setBusy(null); }
   };
 
-  return <AppShell title={title} subtitle={subtitle} actions={<Button variant="outline" className="rounded-xl" onClick={() => void load()}><RefreshCw className="size-4 mr-2" />Refresh</Button>}>
+  return <AppShell title={title} subtitle={subtitle} actions={<Button data-refresh-control="true" size="icon" aria-label="Refresh" title="Refresh" variant="outline" className="rounded-xl" onClick={() => void load()}><RefreshCw className="size-4" /></Button>}>
     <div className="grid gap-4 sm:grid-cols-3 mb-6">
       <Card className="rounded-2xl p-5"><p className="text-xs uppercase font-bold text-muted-foreground">Ready for verification</p><p className="text-3xl font-bold mt-2">{orders.length}</p></Card>
       <Card className="rounded-2xl p-5"><p className="text-xs uppercase font-bold text-muted-foreground">Control point</p><p className="text-lg font-bold mt-2 flex items-center gap-2"><ShieldCheck className="size-5 text-emerald-600" />Outbound Gate</p></Card>

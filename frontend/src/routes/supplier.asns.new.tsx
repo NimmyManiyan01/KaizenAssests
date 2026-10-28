@@ -201,6 +201,7 @@ function NewAsnPage() {
 
   const [asnList, setAsnList] = useState<AsnRecord[]>(INITIAL_ASNS);
   const [searchQuery, setSearchQuery] = useState("");
+  const [deliveryPage, setDeliveryPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [arrivalFrom, setArrivalFrom] = useState("");
   const [arrivalTo, setArrivalTo] = useState("");
@@ -720,6 +721,12 @@ function NewAsnPage() {
       a.po_number.toLowerCase().includes(q)
     );
   });
+  const deliveryPageCount = Math.max(1, Math.ceil(filteredList.length / 10));
+  const currentDeliveryPage = Math.min(deliveryPage, deliveryPageCount);
+  const deliveryStart = (currentDeliveryPage - 1) * 10;
+  const pagedDeliveries = filteredList.slice(deliveryStart, deliveryStart + 10);
+  useEffect(() => { setDeliveryPage(1); }, [searchQuery, statusFilter, arrivalFrom, arrivalTo]);
+  useEffect(() => { setDeliveryPage(page => Math.min(page, deliveryPageCount)); }, [deliveryPageCount]);
   const clearFilters = () => {
     setSearchQuery("");
     setStatusFilter("ALL");
@@ -843,8 +850,8 @@ function NewAsnPage() {
                   </Button>
                 </div>
               )}
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[1360px] table-fixed text-left text-sm">
+              <div className="w-full min-w-0">
+                <table className="w-full table-fixed text-left text-sm [&_th]:break-words [&_td]:break-words [&_th]:!whitespace-normal [&_td]:!whitespace-normal [&_th]:!px-2 [&_td]:!px-2 xl:[&_th]:!px-4 xl:[&_td]:!px-4">
                   <colgroup>
                     <col className="w-[13%]" /><col className="w-[10%]" />
                     <col className="w-[12%]" /><col className="w-[12%]" />
@@ -937,7 +944,7 @@ function NewAsnPage() {
                         </td>
                       </tr>
                     ) : (
-                      filteredList.map((asn) => (
+                      pagedDeliveries.map((asn) => (
                         <tr key={asn.id} className="transition-colors hover:bg-muted/40">
                           <td className="px-4 py-3 font-mono font-medium text-primary">
                             {asn.asn_number || "—"}
@@ -1015,12 +1022,15 @@ function NewAsnPage() {
               </div>
               {!loading && !loadError && (
                 <div
-                  className="border-t border-border px-4 py-3 text-xs text-muted-foreground"
+                  className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm text-muted-foreground"
                   aria-live="polite"
                 >
-                  {filteredList.length === asnList.length
-                    ? `${filteredList.length} ${filteredList.length === 1 ? "delivery notice" : "delivery notices"}`
-                    : `${filteredList.length} of ${asnList.length} delivery notices`}
+                  <span>Showing {filteredList.length ? deliveryStart + 1 : 0}–{Math.min(deliveryStart + 10, filteredList.length)} of {filteredList.length} delivery notices</span>
+                  <nav aria-label="Delivery notices pagination" className="flex items-center gap-3">
+                    <Button size="sm" variant="outline" disabled={currentDeliveryPage === 1} onClick={() => setDeliveryPage(currentDeliveryPage - 1)}>Previous</Button>
+                    <span>{currentDeliveryPage} / {deliveryPageCount}</span>
+                    <Button size="sm" variant="outline" disabled={currentDeliveryPage === deliveryPageCount} onClick={() => setDeliveryPage(currentDeliveryPage + 1)}>Next</Button>
+                  </nav>
                 </div>
               )}
             </CardContent>

@@ -1,6 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { useSearch, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { AppShell } from "@/components/wms/app-shell";
+import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -22,7 +22,10 @@ function FinishedGoodsPickupGatePage() {
   const [requests, setRequests] = useState<any[]>([]);
   const [selected, setSelected] = useState<any | null>(null);
   const [query, setQuery] = useState("");
+  const moduleSearchParams = useSearch({ strict: false }) as { search?: string };
+  useEffect(() => { if (typeof moduleSearchParams.search === "string") setQuery(moduleSearchParams.search); }, [moduleSearchParams.search]);
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [requestPage, setRequestPage] = useState(1);
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [driverName, setDriverName] = useState("");
   const [driverContact, setDriverContact] = useState("");
@@ -106,6 +109,12 @@ function FinishedGoodsPickupGatePage() {
       }),
     [requests, query, statusFilter],
   );
+  const pageCount = Math.max(1, Math.ceil(filteredRequests.length / 10));
+  const currentPage = Math.min(requestPage, pageCount);
+  const pageStart = (currentPage - 1) * 10;
+  const pagedRequests = filteredRequests.slice(pageStart, pageStart + 10);
+  useEffect(() => { setRequestPage(1); }, [query, statusFilter]);
+  useEffect(() => { setRequestPage(page => Math.min(page, pageCount)); }, [pageCount]);
   const vehicle = vehicleNumber.trim().toUpperCase().replace(/\s+/g, " ");
   const contact = driverContact.replace(/\D/g, "");
   const vehicleMismatch = Boolean(
@@ -197,9 +206,8 @@ function FinishedGoodsPickupGatePage() {
           <Button variant="outline" onClick={() => setExitOpen(true)}>
             <LogOut className="mr-2 size-4" /> Exit Vehicle
           </Button>
-          <Button variant="outline" onClick={() => void load()}>
-            <RefreshCw className="mr-2 size-4" /> Refresh
-          </Button>
+          <Button data-refresh-control="true" size="icon" aria-label="Refresh" title="Refresh" variant="outline" onClick={() => void load()}>
+            <RefreshCw className="size-4" /></Button>
         </div>
       }
     >
@@ -478,7 +486,7 @@ function FinishedGoodsPickupGatePage() {
                 aria-label="Search pickup requests"
               />
               <select
-                className="h-9 rounded-md border bg-background px-2 text-sm"
+                className="h-9 min-w-40 shrink-0 whitespace-nowrap rounded-md border bg-background px-2 text-sm"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
                 aria-label="Filter pickup request status"
@@ -539,7 +547,10 @@ function FinishedGoodsPickupGatePage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {filteredRequests.map((request) => (
+                  {pagedRequests.map((request) => {
+                    const status = request.gate_pass_status || request.status;
+                    const isExited = ["CLOSED", "EXITED", "VEHICLE_EXITED"].includes(status);
+                    return (
                     <tr key={request.id}>
                       <td className="px-4 py-3 font-mono font-semibold text-primary">
                         {request.request_number}
@@ -553,13 +564,24 @@ function FinishedGoodsPickupGatePage() {
                       <td className="px-4 py-3">{request.vehicle_number || "—"}</td>
                       <td className="px-4 py-3">{request.driver_name || "—"}</td>
                       <td className="px-4 py-3">
-                        {statusLabel(request.gate_pass_status || request.status)}
+                        <StatusBadge status={isExited ? "EXITED" : status} />
                       </td>
-                      <td className="px-4 py-3">{request.gate_pass_number || "—"}</td>
+                      <td className="px-4 py-3 font-mono font-semibold text-primary">{request.gate_pass_number || "—"}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
+            </div>
+          )}
+          {!loading && !error && filteredRequests.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm">
+              <p className="text-muted-foreground">Showing {pageStart + 1}–{Math.min(pageStart + 10, filteredRequests.length)} of {filteredRequests.length} requests</p>
+              <nav aria-label="Pickup requests pagination" className="flex items-center gap-3">
+                <Button size="sm" variant="outline" disabled={currentPage === 1} onClick={() => setRequestPage(currentPage - 1)}>Previous</Button>
+                <span aria-live="polite">{currentPage} / {pageCount}</span>
+                <Button size="sm" variant="outline" disabled={currentPage === pageCount} onClick={() => setRequestPage(currentPage + 1)}>Next</Button>
+              </nav>
             </div>
           )}
         </Card>

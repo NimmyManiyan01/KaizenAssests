@@ -89,6 +89,7 @@ function InboundArrivals() {
   const [exitPass, setExitPass] = useState("");
   const [exitVerified, setExitVerified] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
   const [arrivalPage, setArrivalPage] = useState(1);
   const arrivalsPerPage = 10;
 
@@ -164,6 +165,7 @@ function InboundArrivals() {
   }, [load]);
 
   const filteredArrivals = arrivals.filter((arrival) => {
+    if (statusFilter !== "ALL" && arrival.status !== statusFilter) return false;
     const query = searchQuery.trim().toLowerCase();
     if (!query) return true;
     return [
@@ -174,6 +176,15 @@ function InboundArrivals() {
       arrival.driver_name,
     ].some((value) => String(value || "").toLowerCase().includes(query));
   });
+  const arrivalStatuses = [
+    "AWAITING_DOCK",
+    "DOCK_ASSIGNED",
+    "INSIDE_FACILITY",
+    "AT_DOCK",
+    "UNLOADING_IN_PROGRESS",
+    "RECEIVING_COMPLETED",
+    "VEHICLE_EXITED",
+  ];
   const totalArrivalPages = Math.max(1, Math.ceil(filteredArrivals.length / arrivalsPerPage));
   const visibleArrivals = filteredArrivals.slice(
     (arrivalPage - 1) * arrivalsPerPage,
@@ -192,7 +203,7 @@ function InboundArrivals() {
     });
   }, []);
 
-  const applyAsnDetails = (asn: any) => {
+  const applyAsnDetails = useCallback((asn: any) => {
     if (!asn) return;
     setSelectedSupplier(asn.supplier_name || asn.supplier_company_name || "");
     setAutoPoNumber(asn.po_number || "");
@@ -201,7 +212,7 @@ function InboundArrivals() {
     setDriverNameInput(asn.driver_name || "");
     setDriverMobileInput(asn.driver_contact || "");
     setAsnMaterials(asn.lines || asn.expected_materials || []);
-  };
+  }, []);
 
   const openVehicleCamera = async () => {
     try {
@@ -286,9 +297,10 @@ function InboundArrivals() {
     }, "image/jpeg");
   };
 
-  const lookupAsn = async (value: string) => {
-    const number = value.trim();
-    if (!number) return;
+  useEffect(() => {
+    const number = selectedAsn.trim();
+    if (!isNewRegistrationModalOpen || !number) return;
+    let active = true;
     const local = asnRecords.find(
       (asn) => String(asn.asn_number).toLowerCase() === number.toLowerCase(),
     );
@@ -296,17 +308,26 @@ function InboundArrivals() {
       applyAsnDetails(local);
       return;
     }
-    const remote = await api.getAsn(number);
-    if (remote?.asn_number) {
-      setAsnRecords((prev) => [
-        remote,
-        ...prev.filter((asn) => asn.asn_number !== remote.asn_number),
-      ]);
-      applyAsnDetails(remote);
-    } else {
-      toast.error("ASN not found", { description: `No ASN was found for ${number}.` });
-    }
-  };
+    const timer = window.setTimeout(async () => {
+      try {
+        const remote = await api.getAsn(number);
+        if (!active) return;
+        if (remote?.asn_number) {
+          applyAsnDetails(remote);
+        } else {
+          toast.error("ASN not found", { description: `No ASN was found for ${number}.` });
+        }
+      } catch (error) {
+        if (active) toast.error("Unable to load ASN", {
+          description: error instanceof Error ? error.message : "Please check the ASN number.",
+        });
+      }
+    }, 500);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [selectedAsn, isNewRegistrationModalOpen, asnRecords, applyAsnDetails]);
 
   async function assignDock(arrival: Arrival) {
     const dockId = selectedDock[arrival.id];
@@ -474,13 +495,43 @@ function InboundArrivals() {
           >
             <PlusCircle className="mr-2 size-4" /> New Gate Entry
           </Button>
-          <Button variant="outline" className="rounded-xl" onClick={() => void load()}>
-            <RefreshCw className="size-4" /> Refresh
-          </Button>
+          <Button data-refresh-control="true" size="icon" aria-label="Refresh" title="Refresh" variant="outline" className="rounded-xl" onClick={() => void load()}>
+            <RefreshCw className="size-4" /></Button>
         </div>
       }
     >
-      <div className="overflow-hidden rounded-2xl bg-card">
+      <div className="overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="font-bold">Vehicle Entries</h2>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
+              className="w-full sm:w-56"
+              value={searchQuery}
+              onChange={(event) => {
+                setSearchQuery(event.target.value);
+                setArrivalPage(1);
+              }}
+              placeholder="Search vehicles…"
+              aria-label="Search vehicle entries"
+            />
+            <select
+              className="h-9 min-w-40 shrink-0 whitespace-nowrap rounded-md border bg-background px-2 text-sm"
+              value={statusFilter}
+              onChange={(event) => {
+                setStatusFilter(event.target.value);
+                setArrivalPage(1);
+              }}
+              aria-label="Filter vehicle entry status"
+            >
+              <option value="ALL">All statuses</option>
+              {arrivalStatuses.map((status) => (
+                <option key={status} value={status}>
+                  {status.replaceAll("_", " ")}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
         {loading ? (
           <div className="grid h-64 place-items-center">
             <Loader2 className="size-6 animate-spin text-primary" />
@@ -489,13 +540,23 @@ function InboundArrivals() {
           <div className="grid min-h-64 place-items-center p-8 text-center text-muted-foreground">
             <Truck className="size-10 stroke-1" />
             <p className="mt-2 font-medium">
-              {searchQuery.trim() ? "No matching inbound vehicles" : "No inbound vehicles in queue"}
+              {searchQuery.trim() || statusFilter !== "ALL" ? "No matching inbound vehicles" : "No inbound vehicles in queue"}
             </p>
           </div>
         ) : (
-          <div className="min-h-64 overflow-x-auto bg-card">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b bg-muted/40 text-xs uppercase text-muted-foreground">
+          <div className="overflow-x-auto bg-card">
+            <table aria-label="Vehicle entries and exits" className="w-full min-w-[1280px] table-fixed text-left text-sm [&_th]:align-middle [&_td]:align-middle [&_td]:break-words">
+              <colgroup>
+                <col className="w-[12%]" />
+                <col className="w-[10%]" />
+                <col className="w-[9%]" />
+                <col className="w-[13%]" />
+                <col className="w-[12%]" />
+                <col className="w-[12%]" />
+                <col className="w-[14%]" />
+                <col className="w-[18%]" />
+              </colgroup>
+              <thead className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground [&_th]:whitespace-nowrap [&_th]:font-semibold">
                 <tr>
                   <th className="px-4 py-3">ASN Number</th>
                   <th className="px-4 py-3">Gate Pass No.</th>
@@ -503,11 +564,13 @@ function InboundArrivals() {
                   <th className="px-4 py-3">Vehicle / Driver</th>
                   <th className="px-4 py-3">Expected Arrival</th>
                   <th className="px-4 py-3">Actual Arrival</th>
-                  <th className="px-4 py-3">Status / Dock</th>
-                  <th className="px-4 py-3">Actions</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">
+                    <span className="ml-auto block w-46 text-center">Actions</span>
+                  </th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody className="divide-y divide-border">
                 {visibleArrivals.map((arrival) => (
                   <ArrivalRows
                     key={arrival.id}
@@ -707,18 +770,19 @@ function InboundArrivals() {
                 {/* ASN Number Searchable Dropdown */}
                 <div className="order-first sm:order-first">
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
-                    ASN Number (Enter to load ASN) *
+                    ASN Number *
                   </label>
                   <input
                     type="text"
                     value={selectedAsn}
                     autoFocus
-                    onChange={(e) => setSelectedAsn(e.target.value)}
-                    onBlur={() => void lookupAsn(selectedAsn)}
+                    onChange={(e) => {
+                      setSelectedAsn(e.target.value);
+                      applyAsnDetails({});
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
-                        void lookupAsn(selectedAsn);
                       }
                     }}
                     placeholder="Enter ASN number"
@@ -1302,7 +1366,7 @@ function ArrivalRows({
         <td className="px-4 py-4 font-medium">{arrival.supplier_name || "—"}</td>
         <td className="px-4 py-4">
           <p className="font-mono font-semibold">{arrival.vehicle_number}</p>
-          <p className="text-xs text-muted-foreground">{arrival.driver_name || "—"}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{arrival.driver_name || "—"}</p>
         </td>
         <td className="px-4 py-4">
           {arrival.expected_arrival_at
@@ -1320,18 +1384,10 @@ function ArrivalRows({
           })}
         </td>
         <td className="px-4 py-4">
-          <StatusBadge status={arrival.status} />
-          {arrival.assigned_dock_id && (
-            <p className="mt-1 text-xs font-semibold">{arrival.assigned_dock_id}</p>
-          )}
-          {isExited && (
-            <p className="mt-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
-              Approved exit
-            </p>
-          )}
+          <StatusBadge status={isExited ? "EXITED" : arrival.status} />
         </td>
         <td className="px-4 py-4">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-[repeat(2,5.5rem)] items-center justify-end gap-2 [&_button]:h-9 [&_button]:w-full [&_button]:justify-center [&_button]:text-xs [&_button]:font-semibold">
             <Button size="sm" variant="outline" className="rounded-lg whitespace-nowrap" onClick={onToggle} aria-label={`View details for ${arrival.gate_entry_number || arrival.asn_number}`}>
               <Eye className="size-3.5" /> Details
             </Button>
@@ -1352,7 +1408,7 @@ function ArrivalRows({
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={9} className="bg-muted/20 px-4 py-5">
+          <td colSpan={8} className="bg-muted/20 px-4 py-5">
             <ArrivalDetails
               arrival={arrival}
               docks={docks}
@@ -1411,24 +1467,27 @@ function ArrivalDetails({
           </div>
           <StatusBadge status={arrival.status} />
         </div>
-        <dl className="grid gap-x-6 gap-y-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2">
+        <section className="min-w-0 rounded-lg border bg-muted/10 p-4">
+          <h4 className="mb-4 text-sm font-semibold">Shipment details</h4>
+        <dl className="grid gap-x-4 gap-y-4 text-sm sm:grid-cols-2">
           <Detail label="ASN number" value={arrival.asn_number} mono />
           <Detail label="Supplier" value={arrival.supplier_name} />
           <Detail label="Current status" value={arrival.status.replaceAll("_", " ")} />
-          <Detail label="Vehicle number" value={arrival.vehicle_number} mono />
-          <Detail label="Driver" value={arrival.driver_name} />
-          <Detail label="Driver contact" value={arrival.driver_contact} />
           <Detail label="Arrival time" value={new Date(arrival.arrival_time).toLocaleString()} />
-          <Detail
-            label="Expected arrival"
-            value={
-              arrival.expected_arrival_at
-                ? new Date(arrival.expected_arrival_at).toLocaleString()
-                : null
-            }
-          />
         </dl>
-        <div className="mt-5 border-t pt-4">
+        </section>
+        <section className="min-w-0 rounded-lg border bg-muted/10 p-4">
+          <h4 className="mb-4 text-sm font-semibold">Vehicle / Driver</h4>
+          <dl className="grid gap-x-4 gap-y-4 text-sm sm:grid-cols-2">
+            <Detail label="Vehicle number" value={arrival.vehicle_number} mono />
+            <Detail label="Driver" value={arrival.driver_name} />
+            <Detail label="Driver contact" value={arrival.driver_contact} />
+          </dl>
+        </section>
+        </div>
+        <div className="mt-5 grid gap-4 border-t pt-4 md:grid-cols-2">
+        <div className="min-w-0">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Vehicle photo
           </p>
@@ -1436,7 +1495,7 @@ function ArrivalDetails({
             <img
               src={imageSrc(arrival.truck_photo_base64 || arrival.vehicle_photo_base64)}
               alt={`Vehicle ${arrival.vehicle_number || "photo"}`}
-              className="max-h-72 w-full rounded-xl border object-contain bg-muted/20 p-2 sm:w-96"
+              className="h-60 w-full rounded-xl border object-contain bg-muted/20 p-2"
             />
           ) : (
             <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
@@ -1444,7 +1503,7 @@ function ArrivalDetails({
             </p>
           )}
         </div>
-        <div className="mt-5 border-t pt-4">
+        <div className="min-w-0">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             ASN document photograph
           </p>
@@ -1452,7 +1511,7 @@ function ArrivalDetails({
             <img
               src={imageSrc(arrival.document_image_base64)}
               alt={`ASN document for ${arrival.asn_number || "gate entry"}`}
-              className="max-h-72 w-full rounded-xl border object-contain bg-muted/20 p-2 sm:w-96"
+              className="h-60 w-full rounded-xl border object-contain bg-muted/20 p-2"
             />
           ) : (
             <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
@@ -1460,13 +1519,14 @@ function ArrivalDetails({
             </p>
           )}
         </div>
+        </div>
       </div>
       <div className="grid gap-5 md:grid-cols-2">
-        <div>
+        <div className="min-w-0 rounded-xl border bg-card p-4">
           <h3 className="mb-3 flex items-center gap-2 font-semibold">
             <Boxes className="size-4 text-primary" /> Gate entry information
           </h3>
-          <dl className="grid grid-cols-2 gap-2 text-xs">
+          <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)] gap-x-4 gap-y-3 text-sm [&_dd]:break-words">
             <dt className="text-muted-foreground">Gate entry</dt>
             <dd className="font-mono">{arrival.gate_entry_number}</dd>
             <dt className="text-muted-foreground">Entry time</dt>
@@ -1474,12 +1534,6 @@ function ArrivalDetails({
               {arrival.facility_entry_at || arrival.arrival_time
                 ? new Date(arrival.facility_entry_at || arrival.arrival_time!).toLocaleString()
                 : "Not entered"}
-            </dd>
-            <dt className="text-muted-foreground">Expected arrival</dt>
-            <dd>
-              {arrival.expected_arrival_at
-                ? new Date(arrival.expected_arrival_at).toLocaleString()
-                : "—"}
             </dd>
             <dt className="text-muted-foreground">Allocated dock</dt>
             <dd className="font-semibold">{arrival.assigned_dock_id || "—"}</dd>
@@ -1512,20 +1566,20 @@ function ArrivalDetails({
               </Button>
             )}
         </div>
-        <div>
+        <div className="min-w-0 rounded-xl border bg-card p-4">
           <h3 className="mb-3 font-semibold">Expected materials</h3>
           <div className="space-y-2">
             {arrival.expected_materials.map((m) => (
               <div
                 key={m.item_code}
-                className="flex justify-between rounded-lg border bg-card px-3 py-2 text-xs"
+                className="flex items-start justify-between gap-4 rounded-lg border bg-card px-3 py-2 text-sm"
               >
-                <span>
+                <span className="min-w-0 break-words">
                   <b>{m.item_code}</b>
                   <br />
                   {m.material_name}
                 </span>
-                <span className="font-semibold">
+                <span className="shrink-0 font-semibold tabular-nums">
                   {m.quantity} {m.uom}
                 </span>
               </div>
@@ -1547,9 +1601,9 @@ function Detail({
   mono?: boolean;
 }) {
   return (
-    <div>
+    <div className="min-w-0">
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={`mt-1 font-semibold ${mono ? "font-mono" : ""}`}>{value || "—"}</dd>
+      <dd className={`mt-1 break-words font-semibold leading-relaxed ${mono ? "font-mono" : ""}`}>{value || "—"}</dd>
     </div>
   );
 }

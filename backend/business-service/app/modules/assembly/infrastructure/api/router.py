@@ -663,7 +663,7 @@ async def create_assembly_product(
     Register a new manufacturable product and its Bill of Materials (BOM) in PostgreSQL.
     """
     async with uow:
-        clean_name = payload.product_name.strip()
+        clean_name = " ".join(payload.product_name.split())
         if not clean_name:
             raise HTTPException(status_code=400, detail="Product name is required.")
 
@@ -693,7 +693,7 @@ async def create_assembly_product(
             select(BillOfMaterialsModel).where(
                 or_(
                     BillOfMaterialsModel.product_code == clean_code,
-                    BillOfMaterialsModel.product_name == clean_name,
+                    func.lower(func.trim(func.regexp_replace(BillOfMaterialsModel.product_name, r"\s+", " ", "g"))) == clean_name.lower(),
                 )
             )
         )
@@ -789,6 +789,27 @@ async def add_product_bom_material(product_code: str, payload: AddProductBomMate
         quantity_per_unit=payload.quantity_per_unit, uom=material.base_uom,
         notes=f"Added by {current_user.username}")
     uow.session.add(item)
+    bom.updated_at = datetime.now()
+    await uow.session.flush()
+    return {"material_code": item.material_code, "quantity_per_unit": float(item.quantity_per_unit), "uom": item.uom}
+
+
+@router.put("/products/{product_code}/bom/materials")
+async def update_product_bom_material(product_code: str, payload: AddProductBomMaterialPayload,
+    uow: UnitOfWork = Depends(get_uow), current_user: CurrentUser = Depends(get_current_user)):
+    if not {role.upper() for role in (current_user.roles or [])}.intersection({"ASSEMBLY", "ASSEMBLY_MANAGER", "ADMIN", "SUPERUSER"}):
+        raise HTTPException(403, "Only Assembly managers can update product BOM components")
+    bom = await uow.session.scalar(select(BillOfMaterialsModel).where(
+        func.upper(BillOfMaterialsModel.product_code) == product_code.strip().upper(),
+        func.upper(BillOfMaterialsModel.status) == "ACTIVE").with_for_update())
+    if bom is None:
+        raise HTTPException(404, "No active BOM found for this product")
+    item = await uow.session.scalar(select(BillOfMaterialsItemModel).where(
+        BillOfMaterialsItemModel.bom_id == bom.id,
+        func.upper(BillOfMaterialsItemModel.material_code) == payload.material_code.strip().upper()))
+    if item is None:
+        raise HTTPException(404, "Material not found in this product BOM")
+    item.quantity_per_unit = payload.quantity_per_unit
     bom.updated_at = datetime.now()
     await uow.session.flush()
     return {"material_code": item.material_code, "quantity_per_unit": float(item.quantity_per_unit), "uom": item.uom}

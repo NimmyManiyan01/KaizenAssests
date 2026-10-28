@@ -178,6 +178,14 @@ function AssemblyFinishedGoodsPage() {
         ),
     );
   }, [items, search]);
+  const [listPage, setListPage] = useState(1);
+  const listPageCount = Math.max(1, Math.ceil(filteredItems.length / 10));
+  const currentListPage = Math.min(listPage, listPageCount);
+  const listStart = (currentListPage - 1) * 10;
+  const pagedRows = filteredItems.slice(listStart, listStart + 10);
+  useEffect(() => { setListPage(1); }, [search]);
+  useEffect(() => { setListPage(page => Math.min(page, listPageCount)); }, [listPageCount]);
+
 
   const detailBatches = useMemo(() => {
     const timestamp = (batch: AssemblyFinishedGoodItem) => {
@@ -215,16 +223,14 @@ function AssemblyFinishedGoodsPage() {
             <ShieldCheck className="size-3.5 text-purple-500" />
             Quality Checks
           </Button>
-          <Button
+          <Button data-refresh-control="true" aria-label="Refresh" title="Refresh"
             variant="outline"
             size="sm"
             onClick={() => fetchItems(true)}
             disabled={refreshing}
             className="rounded-xl text-xs gap-1.5 shadow-2xs hover:bg-muted/80"
           >
-            <RefreshCw className={cn("size-3.5", refreshing && "animate-spin text-primary")} />
-            Refresh
-          </Button>
+            <RefreshCw className={cn("size-3.5", refreshing && "animate-spin text-primary")} /></Button>
         </div>
       }
     >
@@ -233,13 +239,16 @@ function AssemblyFinishedGoodsPage() {
         <div className="min-w-0 rounded-2xl border border-border/70 bg-card p-5 shadow-soft space-y-4">
           {/* Header & Controls */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-border/60">
-            <p className="text-xs text-muted-foreground">
+            <div className="space-y-1">
+              <h2 className="flex items-center gap-2 text-lg font-semibold"><PackageCheck className="size-5 text-primary" />Finished goods inventory</h2>
+              <p className="text-sm text-muted-foreground">
               Showing <strong className="text-foreground">{filteredItems.length}</strong> of{" "}
               {items.length} products
-            </p>
+              </p>
+            </div>
 
             {/* Search input */}
-            <div className="relative w-full sm:w-80 sm:shrink-0">
+            <div className="relative w-full sm:w-96 sm:shrink-0">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
               <input
                 type="text"
@@ -247,7 +256,7 @@ function AssemblyFinishedGoodsPage() {
                 placeholder="Search batch, product or order..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="h-8 w-full rounded-xl border border-border bg-card pl-8 pr-7 text-xs outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/40"
+                className="h-11 w-full rounded-xl border border-border bg-card pl-9 pr-8 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/40"
               />
               {search && (
                 <button
@@ -295,7 +304,7 @@ function AssemblyFinishedGoodsPage() {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-border/70">
-              <table className="w-full min-w-[800px] text-left text-xs">
+              <table className="w-full min-w-[800px] table-fixed text-left text-sm [&_th]:align-middle [&_td]:align-middle [&_td]:tabular-nums">
                 <thead className="bg-muted/50">
                   <tr className="border-b border-border/70 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     <th scope="col" className="py-3 px-4">
@@ -322,7 +331,7 @@ function AssemblyFinishedGoodsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
-                  {filteredItems.map((fg) => (
+                  {pagedRows.map((fg) => (
                     <tr key={fg.id} className="group hover:bg-muted/40 transition-colors">
                       {/* Product */}
                       <td className="py-3.5 px-4">
@@ -385,6 +394,14 @@ function AssemblyFinishedGoodsPage() {
               </table>
             </div>
           )}
+          {!loading && filteredItems.length > 0 && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm">
+            <p className="text-muted-foreground">Showing {listStart + 1} to {Math.min(listStart + 10, filteredItems.length)} of {filteredItems.length} products</p>
+            <nav aria-label="Products pagination" className="flex items-center gap-3">
+              <Button size="sm" variant="outline" disabled={currentListPage === 1} onClick={() => setListPage(currentListPage - 1)}>Previous</Button>
+              <span>{currentListPage} / {listPageCount}</span>
+              <Button size="sm" variant="outline" disabled={currentListPage === listPageCount} onClick={() => setListPage(currentListPage + 1)}>Next</Button>
+            </nav>
+          </div>}
         </div>
 
         {/* ========================================================================= */}

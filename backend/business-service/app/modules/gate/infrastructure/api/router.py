@@ -505,56 +505,118 @@ async def download_supplier_asn_pdf(reference: str, uow: UnitOfWork = Depends(ge
     generated = asn.created_at.strftime("%d-%m-%Y") if asn.created_at else datetime.date.today().strftime("%d-%m-%Y")
     arrival = asn.expected_arrival_at.strftime("%d-%m-%Y") if asn.expected_arrival_at else "—"
     buffer = io.BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
-    pdf.setTitle(f"ASN {asn.asn_number}")
-    pdf.setFillColor(colors.HexColor("#123B67"))
-    pdf.rect(0, height - 30 * mm, width, 30 * mm, fill=1, stroke=0)
-    pdf.setFillColor(colors.white)
-    pdf.setFont("Helvetica-Bold", 18)
-    pdf.drawString(18 * mm, height - 18 * mm, "KAIZENASSESTS")
-    pdf.setFont("Helvetica", 9)
-    pdf.drawString(18 * mm, height - 24 * mm, "AMS / WMS · Official Advance Shipping Notice")
-    pdf.setFillColor(colors.HexColor("#111827"))
-    pdf.setFont("Helvetica-Bold", 16)
-    pdf.drawString(18 * mm, height - 48 * mm, "ADVANCE SHIPPING NOTICE")
-    pdf.setFont("Helvetica-Bold", 11)
-    pdf.drawRightString(width - 18 * mm, height - 48 * mm, asn.asn_number)
-    pdf.setFont("Helvetica", 9)
-    pdf.drawRightString(width - 18 * mm, height - 54 * mm, f"Generated: {generated}")
+    # Presentation only: all values above remain bound to the persisted ASN.
+    from html import escape
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import BaseDocTemplate, Frame, PageTemplate, Paragraph, Spacer, Table, TableStyle
 
-    fields = [
-        ("Supplier", supplier), ("Vehicle Number", asn.vehicle_number or "—"),
-        ("Driver Name", asn.driver_name or "—"), ("Driver Contact", asn.driver_contact or "—"),
-        ("Expected Arrival", arrival), ("Status", asn.status or "SUBMITTED"),
-    ]
-    y = height - 72 * mm
-    for index, (label, value) in enumerate(fields):
-        x = 18 * mm if index % 2 == 0 else 110 * mm
-        row_y = y - (index // 2) * 12 * mm
-        pdf.setFillColor(colors.HexColor("#6B7280")); pdf.setFont("Helvetica-Bold", 8); pdf.drawString(x, row_y, label.upper())
-        pdf.setFillColor(colors.HexColor("#111827")); pdf.setFont("Helvetica", 10); pdf.drawString(x, row_y - 5 * mm, str(value)[:48])
+    navy = colors.HexColor("#064B87")
+    border = colors.HexColor("#DFE7F0")
+    ink = colors.HexColor("#172B4D")
+    body = ParagraphStyle("ASNBody", fontName="Helvetica", fontSize=10,
+                          leading=13, textColor=ink, splitLongWords=True)
+    heading = ParagraphStyle("ASNSection", parent=body, fontName="Helvetica-Bold",
+                             fontSize=11, leading=14, spaceAfter=3 * mm)
+    label = ParagraphStyle("ASNLabel", parent=body, fontName="Helvetica-Bold",
+                           textColor=navy)
+    title = ParagraphStyle("ASNTitle", parent=heading, fontSize=17, leading=21,
+                           spaceAfter=5 * mm)
+    right = ParagraphStyle("ASNQuantity", parent=body, alignment=2)
 
-    table_y = y - 48 * mm
-    pdf.setFillColor(colors.HexColor("#E5E7EB")); pdf.rect(18 * mm, table_y, width - 36 * mm, 9 * mm, fill=1, stroke=0)
-    pdf.setFillColor(colors.HexColor("#111827")); pdf.setFont("Helvetica-Bold", 8)
-    pdf.drawString(22 * mm, table_y + 3 * mm, "MATERIAL NAME")
-    pdf.drawString(105 * mm, table_y + 3 * mm, "CODE")
-    pdf.drawRightString(155 * mm, table_y + 3 * mm, "QTY")
-    pdf.drawString(162 * mm, table_y + 3 * mm, "UOM")
-    pdf.setFont("Helvetica", 8)
-    row_y = table_y - 7 * mm
-    for line in asn.lines:
-        pdf.drawString(22 * mm, row_y, str(line.material_name or "—")[:42])
-        pdf.drawString(105 * mm, row_y, str(line.item_code or "—")[:22])
-        pdf.drawRightString(155 * mm, row_y, f"{line.shipped_quantity:g}")
-        pdf.drawString(162 * mm, row_y, str(line.uom or "PCS"))
-        row_y -= 7 * mm
+    def paragraph(value, style=body):
+        return Paragraph(escape(str(value)).replace("\n", "<br/>"), style)
 
-    pdf.setStrokeColor(colors.HexColor("#D1D5DB")); pdf.line(18 * mm, 24 * mm, width - 18 * mm, 24 * mm)
-    pdf.setFillColor(colors.HexColor("#6B7280")); pdf.setFont("Helvetica", 8)
-    pdf.drawString(18 * mm, 17 * mm, "KaizenAssests Warehouse Management System · This document is system generated.")
-    pdf.save()
+    def page_decoration(pdf, document):
+        width, height = A4
+        pdf.saveState()
+        pdf.setTitle(f"ASN {asn.asn_number}")
+        pdf.setFillColor(navy)
+        pdf.rect(18 * mm, height - 40 * mm, 174 * mm, 25 * mm, fill=1, stroke=0)
+        company = ParagraphStyle("ASNCompany", parent=heading, fontSize=14,
+                                 leading=17, textColor=colors.white)
+        reference_style = ParagraphStyle("ASNReference", parent=body,
+                                        alignment=2, textColor=colors.white)
+        for value, style, x, available in (
+            ("KAIZENASSESTS", company, 22 * mm, 88 * mm),
+            (asn.asn_number, reference_style, 114 * mm, 74 * mm),
+        ):
+            item = paragraph(value, style)
+            _, item_height = item.wrap(available, 23 * mm)
+            item.drawOn(pdf, x, height - 27.5 * mm - item_height / 2)
+        pdf.setStrokeColor(border)
+        pdf.line(18 * mm, 27 * mm, 192 * mm, 27 * mm)
+        footer_style = ParagraphStyle("ASNFooter", parent=body, fontSize=8, leading=10)
+        footer = Table([[paragraph(asn.asn_number, footer_style),
+                         paragraph(f"Generated: {generated}", footer_style),
+                         paragraph(f"Page {document.page}", ParagraphStyle(
+                             "ASNPage", parent=footer_style, alignment=2))]],
+                       colWidths=[70 * mm, 74 * mm, 30 * mm])
+        footer.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        _, footer_height = footer.wrap(174 * mm, 12 * mm)
+        footer.drawOn(pdf, 18 * mm, 21 * mm - footer_height / 2)
+        pdf.restoreState()
+
+    document = BaseDocTemplate(
+        buffer, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm,
+        topMargin=45 * mm, bottomMargin=30 * mm,
+        title=f"ASN {asn.asn_number}",
+    )
+    document.addPageTemplates(PageTemplate(
+        id="ASN", onPage=page_decoration,
+        frames=[Frame(18 * mm, 30 * mm, 174 * mm, 222 * mm,
+                      leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)],
+    ))
+    story = [paragraph("ADVANCE SHIPPING NOTICE", title)]
+    section_rows = [[paragraph("Supplier / Shipment", heading),
+                     paragraph("Vehicle / Driver", heading)]]
+    for left_label, left_value, right_label, right_value in (
+        ("Supplier", supplier, "Vehicle Number", asn.vehicle_number or "—"),
+        ("Expected Arrival", arrival, "Driver Name", asn.driver_name or "—"),
+        ("Status", asn.status or "SUBMITTED", "Driver Contact", asn.driver_contact or "—"),
+    ):
+        section_rows.append([
+            [paragraph(left_label, label), paragraph(left_value)],
+            [paragraph(right_label, label), paragraph(right_value)],
+        ])
+    sections = Table(section_rows, colWidths=[87 * mm, 87 * mm])
+    sections.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5 * mm),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3 * mm),
+    ]))
+    story.extend([sections, Spacer(1, 3 * mm), paragraph("Materials", heading)])
+    header_style = ParagraphStyle("ASNTableHeader", parent=body, fontName="Helvetica-Bold",
+                                  fontSize=9, leading=11)
+    rows = [[paragraph(value, header_style) for value in
+             ("S.No.", "Material Name", "Material Code", "Quantity", "UOM")]]
+    for index, line in enumerate(asn.lines, start=1):
+        rows.append([
+            paragraph(index), paragraph(line.material_name or "—"),
+            paragraph(line.item_code or "—"), paragraph(f"{line.shipped_quantity:g}", right),
+            paragraph(line.uom or "PCS"),
+        ])
+    materials = Table(rows, colWidths=[value * mm for value in (12, 65, 52, 25, 20)],
+                      repeatRows=1, minRowHeights=[9 * mm] * len(rows),
+                      splitByRow=1, splitInRow=1, hAlign="LEFT")
+    materials.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EAF1F8")),
+        ("GRID", (0, 0), (-1, -1), 0.5, border),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2 * mm),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2 * mm),
+        ("TOPPADDING", (0, 0), (-1, -1), 2 * mm),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
+        ("LEFTPADDING", (0, 0), (-1, 0), 1 * mm),
+        ("RIGHTPADDING", (0, 0), (-1, 0), 1 * mm),
+    ]))
+    story.append(materials)
+    document.build(story)
     return Response(content=buffer.getvalue(), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{asn.asn_number}.pdf"'})
 
 

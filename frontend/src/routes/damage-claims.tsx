@@ -1,6 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
-import { Eye, Loader2, RefreshCw } from "lucide-react";
+import { Eye, History, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
@@ -22,12 +22,15 @@ const resolutions = [
 ];
 const actionButtonClass = "h-10 rounded-lg";
 function Page() {
+  const navigate = useNavigate();
   const [claims, setClaims] = useState<any[]>([]),
     [loading, setLoading] = useState(true),
     [busy, setBusy] = useState<string>(),
     [error, setError] = useState<string>();
   const [forms, setForms] = useState<Record<string, any>>({});
   const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyDetailId, setHistoryDetailId] = useState<string | null>(null);
   const roles: string[] = getUserInfo()?.roles || [];
   const has = (role: string) => roles.includes(role) || roles.includes("ADMIN");
   const load = useCallback(async () => {
@@ -75,20 +78,27 @@ function Page() {
   };
   const patch = (id: string, data: any) =>
     setForms((all) => ({ ...all, [id]: { ...all[id], ...data } }));
+  const historyClaims = claims.filter(claim => Boolean(claim.shipment));
+  const visibleClaims = has("SUPPLIER")
+    ? claims.filter(claim => showHistory ? Boolean(claim.shipment) : !claim.shipment)
+    : showHistory ? historyClaims : claims;
   return (
     <AppShell
       title="Damage Returns"
       subtitle="Review damaged or rejected goods sent from GRN, respond to the supplier claim, and track returns"
       actions={
-        <Button
+        <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="default" className="h-10 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setShowHistory(value => !value)}>
+          <History className="size-4" />{showHistory ? "Back to claims" : `History (${historyClaims.length})`}
+        </Button>
+        <Button data-refresh-control="true" size="icon" aria-label="Refresh" title="Refresh"
           type="button"
           variant="outline"
           className="h-10 rounded-lg"
           onClick={() => void load()}
         >
-          <RefreshCw className="size-4" />
-          Refresh
-        </Button>
+          <RefreshCw className="size-4" /></Button>
+        </div>
       }
     >
       {loading ? (
@@ -109,20 +119,20 @@ function Page() {
             Try again
           </Button>
         </Card>
-      ) : claims.length === 0 ? (
+      ) : visibleClaims.length === 0 ? (
         <Card className="rounded-xl border-border bg-card p-6 text-center shadow-sm sm:p-10">
-          <h3 className="text-base font-semibold">No damage returns</h3>
+          <h3 className="text-base font-semibold">{showHistory ? "No response history yet" : "No pending damage returns"}</h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            Completed GRNs with damaged or rejected quantities will appear here when published to
-            this supplier.
+            {showHistory ? "Claims appear here after a replacement is sent." : "Claims remain here until you send a replacement."}
           </p>
         </Card>
       ) : (
         <div className="space-y-3">
-          {claims.map((c) => {
+          {showHistory && <h2 className="text-lg font-semibold">Replacement history</h2>}
+          {visibleClaims.map((c) => {
             const f = forms[c.id] || {};
             const s = c.shipment;
-            return (
+            const details = (
               <Card key={c.id} className="rounded-xl border-border bg-card p-3 shadow-sm sm:p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -191,6 +201,11 @@ function Page() {
                     <p className="font-medium text-warning-foreground">Original goods retained</p>
                   </div>
                 </div>
+                {showHistory && c.response && <div className="mt-3 rounded-lg bg-muted/30 p-3 text-sm">
+                  {c.responded_at && <p><span className="text-muted-foreground">Responded: </span>{new Date(c.responded_at).toLocaleString()}</p>}
+                  <p><span className="text-muted-foreground">Supplier remarks: </span>{c.supplier_remarks || "No remarks"}</p>
+                  <p className="mt-1"><span className="text-muted-foreground">Return required: </span>{c.return_required ? "Yes" : "No"}</p>
+                </div>}
                 {has("SUPPLIER") && !c.response && (
                   <div className="mt-3 grid gap-3 rounded-lg border border-border bg-muted/20 p-3 md:grid-cols-2">
                     <div className="space-y-1.5">
@@ -270,26 +285,12 @@ function Page() {
                 {has("SUPPLIER") &&
                   ["REPLACEMENT", "RETURN_REPLACEMENT"].includes(c.resolution) &&
                   !s && (
-                    <div className="mt-3 grid gap-3 rounded-lg border border-border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-                      <Input
-                        aria-label="Replacement vehicle number"
-                        className="h-10 rounded-lg"
-                        placeholder="Replacement vehicle number"
-                        value={f.vehicle || ""}
-                        onChange={(e) => patch(c.id, { vehicle: e.target.value })}
-                      />
+                    <div className="mt-3 flex justify-end border-t pt-3">
                       <Button
                         type="button"
                         className={actionButtonClass}
                         disabled={busy === c.id}
-                        onClick={() =>
-                          void run(
-                            c.id,
-                            () =>
-                              api.createReplacementShipment(c.id, { vehicle_number: f.vehicle }),
-                            "Replacement shipment created",
-                          )
-                        }
+                        onClick={() => void navigate({ to: "/supplier/asns/new", search: { open: "create" } as any })}
                       >
                         {busy === c.id && <Loader2 className="size-4 animate-spin" />}
                         Send Replacement
@@ -478,6 +479,26 @@ function Page() {
                 )}
               </Card>
             );
+            return showHistory ? (
+              <div key={c.id}>
+                <Card className="flex flex-wrap items-center justify-between gap-4 p-4">
+                  <div className="min-w-0">
+                    <h3 className="font-mono font-semibold">{c.claim_number}</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">{c.material || "Material"} · {c.grn_number || ""}</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <StatusBadge status={s?.status || c.status} />
+                    <Button variant="outline" size="sm" onClick={() => setHistoryDetailId(c.id)}><Eye className="size-4" />View details</Button>
+                  </div>
+                </Card>
+                <Dialog open={historyDetailId === c.id} onOpenChange={open => !open && setHistoryDetailId(null)}>
+                  <DialogContent className="sm:max-w-3xl max-h-[90dvh] overflow-y-auto">
+                    <DialogHeader className="pr-6 text-left"><DialogTitle>Claim details · {c.claim_number}</DialogTitle></DialogHeader>
+                    {details}
+                  </DialogContent>
+                </Dialog>
+              </div>
+            ) : details;
           })}
         </div>
       )}

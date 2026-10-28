@@ -13,12 +13,33 @@ from sqlalchemy.orm import selectinload
 
 from app.database.session import UnitOfWork, get_uow
 from app.common.persistence.models import AsnModel
-from app.modules.gate.infrastructure.persistence.models import GateEntryModel
+from app.modules.gate.infrastructure.persistence.models import GateEntryModel, FinishedGoodsPickupGateVisitModel
 from app.security.dependencies import get_current_user, CurrentUser
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+def _gate_security_metrics(inbound_entries, pickup_visits) -> dict[str, int]:
+    """Count persisted visits across inbound and finished-goods gate workflows."""
+    inbound_exits = sum(
+        1 for entry in inbound_entries
+        if (entry.get("status") or "").upper() == "VEHICLE_EXITED" or entry.get("exited_at")
+    )
+    pickup_exits = sum(
+        1 for visit in pickup_visits
+        if visit.exited_at or (visit.status or "").upper() in {"CLOSED", "EXITED", "VEHICLE_EXITED"}
+    )
+    pickup_inside = sum(
+        1 for visit in pickup_visits
+        if not visit.exited_at and (visit.status or "").upper() == "INSIDE_FACILITY"
+    )
+    return {
+        "totalEntries": len(inbound_entries) + len(pickup_visits),
+        "vehiclesInside": len(inbound_entries) - inbound_exits + pickup_inside,
+        "totalExits": inbound_exits + pickup_exits,
+    }
 
 
 def _format_ist_time(value: datetime | None) -> str:
@@ -406,8 +427,12 @@ async def get_dashboard_stats(
     occupied_count = len([d for d in docks if d["status"] in ("Occupied", "Reserved")])
     total_docks_count = len(docks)
 
+    pickup_res = await uow.session.execute(select(FinishedGoodsPickupGateVisitModel))
+    security_metrics = _gate_security_metrics(combined_entries, pickup_res.scalars().all())
+
     return {
         "stats": {
+            **security_metrics,
             "totalArrivals": total_arrivals,
             "verifiedArrivals": verified_arrivals,
             "unscheduledArrivals": unscheduled_arrivals,

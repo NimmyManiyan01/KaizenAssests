@@ -13,6 +13,7 @@ import {
   Boxes,
   CheckCircle2,
   ClipboardList,
+  Info,
   Clock3,
   DoorOpen,
   Download,
@@ -75,7 +76,9 @@ export const Route = createFileRoute("/grn")({
     gatePassId?: string;
     dock?: string;
     po?: string;
+    search?: string;
   } => ({
+    search: typeof search.search === "string" ? search.search : undefined,
     tab: (search.tab as string) || "dashboard",
     page: Number(search.page) || 1,
     grn_id:
@@ -325,6 +328,7 @@ function GrnPageWorkflow() {
   const [totalRecordCount, setTotalRecordCount] = useState<number>(0);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  useEffect(() => { if (search.search !== undefined) setSearchTerm(search.search); }, [search.search]);
 
   // Page 1 - Header Form State
   const [header, setHeader] = useState<GrnHeaderState>({
@@ -822,6 +826,8 @@ function GrnPageWorkflow() {
   // Dashboard & Detail Drawer State
   const [selectedGrnDetail, setSelectedGrnDetail] = useState<any | null>(null);
   const [dashboardStatusFilter, setDashboardStatusFilter] = useState<string>("ALL");
+  const [receiptPage, setReceiptPage] = useState(1);
+  const [activityLimit, setActivityLimit] = useState(5);
   const [recordsStatusFilter, setRecordsStatusFilter] = useState<string>("ALL");
   const [showAssignDockModal, setShowAssignDockModal] = useState(false);
   const [assigningDockId, setAssigningDockId] = useState("");
@@ -869,6 +875,15 @@ function GrnPageWorkflow() {
       (r.status || "").toLowerCase().includes(t)
     );
   };
+
+  const dashboardReceipts = grnRecords.filter((record) =>
+    isRecordMatchingSearch(record, searchTerm) && isRecordMatchingStatus(record.status, dashboardStatusFilter));
+  const receiptPageSize = 5;
+  const receiptPageCount = Math.max(1, Math.ceil(dashboardReceipts.length / receiptPageSize));
+  const currentReceiptPage = Math.min(receiptPage, receiptPageCount);
+  const visibleDashboardReceipts = dashboardReceipts.slice((currentReceiptPage - 1) * receiptPageSize, currentReceiptPage * receiptPageSize);
+  useEffect(() => { setReceiptPage(1); }, [searchTerm, dashboardStatusFilter]);
+  useEffect(() => { setReceiptPage((page) => Math.min(page, receiptPageCount)); }, [receiptPageCount]);
 
   // Fetch Records
   const loadRecords = useCallback(async () => {
@@ -3664,20 +3679,27 @@ function GrnPageWorkflow() {
 
   return (
     <AppShell
-      title="GRN / Quality Inspection"
+      title={<span className="inline-flex items-center gap-3"><ClipboardList className="size-6 shrink-0 text-primary" aria-hidden="true" />GRN / Quality Inspection</span>}
       subtitle="Manage goods receipts, quality checks, and GRN records"
       actions={
         <>
-          <Button variant="outline" className="rounded-xl"
-            disabled={busyAction || loadingRecords || loadingContext}
-            onClick={async () => {
-              await Promise.all([loadRecords(), loadWarehouseDocks()]);
-              if (activeTab === "wizard" && grnId) await loadExistingGrnSession(grnId);
-              else if (activeTab === "wizard" && header.asn_number.trim()) await fetchPoContext(header.asn_number);
-            }}>
-            <RefreshCw className={`size-4 ${loadingRecords || loadingContext ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
+          {activeTab !== "dashboard" && (
+            <Button data-refresh-control="true"
+              variant="outline"
+              size="icon"
+              className="size-11 rounded-xl bg-white text-primary hover:bg-white"
+              aria-label="Refresh GRN details"
+              title="Refresh GRN details"
+              disabled={busyAction || loadingRecords || loadingContext}
+              onClick={async () => {
+                await Promise.all([loadRecords(), loadWarehouseDocks()]);
+                if (activeTab === "wizard" && grnId) await loadExistingGrnSession(grnId);
+                else if (activeTab === "wizard" && header.asn_number.trim()) await fetchPoContext(header.asn_number);
+              }}
+            >
+              <RefreshCw className={`size-4 ${loadingRecords || loadingContext ? "animate-spin" : ""}`} />
+            </Button>
+          )}
           {activeTab === "dashboard" && (
             <>
               <Button
@@ -3753,12 +3775,36 @@ function GrnPageWorkflow() {
           const healthPercent =
             totalLines > 0 ? Number(((inspectedLines / totalLines) * 100).toFixed(1)) : 100;
 
+          const dayKey = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+          const chartDays = Array.from({ length: 7 }, (_, index) => {
+            const date = new Date();
+            date.setDate(date.getDate() - 6 + index);
+            return { key: dayKey(date), label: date.toLocaleDateString([], { day: "numeric", month: "short" }) };
+          });
+          const chartFor = (weight: (record: any) => number) => chartDays.map((day) => ({
+            label: day.label,
+            value: grnRecords.reduce((count, record) => {
+              const date = new Date(record.receipt_date || record.created_at || "");
+              return !Number.isNaN(date.getTime()) && dayKey(date) === day.key ? count + weight(record) : count;
+            }, 0),
+          }));
+          const grnKpiCharts = {
+            total: chartFor(() => 1),
+            completed: chartFor((record) => isRecordMatchingStatus(record.status, "COMPLETED") ? 1 : 0),
+            partial: chartFor((record) => isRecordMatchingStatus(record.status, "PARTIAL") ? 1 : 0),
+            quarantine: chartFor((record) => {
+              const lots = record.damage_lots || record.damageLots || [];
+              return lots.length || (record.lines || record.materials || []).filter((line: any) => Number(line.damaged_quantity ?? line.damagedQuantity ?? 0) > 0).length;
+            }),
+          };
+
           return (
             <div className="space-y-6">
               {/* TOP STAT CARDS */}
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <StatCard
                   label="Total GRN receipts"
+                  sparkline={grnKpiCharts.total}
                   value={loadingRecords ? "..." : String(totalRecordCount || grnRecords.length)}
                   delta={grnRecords.length > 0 ? "All recorded entries" : "No receipts yet"}
                   icon={ClipboardList}
@@ -3766,6 +3812,7 @@ function GrnPageWorkflow() {
                 />
                 <StatCard
                   label="Fully completed"
+                  sparkline={grnKpiCharts.completed}
                   value={
                     loadingRecords
                       ? "..."
@@ -3780,6 +3827,7 @@ function GrnPageWorkflow() {
                 />
                 <StatCard
                   label="Partially completed"
+                  sparkline={grnKpiCharts.partial}
                   value={
                     loadingRecords
                       ? "..."
@@ -3794,6 +3842,7 @@ function GrnPageWorkflow() {
                 />
                 <StatCard
                   label="Quarantine lots"
+                  sparkline={grnKpiCharts.quarantine}
                   value={
                     loadingRecords
                       ? "..."
@@ -3876,13 +3925,7 @@ function GrnPageWorkflow() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border/60">
-                            {grnRecords
-                              .filter(
-                                (r) =>
-                                  isRecordMatchingSearch(r, searchTerm) &&
-                                  isRecordMatchingStatus(r.status, dashboardStatusFilter),
-                              )
-                              .slice(0, 8)
+                            {visibleDashboardReceipts
                               .map((r, i) => (
                                 <tr
                                   key={r.id || r.grn_id || r.grn_number || `rec_row_${i}`}
@@ -3924,11 +3967,7 @@ function GrnPageWorkflow() {
                                   </td>
                                 </tr>
                               ))}
-                            {grnRecords.filter(
-                              (r) =>
-                                isRecordMatchingSearch(r, searchTerm) &&
-                                isRecordMatchingStatus(r.status, dashboardStatusFilter),
-                            ).length === 0 && (
+                            {dashboardReceipts.length === 0 && (
                               <tr>
                                 <td colSpan={5} className="text-center py-10 text-muted-foreground">
                                   <FileCheck2 className="mx-auto mb-2 size-6 text-muted-foreground/50" />
@@ -3951,6 +3990,14 @@ function GrnPageWorkflow() {
                             )}
                           </tbody>
                         </table>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3 text-sm text-muted-foreground">
+                        <p aria-live="polite">Showing {dashboardReceipts.length ? (currentReceiptPage - 1) * receiptPageSize + 1 : 0}?{Math.min(currentReceiptPage * receiptPageSize, dashboardReceipts.length)} of {dashboardReceipts.length} receipts</p>
+                        <nav aria-label="Inbound goods receipts pagination" className="flex items-center gap-2">
+                          <Button variant="outline" size="sm" disabled={currentReceiptPage === 1 || loadingRecords} onClick={() => setReceiptPage(currentReceiptPage - 1)}>Previous</Button>
+                          <span className="min-w-12 text-center text-xs" aria-current="page">{currentReceiptPage} / {receiptPageCount}</span>
+                          <Button variant="outline" size="sm" disabled={currentReceiptPage >= receiptPageCount || loadingRecords} onClick={() => setReceiptPage(currentReceiptPage + 1)}>Next</Button>
+                        </nav>
                       </div>
                     </div>
                   </SectionCard>
@@ -3990,7 +4037,7 @@ function GrnPageWorkflow() {
                     <Timeline
                       items={
                         grnRecords.length > 0
-                          ? grnRecords.slice(0, 4).map((r, idx) => ({
+                          ? grnRecords.slice(0, activityLimit).map((r, idx) => ({
                               time: r.receipt_date || "Today",
                               title: `${r.grn_number || `GRN-000${idx + 1}`} · ${r.supplier_name || r.supplier_company_name || "Supplier"}`,
                               detail: `PO ${r.po_number || "—"} · ${r.vehicle_number || "Dock arrival"}`,
@@ -4004,6 +4051,15 @@ function GrnPageWorkflow() {
                           : []
                       }
                     />
+                    {grnRecords.length > 5 && (
+                      <div className="mt-3 flex items-center justify-between gap-2 border-t pt-3 text-xs text-muted-foreground">
+                        <span>Showing {Math.min(activityLimit, grnRecords.length)} of {grnRecords.length}</span>
+                        <div className="flex items-center gap-2">
+                          {activityLimit > 5 && <Button variant="ghost" size="sm" onClick={() => setActivityLimit(5)}>Show less</Button>}
+                          {activityLimit < grnRecords.length && <Button variant="outline" size="sm" onClick={() => setActivityLimit((limit) => limit + 5)}>More</Button>}
+                        </div>
+                      </div>
+                    )}
                   </SectionCard>
                 </div>
               </div>
@@ -4013,7 +4069,7 @@ function GrnPageWorkflow() {
 
       {/* 📋 RECORDS OVERVIEW TAB */}
       {activeTab === "records" && (
-        <div className="mx-auto w-full max-w-7xl space-y-4 px-1 sm:px-2">
+        <div className="grn-records-layout w-full space-y-4">
           <SectionCard
             title="All Goods Receipt Notes (GRN)"
             description="Complete register of all inbound material receipts, inspection outcomes, and certificates"
@@ -4050,14 +4106,6 @@ function GrnPageWorkflow() {
                   onClick={() => exportGrnRecordsCsv()}
                 >
                   <Download className="mr-1.5 size-3.5 text-primary" /> Export CSV
-                </Button><InformationTooltip help="reports" />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl text-xs h-8"
-                  onClick={() => void loadRecords()}
-                >
-                  <RefreshCw className="mr-1.5 size-3.5" /> Refresh
                 </Button>
               </div>
             }
@@ -4129,15 +4177,10 @@ function GrnPageWorkflow() {
                       return (
                         <Card
                           key={grnKey}
-                          className="rounded-2xl p-5 border border-border/70 hover:shadow-soft transition-all space-y-4"
+                          className="grn-record-summary rounded-xl p-4 border border-border/70 shadow-none gap-3"
                         >
-                          <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/60 pb-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
-                                  Goods Receipt Note
-                                </span>
-                              </div>
                               <h3 className="font-mono text-xl font-bold text-primary mt-0.5">
                                 {grnNumber}
                               </h3>
@@ -4148,41 +4191,18 @@ function GrnPageWorkflow() {
                             <StatusBadge status={status} />
                           </div>
 
-                          <div className="grid gap-3 rounded-xl border border-border/60 bg-muted/20 p-4 text-xs sm:grid-cols-2 lg:grid-cols-3 font-mono">
-                            <div>
-                              <span className="text-muted-foreground block text-[10px] uppercase font-sans">
-                                Receiving Dock
-                              </span>
-                              <span className="font-bold text-foreground">{dockNumber}</span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground block text-[10px] uppercase font-sans">
-                                Vehicle Reg / Driver
-                              </span>
-                              <span className="font-bold text-foreground">
-                                {vehicleNumber} {driverName}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground block text-[10px] uppercase font-sans">
-                                Received Date / Officer
-                              </span>
-                              <span className="font-bold text-foreground">
-                                {receiptDate} {receivedBy}
-                              </span>
-                            </div>
-                          </div>
+                          <p className="text-xs text-muted-foreground">Received: <span className="font-medium text-foreground">{receiptDate}</span></p>
 
                           {/* REAL ACTION BUTTONS PER RECORD */}
-                          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                            <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+                            <div className="flex flex-wrap items-center gap-2">
                               <Button
                                 size="sm"
                                 variant="outline"
                                 className="rounded-xl text-xs font-semibold border-primary/40 text-primary hover:bg-primary-soft"
                                 onClick={() => void handleViewGrnDetail(r)}
                               >
-                                <FileText className="mr-1.5 size-3.5" /> View Details
+                                <FileText className="mr-1.5 size-3.5" /> View all details
                               </Button>
                               <Button
                                 size="sm"
@@ -4235,7 +4255,7 @@ function GrnPageWorkflow() {
 
       {/* ✨ 6-PAGE WIZARD WORKFLOW */}
       {activeTab === "wizard" && (
-        <div className="mx-auto w-full max-w-7xl space-y-4 px-1 sm:px-2">
+        <div className="grn-wizard-layout w-full space-y-4">
           {/* STEP NAVIGATION HEADER */}
           <Card className="rounded-2xl p-4 overflow-x-auto shadow-sm border border-border/80">
             <div className="flex items-center justify-between min-w-[720px] gap-2">
@@ -4763,11 +4783,11 @@ function GrnPageWorkflow() {
               ) : (
                 /* ASN MATERIAL TABLE */
                 <div className="overflow-x-auto rounded-xl border">
-                  <table className="w-full table-fixed text-sm text-left">
+                  <table className="grn-receiving-table w-full min-w-[720px] table-fixed text-sm text-left">
                     <colgroup>
-                      <col className="w-[40%]" />
-                      <col className="w-[20%]" />
-                      <col className="w-[25%]" />
+                      <col className="w-[46%]" />
+                      <col className="w-[16%]" />
+                      <col className="w-[23%]" />
                       <col className="w-[15%]" />
                     </colgroup>
                     <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
@@ -4790,14 +4810,14 @@ function GrnPageWorkflow() {
                         return (
                           <tr key={grnMaterialKey(m, idx)} className="hover:bg-muted/20">
                             <td className="px-4 py-3 font-bold text-foreground">
-                              <div>
+                              <div className="text-base leading-relaxed">
                                 {m.item_code || m.material_code} —{" "}
                                 {m.material_name ||
                                   m.materialName ||
                                   m.material_description ||
                                   "Material"}
                               </div>
-                              <span className="text-[10px] text-emerald-600 font-medium block mt-0.5">
+                              <span className="text-xs leading-relaxed text-emerald-600 font-medium block mt-1">
                                 Category: {m.material_category || "General"}
                               </span>
                             </td>
@@ -4810,7 +4830,7 @@ function GrnPageWorkflow() {
                               </div>
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <div className="flex flex-col items-end gap-1">
+                              <div className="flex flex-col items-center gap-2">
                                 <Input
                                   type="number"
                                   min={0}
@@ -4844,7 +4864,7 @@ function GrnPageWorkflow() {
                                       ),
                                     );
                                   }}
-                                  className="w-32 text-right font-bold text-foreground rounded-xl"
+                                  className="h-10 w-32 text-center font-semibold tabular-nums text-foreground rounded-lg"
                                 />
                                 <button
                                   type="button"
@@ -6050,24 +6070,24 @@ function GrnPageWorkflow() {
                               return (
                                 <Card
                                   key={b.batch_number}
-                                  className="rounded-2xl p-5 border text-center space-y-3 bg-white text-black shadow-md relative overflow-hidden group"
+                                  className="grn-batch-label rounded-xl p-5 border text-center gap-4 bg-white text-foreground shadow-sm relative overflow-hidden group"
                                 >
                                   <div className="border-b pb-2 text-left">
                                     <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
                                       GRN Batch Label
                                     </span>
-                                    <h4 className="font-mono text-base font-bold text-gray-900">
+                                    <h4 className="mt-1 break-words font-mono text-sm font-semibold leading-relaxed text-foreground">
                                       {b.batch_number}
                                     </h4>
                                   </div>
 
-                                  <div className="relative my-2">
+                                  <div className="relative flex justify-center py-1">
                                     {qrInfo.data_url ? (
                                       <div className="relative inline-block rounded-2xl border border-gray-200 bg-white p-2 shadow-sm">
                                         <img
                                           src={qrInfo.data_url}
                                           alt="Material QR Code"
-                                          className="size-48 mx-auto"
+                                          className="size-48 max-w-full object-contain mx-auto"
                                         />
                                       </div>
                                     ) : (
@@ -6080,23 +6100,14 @@ function GrnPageWorkflow() {
                                     )}
                                   </div>
 
-                                  <div className="text-xs text-left space-y-1 font-mono text-gray-800 border-t pt-2">
-                                    <p></p>
-                                    <p>
-                                      <b>GRN Number:</b> {header.grn_number || "Assigning GRN number..."}
-                                    </p>
-                                    <p>
-                                      <b>Material:</b> {mat.item_code} ({mat.material_name})
-                                    </p>
-                                    <p>
-                                      <b>Category:</b> {mat.material_category || "General"}
-                                    </p>
-                                    <p>
-                                      <b>Batch Qty:</b> {b.batch_quantity} {mat.uom}
-                                    </p>
-                                  </div>
+                                  <dl className="grid grid-cols-[100px_minmax(0,1fr)] gap-x-3 gap-y-2 border-t pt-3 text-left text-xs leading-relaxed">
+                                    <dt className="text-muted-foreground">GRN number</dt><dd className="break-words font-mono font-semibold">{header.grn_number || "Assigning GRN number..."}</dd>
+                                    <dt className="text-muted-foreground">Material</dt><dd className="break-words font-medium">{mat.item_code} ({mat.material_name})</dd>
+                                    <dt className="text-muted-foreground">Category</dt><dd className="break-words">{mat.material_category || "General"}</dd>
+                                    <dt className="text-muted-foreground">Batch quantity</dt><dd className="font-semibold tabular-nums">{b.batch_quantity} {mat.uom}</dd>
+                                  </dl>
 
-                                  <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-3">
+                                  <div className="grid grid-cols-1 gap-2 border-t pt-3">
                                     {qrInfo.data_url ? (
                                       <a
                                         href={qrInfo.data_url}
@@ -6431,8 +6442,8 @@ function GrnPageWorkflow() {
 
       {historyQrLabels && (
         <Dialog open={!!historyQrLabels} onOpenChange={() => setHistoryQrLabels(null)}>
-          <DialogContent className="w-[min(96vw,1100px)] max-w-none rounded-2xl p-0 overflow-hidden">
-            <DialogHeader className="border-b px-5 py-4 text-left">
+          <DialogContent className={`w-[calc(100vw-2rem)] ${historyQrLabels.length === 1 ? "sm:max-w-md" : "sm:max-w-4xl"} max-h-[90dvh] gap-0 rounded-2xl p-0 overflow-hidden`}>
+            <DialogHeader className="border-b px-5 py-4 pr-12 text-left">
               <DialogTitle className="flex items-center gap-2 text-lg font-bold">
                 <QrCode className="size-5 text-primary" /> Batch QR Labels ({historyQrLabels.length}
                 )
@@ -6442,12 +6453,12 @@ function GrnPageWorkflow() {
                 generated for this GRN. Download any label when needed.
               </DialogDescription>
             </DialogHeader>
-            <div className="max-h-[75vh] overflow-y-auto p-5">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="min-h-0 overflow-y-auto p-5">
+              <div className={`grid gap-4 ${historyQrLabels.length > 1 ? "sm:grid-cols-2 lg:grid-cols-3" : "grid-cols-1"}`}>
                 {historyQrLabels.map((label) => (
-                  <Card key={label.qrId} className="rounded-2xl border p-4 text-center">
-                    <div className="mb-3 text-left">
-                      <p className="break-all text-sm font-bold text-foreground">{label.title}</p>
+                  <Card key={label.qrId} className="rounded-xl border p-4 gap-4 text-center shadow-none">
+                    <div className="border-b pb-3 text-left">
+                      <p className="break-words text-sm font-semibold leading-relaxed text-foreground">{label.title}</p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {label.materialCode} · {label.materialName}
                       </p>
@@ -6470,7 +6481,7 @@ function GrnPageWorkflow() {
                       <a
                         href={label.dataUrl}
                         download={`${label.title}-QR.png`}
-                        className="mt-3 inline-flex h-9 items-center justify-center rounded-xl border border-primary/30 px-4 text-sm font-semibold text-primary hover:bg-primary/5"
+                        className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-primary/30 px-4 text-sm font-semibold text-primary hover:bg-primary/5"
                       >
                         Download QR
                       </a>
@@ -7047,16 +7058,16 @@ function GrnPageWorkflow() {
       {/* 📄 GRN RECORD QUICK DETAIL MODAL DRAWER */}
       {selectedGrnDetail && (
         <Dialog open={!!selectedGrnDetail} onOpenChange={() => setSelectedGrnDetail(null)}>
-          <DialogContent className="max-w-3xl rounded-2xl p-6 space-y-5">
+          <DialogContent id="grn-record-details-dialog" className="w-[calc(100vw-2rem)] sm:max-w-5xl max-h-[90dvh] overflow-y-auto rounded-2xl p-6 gap-4">
             <DialogHeader className="border-b pb-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3 pr-7">
                 <span className="text-xs font-mono font-bold text-primary px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
                   {selectedGrnDetail.grn_number || "—"}
                 </span>
                 <StatusBadge status={selectedGrnDetail.status || "COMPLETED"} />
               </div>
               <DialogTitle className="text-lg font-bold text-foreground mt-2">
-                Goods Receipt Note Breakdown & Reconciliation
+                Goods receipt details
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
                 Supplier:{" "}
@@ -7068,30 +7079,20 @@ function GrnPageWorkflow() {
               </DialogDescription>
             </DialogHeader>
 
-            {/* STATUS RECONCILIATION RULE BANNER */}
-            <div
-              className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-between ${
-                selectedReconciliation.received > 0 &&
-                selectedReconciliation.accounted === selectedReconciliation.received
-                  ? "bg-emerald-50 text-emerald-900 border-emerald-300 dark:bg-emerald-950/30 dark:text-emerald-200 dark:border-emerald-800"
-                  : "bg-amber-50 text-amber-900 border-amber-300 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-800"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
-                <span>
-                  {selectedReconciliation.received > 0 &&
-                  selectedReconciliation.accounted === selectedReconciliation.received
-                    ? `✓ RECEIVED QUANTITY RECONCILED: ${selectedReconciliation.accounted} ${materials.find((m) => Number(m.received_quantity ?? m.receivedQuantity ?? 0) === selectedReconciliation.received)?.uom || materials[0]?.uom || "PCS"} accounted across accepted, rejected, damaged, and held quantities.`
-                    : `⚠ RECONCILIATION PENDING: ${Math.max(0, selectedReconciliation.received - selectedReconciliation.accounted)} ${materials.find((m) => Number(m.received_quantity ?? m.receivedQuantity ?? 0) === selectedReconciliation.received)?.uom || materials[0]?.uom || "PCS"} unaccounted.`}
-                </span>
-              </div>
-              <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-background border shadow-xs">
-                Rule Verified
-              </span>
+            <div className={`flex items-start gap-3 rounded-xl border p-3 text-sm ${
+              selectedReconciliation.received > 0 && selectedReconciliation.accounted === selectedReconciliation.received
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-amber-200 bg-amber-50 text-amber-800"
+            }`}>
+              <Info className="mt-0.5 size-4 shrink-0" />
+              <div><p className="font-semibold">Quantity reconciliation</p><p className="mt-0.5 text-xs leading-relaxed">{
+                selectedReconciliation.received > 0 && selectedReconciliation.accounted === selectedReconciliation.received
+                  ? "Received quantities match the recorded quality breakdown."
+                  : "Review the received and accounted quantities in the breakdown below."
+              }</p></div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 bg-muted/20 rounded-xl border text-xs font-mono">
+            <div className="grn-detail-metadata grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 bg-muted/10 rounded-xl border text-sm">
               <div>
                 <span className="text-muted-foreground block text-[10px] uppercase font-sans font-bold">
                   Dock Number
@@ -7130,7 +7131,8 @@ function GrnPageWorkflow() {
                 Line Item Quantity Reconciliation
               </h4>
               <div className="rounded-xl border overflow-x-auto text-xs">
-                <table className="w-full text-left">
+                <table className="grn-reconciliation-table w-full min-w-[800px] table-fixed text-left">
+                  <colgroup><col className="w-[26%]" /><col className="w-[14%]" /><col className="w-[13%]" /><col className="w-[14%]" /><col className="w-[15%]" /><col className="w-[18%]" /></colgroup>
                   <thead className="bg-muted/60 font-bold text-muted-foreground text-[11px] uppercase border-b">
                     <tr>
                       <th className="p-2.5">Material Details</th>
@@ -7216,7 +7218,7 @@ function GrnPageWorkflow() {
                             </td>
                             <td className="p-2.5 text-center">
                               <span
-                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                className={`inline-flex items-center justify-center whitespace-nowrap px-2.5 py-1 rounded-full text-[11px] font-semibold ${
                                   isComplete
                                     ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
                                     : "bg-amber-100 text-amber-800 border border-amber-300"
@@ -7573,7 +7575,7 @@ function GrnPageWorkflow() {
                 Later
               </Button>
               <Button
-                className="rounded-xl"
+                className="rounded-xl bg-emerald-600 text-white hover:bg-emerald-700"
                 onClick={async () => {
                   try {
                     setBusyAction(true);

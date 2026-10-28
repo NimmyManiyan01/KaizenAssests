@@ -1,5 +1,5 @@
 import { InformationTooltip } from "@/components/ui/information-tooltip";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { useSearch, createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -109,6 +109,9 @@ function SupplierDashboard() {
   const [asnsLoading, setAsnsLoading] = useState(true);
   const [asnsError, setAsnsError] = useState("");
   const [query, setQuery] = useState("");
+  const moduleSearchParams = useSearch({ strict: false }) as { search?: string };
+  useEffect(() => { if (typeof moduleSearchParams.search === "string") setQuery(moduleSearchParams.search); }, [moduleSearchParams.search]);
+  const [deliveryPage, setDeliveryPage] = useState(1);
   const [selected, setSelected] = useState<any>(null);
   const [trendDays, setTrendDays] = useState<7 | 30 | 90>(7);
 
@@ -313,6 +316,13 @@ function SupplierDashboard() {
       );
   }, [asns, query]);
 
+  const deliveryPageSize = 5;
+  const deliveryPageCount = Math.max(1, Math.ceil(rows.length / deliveryPageSize));
+  const currentDeliveryPage = Math.min(deliveryPage, deliveryPageCount);
+  const visibleDeliveries = rows.slice((currentDeliveryPage - 1) * deliveryPageSize, currentDeliveryPage * deliveryPageSize);
+  useEffect(() => { setDeliveryPage(1); }, [query]);
+  useEffect(() => { setDeliveryPage((page) => Math.min(page, deliveryPageCount)); }, [deliveryPageCount]);
+
   const submitted = asns.filter(
     (a) => String(a.status || "SUBMITTED").toUpperCase() === "SUBMITTED"
   ).length;
@@ -498,6 +508,7 @@ function SupplierDashboard() {
           </div>
 
           {/* ASN History Table Section */}
+          <div className="supplier-dashboard-panels grid items-start gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
           <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -605,7 +616,7 @@ function SupplierDashboard() {
                       </td>
                     </tr>
                   )}
-                  {rows.map((asn) => {
+                  {visibleDeliveries.map((asn) => {
                     const key = String(asn.id || asn.asn_number);
                     const status = String(asn.status || "SUBMITTED").toUpperCase();
                     return (
@@ -681,14 +692,19 @@ function SupplierDashboard() {
               </table>
             </div>
 
-            <div className="mt-3 text-xs text-muted-foreground" aria-live="polite">
-              {query
-                ? `${rows.length} of ${asns.length} deliveries`
-                : `${rows.length} ${rows.length === 1 ? "delivery" : "deliveries"}`}
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-3 text-sm text-muted-foreground">
+              <p aria-live="polite">
+                Showing {rows.length ? (currentDeliveryPage - 1) * deliveryPageSize + 1 : 0}–{Math.min(currentDeliveryPage * deliveryPageSize, rows.length)} of {rows.length} deliveries
+              </p>
+              <nav aria-label="Delivery history pagination" className="flex items-center gap-2">
+                <Button variant="outline" size="sm" disabled={currentDeliveryPage === 1 || asnsLoading} onClick={() => setDeliveryPage(currentDeliveryPage - 1)}>Previous</Button>
+                <span className="min-w-12 text-center text-xs" aria-current="page">{currentDeliveryPage} / {deliveryPageCount}</span>
+                <Button variant="outline" size="sm" disabled={currentDeliveryPage >= deliveryPageCount || asnsLoading} onClick={() => setDeliveryPage(currentDeliveryPage + 1)}>Next</Button>
+              </nav>
             </div>
           </section>
 
-          {/* Bottom: ASN Submission Trend */}
+          {/* ASN Submission Trend beside delivery history */}
           <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -750,6 +766,8 @@ function SupplierDashboard() {
               </div>
             )}
           </section>
+
+          </div>
 
           <Dialog open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}>
             <DialogContent id="supplier-asn-details-dialog" className="max-w-lg rounded-2xl bg-card p-6 shadow-2xl">

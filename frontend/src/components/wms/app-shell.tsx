@@ -45,6 +45,7 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api-client";
 import { isDashboardSearchVisible } from "@/lib/dashboard-search";
+import { searchModule } from "@/lib/module-search";
 import logoUrl from "@/assets/Logo.png";
 import { toast } from "sonner";
 import { getUserInfo, type UserInfo } from "@/lib/auth-utils";
@@ -124,6 +125,7 @@ function getSearchPlaceholder(path: string, searchStr: string): string {
   if (route.startsWith("/vehicle-exit")) return "Search vehicle, gate pass, or GRN...";
   if (route.startsWith("/gate-dashboard")) return "Search gate pass, vehicle, or supplier...";
   if (route.startsWith("/grn")) return "Search GRN, PO, supplier, vehicle, or material...";
+  if (route.startsWith("/warehouse-dashboard") || (path === "/inventory" && (new URLSearchParams(searchStr).get("tab") || "dashboard") === "dashboard")) return "Search material, stock, putaway, GRN, or dock...";
   if (route.startsWith("/inventory")) {
     if (route.includes("tab=locations")) return "Search zone, bin, or location code...";
     if (route.includes("tab=putaway")) return "Search putaway task, GRN, or material...";
@@ -352,8 +354,18 @@ export function AppShell({
   const [isSearching, setIsSearching] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchRequestId = useRef(0);
+
+  useEffect(() => {
+    searchRequestId.current += 1;
+    setSearchTerm("");
+    setSearchResults([]);
+    setShowSearch(false);
+    setIsSearching(false);
+  }, [path]);
 
   const executeSearch = async (term: string) => {
+    const requestId = ++searchRequestId.current;
     if (!showHeaderSearch || !term || !term.trim()) {
       setSearchResults([]);
       setShowSearch(false);
@@ -361,13 +373,16 @@ export function AppShell({
     }
     setIsSearching(true);
     try {
-      const data = await api.globalSearch(term.trim());
-      setSearchResults(data?.results || []);
+      const results = await searchModule(path, term.trim());
+      if (requestId !== searchRequestId.current) return;
+      setSearchResults(results);
       setShowSearch(true);
     } catch (e) {
+      if (requestId !== searchRequestId.current) return;
+      setSearchResults([]);
       console.error("Search failed", e);
     } finally {
-      setIsSearching(false);
+      if (requestId === searchRequestId.current) setIsSearching(false);
     }
   };
 
@@ -380,8 +395,8 @@ export function AppShell({
         setShowSearch(false);
       }
     }, 200);
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchTerm, showHeaderSearch]);
+    return () => { clearTimeout(delayDebounceFn); searchRequestId.current += 1; };
+  }, [searchTerm, showHeaderSearch, path, searchStr]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -576,10 +591,10 @@ export function AppShell({
           <aside className="wms-sidebar relative flex h-full w-[min(84vw,320px)] flex-col border-r border-sidebar-border bg-sidebar shadow-2xl">
             <div className="flex h-16 items-center justify-between gap-2 border-b border-sidebar-border/40 px-4">
               <div className="flex min-w-0 items-center gap-3">
-                <div className="relative flex h-10 w-14 shrink-0 items-center justify-center rounded-xl bg-white p-1.5 shadow-sm border border-sidebar-border/70">
+                <div className="relative flex h-11 w-16 shrink-0 items-center justify-center rounded-xl bg-white p-1 shadow-sm border border-sidebar-border/70">
                   <img
                     src={logoUrl}
-                    alt="KGS Logo"
+                    alt="GTVP Logo"
                     className="h-full w-full object-contain"
                   />
                 </div>
@@ -655,10 +670,10 @@ export function AppShell({
           {!desktopSidebarCollapsed ? (
             <>
               <div className="flex items-center gap-3 min-w-0">
-                <div className="relative flex h-10 w-14 shrink-0 items-center justify-center rounded-xl bg-white p-1.5 shadow-sm border border-sidebar-border/70">
+                <div className="relative flex h-11 w-16 shrink-0 items-center justify-center rounded-xl bg-white p-1 shadow-sm border border-sidebar-border/70">
                   <img
                     src={logoUrl}
-                    alt="KGS Logo"
+                    alt="GTVP Logo"
                     className="h-full w-full object-contain"
                   />
                 </div>
@@ -673,10 +688,10 @@ export function AppShell({
               </div>
             </>
           ) : (
-            <div className="relative flex h-10 w-11 shrink-0 items-center justify-center rounded-xl bg-white p-1.5 shadow-sm border border-sidebar-border/70">
+            <div className="relative flex h-11 w-12 shrink-0 items-center justify-center rounded-xl bg-white p-1 shadow-sm border border-sidebar-border/70">
               <img
                 src={logoUrl}
-                alt="KGS Logo"
+                alt="GTVP Logo"
                 className="h-full w-full object-contain"
               />
             </div>
@@ -748,11 +763,7 @@ export function AppShell({
                 suppressHydrationWarning
                 type="text"
                 inputMode="search"
-                placeholder={
-                  hasUserRole(user, "SUPPLIER") || path.startsWith("/supplier")
-                    ? "Search ASN, vehicle number, status..."
-                    : "Search ASN, truck no, vendor, gate entry…"
-                }
+                placeholder={getSearchPlaceholder(path, searchStr)}
                 className="h-10 w-full rounded-xl border border-border bg-muted/60 pl-9 pr-16 text-sm outline-none transition-shadow placeholder:text-muted-foreground focus:bg-card focus:ring-2 focus:ring-ring/40 [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
                 value={searchTerm}
                 onChange={(e) => {
@@ -850,7 +861,7 @@ export function AppShell({
                           <Search className="mb-2 size-8 opacity-20" />
                           <p className="text-sm font-medium">No results found for "{searchTerm}"</p>
                           <p className="text-xs">
-                            Try searching for a different ASN, vehicle number, or status
+                            Try a different reference, name, or status in this module
                           </p>
                         </div>
                       )}
@@ -928,7 +939,7 @@ export function AppShell({
         <main className={cn("page-enter flex-1 px-4 py-6 lg:px-7", isWarehouseWorkspace && "px-5 py-5 lg:px-8 lg:py-6")}>
           <div className={cn("mx-auto w-full max-w-[1360px]", isWarehouseWorkspace && "max-w-[1680px]")}>
             {(title || subtitle || actions) && (
-              <div className={cn("mb-6 flex flex-wrap items-end justify-between gap-4", path === "/supplier-dashboard" && "supplier-heading-image", path === "/assembly-dashboard" && "assembly-dashboard-hero", path === "/gate-dashboard" && "gate-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") === "dashboard" && "grn-dashboard-hero")}>
+              <div className={cn("mb-6 flex flex-wrap items-end justify-between gap-4", ["/assembly/material-requests", "/assembly/production", "/assembly/quality", "/assembly/finished-goods", "/assembly/dispatch"].includes(path) && "material-requests-header", path === "/supplier-dashboard" && "supplier-heading-image", path === "/assembly-dashboard" && "assembly-dashboard-hero", path === "/gate-dashboard" && "gate-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") === "dashboard" && "grn-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") !== "dashboard" && "grn-form-header")}>
                 <div>
                   {title && <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">{title}{pageHelp[path] && <InformationTooltip help={pageHelp[path]} placement="title" />}</h1>}
                   {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
@@ -960,6 +971,8 @@ export function StatusBadge({ status }: { status: string }) {
     "PO Created": "bg-primary-soft text-primary border-primary/25",
     Fulfilled: "bg-success-soft text-success border-success/30",
     Closed: "bg-muted text-muted-foreground border-border",
+    EXITED: "bg-red-50 text-red-600 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-900",
+    VEHICLE_EXITED: "bg-red-50 text-red-600 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-900",
     "Dock Assigned": "bg-teal-soft text-teal border-teal/30",
     Receiving: "bg-primary-soft text-primary border-primary/25",
     Completed: "bg-success-soft text-success border-success/30",
@@ -1157,120 +1170,54 @@ function parseDockAllocationDetails(n: any) {
 
 export function DockAllocationNotificationCard({ notification }: { notification: any }) {
   const details = parseDockAllocationDetails(notification);
+  const additionalFields = [
+    ["Driver", details.driverName],
+    ["Driver contact", details.driverPhone],
+    ["ASN", details.asnNumber],
+    ["PO reference", details.poNumber],
+    ["Dock name", details.dockName],
+    ["Location", details.dockLocation],
+    ["Dock type", details.dockType],
+    ["Warehouse", details.warehouseName],
+  ].filter(([, value]) => value && value !== "N/A");
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-teal-500/30 bg-teal-500/5 p-5 shadow-sm space-y-4 font-sans text-foreground">
-      <div className="absolute left-0 top-0 h-full w-1 bg-teal-600 dark:bg-teal-400" />
-
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-teal-500/20 pb-3">
-        <div className="flex items-center gap-2.5">
-          <div className="grid size-9 place-items-center rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400">
-            <Warehouse className="size-5" />
-          </div>
-          <div>
-            <h3 className="font-black text-base tracking-tight text-foreground uppercase">
-              DOCK ALLOCATION CONFIRMED
-            </h3>
-            <p className="text-xs text-muted-foreground">Vehicle assigned & dock allocated</p>
-          </div>
+    <div className="notification-centre-card relative overflow-hidden rounded-xl border border-border bg-card p-4 text-foreground">
+      {!notification.is_read && <div className="absolute inset-y-0 left-0 w-1 bg-primary" />}
+      <div className="notification-centre-body flex items-start gap-3">
+        <div className="notification-centre-icon grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+          <Warehouse className="size-5" />
         </div>
-        <Badge
-          variant="outline"
-          className="bg-teal-500/10 text-teal-700 dark:text-teal-300 border-teal-500/30 font-extrabold text-[11px] px-2.5 py-0.5 rounded-full"
-        >
-          Dock Allocated
-        </Badge>
-      </div>
-
-      {/* Details Grid */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        {/* Vehicle Details */}
-        <div className="space-y-2 rounded-xl bg-card/80 p-3.5 border border-border/50 text-xs shadow-2xs">
-          <span className="text-[10px] font-black uppercase text-muted-foreground tracking-wider block border-b border-border/40 pb-1">
-            Vehicle Details
-          </span>
-          <div className="space-y-1.5 pt-1 font-medium">
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Gate Pass:</span>
-              <span className="font-mono font-bold text-foreground">{details.gatePass}</span>
+        <div className="min-w-0 flex-1 space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="notification-centre-heading flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold">Dock allocation confirmed</h3>
+              <Badge variant="outline" className="border-primary/20 bg-primary/10 text-primary text-[10px] font-medium">Dock Allocated</Badge>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Vehicle:</span>
-              <span className="font-mono font-bold text-primary">{details.vehicle}</span>
-            </div>
-            {details.driverName && (
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Driver:</span>
-                <span className="font-semibold text-foreground">{details.driverName}</span>
-              </div>
-            )}
-            {details.driverPhone && (
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Driver Phone:</span>
-                <span className="font-mono text-foreground">{details.driverPhone}</span>
-              </div>
-            )}
-            {details.asnNumber && (
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">ASN:</span>
-                <span className="font-mono font-semibold text-foreground">{details.asnNumber}</span>
-              </div>
-            )}
-            {details.poNumber && (
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">PO:</span>
-                <span className="font-mono font-semibold text-foreground">{details.poNumber}</span>
-              </div>
-            )}
+            <span className="notification-centre-date text-xs text-muted-foreground">{details.allocatedAt}</span>
           </div>
-        </div>
-
-        {/* Allocated Dock Details */}
-        <div className="space-y-2 rounded-xl bg-card/80 p-3.5 border border-border/50 text-xs shadow-2xs">
-          <span className="text-[10px] font-black uppercase text-muted-foreground tracking-wider block border-b border-border/40 pb-1">
-            Allocated Dock Details
-          </span>
-          <div className="space-y-1.5 pt-1 font-medium">
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Dock Code:</span>
-              <span className="font-mono font-bold text-teal-600 dark:text-teal-400">
-                {details.dockCode}
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Dock Name:</span>
-              <span className="font-semibold text-foreground">{details.dockName}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Location:</span>
-              <span className="text-foreground">{details.dockLocation}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Dock Type:</span>
-              <span className="text-foreground">{details.dockType}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Warehouse:</span>
-              <span className="text-foreground">{details.warehouseName}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Allocated At:</span>
-              <span className="text-foreground">{details.allocatedAt}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Instruction Banner */}
-      <div className="rounded-xl border border-teal-500/20 bg-teal-500/10 p-3 text-xs flex items-center justify-between">
-        <div>
-          <span className="text-[10px] font-black uppercase tracking-wider block text-teal-700 dark:text-teal-300">
-            Instruction
-          </span>
-          <p className="font-extrabold text-teal-900 dark:text-teal-100 mt-0.5">
-            Proceed directly to Dock {details.dockCode}.
-          </p>
+          <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+            {[["Gate pass", details.gatePass], ["Vehicle", details.vehicle], ["Dock", details.dockCode]].map(([label, value]) => (
+              <div key={label} className="min-w-0">
+                <dt className="text-xs text-muted-foreground">{label}</dt>
+                <dd className="mt-0.5 break-words font-mono font-semibold text-primary">{value}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="text-xs text-muted-foreground">Proceed directly to Dock {details.dockCode}.</p>
+          {additionalFields.length > 0 && (
+            <details className="border-t pt-2">
+              <summary className="w-fit cursor-pointer text-xs font-medium text-primary">View allocation details</summary>
+              <dl className="mt-3 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                {additionalFields.map(([label, value]) => (
+                  <div key={label} className="min-w-0">
+                    <dt className="text-xs text-muted-foreground">{label}</dt>
+                    <dd className="mt-0.5 break-words font-medium">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
+          )}
         </div>
       </div>
     </div>

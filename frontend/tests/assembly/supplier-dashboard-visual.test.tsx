@@ -4,6 +4,7 @@ import { Route } from "@/routes/supplier-dashboard";
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: any) => ({ options }),
+  useSearch: () => ({ search: "" }),
   Link: ({ to, children, search, ...props }: any) => <a href={to} {...props}>{children}</a>,
 }));
 vi.mock("@/components/wms/app-shell", () => ({
