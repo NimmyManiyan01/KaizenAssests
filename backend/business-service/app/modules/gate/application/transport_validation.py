@@ -37,21 +37,16 @@ def validate_transport(vehicle, driver, contact) -> tuple[str, str, str]:
 
 
 async def validate_gate_duplicates(session, vehicle: str, asn_id: uuid.UUID | None) -> None:
-    """Serialize admission checks and allow reuse only after a vehicle exits."""
+    """Serialize admission checks and block an active pass for the same vehicle."""
     dialect = session.get_bind().dialect.name
     if dialect == "postgresql":
-        for key in sorted([f"gate-vehicle:{normalize_vehicle(vehicle)}"] + ([f"gate-asn:{asn_id}"] if asn_id else [])):
-            await session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": key})
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": f"gate-vehicle:{normalize_vehicle(vehicle)}"},
+        )
     elif dialect == "sqlite":
         # Obtain SQLite's writer reservation before checking for duplicates.
         await session.execute(text("UPDATE gate_entry SET status = status WHERE 0"))
-    if asn_id:
-        existing = await session.scalar(select(GateEntryModel.gate_entry_number).where(
-            GateEntryModel.asn_id == asn_id,
-            GateEntryModel.status.notin_(["REJECTED", "DENIED_ENTRY"]),
-        ).limit(1))
-        if existing:
-            raise HTTPException(409, f"Gate Pass {existing} already exists for this ASN. Use the existing pass.")
     normalized_column = func.replace(func.replace(func.upper(GateEntryModel.vehicle_number), "-", ""), " ", "")
     existing = await session.scalar(select(GateEntryModel.gate_entry_number).where(
         normalized_column == normalize_vehicle(vehicle),

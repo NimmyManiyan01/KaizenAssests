@@ -20,6 +20,10 @@ function getApiErrorMessage(payload: unknown, fallback: string): string {
   const { detail, message } = payload as { detail?: unknown; message?: unknown };
   if (typeof detail === "string") return detail;
   if (typeof message === "string") return message;
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const detailMessage = (detail as { message?: unknown }).message;
+    if (typeof detailMessage === "string") return detailMessage;
+  }
 
   if (Array.isArray(detail)) {
     return (
@@ -324,7 +328,7 @@ export const api = {
   },
   async completeFinishedGoodsPickupGateExit(
     gatePassNumber: string,
-    payload: { vehicle_number: string; driver_name: string; documents_verified: boolean },
+    payload: { vehicle_number: string; driver_name: string; documents_verified: boolean; section_qr_identities?: string[] },
   ): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/gate-entries/finished-goods-pickup/${encodeURIComponent(gatePassNumber)}/exit`,
@@ -1503,8 +1507,10 @@ export const api = {
     });
   },
 
-  async getMaterialComponents(status: string = "ACTIVE"): Promise<any[]> {
-    return request<any[]>(`${BUSINESS_API_URL}/api/gate/materials?status=${encodeURIComponent(status)}`);
+  async getMaterialComponents(status: string = "ACTIVE", availableOnly: boolean = false): Promise<any[]> {
+    const q = new URLSearchParams({ status });
+    if (availableOnly) q.append("available_only", "true");
+    return request<any[]>(`${BUSINESS_API_URL}/api/gate/materials?${q.toString()}`);
     /*
       { code: "MAT-RAD-001", name: "SKID MOUNTED RADIATOR", category: "Heavy Components", uom: "PCS" },
       { code: "MAT-ECP-002", name: "ENGINE CONTROL PANEL", category: "Control Systems", uom: "PCS" },
@@ -3204,6 +3210,11 @@ export const api = {
       cache: "no-store",
     });
   },
+  async getAssemblyAvailableMaterials(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/available-materials`, {
+      cache: "no-store",
+    });
+  },
   async createAssemblyProduct(payload: {
     product_name: string;
     product_code: string;
@@ -3251,9 +3262,11 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
     });
   },
-  async getProductBOM(productCode: string, quantity = 1): Promise<AssemblyProductBOMResponse> {
+  async getProductBOM(productCode: string, quantity = 1, availableOnly = false): Promise<AssemblyProductBOMResponse> {
+    const q = new URLSearchParams({ quantity: String(quantity) });
+    if (availableOnly) q.append("available_only", "true");
     return request<AssemblyProductBOMResponse>(
-      `${BUSINESS_API_URL}/api/v1/assembly/products/${encodeURIComponent(productCode)}/bom?quantity=${quantity}`,
+      `${BUSINESS_API_URL}/api/v1/assembly/products/${encodeURIComponent(productCode)}/bom?${q.toString()}`,
       { cache: "no-store" },
     );
   },
@@ -3357,6 +3370,26 @@ export const api = {
       },
     );
   },
+  async verifyAssemblyMaterialQr(orderId: string, scannedQr: string): Promise<AssemblyMaterialQrVerification> {
+    return request<AssemblyMaterialQrVerification>(
+      `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}/material-consumption/verify?scanned_qr=${encodeURIComponent(scannedQr)}`,
+      { cache: "no-store" },
+    );
+  },
+  async getAssemblyMaterialConsumption(orderId: string): Promise<AssemblyMaterialConsumptionSummary> {
+    return request<AssemblyMaterialConsumptionSummary>(
+      `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}/material-consumption`,
+      { cache: "no-store" },
+    );
+  },
+  async recordAssemblyMaterialConsumption(orderId: string, payload: {
+    material_code: string; grn_batch_id: string; material_qr: string;
+    actual_consumed: number; uom: string; idempotency_key: string;
+  }): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}/material-consumption`, {
+      method: "POST", body: JSON.stringify(payload),
+    });
+  },
   async startAssemblyProduction(orderId: string): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/v1/assembly/orders/${encodeURIComponent(orderId)}/start-production`,
@@ -3444,7 +3477,17 @@ export const api = {
       cache: "no-store",
     });
   },
+  async getSupplierPickupFinishedGoods(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/supplier/pickup-finished-goods`);
+  },
+  async getFgLoading(): Promise<any[]> {
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/assembly/fg-loading`);
+  },
+  async confirmFgLoading(gatePass: string, qrIdentities: string[]): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/fg-loading/${encodeURIComponent(gatePass)}/confirm`, {method: "POST", body: JSON.stringify({qr_identities: qrIdentities})});
+  },
   async createSupplierFinishedGoodsDispatchRequest(payload: {
+    finished_goods_id?: string;
     product_code: string;
     product_name: string;
     quantity: number;
@@ -3452,6 +3495,11 @@ export const api = {
     vehicle_number: string;
     driver_name: string;
     driver_contact: string;
+    transport_entries?: Array<{
+      vehicle_number: string;
+      driver_name: string;
+      driver_contact: string;
+    }>;
     expected_pickup_date: string;
     remarks?: string;
   }): Promise<any> {
@@ -3488,6 +3536,12 @@ export const api = {
       {
         cache: "no-store",
       },
+    );
+  },
+  async getAssemblyFinishedGoodsTraceability(fgId: string): Promise<AssemblyFinishedGoodsTraceability> {
+    return request<AssemblyFinishedGoodsTraceability>(
+      `${BUSINESS_API_URL}/api/v1/assembly/finished-goods/${encodeURIComponent(fgId)}/traceability`,
+      { cache: "no-store" },
     );
   },
   async verifyAssemblyFinishedGoodsQr(fgId: string, qrCode: string): Promise<any> {
@@ -3809,6 +3863,74 @@ export interface AssemblyFinishedGoodDetail extends AssemblyFinishedGoodItem {
   };
 }
 
+export interface AssemblyFinishedGoodsTraceabilityMaterial {
+  material_code: string;
+  material_name: string;
+  grn_batch_id: string;
+  batch_number: string | null;
+  original_qr_identity: string;
+  original_qr_payload: string | null;
+  quantity_consumed: number;
+  uom: string;
+  grn_reference: { grn_id: string | null; grn_number: string | null };
+  supplier: { supplier_name: string | null; source: string | null };
+  consumption_event_ids: string[];
+}
+
+export interface AssemblyFinishedGoodsTraceabilityEvent {
+  consumption_event_id: string;
+  material_code: string;
+  grn_batch_id: string;
+  batch_number: string | null;
+  original_material_qr_reference: string | null;
+  quantity_consumed: number;
+  uom: string;
+  consumed_at: string;
+  recorded_by: string;
+  traceability_status: "VERIFIED" | "UNLINKED";
+}
+
+export interface AssemblyFinishedGoodsUnlinkedMaterialRecord {
+  consumption_id?: string;
+  consumption_event_id?: string;
+  material_code: string;
+  batch_number?: string | null;
+  quantity_consumed: number;
+  uom: string;
+  original_material_qr_reference?: string | null;
+  traceability_status: "UNLINKED";
+  reason: string;
+}
+
+export interface AssemblyFinishedGoodsTraceability {
+  finished_goods: {
+    fg_id: string;
+    fg_batch_number: string | null;
+    serial_number: string | null;
+    product_code: string;
+    product_name: string;
+    finished_quantity: number;
+    uom: string;
+    qc_status: string | null;
+    qr_identity: string | null;
+  };
+  assembly: {
+    assembly_order_id: string;
+    assembly_order_number: string;
+    production_status: string;
+  };
+  traceability: {
+    overall_status: "COMPLETE" | "PARTIAL" | "UNLINKED" | "NOT_AVAILABLE";
+    total_material_batches: number;
+    verified_material_batches: number;
+    unlinked_material_records: number;
+    data_quality_warnings: string[];
+  };
+  consumed_materials: AssemblyFinishedGoodsTraceabilityMaterial[];
+  consumption_events: AssemblyFinishedGoodsTraceabilityEvent[];
+  unlinked_material_records: AssemblyFinishedGoodsUnlinkedMaterialRecord[];
+}
+
 export interface AssemblyProductionOrder {
   id: string;
   order_number: string;
@@ -3826,9 +3948,24 @@ export interface AssemblyProductionOrder {
   material_request_number?: string | null;
   can_start: boolean;
   can_complete: boolean;
+  traceability_required?: boolean;
   started_at: string | null;
   completed_at: string | null;
   created_at: string | null;
+}
+
+export interface AssemblyMaterialQrVerification {
+  material_code: string; material_name: string; grn_batch_id: string; batch_number: string;
+  material_qr: string; quantity_issued: number; quantity_received: number;
+  quantity_already_consumed: number; remaining_quantity: number; uom: string; verified: boolean;
+}
+
+export interface AssemblyMaterialConsumptionSummary {
+  assembly_order_id: string; traceability_required: boolean; traceability_status: string;
+  missing_material_codes: string[]; can_complete: boolean;
+  events: Array<{ consumption_event_id: string; material_code: string; grn_batch_id: string;
+    batch_number?: string | null; material_qr: string; consumed_quantity: number; uom: string;
+    consumed_at: string; recorded_by: string; status: string }>;
 }
 
 export interface AssemblyMaterialRequestItem {

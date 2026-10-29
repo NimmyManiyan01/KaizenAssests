@@ -147,7 +147,7 @@ def test_active_duplicate_entry_prevention():
     # 1. Duplicate PO should be rejected
     with pytest.raises(DomainRuleViolationException) as exc_info:
         GateVerificationService.check_duplicate_active_entry(
-            active_entries, po_number="PO-1001"
+            active_entries, po_number="PO-1001", vehicle_plate="MH-12-AB-1234"
         )
     assert "Active gate entry attempt" in str(exc_info.value)
 

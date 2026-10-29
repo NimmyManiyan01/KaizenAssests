@@ -111,7 +111,7 @@ class HandlingUnitModel(Base):
     uom: Mapped[str] = mapped_column(String(32), nullable=False)
     batch_number: Mapped[str | None] = mapped_column(String(128), nullable=True)
     supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    po_number: Mapped[str] = mapped_column(String(64), nullable=False)
+    po_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     asn_number: Mapped[str] = mapped_column(String(64), nullable=False)
     grn_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False)

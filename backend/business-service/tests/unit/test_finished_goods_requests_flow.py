@@ -12,7 +12,7 @@ from sqlalchemy import delete, select
 from app.database.session import session_scope
 from app.main import app
 from app.modules.assembly.infrastructure.persistence.models import AssemblyFinishedGoodsModel, AssemblyOrderModel
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
     FinishedGoodsRequestModel,
     NotificationModel,
 )
@@ -208,7 +208,7 @@ async def test_fg_warehouse_availability_and_shortage_calculation():
     Test Finished Goods Warehouse availability check and shortage calculation against database inventory.
     Requested: 100, FG Warehouse Available: 70 -> Shortage: 30
     """
-    from app.modules.procurement.infrastructure.persistence.models import (
+    from app.common.persistence.models import (
         MaterialRequestModel,
         PickTaskModel,
         MaterialIssueModel,

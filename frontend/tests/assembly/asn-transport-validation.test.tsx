@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import {
   isValidAsnVehicleNumber, normalizeAsnVehicleNumber,
-  isValidAsnDriverName, isValidAsnDriverMobileNumber,
+  isValidAsnDriverName, isValidAsnDriverMobileNumber, sanitizeAsnDriverName,
 } from "@/lib/input-validation";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -32,10 +32,31 @@ describe("ASN transport validation", () => {
   it.each(["", "A", "1234", "Ram2", "....", "Ram@Kumar", "A".repeat(101)])("rejects name %s", (value) => {
     expect(isValidAsnDriverName(value)).toBe(false);
   });
+  it("removes digits and unsupported characters from driver names", () => {
+    expect(sanitizeAsnDriverName("Ravi123 Kumar5")).toBe("Ravi Kumar");
+    expect(sanitizeAsnDriverName("Ravi@Kumar")).toBe("RaviKumar");
+  });
   it.each(["", "1234567890", "987654321", "98765432100", "98765a43210", "+919876543210"])("rejects contact %s", (value) => {
     expect(isValidAsnDriverMobileNumber(value)).toBe(false);
   });
   it("accepts an Indian mobile", () => expect(isValidAsnDriverMobileNumber("9876543210")).toBe(true));
+
+  it("shows only one Add Vehicle & Driver button in the assignment modal", async () => {
+    const Page = Route.options.component as any;
+    render(<Page />);
+    fireEvent.click(await screen.findByRole("button", { name: /create asn/i }));
+    await screen.findByLabelText("Vehicle Number *");
+    expect(screen.getAllByRole("button", { name: "Add Vehicle & Driver" })).toHaveLength(1);
+  });
+
+  it("does not allow digits in the driver name field", async () => {
+    const Page = Route.options.component as any;
+    render(<Page />);
+    fireEvent.click(await screen.findByRole("button", { name: /create asn/i }));
+    const driver = await screen.findByLabelText("Driver Name *");
+    fireEvent.change(driver, { target: { value: "Ravi123 Kumar5" } });
+    expect(driver).toHaveValue("Ravi Kumar");
+  });
 
   it("shows inline errors and preserves transport details through Details and Back", async () => {
     const Page = Route.options.component as any;
@@ -49,7 +70,7 @@ describe("ASN transport validation", () => {
     expect(next).toBeDisabled();
     fireEvent.change(driver, { target: { value: "123" } });
     fireEvent.blur(driver);
-    expect(screen.getByText(/Enter 2–100 characters/)).toBeVisible();
+    expect(screen.getByText("Driver name is required.")).toBeVisible();
     fireEvent.change(vehicle, { target: { value: "ka-02-ah-2755" } });
     fireEvent.change(driver, { target: { value: "R. D'Souza" } });
     fireEvent.change(contact, { target: { value: "987654321" } });

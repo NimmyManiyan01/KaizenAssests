@@ -31,7 +31,7 @@ async def test_qr_lookup_good_stock_item():
 
 @pytest.mark.asyncio
 async def test_qr_lookup_material_with_color_variant():
-    from app.modules.procurement.infrastructure.persistence.models import MaterialModel, MaterialVariantModel
+    from app.common.persistence.models import MaterialModel, MaterialVariantModel
     from sqlalchemy import select
     import uuid
     async for uow in get_uow():
@@ -84,7 +84,7 @@ async def test_qr_lookup_material_with_color_variant():
 
 @pytest.mark.asyncio
 async def test_qr_lookup_damage_payload():
-    from app.modules.procurement.infrastructure.persistence.models import MaterialModel, MaterialVariantModel
+    from app.common.persistence.models import MaterialModel, MaterialVariantModel
     from sqlalchemy import select
     import uuid
     async for uow in get_uow():

@@ -7,7 +7,7 @@ from sqlalchemy import delete, select, text
 
 from app.main import app
 from app.database.session import session_scope
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
     MaterialModel,
     MaterialStockModel,
     NotificationModel,
@@ -591,7 +591,7 @@ async def test_assembly_requisition_reservation_shortage_and_warehouse_visibilit
     After the remaining 4 is received and becomes available, requisition proceeds through Warehouse assignment.
     """
     from app.modules.storage.infrastructure.persistence.models import AssemblyStockReservationModel
-    from app.modules.procurement.infrastructure.persistence.models import MaterialRequestModel
+    from app.common.persistence.models import MaterialRequestModel
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

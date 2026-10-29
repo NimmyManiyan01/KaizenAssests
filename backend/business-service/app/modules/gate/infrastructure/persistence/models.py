@@ -116,7 +116,7 @@ class DamageReportModel(Base):
     receiving_line_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("receiving_line.id", ondelete="CASCADE"), nullable=False, index=True)
     material_code: Mapped[str] = mapped_column(String(64), nullable=False)
     material_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    po_number: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    po_number: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     grn_number: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     damaged_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     received_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
@@ -209,7 +209,7 @@ class VehicleExitApprovalModel(Base):
     gate_entry_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("gate_entry.id", ondelete="RESTRICT"), nullable=False, unique=True, index=True)
     dock_assignment_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("dock_assignment.id", ondelete="RESTRICT"), nullable=False, unique=True)
     asn_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("asn.id", ondelete="RESTRICT"), nullable=False)
-    po_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("purchase_order.id", ondelete="RESTRICT"), nullable=False)
+    po_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("purchase_order.id", ondelete="RESTRICT"), nullable=True)
     grn_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("grn.id", ondelete="RESTRICT"), nullable=False)
     vehicle_number: Mapped[str] = mapped_column(String(32), nullable=False)
     driver_name: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -247,7 +247,7 @@ class GateEntryModel(Base):
     po_id: Mapped[uuid.UUID | None] = mapped_column(GUID, nullable=True)
     asn_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("asn.id", ondelete="RESTRICT"), nullable=True, index=True)
     assigned_dock_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
-    po_number: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    po_number: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     vehicle_number: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
 
     driver_name: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -255,7 +255,7 @@ class GateEntryModel(Base):
     driver_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     driver_photo_path: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    po_document_path: Mapped[str] = mapped_column(String(256), nullable=False)
+    po_document_path: Mapped[str | None] = mapped_column(String(256), nullable=True)
     vehicle_photo_path: Mapped[str | None] = mapped_column(String(256), nullable=True)
     po_document_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     vehicle_photo_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
@@ -306,7 +306,7 @@ class FinishedGoodsPickupGateVisitModel(Base):
 
     # Existing databases warehouse this primary key as VARCHAR, not UUID.
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
-    request_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("finished_goods_request.id", ondelete="RESTRICT"), nullable=False, unique=True, index=True)
+    request_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("finished_goods_request.id", ondelete="RESTRICT"), nullable=False, index=True)
     gate_pass_number: Mapped[str] = mapped_column(String(6), nullable=False, unique=True, index=True)
     supplier_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)

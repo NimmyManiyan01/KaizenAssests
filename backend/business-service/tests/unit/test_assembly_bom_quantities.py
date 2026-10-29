@@ -11,7 +11,7 @@ from app.database.base import Base
 from app.database.session import get_uow
 from app.security.dependencies import get_current_user, CurrentUser
 from app.modules.assembly.infrastructure.persistence.models import BillOfMaterialsModel, BillOfMaterialsItemModel, AssemblyOrderModel
-from app.common.persistence.models import MaterialRequestItemModel
+from app.common.persistence.models import MaterialRequestItemModel, MaterialStockModel
 
 class TestUow:
     def __init__(self, session): self.session=session
@@ -36,6 +36,12 @@ class AssemblyBomQuantityTests(unittest.IsolatedAsyncioTestCase):
         self.session.add(bom);await self.session.flush()
         for code,qty,uom in [("MAT-100",100,"PCS"),("MAT-2",2,"PCS"),("MAT-KG",Decimal("0.25"),"KG")]:
             self.session.add(BillOfMaterialsItemModel(bom_id=bom.id,material_code=code,material_name=code,quantity_per_unit=qty,uom=uom))
+            self.session.add(MaterialStockModel(
+                material_code=code,
+                on_hand_quantity=Decimal("100000"),
+                available_quantity=Decimal("100000"),
+                uom=uom,
+            ))
         await self.session.commit()
         self.client=AsyncClient(transport=ASGITransport(app=app),base_url="http://test")
     async def asyncTearDown(self):
@@ -49,7 +55,7 @@ class AssemblyBomQuantityTests(unittest.IsolatedAsyncioTestCase):
             rows={r["material_code"]:r for r in data["materials"]}
             for code,per_unit in [("MAT-100",100),("MAT-2",2),("MAT-KG",0.25)]:
                 self.assertEqual(rows[code]["required_quantity"],quantity*per_unit)
-                self.assertEqual(rows[code]["shortage"],quantity*per_unit)
+                self.assertEqual(rows[code]["shortage"],max(0,quantity*per_unit-100000))
     async def test_saved_request_matches_bom_and_keeps_production_target(self):
         response=await self.client.post("/api/v1/assembly/material-requests",json={"product_code":"FG-TEST","target_quantity":100,"required_date":(date.today()+timedelta(days=7)).isoformat()})
         self.assertEqual(response.status_code,201,response.text)
@@ -64,6 +70,12 @@ class AssemblyBomQuantityTests(unittest.IsolatedAsyncioTestCase):
     async def test_add_material_persists_component_and_updates_preview(self):
         from app.common.persistence.models import MaterialModel
         self.session.add(MaterialModel(material_code="MAT-NEW",material_name="New Component",base_uom="KG",status="Active"))
+        self.session.add(MaterialStockModel(
+            material_code="MAT-NEW",
+            on_hand_quantity=Decimal("1000"),
+            available_quantity=Decimal("1000"),
+            uom="KG",
+        ))
         await self.session.commit()
         response=await self.client.post("/api/v1/assembly/products/FG-TEST/bom/materials",json={"material_code":"MAT-NEW","quantity_per_unit":2.5})
         self.assertEqual(response.status_code,201,response.text)

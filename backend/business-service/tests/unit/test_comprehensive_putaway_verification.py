@@ -40,12 +40,14 @@ from app.modules.gate.infrastructure.persistence.models import (
     DockModel,
     GateEntryModel,
 )
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
+    AsnModel,
     MaterialModel,
     MaterialStockModel,
 )
 from app.modules.receiving.infrastructure.persistence.models import (
     GrnBatchQrModel,
+    GrnBatchModel,
     GrnLineModel,
     GrnModel,
 )
@@ -80,6 +82,7 @@ async def cleanup_e2e():
         mat_code = created.get("mat_code")
         uid_suffix = created.get("uid_suffix")
         ge_num = created.get("ge_num")
+        asn_number = created.get("asn_number")
         grn_num = created.get("grn_num")
         bin_code_a = created.get("bin_code_a")
         bin_code_b = created.get("bin_code_b")
@@ -108,6 +111,9 @@ async def cleanup_e2e():
 
         if ge_num:
             await session.execute(text("DELETE FROM gate_entry WHERE gate_entry_number = :gen;"), {"gen": ge_num})
+
+        if asn_number:
+            await session.execute(text("DELETE FROM asn WHERE asn_number = :asn;"), {"asn": asn_number})
 
         if uid_suffix:
             await session.execute(text("DELETE FROM storage_location WHERE location_code LIKE :pat;"), {"pat": f"%{uid_suffix}%"})
@@ -153,6 +159,7 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
         sm_user_b = f"sm_bob_{uid_suffix.lower()}"
         wh_user = f"wh_mgr_{uid_suffix.lower()}"
         ge_num = f"GE-E2E-{uid_suffix}"
+        asn_number = f"ASN-PUT-{uuid.uuid4().hex[:10].upper()}"
         po_num = f"PO-E2E-{uid_suffix}"
         veh_num = f"KA-04-E2E-{uid_suffix}"
         grn_num = f"GRN-E2E-{uid_suffix}"
@@ -169,6 +176,7 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
             "bin_code_a": bin_code_a,
             "bin_code_b": bin_code_b,
             "ge_num": ge_num,
+                "asn_number": asn_number,
             "grn_num": grn_num,
         })
 
@@ -334,11 +342,21 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
         # -> Unload -> QC -> GRN & QR -> Putaway Task Created
         # -------------------------------------------------------------
         total_received = Decimal("100.00")
+        asn_id = uuid.uuid4()
 
         async with UnitOfWork() as uow:
+            uow.session.add(AsnModel(
+                id=asn_id,
+                asn_number=asn_number,
+                status="EXPECTED",
+                vehicle_number=veh_num,
+                driver_name="Ramesh",
+            ))
+            await uow.session.flush()
             # Gate Entry
             ge = GateEntryModel(
                 gate_entry_number=ge_num,
+                asn_id=asn_id,
                 po_number=po_num,
                 vehicle_number=veh_num,
                 driver_name="Ramesh",
@@ -362,6 +380,7 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
 
             da = DockAssignmentModel(
                 gate_entry_id=ge.id,
+                asn_id=asn_id,
                 vehicle_number=veh_num,
                 dock_number=dock_code_a,
                 assigned_warehouse_ref_id=warehouse_a_id,
@@ -399,13 +418,23 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
             uow.session.add(grn_line)
             await uow.session.flush()
 
+            batch_number = f"BATCH-E2E-{uid_suffix}"
+            grn_batch = GrnBatchModel(
+                grn_line_id=grn_line.id,
+                batch_number=batch_number,
+                batch_quantity=total_received,
+                created_by="qc_inspector_1",
+            )
+            uow.session.add(grn_batch)
+            await uow.session.flush()
+
             # GRN Batch QR Generated
-            grn_qr_code = f"QR-MAT-{mat_code}"
+            grn_qr_code = f"QR-BATCH-{batch_number}"
             qr_record = GrnBatchQrModel(
+                batch_id=grn_batch.id,
                 item_code=mat_code,
                 qr_code=grn_qr_code,
-                qr_payload=f'{{"grn_number":"{grn_num}","item_code":"{mat_code}","batch_number":"BATCH-E2E-001"}}',
-                generated_by="qc_inspector_1",
+                qr_payload=f'{{"grn_number":"{grn_num}","item_code":"{mat_code}","batch_number":"{batch_number}"}}',
             )
             uow.session.add(qr_record)
 
@@ -414,6 +443,7 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
                 task_number=f"PT-{uid_suffix}",
                 grn_id=grn.id,
                 grn_number=grn_num,
+                batch_number=batch_number,
                 item_code=mat_code,
                 material_name=mat_name,
                 quantity=total_received,
@@ -649,12 +679,15 @@ async def test_full_putaway_end_to_end_verification(cleanup_e2e):
         # STEP 13: Takeaway after Putaway with GRN Material QR
         # 13a. Query materials currently stored in Destination Bin
         res_bin_mats = await client.get(
-            f"/api/v1/bins/{bin_code_a}/materials",
+            f"/api/storage/putaway-tasks/inventory-locations?material_code={mat_code}",
             headers=headers_sm_a,
         )
         assert res_bin_mats.status_code == 200, res_bin_mats.text
-        mats_in_bin = res_bin_mats.json()["materials"]
-        assert any(m["material_code"] == mat_code and m["available_quantity"] == 100.0 for m in mats_in_bin)
+        mats_in_bin = [
+            row for row in res_bin_mats.json()
+            if row["material_code"] == mat_code and row["bin"] == bin_code_a
+        ]
+        assert mats_in_bin and mats_in_bin[0]["available_quantity"] == 100.0
 
         # 13b. Execute Takeaway of 25 units using the GRN Material QR
         res_takeaway = await client.post(

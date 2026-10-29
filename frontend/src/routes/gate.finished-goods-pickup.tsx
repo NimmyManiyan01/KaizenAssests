@@ -1,3 +1,4 @@
+import { FgQrInput } from "@/components/wms/fg-qr-input";
 import { useSearch, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
@@ -16,11 +17,13 @@ export const Route = createFileRoute("/gate/finished-goods-pickup")({
 const eligibleStatuses = ["ALLOCATED", "APPROVED", "READY_FOR_PICKUP"];
 const vehiclePattern = /^[A-Z]{2}\s?\d{1,2}\s?[A-Z]{1,3}\s?\d{3,4}$/;
 const statusLabel = (status: string) => status.replaceAll("_", " ");
+const normalizeVehicle = (value: unknown) => String(value || "").replace(/[\s-]/g, "").toUpperCase();
 
 function FinishedGoodsPickupGatePage() {
   const [entryOpen, setEntryOpen] = useState(false);
   const [requests, setRequests] = useState<any[]>([]);
   const [selected, setSelected] = useState<any | null>(null);
+  const [selectedTransportIndex, setSelectedTransportIndex] = useState(-1);
   const [query, setQuery] = useState("");
   const moduleSearchParams = useSearch({ strict: false }) as { search?: string };
   useEffect(() => { if (typeof moduleSearchParams.search === "string") setQuery(moduleSearchParams.search); }, [moduleSearchParams.search]);
@@ -37,6 +40,8 @@ function FinishedGoodsPickupGatePage() {
   const [exitOpen, setExitOpen] = useState(false);
   const [exitPass, setExitPass] = useState("");
   const [exitDetails, setExitDetails] = useState<any | null>(null);
+  const [sectionScan, setSectionScan] = useState("");
+  const [verifiedScans, setVerifiedScans] = useState<string[]>([]);
   const [exitDocs, setExitDocs] = useState(false);
   const [exitBusy, setExitBusy] = useState(false);
 
@@ -51,6 +56,8 @@ function FinishedGoodsPickupGatePage() {
       const result = await api.getFinishedGoodsPickupGatePass(normalized);
       setExitDetails(result);
       setExitDocs(false);
+      setVerifiedScans([]);
+      setSectionScan("");
     } catch (err) {
       setExitDetails(null);
       toast.error(err instanceof Error ? err.message : "Gate pass not found.");
@@ -65,6 +72,7 @@ function FinishedGoodsPickupGatePage() {
         vehicle_number: exitDetails.vehicle_number,
         driver_name: exitDetails.driver_name,
         documents_verified: true,
+        section_qr_identities: verifiedScans,
       });
       toast.success(`${result.request_number} exited successfully`, {
         description: `Exit recorded at ${new Date(result.exited_at).toLocaleString()}.`,
@@ -84,9 +92,12 @@ function FinishedGoodsPickupGatePage() {
     setLoading(true);
     setError("");
     try {
-      setRequests(await api.getSupplierFinishedGoodsDispatchRequests());
+      const rows = await api.getSupplierFinishedGoodsDispatchRequests();
+      setRequests(rows);
+      return rows;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load pickup requests.");
+      return [];
     } finally {
       setLoading(false);
     }
@@ -125,15 +136,18 @@ function FinishedGoodsPickupGatePage() {
   useEffect(() => { setRequestPage(page => Math.min(page, pageCount)); }, [pageCount]);
   const vehicle = vehicleNumber.trim().toUpperCase().replace(/\s+/g, " ");
   const contact = driverContact.replace(/\D/g, "");
+  const selectedTransport = selected?.transport_entries?.[selectedTransportIndex];
+  const expectedVehicleNumber = selectedTransport?.vehicle_number || selected?.vehicle_number;
+  const expectedDriverName = selectedTransport?.driver_name || selected?.driver_name;
   const vehicleMismatch = Boolean(
-    selected?.vehicle_number &&
+    expectedVehicleNumber &&
     vehicle &&
-    selected.vehicle_number.toUpperCase().replace(/\s/g, "") !== vehicle.replace(/\s/g, ""),
+    normalizeVehicle(expectedVehicleNumber) !== normalizeVehicle(vehicle),
   );
   const driverMismatch = Boolean(
-    selected?.driver_name &&
+    expectedDriverName &&
     driverName.trim() &&
-    selected.driver_name.trim().toLowerCase() !== driverName.trim().toLowerCase(),
+    expectedDriverName.trim().toLowerCase() !== driverName.trim().toLowerCase(),
   );
   const hasMismatch = vehicleMismatch || driverMismatch;
   const transportValid =
@@ -141,13 +155,38 @@ function FinishedGoodsPickupGatePage() {
     /^[A-Z .-]+$/i.test(driverName.trim()) &&
     /^[6-9]\d{9}$/.test(contact);
 
-  const chooseRequest = (request: any) => {
-    setSelected(request);
-    setVehicleNumber(request.vehicle_number || "");
-    setDriverName(request.driver_name || "");
-    setDriverContact(request.driver_contact || "");
+  const chooseRequest = (request: any, preserveSuccess = false) => {
+    const sourceEntries = Array.isArray(request.transport_entries) && request.transport_entries.length
+      ? request.transport_entries
+      : request.vehicle_number && request.driver_name && request.driver_contact
+        ? [{ vehicle_number: request.vehicle_number, driver_name: request.driver_name, driver_contact: request.driver_contact }]
+        : [];
+    const existingPasses = Array.isArray(request.gate_passes) ? [...request.gate_passes] : [];
+    if (!existingPasses.length && request.gate_pass_number) {
+      existingPasses.push({ vehicle_number: request.vehicle_number });
+    }
+    const usedVehicles = new Set(existingPasses.map((pass: any) => normalizeVehicle(pass.vehicle_number)));
+    const transportEntries = sourceEntries.map((entry: any) => ({
+      ...entry,
+      has_gate_pass: usedVehicles.has(normalizeVehicle(entry.vehicle_number)),
+    }));
+    const nextIndex = transportEntries.findIndex((entry: any) => !entry.has_gate_pass);
+    const nextTransport = transportEntries[nextIndex];
+    setSelected({
+      ...request,
+      vehicle_number: nextTransport?.vehicle_number || request.vehicle_number,
+      driver_name: nextTransport?.driver_name || request.driver_name,
+      transport_entries: transportEntries,
+    });
+    setSelectedTransportIndex(nextIndex);
+    setVehicleNumber(nextTransport?.vehicle_number || "");
+    setDriverName(nextTransport?.driver_name || "");
+    setDriverContact(nextTransport?.driver_contact || "");
     setMismatchReason("");
-    setSuccess(null);
+    if (!preserveSuccess) setSuccess(null);
+    if (transportEntries.length && nextIndex < 0) {
+      toast.error("Every assigned vehicle already has a gate pass for this dispatch.");
+    }
   };
   const lookupRequest = () => {
     const requestNumber = query.trim().toLowerCase();
@@ -171,10 +210,6 @@ function FinishedGoodsPickupGatePage() {
       toast.error("This dispatch request is not approved.");
       return;
     }
-    if (selected.gate_pass_number) {
-      toast.error("A gate pass already exists for this request.");
-      return;
-    }
     if (!transportValid) {
       toast.error("Enter a valid vehicle number, driver name and 10-digit Indian mobile number.");
       return;
@@ -193,7 +228,12 @@ function FinishedGoodsPickupGatePage() {
       });
       setSuccess(result);
       toast.success(`Gate pass ${result.gate_pass_number} generated`);
-      await load();
+      const refreshedRequests = await load();
+      const refreshedRequest = refreshedRequests.find((request: any) => request.id === selected.id);
+      if (refreshedRequest) {
+        chooseRequest(refreshedRequest, true);
+        setSuccess(result);
+      }
       window.setTimeout(() => setEntryOpen(false), 1800);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not create pickup gate entry");
@@ -243,6 +283,12 @@ function FinishedGoodsPickupGatePage() {
                   <p className="sm:col-span-2"><span className="text-muted-foreground">Entry:</span> {exitDetails.entered_at ? new Date(exitDetails.entered_at).toLocaleString() : "—"}</p>
                 </Card>
               )}
+              {exitDetails?.fg_id && <div className="space-y-2">
+                <p>FG: {exitDetails.fg_id}</p>
+                {exitDetails.loaded_sections?.map((s: any) => <p key={s.sub_id}>{s.sub_id} ? {s.status} ? {verifiedScans.includes(s.qr_identity) ? "Verified" : "Scan required"}</p>)}
+                <FgQrInput value={sectionScan} onChange={setSectionScan} label="Verify loaded section" inputId="exit-section-scan" />
+                <Button onClick={() => { if (!exitDetails.loaded_sections?.some((s: any) => s.qr_identity === sectionScan)) { toast.error("QR is not loaded on this vehicle"); return; } setVerifiedScans(prev => [...new Set([...prev, sectionScan])]); setSectionScan(""); }}>Verify section</Button>
+              </div>}
               {exitDetails && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={exitDocs} onChange={(e) => setExitDocs(e.target.checked)} /> Packing list and dispatch documents verified</label>}
             </div>
             <DialogFooter>
@@ -283,6 +329,7 @@ function FinishedGoodsPickupGatePage() {
                             String(selected.request_number || "").toLowerCase()
                         ) {
                           setSelected(null);
+                          setSelectedTransportIndex(-1);
                           setVehicleNumber("");
                           setDriverName("");
                           setDriverContact("");
@@ -396,6 +443,44 @@ function FinishedGoodsPickupGatePage() {
                     )}
                   </div>
                 </div>
+                {selected?.transport_entries?.length > 1 && (
+                  <div>
+                    <Label htmlFor="pickup-transport">Assigned vehicle and driver</Label>
+                    <select
+                      id="pickup-transport"
+                      value={selectedTransportIndex}
+                      onChange={(event) => {
+                        const index = Number(event.target.value);
+                        const entry = selected.transport_entries[index];
+                        if (!entry || entry.has_gate_pass) return;
+                        setSelectedTransportIndex(index);
+                        setSelected({ ...selected, vehicle_number: entry.vehicle_number, driver_name: entry.driver_name });
+                        setVehicleNumber(entry.vehicle_number || "");
+                        setDriverName(entry.driver_name || "");
+                        setDriverContact(entry.driver_contact || "");
+                      }}
+                      className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                    >
+                      {selectedTransportIndex < 0 && (
+                        <option value={-1}>No assigned vehicle remains available</option>
+                      )}
+                      {selected.transport_entries.map((entry: any, index: number) => (
+                        <option key={`${entry.vehicle_number}-${index}`} value={index} disabled={entry.has_gate_pass}>
+                          {entry.vehicle_number} · {entry.driver_name}
+                          {entry.has_gate_pass ? " · Gate pass generated" : " · Available"}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      The next supplier-assigned truck without a gate pass is selected automatically.
+                    </p>
+                  </div>
+                )}
+                {selected?.transport_entries?.length > 0 && selected.transport_entries.every((entry: any) => entry.has_gate_pass) && (
+                  <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="alert">
+                    Every assigned vehicle already has a gate pass for this dispatch.
+                  </p>
+                )}
                 <div className="grid gap-4 md:grid-cols-3">
                   <div>
                     <Label htmlFor="actual-vehicle">Actual vehicle number *</Label>
@@ -457,7 +542,7 @@ function FinishedGoodsPickupGatePage() {
                     />
                   </div>
                 )}
-                <Button type="submit" disabled={busy || !selected}>
+                <Button type="submit" disabled={busy || !selected || !transportValid || selectedTransportIndex < 0}>
                   {busy ? (
                     <>
                       <Loader2 className="mr-2 size-4 animate-spin" /> Generating...

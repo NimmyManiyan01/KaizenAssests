@@ -297,6 +297,11 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
 
+        try:
+            await run_ddl("ALTER TABLE finished_goods_request ADD COLUMN IF NOT EXISTS transport_entries JSON")
+        except Exception as e:
+            logger.warning(f"Failed to ensure finished-goods transport entries column: {e}")
+
         # Ensure gate_entry has exited_at and exited_by
         for col in [
             ("exited_at", "TIMESTAMP WITH TIME ZONE"),
@@ -321,6 +326,43 @@ async def lifespan(app: FastAPI):
                 )
             except Exception:
                 pass
+
+        await run_ddl("""
+            DO $$
+            DECLARE
+                unique_constraint_name TEXT;
+                unique_index_name TEXT;
+            BEGIN
+                IF to_regclass('public.finished_goods_pickup_gate_visit') IS NOT NULL THEN
+                    SELECT c.conname INTO unique_constraint_name
+                    FROM pg_constraint c
+                    JOIN pg_attribute a
+                      ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+                    WHERE c.conrelid = 'public.finished_goods_pickup_gate_visit'::regclass
+                      AND c.contype = 'u'
+                      AND a.attname = 'request_id'
+                      AND cardinality(c.conkey) = 1
+                    LIMIT 1;
+                    IF unique_constraint_name IS NOT NULL THEN
+                        EXECUTE format('ALTER TABLE public.finished_goods_pickup_gate_visit DROP CONSTRAINT %I', unique_constraint_name);
+                    END IF;
+                    SELECT index_class.relname INTO unique_index_name
+                    FROM pg_index i
+                    JOIN pg_class table_class ON table_class.oid = i.indrelid
+                    JOIN pg_class index_class ON index_class.oid = i.indexrelid
+                    JOIN pg_attribute a ON a.attrelid = table_class.oid AND a.attnum = ANY(i.indkey)
+                    WHERE table_class.oid = 'public.finished_goods_pickup_gate_visit'::regclass
+                      AND i.indisunique
+                      AND NOT i.indisprimary
+                      AND i.indnkeyatts = 1
+                      AND a.attname = 'request_id'
+                    LIMIT 1;
+                    IF unique_index_name IS NOT NULL THEN
+                        EXECUTE format('DROP INDEX public.%I', unique_index_name);
+                    END IF;
+                END IF;
+            END $$;
+        """)
 
         # Add columns to asn
         for col in [
@@ -955,9 +997,27 @@ async def lifespan(app: FastAPI):
                 await run_ddl("UPDATE material_stock SET on_hand_quantity = COALESCE(NULLIF(on_hand_quantity, 0), on_hand, 0), on_hand = COALESCE(NULLIF(on_hand, 0), on_hand_quantity, 0)")
                 await run_ddl("UPDATE material_stock SET available_quantity = COALESCE(NULLIF(available_quantity, 0), available, 0), available = COALESCE(NULLIF(available, 0), available_quantity, 0)")
             except Exception: pass
+            try:
+                await run_ddl("ALTER TABLE material_stock ALTER COLUMN material_name DROP NOT NULL")
+            except Exception: pass
+            try:
+                await run_ddl("ALTER TABLE material_stock ALTER COLUMN category DROP NOT NULL")
+            except Exception: pass
             logger.debug("Ensured material_stock table and columns exist")
         except Exception as e:
             logger.warning(f"Failed to create/alter material_stock table: {e}")
+
+        try:
+            for col, col_type in [
+                ("confirmation_id", "VARCHAR(64)"),
+                ("confirmation_hash", "VARCHAR(64)"),
+            ]:
+                try:
+                    await run_ddl(f"ALTER TABLE inventory_movement_history ADD COLUMN IF NOT EXISTS {col} {col_type}")
+                except Exception: pass
+            logger.debug("Ensured inventory_movement_history columns exist")
+        except Exception as e:
+            logger.warning(f"Failed to alter inventory_movement_history table: {e}")
 
         try:
             await run_ddl("""

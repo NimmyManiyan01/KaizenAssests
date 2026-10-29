@@ -11,8 +11,8 @@ from app.main import app
 from app.config.settings import get_settings
 from app.database.session import session_scope
 from app.security.dependencies import get_current_user
-from app.modules.procurement.infrastructure.persistence.models import MaterialModel, MaterialStockModel
-from app.modules.receiving.infrastructure.persistence.models import GrnModel
+from app.common.persistence.models import MaterialModel, MaterialStockModel
+from app.modules.receiving.infrastructure.persistence.models import GrnLineModel, GrnModel
 from app.modules.storage.infrastructure.persistence.models import PutawayTaskModel
 from app.modules.warehouse.infrastructure.persistence.models import WarehouseModel, WarehouseZoneModel, UserAccountModel
 
@@ -23,7 +23,7 @@ async def test_dev_login_case_insensitivity_and_auth_rules():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # 1. Warehouse login with lowercase
         wh_res = await client.post(
-            "/api/v1/procurement/auth/dev-login",
+            "/api/v1/auth/dev-login",
             json={"username": settings.warehouse_username.lower(), "password": settings.warehouse_password},
         )
         assert wh_res.status_code == 200, wh_res.text
@@ -31,7 +31,7 @@ async def test_dev_login_case_insensitivity_and_auth_rules():
 
         # 2. Warehouse login with uppercase
         wh_caps = await client.post(
-            "/api/v1/procurement/auth/dev-login",
+            "/api/v1/auth/dev-login",
             json={"username": settings.warehouse_username.upper(), "password": settings.warehouse_password},
         )
         assert wh_caps.status_code == 200, wh_caps.text
@@ -39,7 +39,7 @@ async def test_dev_login_case_insensitivity_and_auth_rules():
 
         # 3. Invalid password must return 401
         inv_res = await client.post(
-            "/api/v1/procurement/auth/dev-login",
+            "/api/v1/auth/dev-login",
             json={"username": settings.warehouse_username, "password": "definitely_wrong_password"},
         )
         assert inv_res.status_code == 401
@@ -53,7 +53,7 @@ async def test_dev_login_is_disabled_outside_authorized_environments(monkeypatch
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         res = await client.post(
-            "/api/v1/procurement/auth/dev-login",
+            "/api/v1/auth/dev-login",
             json={"username": settings.manager_username, "password": settings.manager_password},
         )
 
@@ -204,7 +204,7 @@ async def test_handling_unit_lookup_and_putaway_zone_uuid_completion():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # 1. Login as the newly created Warehouse Operator with DB credentials
         login_res = await client.post(
-            "/api/v1/procurement/auth/dev-login",
+            "/api/v1/auth/dev-login",
             json={"username": f"mgr_{test_uid.lower()}", "password": "store123"},
         )
         assert login_res.status_code == 200, login_res.text
@@ -222,7 +222,7 @@ async def test_handling_unit_lookup_and_putaway_zone_uuid_completion():
             headers=mgr_headers,
         )
         assert complete_res.status_code == 200, complete_res.text
-        assert complete_res.json()["status"] == "PUTAWAY_COMPLETED"
+        assert complete_res.json()["status"] == "COMPLETED"
         assert complete_res.json()["destination_zone"] == f"ZON-{test_uid}"
 
         # 3. Cross-Warehouse Rejection Test: create second task assigned to other_warehouse_ref_id

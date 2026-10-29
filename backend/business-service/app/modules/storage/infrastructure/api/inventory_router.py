@@ -53,6 +53,7 @@ from app.modules.storage.infrastructure.persistence.models import (
     StockAdjustmentModel,
     StorageLocationModel,
 )
+from app.modules.quarantine.infrastructure.persistence.models import QuarantineRecordModel
 from app.modules.storage.application.rack_capacity import validate_rack_capacity
 from app.modules.warehouse.infrastructure.persistence.models import (
     WarehouseBinModel,
@@ -991,8 +992,8 @@ async def get_warehouse_inventory_summary(
                 .group_by(InventoryMovementHistoryModel.batch_lot, InventoryMovementHistoryModel.movement_type)
             )
             batch_totals: dict[str, float] = {}
-            for batch, movement_type, quantity in movement_rows.all():
-                batch_key = batch or "-"
+            for movement_batch, movement_type, quantity in movement_rows.all():
+                batch_key = movement_batch or "-"
                 signed_quantity = float(quantity or 0) * (1 if movement_type == "PUTAWAY" else -1)
                 batch_totals[batch_key] = batch_totals.get(batch_key, 0.0) + signed_quantity
             batch_details = [

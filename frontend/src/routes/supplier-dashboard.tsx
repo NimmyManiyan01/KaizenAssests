@@ -140,21 +140,75 @@ function SupplierDashboard() {
   const [materialsLoading, setMaterialsLoading] = useState(false);
   const [materialsError, setMaterialsError] = useState("");
   const [materialSearch, setMaterialSearch] = useState("");
-  const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
-  const [selectedPo, setSelectedPo] = useState<any>(null);
   const currentUser = getUserInfo();
+  const supplierId = currentUser?.supplierId;
+  const supplierUsername = currentUser?.username;
+  const supplierFullName = currentUser?.full_name;
 
   useEffect(() => {
     loadAsns();
-    void (currentUser?.supplierId ? api.getSupplier(currentUser.supplierId) : api.getSuppliers({ search: currentUser?.username })).then((result: any) => { const rows = Array.isArray(result) ? result : result?.items || result?.suppliers || []; const supplier = rows.length ? rows.find((item: any) => String(item.id) === String(currentUser?.supplierId) || String(item.username || item.supplier_name || "").toLowerCase() === String(currentUser?.username || "").toLowerCase()) || rows[0] : result; const companyName = supplier?.registered_company_name || supplier?.company_name || supplier?.supplier_name || ""; setSupplierCompanyName(companyName); if (companyName) setSupplierName(companyName); }).catch(() => undefined);
+    void (supplierId ? api.getSupplier(supplierId) : api.getSuppliers({ search: supplierUsername }))
+      .then((result: any) => {
+        const rows = Array.isArray(result) ? result : result?.items || result?.suppliers || [];
+        const supplier = rows.length
+          ? rows.find(
+              (item: any) =>
+                String(item.id) === String(supplierId) ||
+                String(item.username || item.supplier_name || "").toLowerCase() ===
+                  String(supplierUsername || "").toLowerCase(),
+            ) || rows[0]
+          : result;
+        const companyName =
+          supplier?.registered_company_name ||
+          supplier?.company_name ||
+          supplier?.supplier_name ||
+          "";
+        setSupplierCompanyName(companyName);
+        if (companyName) setSupplierName(companyName);
+      })
+      .catch(() => undefined);
     setMaterialsLoading(true);
-    void api.getMaterialComponents().then((materials) => { setMaterialCatalog((materials || []).map((material: any) => ({ ...material, id: material.id || material.material_id, code: material.code || material.material_code, name: material.name || material.material_name, uom: material.uom || material.base_uom || material.unit_of_measure })).filter((material: any) => material.id && material.code && material.name && material.uom)); setMaterialsError(""); }).catch(() => { setMaterialCatalog([]); setMaterialsError("Unable to load Material Master records."); }).finally(() => setMaterialsLoading(false));
-    void Promise.all([api.getVehicles().catch(() => []), api.getDrivers().catch(() => [])]).then(([vehicles, drivers]) => { setRegisteredVehicles((vehicles || []).filter((v: any) => v.is_active !== false && String(v.status || "AVAILABLE").toUpperCase() === "AVAILABLE")); setRegisteredDrivers((drivers || []).filter((d: any) => d.is_active !== false && String(d.status || "ACTIVE").toUpperCase() === "ACTIVE")); });
     void api
-      .getPurchaseOrders({ supplierId: currentUser?.supplierId })
-      .catch(() => [])
-      .then((pos) => setPurchaseOrders(pos || []));
-  }, []);
+      .getMaterialComponents()
+      .then((materials) => {
+        setMaterialCatalog(
+          (materials || [])
+            .map((material: any) => ({
+              ...material,
+              id: material.id || material.material_id,
+              code: material.code || material.material_code,
+              name: material.name || material.material_name,
+              uom: material.uom || material.base_uom || material.unit_of_measure,
+            }))
+            .filter(
+              (material: any) => material.id && material.code && material.name && material.uom,
+            ),
+        );
+        setMaterialsError("");
+      })
+      .catch(() => {
+        setMaterialCatalog([]);
+        setMaterialsError("Unable to load Material Master records.");
+      })
+      .finally(() => setMaterialsLoading(false));
+    void Promise.all([api.getVehicles().catch(() => []), api.getDrivers().catch(() => [])]).then(
+      ([vehicles, drivers]) => {
+        setRegisteredVehicles(
+          (vehicles || []).filter(
+            (v: any) =>
+              v.is_active !== false &&
+              String(v.status || "AVAILABLE").toUpperCase() === "AVAILABLE",
+          ),
+        );
+        setRegisteredDrivers(
+          (drivers || []).filter(
+            (d: any) =>
+              d.is_active !== false && String(d.status || "ACTIVE").toUpperCase() === "ACTIVE",
+          ),
+        );
+      },
+    );
+  }, [supplierId, supplierUsername]);
 
   const handleAddNewCustomMaterial = async () => {
     const compName = prompt("Enter New Material Component Name (to save in Database):");
@@ -168,7 +222,12 @@ function SupplierDashboard() {
       });
       setLines((prev) => [
         ...prev,
-        { item_code: created.code, material_name: created.name, shipped_quantity: "1", uom: created.uom || "PCS" },
+        {
+          item_code: created.code,
+          material_name: created.name,
+          shipped_quantity: "1",
+          uom: created.uom || "PCS",
+        },
       ]);
     } catch {
       toast.error("Failed to save material to database");
@@ -180,12 +239,28 @@ function SupplierDashboard() {
     setAsnsError("");
     try {
       const data = await api.getAsns();
-      setAsns((data || []).map((asn: any) => ({
-        ...asn,
-        expected_arrival_date: asn.expected_arrival_date || asn.delivery_date || asn.expected_arrival_at?.split("T")[0] || "",
-        supplier_name: asn.supplier_name || asn.supplierName || asn.supplier_company_name || asn.supplier?.supplier_name || "",
-        destination_warehouse: asn.destination_warehouse || asn.destinationWarehouse || asn.warehouse_name || asn.delivery_warehouse_name || "",
-      })));
+      setAsns(
+        (data || []).map((asn: any) => ({
+          ...asn,
+          expected_arrival_date:
+            asn.expected_arrival_date ||
+            asn.delivery_date ||
+            asn.expected_arrival_at?.split("T")[0] ||
+            "",
+          supplier_name:
+            asn.supplier_name ||
+            asn.supplierName ||
+            asn.supplier_company_name ||
+            asn.supplier?.supplier_name ||
+            "",
+          destination_warehouse:
+            asn.destination_warehouse ||
+            asn.destinationWarehouse ||
+            asn.warehouse_name ||
+            asn.delivery_warehouse_name ||
+            "",
+        })),
+      );
     } catch {
       setAsnsError("Unable to load delivery notices. Please try again.");
     } finally {
@@ -201,21 +276,14 @@ function SupplierDashboard() {
       setAsnNumber("");
     }
     setExpectedArrivalDate(todayDate());
-    setSupplierName(supplierCompanyName || currentUser?.full_name || currentUser?.username || "");
-    setSelectedPo(null);
+    setSupplierName(supplierCompanyName || supplierFullName || supplierUsername || "");
     setVehicleNumber("");
     setDriverName("");
     setDriverMobile("");
-    setLines([{ material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" }]);
+    setLines([
+      { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" },
+    ]);
     setIsModalOpen(true);
-  };
-
-  const selectPurchaseOrder = async (id: string) => {
-    if (!id) { setSelectedPo(null); setLines([]); return; }
-    const po = await api.getPurchaseOrder(id);
-    setSelectedPo(po);
-    const poLines = po?.lines || po?.items || po?.materials || po?.purchase_order_lines || [];
-    setLines(poLines.map((line: any) => ({ item_code: line.item_code || line.material_code || line.code || "", material_name: line.material_name || line.material?.name || line.name || "", shipped_quantity: "", remaining_quantity: Number(line.remaining_quantity ?? line.remaining ?? line.balance_quantity ?? line.ordered_quantity ?? line.quantity ?? 0), uom: line.uom || line.unit_of_measure || "PCS" })));
   };
 
   const handleFormSubmit = async (e: React.FormEvent) => {
@@ -228,10 +296,7 @@ function SupplierDashboard() {
     if (
       !lines.length ||
       lines.some(
-        (line) =>
-          !line.item_code ||
-          !line.material_name ||
-          Number(line.shipped_quantity) <= 0,
+        (line) => !line.item_code || !line.material_name || Number(line.shipped_quantity) <= 0,
       )
     ) {
       toast.error("Select a material; shipped quantities must be greater than zero");
@@ -254,7 +319,6 @@ function SupplierDashboard() {
     try {
       const payload = {
         asn_number: asnNumber,
-        po_number: undefined,
         supplier_name: supplierName.trim(),
         supplier_id: currentUser?.supplierId,
         expected_arrival_at: expectedArrivalDate,
@@ -307,12 +371,12 @@ function SupplierDashboard() {
       .filter((a) =>
         `${a.asn_number || ""} ${a.vehicle_number || ""} ${a.status || ""}`
           .toLowerCase()
-          .includes(query.toLowerCase())
+          .includes(query.toLowerCase()),
       )
       .sort(
         (a, b) =>
           new Date(b.created_at || b.submitted_at || 0).getTime() -
-          new Date(a.created_at || a.submitted_at || 0).getTime()
+          new Date(a.created_at || a.submitted_at || 0).getTime(),
       );
   }, [asns, query]);
 
@@ -324,7 +388,7 @@ function SupplierDashboard() {
   useEffect(() => { setDeliveryPage((page) => Math.min(page, deliveryPageCount)); }, [deliveryPageCount]);
 
   const submitted = asns.filter(
-    (a) => String(a.status || "SUBMITTED").toUpperCase() === "SUBMITTED"
+    (a) => String(a.status || "SUBMITTED").toUpperCase() === "SUBMITTED",
   ).length;
   const vehicles = new Set(asns.map((a) => a.vehicle_number).filter(Boolean)).size;
 
@@ -400,7 +464,10 @@ function SupplierDashboard() {
       key: `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`,
       label: day.toLocaleDateString(undefined, { month: "short", day: "2-digit" }),
       count: asns.filter((a) => {
-        return toLocalDateKey(a.submitted_at || a.created_at || a.shipment_date) === `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+        return (
+          toLocalDateKey(a.submitted_at || a.created_at || a.shipment_date) ===
+          `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`
+        );
       }).length,
     }));
   }, [asns, trendDays]);
@@ -475,7 +542,6 @@ function SupplierDashboard() {
                 <div className="supplier-kpi-copy">
                   <div className="flex items-center gap-1.5">
                     <p className="text-sm font-medium text-muted-foreground">{title}</p>
-
                   </div>
                   <p
                     className="mt-1 text-2xl font-semibold tabular-nums text-foreground"
@@ -553,7 +619,6 @@ function SupplierDashboard() {
                     <th scope="col" className="px-3.5 py-3">
                       <div className="inline-flex items-center gap-1">
                         <span>ASN Number</span>
-
                       </div>
                     </th>
                     <th scope="col" className="px-3.5 py-3">
@@ -781,7 +846,6 @@ function SupplierDashboard() {
                   <div className="rounded-xl border bg-muted/30 p-3">
                     <div className="flex items-center gap-1">
                       <p className="font-bold uppercase text-muted-foreground">ASN Number</p>
-
                     </div>
                     <p className="mt-1 font-mono font-black text-sky-600">
                       {selected.asn_number || "—"}
@@ -983,10 +1047,11 @@ function SupplierDashboard() {
                   </summary>
                   <div className="ml-11 mt-3 space-y-2 text-sm leading-5 text-slate-600">
                     <p>
-                      The dashboard gives you a quick view of your deliveries: <strong>Total
-                      deliveries</strong> counts your ASN records, <strong>Awaiting arrival</strong>{" "}
-                      counts notices marked SUBMITTED, and <strong>Vehicles used</strong> counts
-                      the different vehicle numbers on your notices.
+                      The dashboard gives you a quick view of your deliveries:{" "}
+                      <strong>Total deliveries</strong> counts your ASN records,{" "}
+                      <strong>Awaiting arrival</strong> counts notices marked SUBMITTED, and{" "}
+                      <strong>Vehicles used</strong> counts the different vehicle numbers on your
+                      notices.
                     </p>
                     <p>
                       In <strong>Delivery History</strong>, search by ASN number, vehicle, or
@@ -1023,8 +1088,8 @@ function SupplierDashboard() {
                       measurement), and status. Search by name or code, or filter by UOM.
                     </p>
                     <p>
-                      Select <strong>Add Material</strong> and enter the material name and base
-                      UOM. The catalog generates the material code for a new item. Active catalog
+                      Select <strong>Add Material</strong> and enter the material name and base UOM.
+                      The catalog generates the material code for a new item. Active catalog
                       materials are available when you add items to an ASN.
                     </p>
                     <Link
@@ -1064,8 +1129,8 @@ function SupplierDashboard() {
                       </li>
                       <li>
                         Select a material from your active catalog, enter the shipped quantity, and
-                        check the automatically displayed UOM. Use <strong>Add material</strong>{" "}
-                        for another item.
+                        check the automatically displayed UOM. Use <strong>Add material</strong> for
+                        another item.
                       </li>
                       <li>
                         Check the details and choose <strong>Submit ASN</strong>. After successful
@@ -1108,17 +1173,16 @@ function SupplierDashboard() {
                   <div className="ml-11 mt-3 space-y-2 text-sm leading-5 text-slate-600">
                     <p>
                       In <strong>Damage Returns</strong>, review the claim number, PO number,
-                      material, damaged or rejected quantity, original GRN, status, and any available
-                      evidence such as reason, remarks, or photos. Status and response details show
-                      the current claim progress.
+                      material, damaged or rejected quantity, original GRN, status, and any
+                      available evidence such as reason, remarks, or photos. Status and response
+                      details show the current claim progress.
                     </p>
                     <p>
                       When a response is requested, choose to accept, reject, accept partially, or
-                      request more information. You can add optional remarks. If accepting, select a
-                      resolution such as replacement, credit note, refund, or return and replacement.
-                      For a replacement, enter its vehicle number and select <strong>Send
-                      Replacement</strong>. The page shows the replacement shipment details and
-                      status when available.
+                      request more information. You can add optional remarks. If accepting, select
+                      Replacement as the resolution. For a replacement, enter its vehicle number and
+                      select <strong>Send Replacement</strong>. The page shows the replacement
+                      shipment details and status when available.
                     </p>
                     <Link
                       to="/damage-claims"
@@ -1151,9 +1215,10 @@ function SupplierDashboard() {
                     </p>
                     <p>
                       Submit the request, then use <strong>Dispatch History</strong> to check its
-                      status and choose <strong>View</strong> for the finished goods, vehicle, driver,
-                      and pickup details. Assembly, Dispatch, and Gate teams handle processing and
-                      vehicle departure; the status shown in the page reflects its current progress.
+                      status and choose <strong>View</strong> for the finished goods, vehicle,
+                      driver, and pickup details. Assembly, Dispatch, and Gate teams handle
+                      processing and vehicle departure; the status shown in the page reflects its
+                      current progress.
                     </p>
                     <Link
                       to="/supplier/dispatch"
@@ -1502,12 +1567,13 @@ function SupplierDashboard() {
                                   }
                                 }}
                                 onChange={(e) => {
-                                  const sanitized = sanitizeNumericQuantity(e.target.value, line.uom || "");
+                                  const sanitized = sanitizeNumericQuantity(
+                                    e.target.value,
+                                    line.uom || "",
+                                  );
                                   setLines((prev) =>
                                     prev.map((item, i) =>
-                                      i === idx
-                                        ? { ...item, shipped_quantity: sanitized }
-                                        : item,
+                                      i === idx ? { ...item, shipped_quantity: sanitized } : item,
                                     ),
                                   );
                                 }}

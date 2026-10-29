@@ -9,7 +9,7 @@ from sqlalchemy import select, text
 
 from app.database.session import AsyncSessionFactory
 from app.main import create_app
-from app.modules.procurement.infrastructure.persistence.models import MaterialStockModel
+from app.common.persistence.models import MaterialModel, MaterialStockModel
 from app.modules.receiving.infrastructure.persistence.models import (
     GrnBatchModel,
     GrnBatchQrModel,
@@ -106,7 +106,7 @@ async def test_qr_driven_putaway_flow_complete_and_partial(client: AsyncClient, 
     warehouse_code_val = f"TEST_QR_STR_{uid_sfx}"
     zone_code_val = f"TEST_QR_ZON_{uid_sfx}"
     bin_code_val = f"TEST_QR_BIN_{uid_sfx}"
-    qr_code_str = f"QR-MAT-{mat_code}"
+    qr_code_str = f"QR-BATCH-{batch_num}"
 
     cleanup_qr_test.update({
         "uid_sfx": uid_sfx,
@@ -179,10 +179,20 @@ async def test_qr_driven_putaway_flow_complete_and_partial(client: AsyncClient, 
             uom="KG",
             ordered_quantity=Decimal("100.0"),
             received_quantity=Decimal("100.0"),
+            accepted_quantity=Decimal("100.0"),
             good_quantity=Decimal("100.0"),
             damaged_quantity=Decimal("0.0"),
         )
         session.add(line)
+        await session.flush()
+
+        session.add(MaterialModel(
+            material_code=mat_code,
+            material_name="High-Grade Structural Steel",
+            category="Raw Materials",
+            base_uom="KG",
+            status="Active",
+        ))
         await session.flush()
 
         batch = GrnBatchModel(
@@ -207,7 +217,6 @@ async def test_qr_driven_putaway_flow_complete_and_partial(client: AsyncClient, 
                 "quantity": 100.0,
                 "uom": "KG",
             }),
-            generated_by="grn_operator",
         )
         session.add(batch_qr)
 
@@ -216,6 +225,7 @@ async def test_qr_driven_putaway_flow_complete_and_partial(client: AsyncClient, 
             task_number=f"PUT-{uuid.uuid4().hex[:8].upper()}",
             grn_id=grn.id,
             grn_number=grn_num,
+            batch_number=batch_num,
             item_code=mat_code,
             material_name="High-Grade Structural Steel",
             quantity=Decimal("100.0"),
@@ -236,6 +246,8 @@ async def test_qr_driven_putaway_flow_complete_and_partial(client: AsyncClient, 
         "Authorization": "Bearer mock-jwt-token",
         "X-User-Roles": "WAREHOUSE_OPERATOR,WAREHOUSE_MANAGER",
         "X-User-Permissions": "storage:read,storage:write,putaway:execute",
+        "X-Store-Id": store_id_val,
+        "X-Store-Code": store_code_val,
     }
 
     # Step 1: Resolve GRN QR
@@ -322,7 +334,7 @@ async def test_qr_driven_putaway_flow_complete_and_partial(client: AsyncClient, 
         assert bin_db.occupied_quantity == Decimal("100.0")
 
         pt_db = (await session.execute(select(PutawayTaskModel).where(PutawayTaskModel.item_code == mat_code))).scalar_one()
-        assert pt_db.status == "PUTAWAY_COMPLETED"
+        assert pt_db.status == "COMPLETED"
         assert pt_db.quantity == Decimal("0.0")
 
         movs = (await session.execute(select(PutawayMovementModel).where(PutawayMovementModel.material_code == mat_code))).scalars().all()

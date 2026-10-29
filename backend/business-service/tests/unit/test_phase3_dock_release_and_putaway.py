@@ -30,9 +30,10 @@ from app.modules.gate.infrastructure.persistence.models import (
     GateEntryModel,
     ReceivingLineModel,
 )
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
     AsnLineModel,
     AsnModel,
+    MaterialModel,
     MaterialStockModel,
     NotificationModel,
     PurchaseOrderItemModel,
@@ -470,6 +471,13 @@ async def test_phase3_putaway_hierarchy_and_inventory_accounting():
                 updated_at=now_naive,
             )
             session.add(stock)
+            session.add(MaterialModel(
+                material_code=item_code,
+                material_name="400mm Insulated Cable",
+                category="Electrical",
+                base_uom="MTR",
+                status="Active",
+            ))
             await session.flush()
 
             # 3. Seed GRN & Handling Unit (Material QR created by GRN + Quality)
@@ -499,6 +507,7 @@ async def test_phase3_putaway_hierarchy_and_inventory_accounting():
                 material_name="400mm Insulated Cable",
                 uom="MTR",
                 received_quantity=Decimal("200.0"),
+                accepted_quantity=Decimal("200.0"),
             )
             session.add(grn_line)
             await session.flush()
@@ -587,7 +596,7 @@ async def test_phase3_putaway_hierarchy_and_inventory_accounting():
             headers=headers_keeper,
         )
         assert resp_excess.status_code == 422
-        assert "exceeds remaining task quantity" in resp_excess.json()["detail"]
+        assert "exceeds GRN accepted quantity remaining" in resp_excess.json()["detail"]
 
         # Positive Test: Confirm Physical Putaway with Material QR & Bin QR
         resp_ok = await client.post(
@@ -599,16 +608,16 @@ async def test_phase3_putaway_hierarchy_and_inventory_accounting():
             },
             headers=headers_keeper,
         )
-        assert resp_ok.status_code == 200
+        assert resp_ok.status_code == 200, resp_ok.text
         putaway_data = resp_ok.json()
-        assert putaway_data["status"] == "PUTAWAY_COMPLETED"
+        assert putaway_data["status"] == "COMPLETED"
         assert putaway_data["destination_bin"] == bin_code
         assert putaway_data["inventory_available_after"] == 600.0
 
         async with session_scope() as session:
             # Verify DB state
             t = (await session.execute(select(PutawayTaskModel).where(PutawayTaskModel.id == uuid.UUID(task_id_str)))).scalar_one()
-            assert t.status == "PUTAWAY_COMPLETED"
+            assert t.status == "COMPLETED"
 
             h = (await session.execute(select(HandlingUnitModel).where(HandlingUnitModel.barcode_value == hu_barcode))).scalar_one()
             assert h.status == "STORED"

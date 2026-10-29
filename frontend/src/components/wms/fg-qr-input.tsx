@@ -9,10 +9,14 @@ export function FgQrInput({
   value,
   onChange,
   disabled = false,
+  label = "Finished goods / package QR",
+  inputId = "fg-dispatch-qr",
 }: {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  label?: string;
+  inputId?: string;
 }) {
   const file = useRef<HTMLInputElement>(null);
   const video = useRef<HTMLVideoElement>(null);
@@ -90,12 +94,12 @@ export function FgQrInput({
   };
   return (
     <div className="space-y-2">
-      <label htmlFor="fg-dispatch-qr" className="text-xs font-semibold">
-        Finished goods / package QR
+      <label htmlFor={inputId} className="text-xs font-semibold">
+        {label}
       </label>
       <div className="flex flex-wrap gap-2">
         <Input
-          id="fg-dispatch-qr"
+          id={inputId}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           disabled={disabled}

@@ -47,7 +47,6 @@ def test_material_qr_model_initialization():
         item_code="MAT-ALU-02",
         qr_code="QR-MAT-MAT-ALU-02",
         qr_payload="Material info payload",
-        generated_by="Tester",
     )
 
     assert qr.item_code == "MAT-ALU-02"
