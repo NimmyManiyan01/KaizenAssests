@@ -65,6 +65,7 @@ import {
   QrNotFoundModal,
   type QrScanResultData,
 } from "@/components/wms/qr-scan-result-modal";
+import { AdminTablePagination } from "@/components/admin/admin-table-pagination";
 
 export const Route = createFileRoute("/grn")({
   validateSearch: (
@@ -829,6 +830,7 @@ function GrnPageWorkflow() {
   const [receiptPage, setReceiptPage] = useState(1);
   const [activityLimit, setActivityLimit] = useState(5);
   const [recordsStatusFilter, setRecordsStatusFilter] = useState<string>("ALL");
+  const [recordsPage, setRecordsPage] = useState(1);
   const [showAssignDockModal, setShowAssignDockModal] = useState(false);
   const [assigningDockId, setAssigningDockId] = useState("");
   const [assigningVehicle, setAssigningVehicle] = useState("");
@@ -878,6 +880,13 @@ function GrnPageWorkflow() {
 
   const dashboardReceipts = grnRecords.filter((record) =>
     isRecordMatchingSearch(record, searchTerm) && isRecordMatchingStatus(record.status, dashboardStatusFilter));
+  const filteredGrnRecords = grnRecords.filter((record) =>
+    isRecordMatchingSearch(record, searchTerm) && isRecordMatchingStatus(record.status, recordsStatusFilter));
+  const recordsPageCount = Math.max(1, Math.ceil(filteredGrnRecords.length / 10));
+  const currentRecordsPage = Math.min(recordsPage, recordsPageCount);
+  const visibleGrnRecords = filteredGrnRecords.slice((currentRecordsPage - 1) * 10, currentRecordsPage * 10);
+  useEffect(() => { setRecordsPage(1); }, [searchTerm, recordsStatusFilter]);
+  useEffect(() => { setRecordsPage((page) => Math.min(page, recordsPageCount)); }, [recordsPageCount]);
   const receiptPageSize = 5;
   const receiptPageCount = Math.max(1, Math.ceil(dashboardReceipts.length / receiptPageSize));
   const currentReceiptPage = Math.min(receiptPage, receiptPageCount);
@@ -3302,8 +3311,8 @@ function GrnPageWorkflow() {
             <div class="footer-signatures">
               <div class="sign-box">
                 <div class="sign-line"></div>
-                <div><b>Received By (Store)</b></div>
-                <div style="color: #64748b; font-size: 10px;">${loggedInUserName || "Store Operator"}</div>
+                <div><b>Received By (Warehouse)</b></div>
+                <div style="color: #64748b; font-size: 10px;">${loggedInUserName || "Warehouse Operator"}</div>
               </div>
               <div class="sign-box">
                 <div class="sign-line"></div>
@@ -4125,11 +4134,7 @@ function GrnPageWorkflow() {
                 <div className="grid h-64 place-items-center">
                   <Loader2 className="size-8 animate-spin text-primary" />
                 </div>
-              ) : grnRecords.filter(
-                  (r) =>
-                    isRecordMatchingSearch(r, searchTerm) &&
-                    isRecordMatchingStatus(r.status, recordsStatusFilter),
-                ).length === 0 ? (
+              ) : filteredGrnRecords.length === 0 ? (
                 <div className="grid h-64 place-items-center rounded-xl border border-dashed p-6 text-center text-muted-foreground">
                   <div>
                     <FileCheck2 className="mx-auto mb-3 size-10 text-muted-foreground/60" />
@@ -4151,13 +4156,7 @@ function GrnPageWorkflow() {
                 </div>
               ) : (
                 <div className="grid gap-4">
-                  {grnRecords
-                    .filter(
-                      (r) =>
-                        isRecordMatchingSearch(r, searchTerm) &&
-                        isRecordMatchingStatus(r.status, recordsStatusFilter),
-                    )
-                    .map((r, idx) => {
+                  {visibleGrnRecords.map((r, idx) => {
                       const grnKey = r.id || r.grn_id || r.grn_number || `grn_rec_${idx}`;
                       const grnNumber = r.grn_number || "—";
                       const supplierName = r.supplier_name || r.supplier_company_name || "—";
@@ -4245,8 +4244,16 @@ function GrnPageWorkflow() {
                           </div>
                         </Card>
                       );
-                    })}
+                  })}
                 </div>
+              )}
+              {!loadingRecords && filteredGrnRecords.length > 0 && (
+                <AdminTablePagination
+                  page={currentRecordsPage}
+                  total={filteredGrnRecords.length}
+                  itemLabel="GRN records"
+                  onPageChange={setRecordsPage}
+                />
               )}
             </div>
           </SectionCard>

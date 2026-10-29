@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   PackageCheck,
   ClipboardList,
+  History,
   QrCode,
   ListOrdered,
   Plus,
@@ -25,6 +26,7 @@ import {
   Layers,
   Tag,
   Download,
+  Upload,
   Printer,
   Truck,
   ArrowRight,
@@ -104,7 +106,7 @@ function SimpleWarehouseModule() {
     requests: {
       eyebrow: "Warehouse Requests",
       title: "Material Requests",
-      description: "Review and fulfill material requests from production and stores.",
+      description: "Review and fulfill material requests from production and warehouses.",
       icon: ClipboardList,
     },
     picking: {
@@ -128,13 +130,12 @@ function SimpleWarehouseModule() {
   const [inventorySummary, setInventorySummary] = useState<any[]>([]);
   const [materialRequests, setMaterialRequests] = useState<any[]>([]);
   const [pickupTasks, setPickupTasks] = useState<any[]>([]);
-  const [stores, setStores] = useState<any[]>([]);
+  const [warehouses, setWarehouses] = useState<any[]>([]);
   const [zones, setZones] = useState<any[]>([]);
   const [bins, setBins] = useState<any[]>([]);
   const [docks, setDocks] = useState<any[]>([]);
   const [dockRequests, setDockRequests] = useState<any[]>([]);
   const [dockChoices, setDockChoices] = useState<Record<string, string>>({});
-  const [dockStoreChoices, setDockStoreChoices] = useState<Record<string, string>>({});
 
   const [requisitionRefreshKey, setRequisitionRefreshKey] = useState(0);
   const [putawaySearch, setPutawaySearch] = useState("");
@@ -152,6 +153,7 @@ function SimpleWarehouseModule() {
 
   // Selected Detail Modals
   const [selectedInventory, setSelectedInventory] = useState<any>(null);
+  const [selectedInventoryBatchCode, setSelectedInventoryBatchCode] = useState<string | null>(null);
   const [selectedPutawayGroup, setSelectedPutawayGroup] = useState<any>(null);
   const [putawayView, setPutawayView] = useState<PutawayView>("details");
   const openPutawayGroup = (group: any, view: PutawayView = "details") => { setPutawayView(view); setSelectedPutawayGroup(group); };
@@ -170,6 +172,7 @@ function SimpleWarehouseModule() {
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState("");
   const [pickupToConfirm, setPickupToConfirm] = useState<any>(null);
+  const [showPickupHistory, setShowPickupHistory] = useState(false);
   const [pickupFifoAlert, setPickupFifoAlert] = useState("");
   const [pickupConfirmation, setPickupConfirmation] = useState({
     material_scan: "",
@@ -177,8 +180,10 @@ function SimpleWarehouseModule() {
     quantity: "",
   });
   const [pickupQrImages, setPickupQrImages] = useState({ material: "", rack: "" });
+  const pickupMaterialFileInput = useRef<HTMLInputElement>(null);
+  const pickupRackFileInput = useRef<HTMLInputElement>(null);
   const [selectedLocationId, setSelectedLocationId] = useState("");
-  const [assignStoreId, setAssignStoreId] = useState("");
+  const [assignWarehouseRefId, setAssignWarehouseRefId] = useState("");
   const [assignZoneId, setAssignZoneId] = useState("");
   const [assignQuantity, setAssignQuantity] = useState("");
 
@@ -273,14 +278,14 @@ function SimpleWarehouseModule() {
       const [
         putawaysRes,
         inventoryRes,
-        storesRes,
+        warehouseConfigurationRes,
         materialCatalogRes,
         assemblyRequestsRes,
         assemblyPickingTasksRes,
       ] = await Promise.all([
         api.getPutawayTasks(),
         api.getWarehouseInventorySummary(),
-        api.getStores(),
+        api.getWarehouses(),
         api.getMaterialComponents(),
         api.getAssemblyMaterialRequests(),
         api.getAssemblyPickingTasks(),
@@ -411,7 +416,9 @@ function SimpleWarehouseModule() {
                 batch_number: movement.batch_lot,
                 quantity: movement.quantity,
                 uom: movement.uom || summary.uom,
-              }));
+                received_at: movement.performed_at,
+              }))
+              .sort((a: any, b: any) => String(a.received_at || "").localeCompare(String(b.received_at || "")));
             return {
               ...row,
               available: summary.available_stock ?? row.available,
@@ -459,7 +466,7 @@ function SimpleWarehouseModule() {
         })),
       );
       setPickupTasks(assemblyPickingTasks);
-      setStores(Array.isArray(storesRes) ? storesRes : []);
+      setWarehouses(Array.isArray(warehouseConfigurationRes) ? warehouseConfigurationRes : []);
 
       const locationZones = await api.getLocationZones();
       const zoneRows = Array.isArray(locationZones) ? locationZones : [];
@@ -495,7 +502,7 @@ function SimpleWarehouseModule() {
       id: string;
       label: string;
       bin_code: string;
-      store_id: string;
+      warehouse_ref_id: string;
       zone_id: string;
       rack: string;
       rack_capacity?: any;
@@ -509,7 +516,7 @@ function SimpleWarehouseModule() {
           id: b.id,
           label: `${b.zone_code || b.zone_name || "—"} / ${b.rack || "—"} / ${b.bin_code}`,
           bin_code: b.bin_code,
-          store_id: b.store_id,
+          warehouse_ref_id: b.warehouse_ref_id,
           zone_id: b.zone_id,
           rack: b.rack,
           rack_capacity: b.rack_capacity,
@@ -527,7 +534,7 @@ function SimpleWarehouseModule() {
     if (!assignPutawayTask) return;
     const quantity = Number(assignQuantity);
     if (
-      !assignStoreId ||
+      !assignWarehouseRefId ||
       !assignZoneId ||
       !selectedLocationId ||
       !Number.isFinite(quantity) ||
@@ -545,7 +552,7 @@ function SimpleWarehouseModule() {
       await api.assignPutawayLocation(
         assignPutawayTask.id,
         selectedBinObj?.id,
-        selectedBinObj?.store_id,
+        selectedBinObj?.warehouse_ref_id,
         selectedBinObj?.zone_id,
         selectedBinObj?.id,
         quantity,
@@ -566,7 +573,7 @@ function SimpleWarehouseModule() {
     if (!canAssignPutaway(task)) return;
     setSelectedPutawayGroup(null);
     setAssignPutawayTask(task);
-    setAssignStoreId(task.destination_store_id || task.assigned_store_id || "");
+    setAssignWarehouseRefId(task.destination_warehouse_ref_id || task.assigned_warehouse_ref_id || warehouses[0]?.id || "");
     setAssignZoneId(task.destination_zone_id || "");
     setSelectedLocationId(task.destination_bin_id || "");
     setAssignQuantity(String(unassignedPutawayQuantity(task)));
@@ -732,7 +739,7 @@ function SimpleWarehouseModule() {
       return;
     void Promise.allSettled([
       api.resolveGrnQr(putawayScan.materialQr.trim()),
-      api.resolveBinQr((putawayScan.binQr || "").trim(), scanPutawayTask.destination_store_id),
+      api.resolveBinQr((putawayScan.binQr || "").trim(), scanPutawayTask.destination_warehouse_ref_id),
     ])
       .then(([materialResult, rackResult]) => {
         if (materialResult.status === "rejected") {
@@ -856,7 +863,7 @@ function SimpleWarehouseModule() {
       }
       const rack = await api.resolveBinQr(
         (putawayScan.binQr || "").trim(),
-        scanPutawayTask.destination_store_id,
+        scanPutawayTask.destination_warehouse_ref_id,
       );
       if (
         scanPutawayTask.destination_bin_id &&
@@ -1030,14 +1037,14 @@ function SimpleWarehouseModule() {
           await api.updateZone(String(editingZone.id), { zone_name: zoneName });
           toast.success(`Zone ${generatedZoneCode} updated.`);
         } else {
-          if (!stores.length && (!firstWarehouse.name.trim() || !firstWarehouse.location.trim())) {
+          if (!warehouses.length && (!firstWarehouse.name.trim() || !firstWarehouse.location.trim())) {
             toast.error("Enter the warehouse name and location / plant for the first zone.");
             return;
           }
           const createdZone = await api.createLocationZone({
             zone_name: zoneName,
             zone_code: generatedZoneCode,
-            ...(!stores.length ? {
+            ...(!warehouses.length ? {
               warehouse_name: firstWarehouse.name.trim(), warehouse_id: firstWarehouse.location.trim(),
             } : {}),
           });
@@ -1117,8 +1124,7 @@ function SimpleWarehouseModule() {
         (item.batch_number || item.batch || "").toLowerCase().includes(invSearch.toLowerCase());
 
       const matchesWarehouse =
-        invWarehouseFilter === "ALL" ||
-        (item.warehouse_id || item.store_name || "").includes(invWarehouseFilter);
+        true;
 
       const matchesStatus = invStatusFilter === "ALL" || item.status === invStatusFilter;
 
@@ -1263,14 +1269,14 @@ function SimpleWarehouseModule() {
   );
   const handleAllocateDockFromLocations = async (requestId: string) => {
     const dockId = dockChoices[requestId];
-    const storeId = dockStoreChoices[requestId];
-    if (!dockId || !storeId) {
+    const warehouseRefId = warehouses[0]?.id;
+    if (!dockId) {
       toast.error("Select an available dock and warehouse for this gate entry.");
       return;
     }
     setIsSubmitting(true);
     try {
-      await api.allocateDock(requestId, dockId, { assignedStoreId: storeId });
+      await api.allocateDock(requestId, dockId, { assignedWarehouseRefId: warehouseRefId });
       toast.success("Dock allocated. Gate Entry has been notified.");
       await fetchData(true);
     } catch (error: any) {
@@ -1298,6 +1304,72 @@ function SimpleWarehouseModule() {
     }
   };
 
+  const selectedInventoryBatches = useMemo(() => {
+    const batches = [...(selectedInventory?.batch_details || [])];
+    const timestamp = (batch: any) => {
+      const parsed = Date.parse(batch.received_at || batch.created_at || batch.mfg_date || "");
+      if (!Number.isNaN(parsed)) return parsed;
+      const compactDate = String(batch.batch_number || "").match(/20\d{6}/)?.[0];
+      if (compactDate) {
+        const date = Date.parse(`${compactDate.slice(0, 4)}-${compactDate.slice(4, 6)}-${compactDate.slice(6, 8)}`);
+        if (!Number.isNaN(date)) return date;
+      }
+      return Number.MAX_SAFE_INTEGER;
+    };
+    return batches.sort((a, b) => timestamp(a) - timestamp(b) || String(a.batch_number || "").localeCompare(String(b.batch_number || "")));
+  }, [selectedInventory]);
+  const visibleInventoryBatches = selectedInventoryBatchCode
+    ? selectedInventoryBatches.filter((batch: any) => batch.batch_number === selectedInventoryBatchCode)
+    : selectedInventoryBatches;
+  const openInventoryBatchDetails = async (item: any) => {
+    setSelectedInventoryBatchCode(null);
+    setSelectedInventory(item);
+    try {
+      const detail: any = await api.getMaterialInventoryDetail(String(item.material_code || ""));
+      const putawayMovements = (Array.isArray(detail?.movements) ? detail.movements : []).filter(
+        (movement: any) => movement.movement_type === "PUTAWAY" && movement.batch_lot,
+      );
+      const movementBatches = putawayMovements.map((movement: any) => ({
+        batch_number: movement.batch_lot,
+        quantity: movement.quantity,
+        uom: movement.uom || detail?.summary?.uom,
+        location: movement.to_location || movement.location_code,
+        received_at: movement.performed_at,
+      }));
+      setSelectedInventory((current: any) => current ? {
+        ...current,
+        batch_details: movementBatches.length ? movementBatches : detail?.batches || current.batch_details,
+        bin_code: movementBatches[0]?.location || current.bin_code,
+        location: movementBatches[0]?.location || current.location,
+        inventory_history: detail?.inventory_history,
+        total_quantity: detail?.summary?.total_stock ?? current.total_quantity,
+        available: detail?.summary?.available_stock ?? current.available,
+        uom: detail?.summary?.uom || current.uom,
+      } : current);
+    } catch {
+      // Keep the row details available if the per-material request fails.
+    }
+  };
+  const oldestAvailableBatch = selectedInventoryBatches.find((batch: any) =>
+    Number(batch.quantity ?? batch.available_quantity ?? 0) > 0,
+  );
+  const inventoryBatchQrValue = (batch: any) =>
+    batch.qr_payload || batch.qr_code || batch.material_qr ||
+    (batch.batch_number ? `QR-BATCH-${batch.batch_number}` : selectedInventory?.material_code || "");
+  const previewInventoryBatchQr = async (batch: any) => {
+    const value = inventoryBatchQrValue(batch);
+    if (!value) {
+      toast.error("No material or batch code is available for this QR.");
+      return;
+    }
+    try {
+      const image = await QRCode.toDataURL(value, { width: 320, margin: 2 });
+      setQrPreview({ title: `Material QR ${batch.batch_number || selectedInventory?.material_code || ""}`.trim(), image });
+    } catch {
+      toast.error("Unable to generate the material QR.");
+    }
+  };
+
   return (
     <AppShell activeItem="/inventory">
       <div className="warehouse-module-content space-y-5" data-warehouse-tab={activeTab}>
@@ -1318,6 +1390,20 @@ function SimpleWarehouseModule() {
             </p>
           </div>
           <div className="warehouse-hero-actions flex items-center gap-2">
+            {activeTab === "picking" && (
+              <Button
+                data-pickup-history="true"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowPickupHistory(true)}
+                className="gap-2 border-primary bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground"
+              >
+                <History className="size-4" /> History
+                <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] text-primary-foreground">
+                  {pickupTasks.filter((task) => ["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())).length}
+                </span>
+              </Button>
+            )}
             <Button data-refresh-control="true"
               variant="outline"
               size="icon"
@@ -1742,21 +1828,7 @@ function SimpleWarehouseModule() {
                     className="pl-9 text-xs"
                   />
                 </div>
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <Select value={invWarehouseFilter} onValueChange={setInvWarehouseFilter}>
-                    <SelectTrigger className="w-40 text-xs">
-                      <SelectValue placeholder="Warehouse" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ALL">All Warehouses</SelectItem>
-                      {stores.map((s) => (
-                        <SelectItem key={s.id} value={s.store_code || s.store_name}>
-                          {s.store_code || s.store_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+
               </div>
 
               <div className="overflow-x-auto">
@@ -1766,7 +1838,7 @@ function SimpleWarehouseModule() {
                     <tr className="border-b border-sky-200 bg-sky-100/70 text-sky-950 uppercase dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-100">
                       <th className="py-2.5 px-3">Material Code</th>
                       <th className="py-2.5 px-3">Material Name</th>
-                      <th className="py-2.5 px-3">Batch</th>
+                      <th className="py-2.5 px-3">Batches</th>
                       <th className="py-2.5 px-3">Available<InformationTooltip help="inventory" /></th>
                       <th className="py-2.5 px-3">Location</th>
                       <th className="sticky right-0 bg-muted py-2.5 px-3 text-center">Actions</th>
@@ -1788,11 +1860,20 @@ function SimpleWarehouseModule() {
                           <td className="py-3 px-3 font-medium text-slate-900 dark:text-slate-100">
                             {item.material_name || item.material}
                           </td>
-                          <td className="py-3 px-3 font-mono text-slate-500">
-                            {item.batch_number ||
-                              item.batch ||
-                              item.batch_details?.map((b: any) => b.batch_number).join(", ") ||
-                              "-"}
+                          <td className="py-3 px-3 text-slate-600">
+                            {(() => {
+                              const batchCodes = Array.isArray(item.batch_details)
+                                ? item.batch_details.map((batch: any) => String(batch.batch_number || "")).filter(Boolean)
+                                : [
+                                ...(item.batch_number ? String(item.batch_number).split(",") : []),
+                                ...(item.batch ? String(item.batch).split(",") : []),
+                              ].map((batch) => batch.trim()).filter((batch, index, all) => batch && all.indexOf(batch) === index);
+                              return batchCodes.length ? (
+                                <button type="button" onClick={() => void openInventoryBatchDetails(item)} className="inline-flex min-w-20 items-center justify-center rounded-full border bg-muted/40 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                                  Batch {batchCodes.length}
+                                </button>
+                              ) : "—";
+                            })()}
                           </td>
                           <td className={`py-3 px-3 font-semibold tabular-nums ${Number(getInventoryDisplayQuantity(item)) > 0 ? "text-emerald-700" : "text-amber-700"}`}>
                             {getInventoryDisplayQuantity(item)} {item.uom || ""}
@@ -1807,6 +1888,7 @@ function SimpleWarehouseModule() {
                               size="sm"
                               variant="outline"
                               onClick={() => {
+                                setSelectedInventoryBatchCode(null);
                                 setSelectedInventory(item);
                                 void api
                                   .getMaterialInventoryDetail(String(item.material_code || ""))
@@ -1825,6 +1907,7 @@ function SimpleWarehouseModule() {
                                         batch_number: movement.batch_lot,
                                         quantity: movement.quantity,
                                         uom: movement.uom || detail?.summary?.uom,
+                                        location: movement.to_location || movement.location_code,
                                       }));
                                     const refreshedRow = {
                                       batch_details: movementBatches,
@@ -1862,7 +1945,7 @@ function SimpleWarehouseModule() {
                                               : detail?.batches || [],
                                             detail_movements: detail?.movements,
                                             warehouse:
-                                              firstLocation?.store_name || detail?.warehouse,
+                                              firstLocation?.warehouse_name || detail?.warehouse,
                                             zone_code: firstLocation?.zone_code,
                                             bin_code:
                                               firstLocation?.bin_code ||
@@ -2011,11 +2094,20 @@ function SimpleWarehouseModule() {
                 </div>
               ))}
             </div>
-            <AssemblyRequisitionsPanel refreshKey={requisitionRefreshKey} showRefresh={false} onUpdated={() => fetchData(true)} />
+            <AssemblyRequisitionsPanel
+              refreshKey={requisitionRefreshKey}
+              showRefresh={false}
+              pickupTasks={pickupTasks}
+              onConfirmPick={(task) => {
+                setPickupFifoAlert("");
+                setPickupToConfirm(task);
+              }}
+              onUpdated={() => fetchData(true)}
+            />
             <Card className="warehouse-picking-queue overflow-x-auto border-violet-200 bg-gradient-to-br from-violet-50/80 via-white to-indigo-50/50 p-5 shadow-sm dark:border-violet-900/60 dark:bg-violet-950/20">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 uppercase tracking-wider">
-                Warehouse picking queue
-              <InformationTooltip help="pickRemaining" /></h3>
+              <h3 className="mb-4 text-sm font-bold uppercase tracking-wider text-slate-900 dark:text-slate-100">
+                Warehouse picking queue <InformationTooltip help="pickRemaining" />
+              </h3>
               <table className="w-full min-w-[1040px] table-fixed text-left text-sm">
                 <colgroup><col className="w-[15%]" /><col className="w-[15%]" /><col className="w-[14%]" /><col className="w-[24%]" /><col className="w-[10%]" /><col className="w-[12%]" /><col className="w-[10%]" /></colgroup>
                 <thead>
@@ -2091,6 +2183,37 @@ function SimpleWarehouseModule() {
                 </tbody>
               </table>
             </Card>
+            <Dialog open={showPickupHistory} onOpenChange={setShowPickupHistory}>
+              <DialogContent className="w-[calc(100vw-2rem)] max-h-[85dvh] max-w-5xl overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2"><History className="size-5 text-primary" /> Warehouse pick history</DialogTitle>
+                  <DialogDescription>Completed assembly material picks and their confirmation details.</DialogDescription>
+                </DialogHeader>
+                <div className="overflow-x-auto rounded-lg border">
+                  <table className="w-full min-w-[850px] text-left text-sm">
+                    <thead className="border-b bg-muted/50 text-xs uppercase text-muted-foreground">
+                      <tr><th className="px-3 py-3">Task No</th><th className="px-3">Assembly Request</th><th className="px-3">Material</th><th className="px-3">Pick Location</th><th className="px-3">Picked Quantity</th><th className="px-3">Confirmed By</th><th className="px-3">Confirmed At</th></tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {pickupTasks.filter((task) => ["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())).map((task) => (
+                        <tr key={task.id}>
+                          <td className="px-3 py-3 font-semibold text-primary">{task.task_number || task.id}</td>
+                          <td className="px-3">{task.assembly_order_number || task.assembly_order || "—"}</td>
+                          <td className="px-3"><span className="font-medium">{task.material_name || task.material_code || "—"}</span>{task.material_name && task.material_code && <span className="block text-xs text-muted-foreground">{task.material_code}</span>}</td>
+                          <td className="px-3 font-mono text-xs">{task.pick_location || "—"}</td>
+                          <td className="px-3 font-semibold">{task.picked_quantity ?? task.quantity ?? "—"} {task.uom || ""}</td>
+                          <td className="px-3">{task.confirmation?.confirmed_by || "—"}</td>
+                          <td className="px-3 text-xs text-muted-foreground">{task.confirmation?.confirmed_at ? new Date(task.confirmation.confirmed_at).toLocaleString() : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {!pickupTasks.some((task) => ["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())) && (
+                    <p className="p-8 text-center text-sm text-muted-foreground">No completed picks have been recorded yet.</p>
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
           </TabsContent>
 
           {/* ========================================================================= */}
@@ -2177,28 +2300,10 @@ function SimpleWarehouseModule() {
                               </option>
                             ))}
                         </select>
-                        <select
-                          className="h-9 rounded-md border bg-background px-2 text-xs"
-                          value={dockStoreChoices[request.id] || ""}
-                          onChange={(event) =>
-                            setDockStoreChoices((current) => ({
-                              ...current,
-                              [request.id]: event.target.value,
-                            }))
-                          }
-                        >
-                          <option value="">Select warehouse</option>
-                          {stores
-                            .filter((store) => (store.status || "").toUpperCase() === "ACTIVE")
-                            .map((store) => (
-                              <option key={store.id} value={store.id}>
-                                {store.store_name} · {store.store_code}
-                              </option>
-                            ))}
-                        </select>
+
                         <Button
                           size="sm"
-                          disabled={isSubmitting || !stores.length}
+                          disabled={isSubmitting || !warehouses.length}
                           onClick={() => void handleAllocateDockFromLocations(request.id)}
                         >
                           Allocate dock
@@ -2308,7 +2413,7 @@ function SimpleWarehouseModule() {
           }
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-xl">
           <DialogHeader>
             <DialogTitle>
               {pickupToConfirm?.status === "COMPLETED"
@@ -2323,10 +2428,11 @@ function SimpleWarehouseModule() {
           </DialogHeader>
           {pickupToConfirm && (
             <form onSubmit={handleCompletePickup} className="space-y-4">
-              <p className="text-xs text-muted-foreground">
-                Task {pickupToConfirm.task_number || pickupToConfirm.id} ·{" "}
-                {pickupToConfirm.material_name || pickupToConfirm.material_code}
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-muted/30 px-3 py-2.5 text-xs">
+                <span className="font-semibold text-foreground">Task {pickupToConfirm.task_number || pickupToConfirm.id}</span>
+                <span className="text-muted-foreground">{pickupToConfirm.assembly_order_number || "Assembly request"}</span>
+                <span className="font-medium text-primary">{pickupToConfirm.material_name || pickupToConfirm.material_code}</span>
+              </div>
               {pickupFifoAlert && <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><p><strong>Older stock must be cleared first.</strong> {pickupFifoAlert}</p></div>}
               {pickupToConfirm.status === "COMPLETED" && (
                 <div className="space-y-1 rounded-md border bg-muted/30 p-3 text-xs">
@@ -2367,7 +2473,7 @@ function SimpleWarehouseModule() {
               )}
               {pickupToConfirm.status !== "COMPLETED" && (
                 <>
-                  <div className="space-y-2">
+                  <div className="space-y-2.5 rounded-xl border border-border/80 p-3">
                     <span className="inline-flex items-center"><label className="text-xs font-semibold" htmlFor="pickup-material-scan">
                       Material code / QR scan
                     </label><InformationTooltip help="qr" /></span>
@@ -2383,31 +2489,31 @@ function SimpleWarehouseModule() {
                         }));
                       }}
                     />
-                    <div className="flex flex-wrap items-center gap-3 text-xs">
-                      <label className="cursor-pointer font-semibold text-primary underline">
-                        Upload QR
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/jpg"
-                          className="hidden"
-                          onChange={(event) =>
-                            event.target.files?.[0] &&
-                            decodePickupQrUpload(event.target.files[0], "material")
-                          }
-                        />
-                      </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button type="button" variant="outline" size="sm" className="w-full gap-2" onClick={() => pickupMaterialFileInput.current?.click()}>
+                        <Upload className="size-4" /> Upload QR
+                      </Button>
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
-                        className="h-6 px-1.5 text-xs"
+                        className="w-full gap-2"
+                        disabled={!pickupMaterialQrValue}
                         onClick={() => void downloadQrValue(pickupMaterialQrValue, "Material QR")}
                       >
-                        Download QR
+                        <Download className="size-4" /> Download QR
                       </Button>
                     </div>
+                    <input
+                      ref={pickupMaterialFileInput}
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg"
+                      className="sr-only"
+                      aria-label="Upload material QR image"
+                      onChange={(event) => event.target.files?.[0] && decodePickupQrUpload(event.target.files[0], "material")}
+                    />
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-2.5 rounded-xl border border-border/80 p-3">
                     <span className="inline-flex items-center"><label className="text-xs font-semibold" htmlFor="pickup-zone-scan">
                       BIN / location code / QR scan
                     </label><InformationTooltip help="qr" /></span>
@@ -2422,29 +2528,29 @@ function SimpleWarehouseModule() {
                         }))
                       }
                     />
-                    <div className="flex flex-wrap items-center gap-3 text-xs">
-                      <label className="cursor-pointer font-semibold text-primary underline">
-                        Upload QR
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/jpg"
-                          className="hidden"
-                          onChange={(event) =>
-                            event.target.files?.[0] &&
-                            decodePickupQrUpload(event.target.files[0], "rack")
-                          }
-                        />
-                      </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button type="button" variant="outline" size="sm" className="w-full gap-2" onClick={() => pickupRackFileInput.current?.click()}>
+                        <Upload className="size-4" /> Upload QR
+                      </Button>
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
-                        className="h-6 px-1.5 text-xs"
+                        className="w-full gap-2"
+                        disabled={!pickupRackQrValue}
                         onClick={() => void downloadQrValue(pickupRackQrValue, "BIN QR")}
                       >
-                        Download QR
+                        <Download className="size-4" /> Download QR
                       </Button>
                     </div>
+                    <input
+                      ref={pickupRackFileInput}
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg"
+                      className="sr-only"
+                      aria-label="Upload bin or location QR image"
+                      onChange={(event) => event.target.files?.[0] && decodePickupQrUpload(event.target.files[0], "rack")}
+                    />
                   </div>
                   <div className="space-y-2">
                     <span className="inline-flex items-center"><label className="text-xs font-semibold" htmlFor="pickup-quantity">
@@ -2545,30 +2651,7 @@ function SimpleWarehouseModule() {
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="min-w-0 space-y-2">
-                <label htmlFor="assign-warehouse" className="font-medium">Warehouse</label>
-                <Select
-                  value={assignStoreId}
-                  onValueChange={(value) => {
-                    setAssignStoreId(value);
-                    setAssignZoneId("");
-                    setSelectedLocationId("");
-                  }}
-                >
-                  <SelectTrigger id="assign-warehouse" className="w-full text-sm">
-                    <SelectValue placeholder="Select warehouse" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {stores
-                      .filter((s) => !s.status || String(s.status).toUpperCase() === "ACTIVE")
-                      .map((s) => (
-                        <SelectItem key={s.id} value={s.id}>
-                          {s.store_code} - {s.store_name}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-                </div>
+
                 <div className="min-w-0 space-y-2">
                 <label htmlFor="assign-zone" className="font-medium">Zone</label>
                 <Select
@@ -2577,7 +2660,7 @@ function SimpleWarehouseModule() {
                     setAssignZoneId(value);
                     setSelectedLocationId("");
                   }}
-                  disabled={!assignStoreId}
+                  disabled={!assignWarehouseRefId}
                 >
                   <SelectTrigger id="assign-zone" className="w-full text-sm">
                     <SelectValue placeholder="Select zone" />
@@ -2586,7 +2669,7 @@ function SimpleWarehouseModule() {
                     {zones
                       .filter(
                         (z) =>
-                          z.store_id === assignStoreId &&
+                          z.warehouse_ref_id === assignWarehouseRefId &&
                           (!z.status || String(z.status).toUpperCase() === "ACTIVE"),
                       )
                       .map((z) => (
@@ -2611,7 +2694,7 @@ function SimpleWarehouseModule() {
                     {allFlattenedBins
                       .filter(
                         (loc) =>
-                          loc.store_id === assignStoreId &&
+                          loc.warehouse_ref_id === assignWarehouseRefId &&
                           loc.zone_id === assignZoneId &&
                           isAssignableRack(loc.status),
                       )
@@ -2658,7 +2741,7 @@ function SimpleWarehouseModule() {
               onClick={handleConfirmAssignPutaway}
               disabled={
                 isSubmitting ||
-                !assignStoreId ||
+                !assignWarehouseRefId ||
                 !assignZoneId ||
                 !selectedLocationId ||
                 !Number.isFinite(Number(assignQuantity)) ||
@@ -2907,8 +2990,8 @@ function SimpleWarehouseModule() {
       </Dialog>
 
       {/* 2. Inventory Detail Modal */}
-      <Dialog open={!!selectedInventory} onOpenChange={() => setSelectedInventory(null)}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl">
+      <Dialog open={!!selectedInventory} onOpenChange={() => { setSelectedInventory(null); setSelectedInventoryBatchCode(null); }}>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-4xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {selectedInventory?.material_name ||
@@ -2918,126 +3001,102 @@ function SimpleWarehouseModule() {
           </DialogHeader>
 
           {selectedInventory && (
-            <div className="space-y-4 text-xs py-2">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
+            <div className="space-y-4 py-2 text-xs">
+              <div className="grid gap-3 rounded-xl border bg-muted/20 p-4 sm:grid-cols-[minmax(150px,0.7fr)_minmax(0,1.3fr)]">
+                <div className="min-w-0">
                   <span className="text-slate-500">Material Code:</span>
                   <div className="font-mono font-semibold">
                     {selectedInventory.material_code || "-"}
                   </div>
                 </div>
-                <div>
+                <div className="min-w-0">
                   <span className="text-slate-500">Batch:</span>
-                  <div className="font-mono font-semibold">
-                    {selectedInventory.batch_details?.length
-                      ? selectedInventory.batch_details.map((b: any) => b.batch_number).join(", ")
-                      : selectedInventory.batch_number || selectedInventory.batch || "-"}
+                  <div className="mt-1 flex min-w-0 flex-wrap gap-1.5 font-mono font-semibold">
+                    {visibleInventoryBatches.length ? visibleInventoryBatches.map((batch: any, index: number) => (
+                      <span key={`${batch.batch_number || "batch"}-summary-${index}`} className="max-w-full break-all rounded-md bg-background px-2 py-1">
+                        Batch {selectedInventoryBatchCode ? selectedInventoryBatches.findIndex((entry: any) => entry.batch_number === selectedInventoryBatchCode) + 1 : index + 1}: {batch.batch_number || "-"}
+                      </span>
+                    )) : <span>{selectedInventory.batch_number || selectedInventory.batch || "-"}</span>}
                   </div>
                 </div>
               </div>
 
-              <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-1">
+              <div className="grid gap-3 lg:grid-cols-2">
+              <div className="min-w-0 space-y-1 rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
                 <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
                   Storage Location
                 </div>
-                <div className="font-semibold">
+                <div className="break-words font-semibold">
                   {selectedInventory.warehouse || selectedInventory.warehouse_id || "-"} →{" "}
                   {selectedInventory.zone_code || selectedInventory.zone_name || "-"} →{" "}
                   {selectedInventory.bin_code || selectedInventory.location || "-"}
                 </div>
               </div>
+              <div className="space-y-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
+                <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">Stock</div>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 font-medium">
+                  <span>Total Physical Stock:</span>
+                  <span className="text-right font-bold">{selectedInventory.total_quantity ?? selectedInventory.on_hand_quantity ?? "—"} {selectedInventory.uom || ""}</span>
+                  <span className="text-emerald-600">Available Stock:</span>
+                  <span className="text-right font-bold text-emerald-600">{selectedInventory.available ?? selectedInventory.available_quantity ?? "—"} {selectedInventory.uom || ""}</span>
+                </div>
+              </div>
+              </div>
 
               <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-2">
                 <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
-                  Batch-wise Stock
+                  {selectedInventoryBatchCode ? "Selected Batch Details" : "Batch-wise Stock"}
                 </div>
-                {(selectedInventory.batch_details || []).length > 0 ? (
-                  selectedInventory.batch_details.map((batch: any) => (
-                    <div
-                      key={batch.batch_number}
-                      className="flex justify-between border-b last:border-0 pb-1 last:pb-0"
-                    >
-                      <span className="font-mono">{batch.batch_number}</span>
-                      <span className="font-semibold">
-                        {batch.quantity} {batch.uom || selectedInventory.uom || ""}
-                      </span>
-                    </div>
-                  ))
+                {visibleInventoryBatches.length > 0 ? (
+                  visibleInventoryBatches.map((batch: any, index: number) => {
+                    const batchIndex = selectedInventoryBatches.findIndex((entry: any) => entry.batch_number === batch.batch_number);
+                    const isOldestAvailable = Boolean(oldestAvailableBatch) && batch === oldestAvailableBatch;
+                    const qrValue = inventoryBatchQrValue(batch);
+                    const qrTitle = `Material QR ${batch.batch_number || selectedInventory.material_code}`;
+                    return (
+                      <div
+                        key={`${batch.batch_number || "batch"}-${index}`}
+                        className={`grid gap-2 border-b pb-2 last:border-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center ${isOldestAvailable ? "rounded-lg border border-red-200 bg-red-50 p-2.5 text-red-900 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-100" : ""}`}
+                      >
+                        <div className="min-w-0 space-y-1">
+                          <div className="space-y-0.5">
+                            <span className="block font-semibold">Batch {batchIndex + 1}</span>
+                            <span className="block break-all font-mono">{batch.batch_number || selectedInventory.material_code}</span>
+                            <span className="block break-words text-[10px] text-muted-foreground">Location: {batch.location || batch.location_code || batch.to_location || selectedInventory.bin_code || selectedInventory.location || "-"}</span>
+                          </div>
+                          {isOldestAvailable ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-1 text-[10px] font-bold text-red-800 dark:bg-red-900/50 dark:text-red-100">
+                              <AlertTriangle className="size-3" /> Oldest stock · Use first (FIFO)
+                            </span>
+                          ) : null}
+                        </div>
+                        <span className="font-semibold sm:min-w-20 sm:text-right">{batch.quantity ?? batch.available_quantity ?? "—"} {batch.uom || selectedInventory.uom || ""}</span>
+                        <div className="flex flex-wrap gap-2 sm:justify-end">
+                          <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 px-2 text-[10px]" onClick={() => void previewInventoryBatchQr(batch)}><QrCode className="size-3.5" /> Material QR</Button>
+                          <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 px-2 text-[10px]" disabled={!qrValue} onClick={() => void downloadQrValue(qrValue, qrTitle)}><Download className="size-3.5" /> Download</Button>
+                        </div>
+                      </div>
+                    );
+                  })
                 ) : (
                   <div className="text-slate-500">No batch movement details available.</div>
                 )}
               </div>
 
-              <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-2">
-                <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
-                  Stock
-                </div>
-                <div className="flex justify-between font-medium">
-                  <span>Total Physical Stock:</span>
-                  <span className="font-bold">
-                    {selectedInventory.total_quantity ?? selectedInventory.on_hand_quantity ?? "—"}{" "}
-                    {selectedInventory.uom || ""}
-                  </span>
-                </div>
-                <div className="flex justify-between font-medium text-emerald-600">
-                  <span>Available Stock:</span>
-                  <span className="font-bold">
-                    {selectedInventory.available ?? selectedInventory.available_quantity ?? "—"}{" "}
-                    {selectedInventory.uom || ""}
-                  </span>
-                </div>
-              </div>
-
               {selectedInventory.inventory_history && (
-                <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-1">
+                <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
                   <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
                     Inventory History
                   </div>
-                  <div>
-                    Original GRN:{" "}
-                    <span className="font-semibold">
-                      {selectedInventory.inventory_history.original_grn || "-"}
-                    </span>
-                  </div>
-                  <div>
-                    Batch:{" "}
-                    <span className="font-mono font-semibold">
-                      {selectedInventory.inventory_history.batch_number || "-"}
-                    </span>
-                  </div>
-                  <div>
-                    Previous Rack Location:{" "}
-                    <span className="font-semibold">
-                      {selectedInventory.inventory_history.original_rack || "-"}
-                    </span>
-                  </div>
-                  <div>
-                    Received Quantity:{" "}
-                    <span className="font-semibold">
-                      {selectedInventory.inventory_history.received_quantity}{" "}
-                      {selectedInventory.uom || ""}
-                    </span>
-                  </div>
-                  <div>
-                    Issued to Assembly:{" "}
-                    <span className="font-semibold">
-                      {selectedInventory.inventory_history.issued_quantity}{" "}
-                      {selectedInventory.uom || ""}
-                    </span>
-                  </div>
-                  <div>
-                    Remaining Quantity:{" "}
-                    <span className="font-semibold">
-                      {selectedInventory.inventory_history.remaining_quantity}{" "}
-                      {selectedInventory.uom || ""}
-                    </span>
-                  </div>
-                  <div>
-                    Picking Task:{" "}
-                    <span className="font-mono font-semibold">
-                      {selectedInventory.inventory_history.picking_task || "-"}
-                    </span>
-                  </div>
+                  <dl className="mt-2 grid grid-cols-[minmax(120px,0.35fr)_minmax(0,1fr)] gap-x-3 gap-y-2">
+                    <dt className="text-muted-foreground">Original GRN</dt><dd className="break-all font-semibold">{selectedInventory.inventory_history.original_grn || "-"}</dd>
+                    <dt className="text-muted-foreground">Batch</dt><dd className="break-all font-mono font-semibold">{selectedInventory.inventory_history.batch_number || "-"}</dd>
+                    <dt className="text-muted-foreground">Previous Rack Location</dt><dd className="break-all font-semibold">{selectedInventory.inventory_history.original_rack || "-"}</dd>
+                    <dt className="text-muted-foreground">Received Quantity</dt><dd className="font-semibold">{selectedInventory.inventory_history.received_quantity} {selectedInventory.uom || ""}</dd>
+                    <dt className="text-muted-foreground">Issued to Assembly</dt><dd className="font-semibold">{selectedInventory.inventory_history.issued_quantity} {selectedInventory.uom || ""}</dd>
+                    <dt className="text-muted-foreground">Remaining Quantity</dt><dd className="font-semibold">{selectedInventory.inventory_history.remaining_quantity} {selectedInventory.uom || ""}</dd>
+                    <dt className="text-muted-foreground">Picking Task</dt><dd className="break-all font-mono font-semibold">{selectedInventory.inventory_history.picking_task || "-"}</dd>
+                  </dl>
                 </div>
               )}
 
@@ -3244,7 +3303,7 @@ function SimpleWarehouseModule() {
           <form onSubmit={handleCreateLocationSubmit} className="space-y-4 text-xs py-2">
             {createLocationType === "zone" && (
               <>
-                {!editingZone && !stores.length && (
+                {!editingZone && !warehouses.length && (
                   <div className="space-y-3 rounded-lg border p-3">
                     <p className="text-muted-foreground">Set up the warehouse with your first zone.</p>
                     <div className="space-y-1">

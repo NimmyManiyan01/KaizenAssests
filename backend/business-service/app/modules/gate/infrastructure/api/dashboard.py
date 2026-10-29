@@ -125,7 +125,7 @@ async def get_dashboard_stats(
         if alloc:
             d_status = "Occupied" if (d.status or "").upper() == "OCCUPIED" else "Reserved"
             v_num = alloc.vehicle_number
-            eta = f"Store: {alloc.assigned_store_code or 'Assigned'}"
+            eta = f"Warehouse: {alloc.assigned_warehouse_code or 'Assigned'}"
         elif (d.status or "").upper() == "OCCUPIED":
             d_status = "Occupied"
             eta = "In use"
@@ -217,8 +217,8 @@ async def get_dashboard_stats(
                 if (item["vehicle_number"] and item["vehicle_number"].upper() == v_num) or (item["gate_entry_no"] and item["gate_entry_no"].upper() == gp_no):
                     if req.assigned_dock:
                         item["dock_number"] = req.assigned_dock.dock_code
-                    elif req.assigned_store_code:
-                        item["dock_number"] = f"Store {req.assigned_store_code}"
+                    elif req.assigned_warehouse_code:
+                        item["dock_number"] = f"Warehouse {req.assigned_warehouse_code}"
                     if req.status and (item.get("status") or "").upper() != "VEHICLE_EXITED":
                         item["status"] = req.status
                     break
@@ -236,8 +236,8 @@ async def get_dashboard_stats(
         dock_code = "—"
         if req.assigned_dock:
             dock_code = req.assigned_dock.dock_code
-        elif req.assigned_store_code:
-            dock_code = f"Store {req.assigned_store_code}"
+        elif req.assigned_warehouse_code:
+            dock_code = f"Warehouse {req.assigned_warehouse_code}"
 
         combined_entries.append({
             "id": str(req.id),

@@ -36,10 +36,12 @@ from app.modules.storage.infrastructure.api.assembly_requisition_router import r
 from app.modules.storage.infrastructure.api.inventory_router import inventory_router, storage_req_router, v1_inventory_router
 from app.security.router import router as auth_router
 from app.modules.assistant.infrastructure.api.router import router as assistant_router
-from app.modules.store.infrastructure.api.location_router import (
-    store_router as store_location_router,
+from app.modules.warehouse.infrastructure.api.location_router import (
+    warehouse_router as warehouse_location_router,
     zone_router as zone_location_router,
 )
+from app.middleware.audit_log import AuditLogMiddleware
+from app.modules.admin.infrastructure.api.router import router as admin_router
 from app.workers.notification_consumer import start_notification_consumer
 from app.workers.outbox_relay import relay_once
 
@@ -55,6 +57,14 @@ _producer_task: asyncio.Task | None = None
 async def lifespan(app: FastAPI):
     settings = get_settings()
     global _consumer_task, _producer_task
+
+    # Upgrade explicitly before create_all can create an empty parallel schema.
+    from sqlalchemy import inspect
+    from app.database.session import engine
+    async with engine.connect() as connection:
+        tables = await connection.run_sync(lambda conn: inspect(conn).get_table_names())
+        if "store" in tables:
+            raise RuntimeError("Run scripts/migrate_single_warehouse.py before starting this version of the service")
 
     try:
         from app.database.session import engine
@@ -117,7 +127,7 @@ async def lifespan(app: FastAPI):
         from app.modules.receiving.infrastructure.persistence import models as receiving_models  # noqa: F401
         from app.modules.returns.infrastructure.persistence import models as returns_models  # noqa: F401
         from app.modules.storage.infrastructure.persistence import models as storage_models  # noqa: F401
-        from app.modules.store.infrastructure.persistence import models as store_models  # noqa: F401
+        from app.modules.warehouse.infrastructure.persistence import models as warehouse_models  # noqa: F401
         from app.modules.assembly.infrastructure.persistence import models as assembly_models  # noqa: F401
         from app.modules.dispatch.infrastructure.persistence import models as dispatch_models  # noqa: F401
 
@@ -186,7 +196,7 @@ async def lifespan(app: FastAPI):
                 await migration_session.rollback()
 
         # Warehouse location master additions. These are deliberately additive
-        # so existing Store → Zone → Bin records remain valid during rollout.
+        # so existing Warehouse → Zone → Bin records remain valid during rollout.
         for column, column_type in [
             ("position", "VARCHAR(64)"),
             ("storage_type", "VARCHAR(64) NOT NULL DEFAULT 'GENERAL'"),
@@ -197,8 +207,8 @@ async def lifespan(app: FastAPI):
             ("temperature_requirement", "VARCHAR(128)"),
             ("qr_identifier", "VARCHAR(128)"),
         ]:
-            await run_ddl(f"ALTER TABLE store_bin ADD COLUMN IF NOT EXISTS {column} {column_type}")
-        await run_ddl("CREATE UNIQUE INDEX IF NOT EXISTS ix_store_bin_qr_identifier ON store_bin (qr_identifier)")
+            await run_ddl(f"ALTER TABLE warehouse_bin ADD COLUMN IF NOT EXISTS {column} {column_type}")
+        await run_ddl("CREATE UNIQUE INDEX IF NOT EXISTS ix_warehouse_bin_qr_identifier ON warehouse_bin (qr_identifier)")
         await run_ddl("ALTER TABLE assembly_stock_reservation ADD COLUMN IF NOT EXISTS allocations JSON NOT NULL DEFAULT '[]'")
 
         # Upgrade legacy Material Data columns to the canonical Warehouse
@@ -374,9 +384,9 @@ async def lifespan(app: FastAPI):
                     reserved_quantity NUMERIC(18, 4) NOT NULL,
                     uom VARCHAR(32) NOT NULL DEFAULT 'PCS',
                     status VARCHAR(32) NOT NULL DEFAULT 'RESERVED FOR ASSEMBLY',
-                    store_id UUID,
-                    store_code VARCHAR(64),
-                    store_name VARCHAR(128),
+                    warehouse_ref_id UUID,
+                    warehouse_code VARCHAR(64),
+                    warehouse_name VARCHAR(128),
                     zone_code VARCHAR(64),
                     bin_code VARCHAR(64),
                     location_code VARCHAR(64),
@@ -386,7 +396,7 @@ async def lifespan(app: FastAPI):
                 );
                 CREATE INDEX IF NOT EXISTS ix_assembly_stock_reservation_req_id ON assembly_stock_reservation (requisition_id);
                 CREATE INDEX IF NOT EXISTS ix_assembly_stock_reservation_mat_code ON assembly_stock_reservation (material_code);
-                CREATE INDEX IF NOT EXISTS ix_assembly_stock_reservation_store_id ON assembly_stock_reservation (store_id);
+                CREATE INDEX IF NOT EXISTS ix_assembly_stock_reservation_warehouse_ref_id ON assembly_stock_reservation (warehouse_ref_id);
             """)
         except Exception: pass
 
@@ -480,12 +490,12 @@ async def lifespan(app: FastAPI):
             except Exception: pass
 
         for col in [
-            ("assigned_store_id", "UUID"),
-            ("assigned_store_code", "VARCHAR(64)"),
-            ("assigned_store_name", "VARCHAR(128)"),
-            ("assigned_store_manager_id", "VARCHAR(128)"),
-            ("assigned_store_manager_username", "VARCHAR(128)"),
-            ("assigned_store_manager_name", "VARCHAR(128)"),
+            ("assigned_warehouse_ref_id", "UUID"),
+            ("assigned_warehouse_code", "VARCHAR(64)"),
+            ("assigned_warehouse_name", "VARCHAR(128)"),
+            ("assigned_warehouse_operator_id", "VARCHAR(128)"),
+            ("assigned_warehouse_operator_username", "VARCHAR(128)"),
+            ("assigned_warehouse_operator_name", "VARCHAR(128)"),
             ("movement_started_by", "VARCHAR(128)"),
             ("movement_started_at", "TIMESTAMP WITH TIME ZONE"),
             ("dock_checked_in_by", "VARCHAR(128)"),
@@ -513,41 +523,44 @@ async def lifespan(app: FastAPI):
             except Exception: pass
 
         try:
-            await run_ddl("ALTER TABLE dock_masters ADD COLUMN IF NOT EXISTS store_id UUID")
+            await run_ddl("ALTER TABLE dock_masters ADD COLUMN IF NOT EXISTS warehouse_ref_id UUID")
         except Exception: pass
 
         for col in [
-            ("assigned_store_id", "UUID"),
-            ("assigned_store_code", "VARCHAR(64)"),
-            ("assigned_store_name", "VARCHAR(128)"),
-            ("assigned_store_manager_id", "VARCHAR(128)"),
-            ("assigned_store_manager_username", "VARCHAR(128)"),
-            ("assigned_store_manager_name", "VARCHAR(128)"),
+            ("assigned_warehouse_ref_id", "UUID"),
+            ("assigned_warehouse_code", "VARCHAR(64)"),
+            ("assigned_warehouse_name", "VARCHAR(128)"),
+            ("assigned_warehouse_operator_id", "VARCHAR(128)"),
+            ("assigned_warehouse_operator_username", "VARCHAR(128)"),
+            ("assigned_warehouse_operator_name", "VARCHAR(128)"),
         ]:
             try:
                 await run_ddl(f"ALTER TABLE dock_allocation_requests ADD COLUMN IF NOT EXISTS {col[0]} {col[1]}")
             except Exception: pass
 
         for col in [
-            ("role", "VARCHAR(64) NOT NULL DEFAULT 'Store Manager'"),
+            ("role", "VARCHAR(64) NOT NULL DEFAULT 'WAREHOUSE_MANAGER'"),
+            ("shift_name", "VARCHAR(64)"),
+            ("assembly_unit_code", "VARCHAR(64)"),
             ("applications", "JSONB NOT NULL DEFAULT '[\"WMS\"]'::jsonb"),
+            ("page_permissions", "JSONB NOT NULL DEFAULT '{}'::jsonb"),
             ("auth_token_hash", "VARCHAR(128)"),
             ("last_login", "TIMESTAMP WITH TIME ZONE"),
         ]:
             try:
-                await run_ddl(f"ALTER TABLE store_manager_user ADD COLUMN IF NOT EXISTS {col[0]} {col[1]}")
+                await run_ddl(f"ALTER TABLE user_account ADD COLUMN IF NOT EXISTS {col[0]} {col[1]}")
             except Exception as exc:
-                logger.warning("Unable to ensure store_manager_user.%s: %s", col[0], exc)
+                logger.warning("Unable to ensure user_account.%s: %s", col[0], exc)
 
         try:
-            await run_ddl("ALTER TABLE store ADD COLUMN IF NOT EXISTS store_type VARCHAR(64)")
+            await run_ddl("ALTER TABLE warehouse_configuration ADD COLUMN IF NOT EXISTS warehouse_type VARCHAR(64)")
         except Exception: pass
 
         for col in [
             ("material_name", "VARCHAR(256)"),
             ("source_location", "VARCHAR(64) DEFAULT 'RECEIVING_AREA'"),
             ("warehouse_id", "VARCHAR(64) DEFAULT 'Main Warehouse'"),
-            ("destination_store_id", "UUID"),
+            ("destination_warehouse_ref_id", "UUID"),
             ("destination_zone_id", "UUID"),
             ("destination_bin_id", "UUID"),
             ("finished_goods_id", "UUID"),
@@ -1252,7 +1265,7 @@ async def lifespan(app: FastAPI):
                     uom VARCHAR(32),
                     warehouse_id VARCHAR(64),
                     source_location VARCHAR(64),
-                    destination_store_id UUID,
+                    destination_warehouse_ref_id UUID,
                     destination_zone_id UUID,
                     destination_bin_id UUID,
                     destination_location_id UUID,
@@ -1282,7 +1295,7 @@ async def lifespan(app: FastAPI):
         for column, column_type in [
             ("batch_number", "VARCHAR(128)"),
             ("handling_unit_id", "UUID"),
-            ("destination_store_id", "UUID"),
+            ("destination_warehouse_ref_id", "UUID"),
             ("destination_zone_id", "UUID"),
             ("destination_bin_id", "UUID"),
             ("destination_location_id", "UUID"),
@@ -1425,7 +1438,7 @@ async def lifespan(app: FastAPI):
             for column, column_type in [
                 ("qr_code", "VARCHAR(255)"),
                 ("serial_number", "VARCHAR(128)"),
-                ("store_id", "UUID"),
+                ("warehouse_ref_id", "UUID"),
             ]:
                 await run_ddl(f"ALTER TABLE assembly_finished_goods ADD COLUMN IF NOT EXISTS {column} {column_type}")
         except Exception: pass
@@ -1557,51 +1570,51 @@ async def lifespan(app: FastAPI):
         try:
             await run_ddl(
                 """
-                CREATE TABLE IF NOT EXISTS store (
+                CREATE TABLE IF NOT EXISTS warehouse_configuration (
                     id UUID PRIMARY KEY,
-                    store_code VARCHAR(64) UNIQUE NOT NULL,
-                    store_name VARCHAR(128) NOT NULL,
+                    warehouse_code VARCHAR(64) UNIQUE NOT NULL,
+                    warehouse_name VARCHAR(128) NOT NULL,
                     description TEXT,
                     warehouse_id VARCHAR(64) NOT NULL DEFAULT 'Main Warehouse',
-                    store_manager_id VARCHAR(128),
-                    store_manager_name VARCHAR(128),
+                    warehouse_operator_id VARCHAR(128),
+                    warehouse_operator_name VARCHAR(128),
                     status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 );
-                CREATE INDEX IF NOT EXISTS ix_store_store_code ON store (store_code);
-                CREATE INDEX IF NOT EXISTS ix_store_store_name ON store (store_name);
-                CREATE INDEX IF NOT EXISTS ix_store_warehouse_id ON store (warehouse_id);
-                CREATE INDEX IF NOT EXISTS ix_store_status ON store (status);
+                CREATE INDEX IF NOT EXISTS ix_warehouse_warehouse_code ON warehouse_configuration (warehouse_code);
+                CREATE INDEX IF NOT EXISTS ix_warehouse_warehouse_name ON warehouse_configuration (warehouse_name);
+                CREATE INDEX IF NOT EXISTS ix_warehouse_warehouse_id ON warehouse_configuration (warehouse_id);
+                CREATE INDEX IF NOT EXISTS ix_warehouse_status ON warehouse_configuration (status);
                 """
             )
-            logger.info("Ensured table 'store' exists")
+            logger.info("Ensured table 'warehouse' exists")
 
             await run_ddl(
                 """
-                CREATE TABLE IF NOT EXISTS store_zone (
+                CREATE TABLE IF NOT EXISTS warehouse_zone (
                     id UUID PRIMARY KEY,
-                    store_id UUID NOT NULL REFERENCES store(id) ON DELETE RESTRICT,
+                    warehouse_ref_id UUID NOT NULL REFERENCES warehouse_configuration(id) ON DELETE RESTRICT,
                     zone_code VARCHAR(64) NOT NULL,
                     zone_name VARCHAR(128) NOT NULL,
                     description TEXT,
                     status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT uq_store_zone_code UNIQUE (store_id, zone_code)
+                    CONSTRAINT uq_warehouse_zone_code UNIQUE (warehouse_ref_id, zone_code)
                 );
-                CREATE INDEX IF NOT EXISTS ix_store_zone_store_id ON store_zone (store_id);
-                CREATE INDEX IF NOT EXISTS ix_store_zone_zone_code ON store_zone (zone_code);
-                CREATE INDEX IF NOT EXISTS ix_store_zone_status ON store_zone (status);
+                CREATE INDEX IF NOT EXISTS ix_warehouse_zone_warehouse_ref_id ON warehouse_zone (warehouse_ref_id);
+                CREATE INDEX IF NOT EXISTS ix_warehouse_zone_zone_code ON warehouse_zone (zone_code);
+                CREATE INDEX IF NOT EXISTS ix_warehouse_zone_status ON warehouse_zone (status);
                 """
             )
-            logger.info("Ensured table 'store_zone' exists")
+            logger.info("Ensured table 'warehouse_zone' exists")
 
-            # Phase 3: Store Manager User Accounts DDL
+            # Warehouse-wide managed user accounts (legacy table name retained
+            # for in-place upgrades).
             await run_ddl("""
-                CREATE TABLE IF NOT EXISTS store_manager_user (
+                CREATE TABLE IF NOT EXISTS user_account (
                     id UUID PRIMARY KEY,
-                    store_id UUID NOT NULL REFERENCES store(id) ON DELETE RESTRICT,
                     employee_id VARCHAR(64) UNIQUE NOT NULL,
                     username VARCHAR(64) UNIQUE NOT NULL,
                     full_name VARCHAR(128) NOT NULL,
@@ -1611,12 +1624,11 @@ async def lifespan(app: FastAPI):
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 );
-                CREATE INDEX IF NOT EXISTS ix_store_manager_user_store_id ON store_manager_user (store_id);
-                CREATE INDEX IF NOT EXISTS ix_store_manager_user_employee_id ON store_manager_user (employee_id);
-                CREATE INDEX IF NOT EXISTS ix_store_manager_user_username ON store_manager_user (username);
-                CREATE INDEX IF NOT EXISTS ix_store_manager_user_email ON store_manager_user (email);
+                CREATE INDEX IF NOT EXISTS ix_user_account_employee_id ON user_account (employee_id);
+                CREATE INDEX IF NOT EXISTS ix_user_account_username ON user_account (username);
+                CREATE INDEX IF NOT EXISTS ix_user_account_email ON user_account (email);
             """)
-            logger.info("Ensured table 'store_manager_user' exists")
+            logger.info("Ensured table 'user_account' exists")
 
             # Assembly Requisition & Stock Reservation DDL
             await run_ddl("ALTER TABLE assembly_requisition_item ADD COLUMN IF NOT EXISTS reserved_quantity NUMERIC(18,4) NOT NULL DEFAULT 0")
@@ -1632,9 +1644,9 @@ async def lifespan(app: FastAPI):
                     reserved_quantity NUMERIC(18,4) NOT NULL,
                     uom VARCHAR(32) NOT NULL DEFAULT 'PCS',
                     status VARCHAR(64) NOT NULL DEFAULT 'RESERVED FOR ASSEMBLY',
-                    store_id UUID REFERENCES store(id) ON DELETE SET NULL,
-                    store_code VARCHAR(64),
-                    store_name VARCHAR(256),
+                    warehouse_ref_id UUID REFERENCES warehouse_configuration(id) ON DELETE SET NULL,
+                    warehouse_code VARCHAR(64),
+                    warehouse_name VARCHAR(256),
                     zone_code VARCHAR(64),
                     bin_code VARCHAR(64),
                     location_code VARCHAR(64),
@@ -1645,12 +1657,12 @@ async def lifespan(app: FastAPI):
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS ix_assembly_stock_res_req_id ON assembly_stock_reservation (requisition_id);
-                CREATE INDEX IF NOT EXISTS ix_assembly_stock_res_store_id ON assembly_stock_reservation (store_id);
+                CREATE INDEX IF NOT EXISTS ix_assembly_stock_res_warehouse_ref_id ON assembly_stock_reservation (warehouse_ref_id);
                 CREATE INDEX IF NOT EXISTS ix_assembly_stock_res_status ON assembly_stock_reservation (status);
             """)
             logger.info("Ensured table 'assembly_stock_reservation' exists")
         except Exception as exc:
-            logger.debug(f"Store / Zone / Manager / Reservation table DDL note: {exc}")
+            logger.debug(f"Warehouse / Zone / Manager / Reservation table DDL note: {exc}")
         await migration_session.close()
     except Exception as e:
         logger.warning(f"Auto-migration failed: {e}", exc_info=True)
@@ -1726,6 +1738,7 @@ def create_app() -> FastAPI:
             origins.append(o)
 
     app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(AuditLogMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
@@ -1737,8 +1750,8 @@ def create_app() -> FastAPI:
     )
     register_exception_handlers(app)
 
-    from app.modules.store.infrastructure.api.router import router as store_router
-    app.include_router(store_router)
+    from app.modules.warehouse.infrastructure.api.router import router as warehouse_router
+    app.include_router(warehouse_router)
     # Zone/bin URLs are owned by location_router, including rack persistence
     # and occupancy responses. Do not register legacy duplicate handlers.
     app.include_router(dock_router)
@@ -1755,8 +1768,9 @@ def create_app() -> FastAPI:
     app.include_router(dispatch_router)
     app.include_router(search_router)
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+    app.include_router(admin_router)
     app.include_router(assistant_router)
-    app.include_router(store_location_router)
+    app.include_router(warehouse_location_router)
     app.include_router(zone_location_router)
 
     @app.get("/api/debug-assembly")

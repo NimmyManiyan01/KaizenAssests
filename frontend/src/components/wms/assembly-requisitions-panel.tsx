@@ -6,19 +6,18 @@ import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { ClipboardList, Loader2, RefreshCw } from "lucide-react";
 
-export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefresh = true }: { onUpdated?: () => void | Promise<void>; refreshKey?: number; showRefresh?: boolean }) {
+export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefresh = true, pickupTasks = [], onConfirmPick }: { onUpdated?: () => void | Promise<void>; refreshKey?: number; showRefresh?: boolean; pickupTasks?: any[]; onConfirmPick?: (task: any) => void }) {
   const [rows, setRows] = useState<any[]>([]);
-  const [stores, setStores] = useState<any[]>([]);
-  const [storeChoice, setStoreChoice] = useState<Record<string, string>>({});
+  const [warehouses, setWarehouses] = useState<any[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     try {
-      const [requests, materialRequests, storeRows] = await Promise.all([
+      const [requests, materialRequests, warehouseRows] = await Promise.all([
         api.getAssemblyRequisitions("Assembly"),
         api.getAssemblyMaterialRequests(),
-        api.getStores().catch(() => []),
+        api.getWarehouses().catch(() => []),
       ]);
       const requisitionRows = Array.isArray(requests) ? requests : [];
       const existingIds = new Set(requisitionRows.map((request: any) => String(request.id)));
@@ -39,9 +38,9 @@ export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefre
           legacy_material_request: true,
         }));
       setRows([...requisitionRows, ...legacyRows]);
-      setStores(
-        Array.isArray(storeRows)
-          ? storeRows.filter((store: any) => String(store.status).toUpperCase() === "ACTIVE")
+      setWarehouses(
+        Array.isArray(warehouseRows)
+          ? warehouseRows.filter((warehouse: any) => String(warehouse.status).toUpperCase() === "ACTIVE")
           : [],
       );
     } catch (error: any) {
@@ -106,13 +105,16 @@ export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefre
             const hasReservation = (request.reservations || []).some(
               (reservation: any) => Number(reservation.reserved_quantity) > 0,
             );
-            const selectedStore =
-              storeChoice[id] ||
-              request.assigned_store_id ||
-              request.suggested_store_id ||
-              request.reservations?.find((r: any) => r.store_id)?.store_id ||
-              "";
+            const selectedWarehouse =
+              request.assigned_warehouse_ref_id ||
+              request.suggested_warehouse_ref_id ||
+              request.reservations?.find((r: any) => r.warehouse_ref_id)?.warehouse_ref_id ||
+              warehouses[0]?.id || "";
             const isBusy = busyId === id;
+            const requestNumber = String(request.requisition_number || request.request_number || "").trim().toUpperCase();
+            const relatedPickupTasks = pickupTasks.filter((task) =>
+              String(task.assembly_order_number || task.request_number || "").trim().toUpperCase() === requestNumber,
+            );
             const productionQuantity = Number(
               request.target_quantity || request.planned_quantity || 0,
             );
@@ -255,42 +257,48 @@ export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefre
                         </Button>
                       </>
                     )}
-                    {(hasReservation || request.assigned_store_id) &&
+                    {(hasReservation || request.assigned_warehouse_ref_id) &&
                       !["REJECTED", "ASSEMBLY_RECEIVED"].includes(status) && (
                         <>
-                          <select
-                            className="h-9 min-w-56 rounded-md border bg-background px-3 text-sm"
-                            value={selectedStore}
-                            onChange={(event) =>
-                              setStoreChoice((current) => ({
-                                ...current,
-                                [id]: event.target.value,
-                              }))
-                            }
-                          >
-                            <option value="">Select fulfilling store</option>
-                            {stores.map((store: any) => (
-                              <option key={store.id} value={store.id}>
-                                {store.store_code} · {store.store_name}
-                              </option>
-                            ))}
-                          </select>
+
                           <Button
                             variant="secondary"
-                            disabled={isBusy || !selectedStore}
+                            disabled={isBusy || !selectedWarehouse}
                             onClick={() =>
                               void runAction(
                                 id,
-                                () => api.assignAssemblyRequisitionStore(id, selectedStore),
-                                "Store picking task created",
+                                () => api.assignAssemblyRequisitionWarehouse(id, selectedWarehouse),
+                                "Warehouse picking task created",
                               )
                             }
                           >
-                            Assign store and create pick task
+                            Create warehouse pick task
                           </Button>
                         </>
                       )}
                   </div>
+                  {relatedPickupTasks.length > 0 && (
+                    <div className="space-y-2 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 dark:border-indigo-900/60 dark:bg-indigo-950/20">
+                      <p className="text-xs font-semibold text-indigo-950 dark:text-indigo-100">Related warehouse pickup</p>
+                      {relatedPickupTasks.map((task) => (
+                        <div key={task.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white px-3 py-2 dark:bg-slate-900">
+                          <div className="min-w-0 text-xs">
+                            <span className="font-semibold">{task.task_number || "Pick task"}</span>
+                            <span className="mx-2 text-muted-foreground">·</span>
+                            <span>{task.material_name || task.material_code}</span>
+                            <span className="mx-2 text-muted-foreground">·</span>
+                            <span>{task.quantity ?? "—"} {task.uom || ""}</span>
+                            <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-700 dark:bg-slate-800 dark:text-slate-200">{task.status || "PENDING"}</span>
+                          </div>
+                          {String(task.status || "").toUpperCase() === "COMPLETED" ? (
+                            <span className="text-xs font-semibold text-emerald-700">Pickup confirmed</span>
+                          ) : (
+                            <Button size="sm" className="h-8" disabled={!onConfirmPick} onClick={() => onConfirmPick?.(task)}>Confirm pickup</Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             );

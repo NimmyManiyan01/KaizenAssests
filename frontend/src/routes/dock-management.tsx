@@ -77,12 +77,12 @@ type AllocationRequest = {
   arrived_at?: string | null;
   released_at?: string | null;
   created_at: string;
-  assigned_store_id?: string | null;
-  assigned_store_code?: string | null;
-  assigned_store_name?: string | null;
-  assigned_store_manager_id?: string | null;
-  assigned_store_manager_username?: string | null;
-  assigned_store_manager_name?: string | null;
+  assigned_warehouse_ref_id?: string | null;
+  assigned_warehouse_code?: string | null;
+  assigned_warehouse_name?: string | null;
+  assigned_warehouse_operator_id?: string | null;
+  assigned_warehouse_operator_username?: string | null;
+  assigned_warehouse_operator_name?: string | null;
 };
 
 type Dock = {
@@ -97,27 +97,27 @@ type Dock = {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-  store_id?: string | null;
-  store_code?: string | null;
-  store_name?: string | null;
-  assigned_store_id?: string | null;
-  assigned_store_code?: string | null;
-  assigned_store_name?: string | null;
-  assigned_store_manager_id?: string | null;
-  assigned_store_manager_username?: string | null;
-  assigned_store_manager_name?: string | null;
+  warehouse_ref_id?: string | null;
+  warehouse_code?: string | null;
+  warehouse_name?: string | null;
+  assigned_warehouse_ref_id?: string | null;
+  assigned_warehouse_code?: string | null;
+  assigned_warehouse_name?: string | null;
+  assigned_warehouse_operator_id?: string | null;
+  assigned_warehouse_operator_username?: string | null;
+  assigned_warehouse_operator_name?: string | null;
   current_allocation?: AllocationRequest | null;
 };
 
-type StoreManager = {
+type WarehouseManager = {
   id: string;
   employee_id: string;
   username: string;
   full_name: string;
   email?: string;
-  store_id?: string;
-  store_code?: string;
-  store_name?: string;
+  warehouse_ref_id?: string;
+  warehouse_code?: string;
+  warehouse_name?: string;
 };
 
 type DockHistory = {
@@ -275,66 +275,66 @@ function DockManagement() {
     }
   }, [showCreateDock, docks, createDockType]);
 
-  // User Auth & Store Context
+  // User Auth & Warehouse Context
   const userInfo = getUserInfo();
   const userRoles = userInfo?.roles || [];
   const isWarehouseManager = userRoles.includes("WAREHOUSE_MANAGER") || userRoles.includes("WAREHOUSE");
   const isWarehouseOrAdmin = isWarehouseManager || userRoles.includes("ADMIN") || userRoles.includes("SUPERUSER");
-  const isStoreUser =
-    userRoles.includes("STORE_MANAGER") ||
-    userRoles.includes("STORE_KEEPER") ||
-    userRoles.includes("STORE");
+  const isWarehouseUser =
+    userRoles.includes("WAREHOUSE_OPERATOR") ||
+    userRoles.includes("WAREHOUSE_OPERATOR") ||
+    userRoles.includes("WAREHOUSE_OPERATOR");
 
-  const [currentUserStore, setCurrentUserStore] = useState<{ id?: string; code?: string; name?: string } | null>(null);
+  const [currentUserWarehouse, setCurrentUserWarehouse] = useState<{ id?: string; code?: string; name?: string } | null>(null);
 
   useEffect(() => {
-    if (userInfo?.store_id || userInfo?.storeId || userInfo?.store_code || userInfo?.storeCode) {
-      setCurrentUserStore({
-        id: userInfo?.store_id || userInfo?.storeId,
-        code: userInfo?.store_code || userInfo?.storeCode,
+    if (userInfo?.warehouse_ref_id || userInfo?.warehouseRefId || userInfo?.warehouse_code || userInfo?.warehouseCode) {
+      setCurrentUserWarehouse({
+        id: userInfo?.warehouse_ref_id || userInfo?.warehouseRefId,
+        code: userInfo?.warehouse_code || userInfo?.warehouseCode,
       });
-    } else if (isStoreUser) {
-      api.getMyStore().then((res) => {
+    } else if (isWarehouseUser) {
+      api.getMyWarehouse().then((res) => {
         if (res) {
-          setCurrentUserStore({
+          setCurrentUserWarehouse({
             id: res.id,
-            code: res.store_code,
-            name: res.store_name,
+            code: res.warehouse_code,
+            name: res.warehouse_name,
           });
         }
       }).catch(() => {
         // ignore if not configured
       });
     } else {
-      setCurrentUserStore(null);
+      setCurrentUserWarehouse(null);
     }
-  }, [isStoreUser, userInfo?.store_id, userInfo?.storeId, userInfo?.store_code, userInfo?.storeCode]);
+  }, [isWarehouseUser, userInfo?.warehouse_ref_id, userInfo?.warehouseRefId, userInfo?.warehouse_code, userInfo?.warehouseCode]);
 
   const canReleaseDock = useCallback((dock: Dock | null | undefined): boolean => {
     if (!dock) return false;
-    // Warehouse managers without Store role are strictly forbidden from releasing docks
-    if (isWarehouseManager && !isStoreUser) return false;
-    // Only assigned store managers / keepers can release docks
-    if (!isStoreUser) return false;
+    // Warehouse managers without Warehouse role are strictly forbidden from releasing docks
+    if (isWarehouseManager && !isWarehouseUser) return false;
+    // Only assigned warehouse operators / keepers can release docks
+    if (!isWarehouseUser) return false;
 
-    const userStoreId = currentUserStore?.id || userInfo?.store_id || userInfo?.storeId;
-    const userStoreCode = (currentUserStore?.code || userInfo?.store_code || userInfo?.storeCode || "").toUpperCase();
+    const userWarehouseRefId = currentUserWarehouse?.id || userInfo?.warehouse_ref_id || userInfo?.warehouseRefId;
+    const userWarehouseCode = (currentUserWarehouse?.code || userInfo?.warehouse_code || userInfo?.warehouseCode || "").toUpperCase();
 
-    if (!userStoreId && !userStoreCode) return false;
+    if (!userWarehouseRefId && !userWarehouseCode) return false;
 
-    const dockStoreId = dock.assigned_store_id || dock.store_id;
-    const dockStoreCode = (dock.assigned_store_code || dock.store_code || "").toUpperCase();
+    const dockWarehouseRefId = dock.assigned_warehouse_ref_id || dock.warehouse_ref_id;
+    const dockWarehouseCode = (dock.assigned_warehouse_code || dock.warehouse_code || "").toUpperCase();
 
-    const matchesId = Boolean(userStoreId && dockStoreId && userStoreId === dockStoreId);
-    const matchesCode = Boolean(userStoreCode && dockStoreCode && userStoreCode === dockStoreCode);
+    const matchesId = Boolean(userWarehouseRefId && dockWarehouseRefId && userWarehouseRefId === dockWarehouseRefId);
+    const matchesCode = Boolean(userWarehouseCode && dockWarehouseCode && userWarehouseCode === dockWarehouseCode);
 
     return matchesId || matchesCode;
-  }, [currentUserStore, isStoreUser, isWarehouseManager, userInfo]);
+  }, [currentUserWarehouse, isWarehouseUser, isWarehouseManager, userInfo]);
 
-  const [storeManagers, setStoreManagers] = useState<StoreManager[]>([]);
-  const [stores, setStores] = useState<any[]>([]);
-  const [selectedStoreId, setSelectedStoreId] = useState<string>("");
-  const [selectedStoreManagerId, setSelectedStoreManagerId] = useState<string>("");
+  const [warehouseManagers, setWarehouseManagers] = useState<WarehouseManager[]>([]);
+  const [warehouses, setWarehouses] = useState<any[]>([]);
+  const [selectedWarehouseRefId, setSelectedWarehouseRefId] = useState<string>("");
+  const [selectedWarehouseManagerId, setSelectedWarehouseManagerId] = useState<string>("");
 
   // Edit & Maintenance Modals
   const [editDockModalDock, setEditDockModalDock] = useState<Dock | null>(null);
@@ -577,8 +577,8 @@ function DockManagement() {
       setAllocateModalDock(null);
       setSelectedDockIdToAllocate("");
       setSelectedRequestIdToAllocate("");
-      setSelectedStoreManagerId("");
-      setSelectedStoreId("");
+      setSelectedWarehouseManagerId("");
+      setSelectedWarehouseRefId("");
       await loadAll(true);
     } catch (error) {
       toast.error("Allocation failed", {
@@ -623,7 +623,7 @@ function DockManagement() {
   async function handleReleaseDock() {
     if (!releaseConfirmDock) return;
     if (!canReleaseDock(releaseConfirmDock)) {
-      toast.error("Unauthorized: Only the assigned Store Manager can release this dock.");
+      toast.error("Unauthorized: Only the assigned Warehouse Operator can release this dock.");
       setReleaseConfirmDock(null);
       return;
     }
@@ -691,7 +691,7 @@ function DockManagement() {
 
   const warehouseDock = docks.find((dock) => dock.is_active) || docks[0];
 
-  if (mounted && isStoreUser && !isWarehouseOrAdmin) {
+  if (mounted && isWarehouseUser && !isWarehouseOrAdmin) {
     return (
       <AppShell
         title="Dock Management"
@@ -705,13 +705,13 @@ function DockManagement() {
             <div className="space-y-2">
               <h2 className="text-lg font-bold text-foreground">Global Dock Management Restricted</h2>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Global dock configuration, allocation, and store assignment are managed exclusively by the Warehouse Manager. Store Managers view and release docks assigned to their specific store from the Assigned Docks portal.
+                Global dock configuration, allocation, and warehouse assignment are managed exclusively by the Warehouse Manager. Warehouse Operators view and release docks assigned to their specific warehouse from the Assigned Docks portal.
               </p>
             </div>
             <div className="pt-2">
               <Button
                 className="rounded-xl font-bold text-xs h-10 px-5 shadow-glow gap-2"
-                onClick={() => { window.location.href = "/my-store?tab=docks"; }}
+                onClick={() => { window.location.href = "/inventory?tab=docks"; }}
               >
                 <Truck className="size-4" /> Go to My Assigned Docks
               </Button>
@@ -893,11 +893,11 @@ function DockManagement() {
                     </span>
                   </div>
                   <div>
-                    <span className="text-muted-foreground block text-[11px]">Assigned Store</span>
+                    <span className="text-muted-foreground block text-[11px]">Assigned Warehouse</span>
                     <span className="font-semibold text-foreground">
-                      {selectedDetailsDock.assigned_store_name
-                        ? `${selectedDetailsDock.assigned_store_name} (${selectedDetailsDock.assigned_store_code || selectedDetailsDock.store_code})`
-                        : (selectedDetailsDock.store_name || selectedDetailsDock.assigned_store_code || selectedDetailsDock.store_code || "Central Warehouse")}
+                      {selectedDetailsDock.assigned_warehouse_name
+                        ? `${selectedDetailsDock.assigned_warehouse_name} (${selectedDetailsDock.assigned_warehouse_code || selectedDetailsDock.warehouse_code})`
+                        : (selectedDetailsDock.warehouse_name || selectedDetailsDock.assigned_warehouse_code || selectedDetailsDock.warehouse_code || "Central Warehouse")}
                     </span>
                   </div>
                   <div>
@@ -907,10 +907,10 @@ function DockManagement() {
                     </span>
                   </div>
                   <div>
-                    <span className="text-muted-foreground block text-[11px]">Assigned Store Manager</span>
+                    <span className="text-muted-foreground block text-[11px]">Assigned Warehouse Operator</span>
                     <span className="font-semibold text-indigo-600 dark:text-indigo-400">
-                      {selectedDetailsDock.assigned_store_manager_name ||
-                        selectedDetailsDock.current_allocation?.assigned_store_manager_name ||
+                      {selectedDetailsDock.assigned_warehouse_operator_name ||
+                        selectedDetailsDock.current_allocation?.assigned_warehouse_operator_name ||
                         "Not assigned"}
                     </span>
                   </div>
@@ -1052,9 +1052,9 @@ function DockManagement() {
                 <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-xl px-3 py-2 text-left">
                   <Info className="size-4 shrink-0" />
                   <span>
-                    Dock release must be performed by the assigned <strong>Store Manager</strong> (
-                    {selectedDetailsDock.assigned_store_name || selectedDetailsDock.store_name || "Chemical Store"}
-                    ) from their Store Portal.
+                    Dock release must be performed by the assigned <strong>Warehouse Operator</strong> (
+                    {selectedDetailsDock.assigned_warehouse_name || selectedDetailsDock.warehouse_name || "Chemical Warehouse"}
+                    ) from their Warehouse Portal.
                   </span>
                 </div>
               )}
@@ -1121,39 +1121,26 @@ function DockManagement() {
                   ))}
                 </div>
               )}
-              {/* Assigned Store Selection */}
+              {/* Warehouse Operator Selection */}
               <div className="hidden">
                 <Label className="text-xs font-semibold flex items-center justify-between">
-                  <span>Assign Available Store:</span>
-                  <span className="text-[10px] text-muted-foreground font-normal">Required</span>
-                </Label>
-                <select value={selectedStoreId} onChange={(e) => setSelectedStoreId(e.target.value)} className="mt-1.5 w-full h-9 rounded-xl border border-input bg-background px-3 text-xs font-medium">
-                  <option value="">-- Select Active Store --</option>
-                  {stores.filter((s) => (s.status || "").toUpperCase() === "ACTIVE").map((s) => (
-                    <option key={s.id} value={s.id}>{s.store_code} · {s.store_name}</option>
-                  ))}
-                </select>
-              </div>
-              {/* Store Manager Selection */}
-              <div className="hidden">
-                <Label className="text-xs font-semibold flex items-center justify-between">
-                  <span>Assign Responsible Store Manager:</span>
+                  <span>Assign Responsible Warehouse Operator:</span>
                   <span className="text-[10px] text-muted-foreground font-normal">Required</span>
                 </Label>
                 <select
-                  value={selectedStoreManagerId}
-                  onChange={(e) => setSelectedStoreManagerId(e.target.value)}
+                  value={selectedWarehouseManagerId}
+                  onChange={(e) => setSelectedWarehouseManagerId(e.target.value)}
                   className="mt-1.5 w-full h-9 rounded-xl border border-input bg-background px-3 text-xs font-medium focus:ring-2 focus:ring-primary/20"
                 >
-                  <option value="">-- Select Store Manager --</option>
-                  {storeManagers.map((sm) => (
+                  <option value="">-- Select Warehouse Operator --</option>
+                  {warehouseManagers.map((sm) => (
                     <option key={sm.id || sm.employee_id} value={sm.employee_id || sm.id}>
-                      {sm.full_name} ({sm.employee_id || sm.username}) {sm.store_name ? `· ${sm.store_name}` : ""}
+                      {sm.full_name} ({sm.employee_id || sm.username}) {sm.warehouse_name ? `· ${sm.warehouse_name}` : ""}
                     </option>
                   ))}
                 </select>
                 <p className="text-[11px] text-muted-foreground mt-1">
-                  The designated Store Manager will be authorized to inspect materials and release this dock.
+                  The designated Warehouse Operator will be authorized to inspect materials and release this dock.
                 </p>
               </div>
             </div>
@@ -1240,35 +1227,21 @@ function DockManagement() {
                   </div>
                 ) : null;
               })()}
-
-              {/* Assigned Store Selection */}
+              {/* Warehouse Operator Selection */}
               <div className="hidden">
                 <Label className="text-xs font-semibold flex items-center justify-between">
-                  <span>Assign Available Store:</span>
-                  <span className="text-[10px] text-muted-foreground font-normal">Required</span>
-                </Label>
-                <select value={selectedStoreId} onChange={(e) => setSelectedStoreId(e.target.value)} className="mt-1.5 w-full h-9 rounded-xl border border-input bg-background px-3 text-xs font-medium">
-                  <option value="">-- Select Active Store --</option>
-                  {stores.filter((s) => (s.status || "").toUpperCase() === "ACTIVE").map((s) => (
-                    <option key={s.id} value={s.id}>{s.store_code} · {s.store_name}</option>
-                  ))}
-                </select>
-              </div>
-              {/* Store Manager Selection */}
-              <div className="hidden">
-                <Label className="text-xs font-semibold flex items-center justify-between">
-                  <span>Assign Responsible Store Manager:</span>
+                  <span>Assign Responsible Warehouse Operator:</span>
                   <span className="text-[10px] text-muted-foreground font-normal">Required</span>
                 </Label>
                 <select
-                  value={selectedStoreManagerId}
-                  onChange={(e) => setSelectedStoreManagerId(e.target.value)}
+                  value={selectedWarehouseManagerId}
+                  onChange={(e) => setSelectedWarehouseManagerId(e.target.value)}
                   className="mt-1.5 w-full h-9 rounded-xl border border-input bg-background px-3 text-xs font-medium focus:ring-2 focus:ring-primary/20"
                 >
-                  <option value="">-- Select Store Manager --</option>
-                  {storeManagers.map((sm) => (
+                  <option value="">-- Select Warehouse Operator --</option>
+                  {warehouseManagers.map((sm) => (
                     <option key={sm.id || sm.employee_id} value={sm.employee_id || sm.id}>
-                      {sm.full_name} ({sm.employee_id || sm.username}) {sm.store_name ? `· ${sm.store_name}` : ""}
+                      {sm.full_name} ({sm.employee_id || sm.username}) {sm.warehouse_name ? `· ${sm.warehouse_name}` : ""}
                     </option>
                   ))}
                 </select>
@@ -1665,9 +1638,9 @@ function DockCard({
           <span className="inline-block rounded-full bg-slate-100 dark:bg-slate-800/80 px-2.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
             {getCategoryLabel(dock.dock_type)}
           </span>
-          {(dock.assigned_store_code || dock.store_code) && (
+          {(dock.assigned_warehouse_code || dock.warehouse_code) && (
             <span className="inline-block rounded-full bg-blue-50 dark:bg-blue-950/50 border border-blue-200/60 dark:border-blue-800/40 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300">
-              {dock.assigned_store_name ? `${dock.assigned_store_name} (${dock.assigned_store_code || dock.store_code})` : (dock.store_name || dock.assigned_store_code || dock.store_code)}
+              {dock.assigned_warehouse_name ? `${dock.assigned_warehouse_name} (${dock.assigned_warehouse_code || dock.warehouse_code})` : (dock.warehouse_name || dock.assigned_warehouse_code || dock.warehouse_code)}
             </span>
           )}
           {dock.location && (
@@ -1692,13 +1665,13 @@ function DockCard({
                 {gatePassNo || "—"}
               </span>
             </div>
-            {(dock.assigned_store_manager_name || dock.current_allocation?.assigned_store_manager_name) && (
+            {(dock.assigned_warehouse_operator_name || dock.current_allocation?.assigned_warehouse_operator_name) && (
               <div className="flex items-center justify-between text-xs pt-1.5 border-t border-border/40">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                  STORE MGR
+                  WAREHOUSE_OPERATOR MGR
                 </span>
                 <span className="font-semibold text-xs text-indigo-600 dark:text-indigo-400">
-                  {dock.assigned_store_manager_name || dock.current_allocation?.assigned_store_manager_name}
+                  {dock.assigned_warehouse_operator_name || dock.current_allocation?.assigned_warehouse_operator_name}
                 </span>
               </div>
             )}
@@ -1758,7 +1731,7 @@ function DockCard({
         {isOccupied && !canRelease && (
           <div className="w-full rounded-full bg-slate-100 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 px-3 py-1.5 text-center text-[10px] font-semibold text-muted-foreground flex items-center justify-center gap-1.5">
             <ShieldAlert className="size-3.5 text-amber-500 shrink-0" />
-            <span>Release: Assigned Store Manager only</span>
+            <span>Release: Assigned Warehouse Operator only</span>
           </div>
         )}
       </div>

@@ -106,6 +106,14 @@ function FinishedGoodsPickupGatePage() {
             request.status === statusFilter ||
             request.gate_pass_status === statusFilter)
         );
+      }).sort((a, b) => {
+        const time = (request: any) => {
+          const value = Date.parse(request.requested_on || request.created_at || request.submitted_at || "");
+          return Number.isNaN(value) ? 0 : value;
+        };
+        return time(b) - time(a) ||
+          String(b.request_number || "").localeCompare(String(a.request_number || ""), undefined, { numeric: true }) ||
+          String(b.id || "").localeCompare(String(a.id || ""));
       }),
     [requests, query, statusFilter],
   );

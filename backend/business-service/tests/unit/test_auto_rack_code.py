@@ -2,7 +2,7 @@ import asyncio
 from unittest.mock import AsyncMock, Mock
 import uuid
 
-from app.modules.store.infrastructure.api.location_router import BinCreateRequest, _next_rack_code
+from app.modules.warehouse.infrastructure.api.location_router import BinCreateRequest, _next_rack_code
 
 
 def test_rack_creation_accepts_server_generated_code_without_position():

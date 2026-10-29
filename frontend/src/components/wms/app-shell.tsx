@@ -27,7 +27,6 @@ import {
   AlertTriangle,
   QrCode,
   PlusCircle,
-  Store,
   ShieldAlert,
   DoorOpen,
   Factory,
@@ -49,6 +48,7 @@ import { searchModule } from "@/lib/module-search";
 import logoUrl from "@/assets/Logo.png";
 import { toast } from "sonner";
 import { getUserInfo, type UserInfo } from "@/lib/auth-utils";
+import { getPageAccess } from "@/lib/page-permissions";
 import { SecureAssistant } from "@/components/wms/secure-assistant";
 
 function getUserDisplayName(user: UserInfo | null): string {
@@ -93,11 +93,11 @@ function getUserRoleLabel(user: UserInfo | null): string {
   ) {
     return "GRN / Operations Manager";
   }
-  if (roles.includes("STORE_MANAGER")) {
-    return "Store Manager";
+  if (roles.includes("WAREHOUSE_OPERATOR")) {
+    return "Warehouse Operator";
   }
-  if (roles.includes("STORE_KEEPER") || roles.includes("STORE_OPERATOR")) {
-    return "Store Keeper";
+  if (roles.includes("WAREHOUSE_OPERATOR") || roles.includes("WAREHOUSE_OPERATOR")) {
+    return "Warehouse Operator";
   }
   if (roles.includes("ASSEMBLY") || roles.includes("ASSEMBLY_MANAGER")) {
     return "Assembly Manager";
@@ -147,6 +147,7 @@ type NavItem = {
   to: string;
   icon: any;
   count?: number;
+  section?: "Administration" | "Operational Monitoring";
 };
 
 const grnNav: NavItem[] = [
@@ -162,7 +163,7 @@ const dispatchNav = [
   { label: "Gate Out", to: "/dispatch-gate-out", icon: DoorOpen },
 ];
 
-const storeManagerNav = [
+const warehouseManagerNav = [
   { label: "Dashboard", to: "/inventory?tab=dashboard", icon: LayoutDashboard },
   { label: "Putaway", to: "/inventory?tab=putaway", icon: PackageCheck },
   { label: "Inventory", to: "/inventory?tab=inventory", icon: Boxes },
@@ -207,11 +208,19 @@ const supplierNav = [
   { label: "Dashboard", to: "/supplier-dashboard", icon: LayoutDashboard },
   { label: "Material Master", to: "/supplier-materials", icon: Database },
   { label: "ASN Management", to: "/supplier/asns", icon: Truck },
-  { label: "Damage Claims", to: "/damage-claims", icon: ShieldAlert },
   { label: "FG Dispatch Requests", to: "/supplier/dispatch", icon: PackageCheck },
+  { label: "Damage Claims", to: "/damage-claims", icon: ShieldAlert },
 ];
 
 const managerNav: any[] = [];
+
+const adminNav: NavItem[] = [
+  { label: "Dashboard", to: "/admin", icon: LayoutDashboard, section: "Administration" },
+  { label: "User Management", to: "/admin/users", icon: Users, section: "Administration" },
+  { label: "Audit Log", to: "/admin/audit", icon: ClipboardList, section: "Administration" },
+  { label: "Suppliers", to: "/admin/suppliers", icon: Truck, section: "Administration" },
+  { label: "Operational Monitoring", to: "/admin/operations", icon: BarChart3, section: "Operational Monitoring" },
+];
 
 const gateSecurityNav = [
   { label: "Dashboard", to: "/gate-dashboard", icon: LayoutDashboard },
@@ -242,7 +251,6 @@ const ICON_MAP: Record<string, any> = {
   QrCode,
   Bell,
   Inbox,
-  Store,
   ShieldAlert,
   PlusCircle,
 };
@@ -291,14 +299,20 @@ function getNotificationRole(user: { username?: string; roles?: string[] } | nul
 
 function getStrictRoleNav(user: { username?: string; roles?: string[] } | null): NavItem[] {
   if (!user) return [];
+  if (
+    hasUserRole(user, "ADMIN") ||
+    hasUserRole(user, "SUPERUSER") ||
+    hasUserRole(user, "SUPER_ADMIN")
+  )
+    return adminNav;
   if (hasUserRole(user, "SUPPLIER")) return supplierNav;
   if (hasUserRole(user, "GATE_SECURITY") || hasUserRole(user, "GATE_OPERATOR"))
     return gateSecurityNav;
   if (hasUserRole(user, "QUALITY") || hasUserRole(user, "QC")) return qualityNav;
   if (hasUserRole(user, "ASSEMBLY") || hasUserRole(user, "ASSEMBLY_MANAGER")) return assemblyNav;
-  if (hasUserRole(user, "STORE_MANAGER") || hasUserRole(user, "STORE_KEEPER"))
-    return storeManagerNav;
-  if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "STORE_OPERATOR"))
+  if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "WAREHOUSE_OPERATOR"))
+    return warehouseManagerNav;
+  if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "WAREHOUSE_OPERATOR"))
     return warehouseOperatorNav;
   if (isDispatchSession(user)) return dispatchNav;
   if (isGrnSession(user)) return grnNav;
@@ -311,10 +325,10 @@ function getRoleLabel(user: { username?: string; roles?: string[] } | null): str
   if (hasUserRole(user, "QUALITY") || hasUserRole(user, "QC")) return "Quality Inspector";
   if (hasUserRole(user, "ASSEMBLY") || hasUserRole(user, "ASSEMBLY_MANAGER"))
     return "Assembly Manager";
-  if (hasUserRole(user, "STORE_MANAGER")) return "Store Manager";
-  if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "STORE_OPERATOR"))
+  if (hasUserRole(user, "WAREHOUSE_OPERATOR")) return "Warehouse Operator";
+  if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "WAREHOUSE_OPERATOR"))
     return "Warehouse Operator";
-  if (hasUserRole(user, "STORE_KEEPER")) return "Store Keeper";
+  if (hasUserRole(user, "WAREHOUSE_OPERATOR")) return "Warehouse Operator";
   if (isDispatchSession(user)) return "Dispatch Manager";
   if (isGrnSession(user)) return "GRN / Operations Manager";
   return "Operations Manager";
@@ -348,6 +362,9 @@ export function AppShell({
   const fullHref = path + searchStr;
   const navigate = useNavigate();
   const [user, setUser] = useState<UserInfo | null>(null);
+  const isAdmin = Boolean(user?.roles?.some((role) =>
+    ["ADMIN", "SUPERUSER", "SUPER_ADMIN"].includes(role.toUpperCase()),
+  ));
   const { unreadCount: unreadNotifications, alert: notificationAlert, dismissAlert } = useNotificationAlerts(user ? getNotificationRole(user) : null, user?.username);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -443,9 +460,8 @@ export function AppShell({
     path === "/assembly-dashboard" ||
     path === "/dispatch-picking-packing" ||
     path === "/dispatch-loading";
-  const isStoreUser =
-    mounted && (user?.roles?.includes("STORE_MANAGER") || user?.roles?.includes("STORE_KEEPER"));
-  const isStoreRoute = path === "/my-store" || path.startsWith("/my-store");
+  const isWarehouseUser =
+    mounted && (user?.roles?.includes("WAREHOUSE_OPERATOR") || user?.roles?.includes("WAREHOUSE_OPERATOR"));
   const isGrnRoute = path === "/grn" || path.startsWith("/grn");
   const isSupplierRoute =
     path === "/supplier-dashboard" ||
@@ -489,36 +505,48 @@ export function AppShell({
       "/arrival-success",
     ].some((route) => path.startsWith(route)) ||
     (isGateSecurityUser && (isSharedOperationsRoute || isNotificationsRoute));
-  const resolvedNav = isSupplierRoute
+  const resolvedNav = isAdmin
+    ? adminNav
+    : isSupplierRoute
     ? supplierNav
-    : isAssemblyUser || isAssemblyRoute
-      ? assemblyNav
-      : isStoreUser || isStoreRoute
-        ? storeManagerNav
-        : isGrnUser || isGrnRoute
-          ? grnNav
-          : isSupplierRoute
-            ? supplierNav
-            : isGateSecurityRoute
-              ? gateSecurityNav
-              : isWarehouseRoute
-                ? warehouseNav
-                : mounted && user?.roles?.includes("DISPATCH")
-                  ? dispatchNav
-                  : mounted && user?.roles?.includes("ASSEMBLY")
-                    ? assemblyNav
-                    : mounted && user?.roles?.includes("SUPPLIER")
-                      ? supplierNav
-                      : isGateSecurityUser
-                        ? gateSecurityNav
-                        : warehouseNav;
+    : path.startsWith("/admin")
+      ? adminNav
+      : isAssemblyUser || isAssemblyRoute
+        ? assemblyNav
+        : isWarehouseUser
+          ? warehouseManagerNav
+          : isGrnUser || isGrnRoute
+            ? grnNav
+            : isSupplierRoute
+              ? supplierNav
+              : isGateSecurityRoute
+                ? gateSecurityNav
+                : isWarehouseRoute
+                  ? warehouseNav
+                  : mounted && user?.roles?.includes("DISPATCH")
+                    ? dispatchNav
+                    : mounted && user?.roles?.includes("ASSEMBLY")
+                      ? assemblyNav
+                      : mounted && user?.roles?.includes("SUPPLIER")
+                        ? supplierNav
+                        : isGateSecurityUser
+                          ? gateSecurityNav
+                          : warehouseNav;
   const navigationPending = !mounted && isSharedOperationsRoute;
-  const nav = navigationPending ? [] : resolvedNav;
+  const nav = navigationPending
+    ? []
+    : resolvedNav.filter((item) => {
+        const [itemPath, itemSearch = ""] = item.to.split("?");
+        if (hasUserRole(user, "SUPPLIER") && itemPath === "/damage-claims") return true;
+        return getPageAccess(user?.page_permissions, itemPath, itemSearch) !== null;
+      });
+  const currentPageAccess = getPageAccess(user?.page_permissions, path, searchStr);
+  const isReadOnlyPage = currentPageAccess === "READ";
   useEffect(() => {
     setMobileSidebarOpen(false);
   }, [fullHref]);
-  const handleLogout = () => {
-    api.logout();
+  const handleLogout = async () => {
+    await api.logout();
     setUser(null);
     toast.success("Logged out successfully");
     navigate({ to: "/login" });
@@ -568,6 +596,9 @@ export function AppShell({
       }
       return fullHref === to || (searchStr ? fullHref.startsWith(to) : to === "/grn?tab=dashboard");
     }
+    // The admin dashboard is the parent route for every admin page. Match it
+    // exactly so it does not stay highlighted alongside the selected child.
+    if (to === "/admin") return path === "/admin";
     return (
       path === to ||
       (to !== "/dashboard" &&
@@ -618,11 +649,16 @@ export function AppShell({
                 Array.from({ length: 5 }).map((_, index) => (
                   <div key={index} className="h-10 animate-pulse rounded-xl bg-sidebar-accent/60" />
                 ))}
-              {nav.map((item) => {
+              {nav.map((item, index) => {
                 const active = isActiveNavItem(item.to);
                 return (
-                  <Link
-                    key={`${item.label}-${item.to}`}
+                  <div key={`${item.label}-${item.to}`}>
+                    {item.section && item.section !== nav[index - 1]?.section && (
+                      <p className="px-3 pb-1 pt-3 text-[10px] font-bold uppercase tracking-[0.16em] text-sidebar-foreground/60">
+                        {item.section}
+                      </p>
+                    )}
+                    <Link
                     to={item.to as any}
                     onClick={(e) => {
                       e.preventDefault();
@@ -643,7 +679,8 @@ export function AppShell({
                         {(item as any).badge}
                       </span>
                     )}
-                  </Link>
+                    </Link>
+                  </div>
                 );
               })}
             </nav>
@@ -703,11 +740,16 @@ export function AppShell({
             Array.from({ length: 5 }).map((_, index) => (
               <div key={index} className="h-10 animate-pulse rounded-xl bg-sidebar-accent/60" />
             ))}
-          {nav.map((item) => {
+          {nav.map((item, index) => {
             const active = isActiveNavItem(item.to);
             return (
-              <Link
-                key={`${item.label}-${item.to}`}
+              <div key={`${item.label}-${item.to}`}>
+                {!desktopSidebarCollapsed && item.section && item.section !== nav[index - 1]?.section && (
+                  <p className="px-3 pb-1 pt-3 text-[10px] font-bold uppercase tracking-[0.16em] text-sidebar-foreground/60">
+                    {item.section}
+                  </p>
+                )}
+                <Link
                 to={item.to as any}
                 onClick={(e) => {
                   e.preventDefault();
@@ -727,7 +769,8 @@ export function AppShell({
                     {(item as any).badge}
                   </span>
                 )}
-              </Link>
+                </Link>
+              </div>
             );
           })}
         </nav>
@@ -939,15 +982,29 @@ export function AppShell({
         <main className={cn("page-enter flex-1 px-4 py-6 lg:px-7", isWarehouseWorkspace && "px-5 py-5 lg:px-8 lg:py-6")}>
           <div className={cn("mx-auto w-full max-w-[1360px]", isWarehouseWorkspace && "max-w-[1680px]")}>
             {(title || subtitle || actions) && (
-              <div className={cn("mb-6 flex flex-wrap items-end justify-between gap-4", ["/assembly/material-requests", "/assembly/production", "/assembly/quality", "/assembly/finished-goods", "/assembly/dispatch"].includes(path) && "material-requests-header", path === "/supplier-dashboard" && "supplier-heading-image", path === "/assembly-dashboard" && "assembly-dashboard-hero", path === "/gate-dashboard" && "gate-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") === "dashboard" && "grn-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") !== "dashboard" && "grn-form-header")}>
+              <div className={cn("mb-6 flex flex-wrap items-end justify-between gap-4", ["/assembly/material-requests", "/assembly/production", "/assembly/quality", "/assembly/finished-goods", "/assembly/dispatch"].includes(path) && "material-requests-header", path === "/supplier-dashboard" && "supplier-heading-image", path.startsWith("/admin") && "rounded-2xl border border-white/70 bg-white/35 p-5 shadow-sm backdrop-blur-sm", path === "/assembly-dashboard" && "assembly-dashboard-hero", path === "/gate-dashboard" && "gate-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") === "dashboard" && "grn-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") !== "dashboard" && "grn-form-header")}>
                 <div>
                   {title && <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">{title}{pageHelp[path] && <InformationTooltip help={pageHelp[path]} placement="title" />}</h1>}
                   {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
                 </div>
-                {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+                {actions && (
+                  <fieldset
+                    disabled={isReadOnlyPage}
+                    className="flex flex-wrap items-center gap-2 border-0 p-0"
+                  >
+                    {actions}
+                  </fieldset>
+                )}
               </div>
             )}
-            {children}
+            {isReadOnlyPage && (
+              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+                Read-only access: you can view this page but cannot perform actions.
+              </div>
+            )}
+            <fieldset disabled={isReadOnlyPage} className="min-w-0 border-0 p-0">
+              {children}
+            </fieldset>
           </div>
         </main>
       </div>

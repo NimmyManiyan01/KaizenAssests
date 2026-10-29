@@ -48,7 +48,7 @@ from app.modules.dock.infrastructure.persistence.models import (
     DockAllocationRequestModel,
     DockMasterModel,
 )
-from app.modules.store.infrastructure.persistence.models import StoreModel
+from app.modules.warehouse.infrastructure.persistence.models import WarehouseModel
 
 from app.modules.receiving.application.repository import (
     AsnDocumentSnapshot,
@@ -422,7 +422,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
         """
         Return the newest ASN linked to the PO.
 
-        The current ASN table stores po_id as text, so UUID PO IDs are
+        The current ASN table warehouses po_id as text, so UUID PO IDs are
         compared using their canonical string representation.
         """
 
@@ -1814,7 +1814,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
         if verification_notes:
             grn.verification_notes = verification_notes
 
-        # Retrieve dock assignment for store routing & manager assignment
+        # Retrieve dock assignment for warehouse routing & manager assignment
         dock_assignment = None
         da_conditions = []
         if grn.id:
@@ -1847,9 +1847,9 @@ class SqlAlchemyGrnRepository(GrnRepository):
                     if ge_obj:
                         ge_obj.status = "RECEIVING_COMPLETED"
 
-        base_dest_store_id = dock_assignment.assigned_store_id if dock_assignment else None
+        base_dest_warehouse_ref_id = dock_assignment.assigned_warehouse_ref_id if dock_assignment else None
         base_assigned_to = (
-            (dock_assignment.assigned_store_manager_username or dock_assignment.assigned_store_manager_id or dock_assignment.assigned_store_manager_name)
+            (dock_assignment.assigned_warehouse_operator_username or dock_assignment.assigned_warehouse_operator_id or dock_assignment.assigned_warehouse_operator_name)
             if dock_assignment
             else None
         )
@@ -1857,30 +1857,30 @@ class SqlAlchemyGrnRepository(GrnRepository):
         assigned_at = (dock_assignment.assigned_at if dock_assignment else None) or now
 
         # Fallback to dock definition if not populated on dock assignment
-        if not base_dest_store_id and grn.dock_number:
+        if not base_dest_warehouse_ref_id and grn.dock_number:
             dock_res = await self._session.execute(
                 select(DockModel).where(DockModel.dock_number == grn.dock_number)
             )
             dock_obj = dock_res.scalars().first()
-            if dock_obj and getattr(dock_obj, "assigned_store_id", None):
-                base_dest_store_id = dock_obj.assigned_store_id
-                base_assigned_to = base_assigned_to or getattr(dock_obj, "assigned_store_manager_username", None) or getattr(dock_obj, "assigned_store_manager_id", None)
+            if dock_obj and getattr(dock_obj, "assigned_warehouse_ref_id", None):
+                base_dest_warehouse_ref_id = dock_obj.assigned_warehouse_ref_id
+                base_assigned_to = base_assigned_to or getattr(dock_obj, "assigned_warehouse_operator_username", None) or getattr(dock_obj, "assigned_warehouse_operator_id", None)
 
-        # Pre-fetch all active stores to match by category
-        store_res = await self._session.execute(
-            select(StoreModel).where(StoreModel.status == "ACTIVE").order_by(StoreModel.created_at.asc())
+        # Pre-fetch all active warehouses to match by category
+        warehouse_res = await self._session.execute(
+            select(WarehouseModel).where(WarehouseModel.status == "ACTIVE").order_by(WarehouseModel.created_at.asc())
         )
-        active_stores = list(store_res.scalars().all())
+        active_warehouses = list(warehouse_res.scalars().all())
 
         # Post inventory updates & putaway tasks
         for line in grn.lines:
-            dest_store_id = base_dest_store_id
+            dest_warehouse_ref_id = base_dest_warehouse_ref_id
             assigned_to = base_assigned_to
 
-            if dest_store_id and not assigned_to:
-                for st in active_stores:
-                    if st.id == dest_store_id:
-                        assigned_to = st.store_manager_name or st.store_manager_id
+            if dest_warehouse_ref_id and not assigned_to:
+                for st in active_warehouses:
+                    if st.id == dest_warehouse_ref_id:
+                        assigned_to = st.warehouse_operator_name or st.warehouse_operator_id
                         break
             # Only QC-accepted material may create a putaway task. Received
             # but rejected, damaged, or held quantities remain unavailable.
@@ -1967,7 +1967,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
                                     uom=bindparam("uom"),
                                     warehouse_id=bindparam("wh"),
                                     source_location=bindparam("source"),
-                                    destination_store_id=bindparam("dest_store_id"),
+                                    destination_warehouse_ref_id=bindparam("dest_warehouse_ref_id"),
                                     assigned_to=bindparam("assigned_to"),
                                     assigned_by=bindparam("assigned_by"),
                                     assigned_at=bindparam("assigned_at"),
@@ -1987,7 +1987,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
                                     "uom": line.uom or "PCS",
                                     "wh": grn.warehouse_id,
                                     "source": f"RECEIVING_DOCK_{grn.dock_number}" if grn.dock_number else "RECEIVING_DOCK",
-                                    "dest_store_id": dest_store_id,
+                                    "dest_warehouse_ref_id": dest_warehouse_ref_id,
                                     "assigned_to": assigned_to,
                                     "assigned_by": assigned_by,
                                     "assigned_at": assigned_at,
@@ -2020,7 +2020,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
                                     uom=bindparam("uom"),
                                     warehouse_id=bindparam("wh"),
                                     source_location=bindparam("source"),
-                                    destination_store_id=bindparam("dest_store_id"),
+                                    destination_warehouse_ref_id=bindparam("dest_warehouse_ref_id"),
                                     assigned_to=bindparam("assigned_to"),
                                     assigned_by=bindparam("assigned_by"),
                                     assigned_at=bindparam("assigned_at"),
@@ -2039,7 +2039,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
                             "uom": line.uom or "PCS",
                             "wh": grn.warehouse_id,
                             "source": f"RECEIVING_DOCK_{grn.dock_number}" if grn.dock_number else "RECEIVING_DOCK",
-                            "dest_store_id": dest_store_id,
+                            "dest_warehouse_ref_id": dest_warehouse_ref_id,
                             "assigned_to": assigned_to,
                             "assigned_by": assigned_by,
                             "assigned_at": assigned_at,

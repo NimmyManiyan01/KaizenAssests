@@ -1,7 +1,7 @@
 import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
-import { Eye, Loader2, Plus, RefreshCw, X } from "lucide-react";
+import { Eye, Loader2, PackageCheck, Plus, RefreshCw, X } from "lucide-react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -229,11 +229,11 @@ function SupplierDispatchPage() {
       }
     >
       <Card className="overflow-hidden rounded-xl border-border bg-card shadow-sm">
-        <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
+        <CardHeader className="flex flex-col gap-4 space-y-0 border-b px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <CardTitle>Dispatch history</CardTitle>
-            <CardDescription>
-              Track dispatches created by the supplier.
+            <CardTitle className="text-lg">Dispatch history</CardTitle>
+            <CardDescription className="mt-1">
+              Track finished goods dispatch requests created by your supplier account.
               {!historyLoading && !historyError && (
                 <>
                   {" "}
@@ -242,7 +242,7 @@ function SupplierDispatchPage() {
               )}
             </CardDescription>
           </div>
-          <Button data-refresh-control="true" size="icon" aria-label="Refresh" title="Refresh"
+          <Button data-refresh-control="true" size="icon" aria-label="Refresh dispatch history" title="Refresh dispatch history"
             type="button"
             variant="outline"
             className="h-10 rounded-lg"
@@ -254,7 +254,6 @@ function SupplierDispatchPage() {
             ) : (
               <RefreshCw className="size-4" />
             )}
-            Refresh
           </Button>
         </CardHeader>
         <CardContent className="p-0">
@@ -279,11 +278,17 @@ function SupplierDispatchPage() {
               </Button>
             </div>
           ) : dispatchHistory.length === 0 ? (
-            <div className="p-8 text-center">
-              <h3 className="text-base font-semibold">No dispatches yet</h3>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Dispatches you create will appear here.
+            <div className="flex min-h-64 flex-col items-center justify-center px-6 py-12 text-center">
+              <span className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-blue-50 text-primary">
+                <PackageCheck className="size-7" aria-hidden="true" />
+              </span>
+              <h3 className="text-base font-semibold">No dispatch requests yet</h3>
+              <p className="mt-2 max-w-md text-sm text-muted-foreground">
+                Finished goods dispatch requests you create will appear here with their vehicle, driver, and status details.
               </p>
+              <Button type="button" className="mt-5 h-10 rounded-lg" onClick={() => { void loadAssemblyFinishedGoods(); setPickupDateTouched(false); setOpen(true); }}>
+                <Plus className="mr-2 size-4" /> Create Dispatch
+              </Button>
             </div>
           ) : (
             <div className="overflow-x-auto">

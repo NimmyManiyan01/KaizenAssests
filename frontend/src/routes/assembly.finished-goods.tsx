@@ -37,7 +37,7 @@ import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/assembly/finished-goods")({
   beforeLoad: () =>
-    requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER", "STORE_MANAGER", "QUALITY"]),
+    requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER", "WAREHOUSE_OPERATOR", "QUALITY"]),
   head: () => ({ meta: [{ title: "Finished Goods · KaizenAssests" }] }),
   component: AssemblyFinishedGoodsPage,
 });
@@ -331,7 +331,12 @@ function AssemblyFinishedGoodsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
-                  {pagedRows.map((fg) => (
+                  {pagedRows.map((fg) => {
+                    const available = Number(fg.available_quantity ?? fg.quantity ?? 0);
+                    const reserved = Number(fg.reserved_quantity ?? 0);
+                    const dispatched = Number(fg.dispatched_quantity ?? 0);
+                    const productStatus = available > 0 ? "AVAILABLE" : reserved > 0 ? "RESERVED" : "OUT OF STOCK";
+                    return (
                     <tr key={fg.id} className="group hover:bg-muted/40 transition-colors">
                       {/* Product */}
                       <td className="py-3.5 px-4">
@@ -363,12 +368,16 @@ function AssemblyFinishedGoodsPage() {
                         <span
                           className={cn(
                             "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold",
-                            ((fg as any).available_quantity ?? 0) > 0
+                            available > 0
                               ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              : reserved > 0
+                              ? "border-blue-500/25 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                              : dispatched > 0
+                              ? "border-slate-500/25 bg-slate-500/10 text-slate-700 dark:text-slate-300"
                               : "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300",
                           )}
                         >
-                          {((fg as any).available_quantity ?? 0) > 0 ? "AVAILABLE" : "OUT OF STOCK"}
+                          {productStatus}
                         </span>
                       </td>
 
@@ -389,7 +398,8 @@ function AssemblyFinishedGoodsPage() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -450,6 +460,9 @@ function AssemblyFinishedGoodsPage() {
                     const expanded = expandedBatches.includes(batch.id);
                     const available = Number(batch.available_quantity ?? batch.quantity);
                     const reserved = Number(batch.reserved_quantity ?? 0);
+                    const batchStatus = reserved > 0
+                      ? available > 0 ? "Partially Reserved" : "Reserved for Dispatch"
+                      : available > 0 ? "Available" : "Out of stock";
                     return (
                       <Fragment key={batch.id}>
                         <tr className="align-top">
@@ -495,7 +508,7 @@ function AssemblyFinishedGoodsPage() {
                                   : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300",
                               )}
                             >
-                              {reserved > 0 ? (available > 0 ? "Partially Reserved" : "Reserved for Dispatch") : available > 0 ? "Available" : "Out of stock"}
+                              {batchStatus}
                             </span>
                           </td>
                           <td className="px-3 py-3 text-right">

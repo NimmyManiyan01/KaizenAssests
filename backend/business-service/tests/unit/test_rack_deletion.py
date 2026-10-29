@@ -5,7 +5,7 @@ import uuid
 import pytest
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
-from app.modules.store.infrastructure.api import location_router as router
+from app.modules.warehouse.infrastructure.api import location_router as router
 
 
 def setup(monkeypatch, occupied=0):
