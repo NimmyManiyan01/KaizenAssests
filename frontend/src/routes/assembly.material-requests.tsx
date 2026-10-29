@@ -152,6 +152,7 @@ function AssemblyMaterialRequestsPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [products, setProducts] = useState<AssemblyProductOption[]>([]);
   const [rawMaterials, setRawMaterials] = useState<any[]>([]);
+  const [loadingRawMaterials, setLoadingRawMaterials] = useState(false);
   const [creating, setCreating] = useState(false);
   const [formData, setFormData] = useState({
     product_code: "",
@@ -174,6 +175,7 @@ function AssemblyMaterialRequestsPage() {
   });
 
   const openAddProductModal = () => {
+    void refreshAvailableMaterials();
     const existingCodes = products.map((p) => p.product_code);
     const initialSku = generateProductSKU("", existingCodes);
     setSkuManuallyEdited(false);
@@ -222,6 +224,22 @@ function AssemblyMaterialRequestsPage() {
   const [bomMaterialError, setBomMaterialError] = useState("");
   const [bomMaterialDraft, setBomMaterialDraft] = useState({ material_code: "", quantity_per_unit: "1" });
   useEffect(() => { setShowBomMaterial(false); setBomMaterialError(""); }, [formData.product_code]);
+  const refreshAvailableMaterials = async () => {
+    setLoadingRawMaterials(true);
+    setRawMaterials([]);
+    try {
+      const rows = await api.getAssemblyAvailableMaterials();
+      setRawMaterials((Array.isArray(rows) ? rows : []).filter(
+        (material: any) => Number(material.available_quantity) > 0,
+      ));
+    } catch (error) {
+      setRawMaterials([]);
+      console.error("Failed to load available warehouse materials:", error);
+      toast.error("Unable to check warehouse material availability.");
+    } finally {
+      setLoadingRawMaterials(false);
+    }
+  };
   const addBomMaterial = async () => {
     const quantity = Number(bomMaterialDraft.quantity_per_unit);
     if (!bomMaterialDraft.material_code || !Number.isFinite(quantity) || quantity <= 0) {
@@ -238,6 +256,31 @@ function AssemblyMaterialRequestsPage() {
   };
 
   const [bomPreviewError, setBomPreviewError] = useState<string | null>(null);
+
+  // In the Bill of Materials, only available materials are shown to assembly
+  const availableBomMaterials = useMemo(() => {
+    return (bomPreview?.materials || []).filter(item => (Number(item.available_quantity) || 0) > 0);
+  }, [bomPreview]);
+  const insufficientBomMaterials = useMemo(() =>
+    (bomPreview?.materials || []).filter(item => Number(item.required_quantity) > Number(item.available_quantity ?? 0)),
+    [bomPreview],
+  );
+  const insufficientNewProductComponents = useMemo(() => {
+    const requiredByMaterial = new Map<string, { required: number; uom: string }>();
+    newProductData.components.forEach(component => {
+      if (!component.material_code) return;
+      const current = requiredByMaterial.get(component.material_code) || { required: 0, uom: component.uom };
+      current.required += component.quantity_per_unit;
+      requiredByMaterial.set(component.material_code, current);
+    });
+    return Array.from(requiredByMaterial, ([code, requirement]) => {
+      const material = rawMaterials.find(item => String(item.code) === code);
+      const available = Number(material?.available_quantity ?? 0);
+      return material && requirement.required > available
+        ? [{ code, required: requirement.required, available, uom: requirement.uom }]
+        : [];
+    }).flat();
+  }, [newProductData.components, rawMaterials]);
 
   // Detail Modal State
   const [selectedRequest, setSelectedRequest] = useState<AssemblyMaterialRequest | null>(null);
@@ -332,11 +375,9 @@ function AssemblyMaterialRequestsPage() {
     try {
       // Only BOM-backed products are eligible for an assembly material request.
       // Raw-material master records must not appear as manufacturable products.
-      const [productRows, materialRows] = await Promise.all([
-        api.getAssemblyProducts(),
-        api.getMaterialComponents(),
-      ]);
-      setRawMaterials(Array.isArray(materialRows) ? materialRows : []);
+      // In the bill of materials, only available materials (warehouse stock > 0) are shown to assembly.
+      const productRows = await api.getAssemblyProducts();
+      await refreshAvailableMaterials();
       setProducts(productRows);
       if (
         productRows.length > 0 &&
@@ -387,6 +428,10 @@ function AssemblyMaterialRequestsPage() {
     );
     if (!components.length || components.length !== newProductData.components.length) {
       toast.error("Add at least one valid BOM component with a material, quantity, and UOM.");
+      return;
+    }
+    if (insufficientNewProductComponents.length) {
+      toast.error(`Insufficient warehouse stock: ${insufficientNewProductComponents.map(item => `${item.code} needs ${item.required} ${item.uom}, only ${item.available} available`).join("; ")}.`);
       return;
     }
 
@@ -440,6 +485,10 @@ function AssemblyMaterialRequestsPage() {
     }
     if (!bomPreview?.materials?.length) {
       toast.error("An active BOM with components is required before submitting this request.");
+      return;
+    }
+    if (insufficientBomMaterials.length) {
+      toast.error(`Insufficient warehouse stock: ${insufficientBomMaterials.map(item => `${item.material_code} needs ${item.required_quantity} ${item.uom}, only ${item.available_quantity ?? 0} available`).join("; ")}.`);
       return;
     }
     if (parsePositiveNumber(formData.target_quantity) === null) {
@@ -975,8 +1024,8 @@ function AssemblyMaterialRequestsPage() {
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-1.5 font-semibold text-foreground">
                       <Layers className="size-3.5 text-primary" />
-                      <span>BOM Material Preview ({bomPreview.materials?.length || 0} {bomPreview.materials?.length === 1 ? "Item" : "Items"})</span>
-                      <Button type="button" size="sm" variant="outline" className="ml-2 h-7 gap-1 text-xs" disabled={savingBomMaterial} onClick={() => { setShowBomMaterial(true); setBomMaterialError(""); }}><Plus className="size-3.5" />Add Material</Button>
+                      <span>BOM Material Preview ({availableBomMaterials.length} Available)</span>
+                      <Button type="button" size="sm" variant="outline" className="ml-2 h-7 gap-1 text-xs" disabled={savingBomMaterial || loadingRawMaterials} onClick={() => { setShowBomMaterial(true); setBomMaterialError(""); void refreshAvailableMaterials(); }}><Plus className="size-3.5" />Add Material</Button>
                     </div>
                     <span className="text-[11px] text-muted-foreground font-mono">
                       BOM: {bomPreview.bom_number}
@@ -984,10 +1033,10 @@ function AssemblyMaterialRequestsPage() {
                   </div>
 
                   {showBomMaterial && <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
-                    <p className="text-xs text-muted-foreground">Add a component to this product's saved BOM. Its total requirement is calculated using the production quantity.</p>
+                    <p className="text-xs text-muted-foreground">Add an available component to this product's saved BOM. Its total requirement is calculated using the production quantity.</p>
                     <div className="grid gap-3 sm:grid-cols-[1fr_160px_72px]">
-                      <div className="space-y-1.5"><label htmlFor="bom-add-material" className="text-xs font-semibold">Raw Material</label><select id="bom-add-material" disabled={savingBomMaterial} className="h-9 w-full rounded-xl border bg-card px-3 text-sm" value={bomMaterialDraft.material_code} onChange={e => setBomMaterialDraft({ ...bomMaterialDraft, material_code: e.target.value })}>
-                        <option value="">Select material...</option>{rawMaterials.filter(material => !bomPreview.materials?.some(item => item.material_code === material.code)).map(material => <option key={material.id || material.code} value={material.code}>{material.name} ({material.code})</option>)}
+                      <div className="space-y-1.5"><label htmlFor="bom-add-material" className="text-xs font-semibold">Raw Material</label><select id="bom-add-material" disabled={savingBomMaterial || loadingRawMaterials} className="h-9 w-full rounded-xl border bg-card px-3 text-sm" value={bomMaterialDraft.material_code} onChange={e => setBomMaterialDraft({ ...bomMaterialDraft, material_code: e.target.value })}>
+                        <option value="">{loadingRawMaterials ? "Checking warehouse availability..." : rawMaterials.filter(material => Number(material.available_quantity) > 0 && !bomPreview.materials?.some(item => item.material_code === material.code)).length ? "Select available material..." : "No available materials"}</option>{rawMaterials.filter(material => Number(material.available_quantity) > 0 && !bomPreview.materials?.some(item => item.material_code === material.code)).map(material => <option key={material.id || material.code} value={material.code}>{material.name} ({material.code}) · Avail: {material.available_quantity} {material.uom}</option>)}
                       </select></div>
                       <div className="space-y-1.5"><label htmlFor="bom-add-quantity" className="text-xs font-semibold">Qty per Product</label><Input id="bom-add-quantity" disabled={savingBomMaterial} type="number" min="0.0001" step="0.0001" value={bomMaterialDraft.quantity_per_unit} onChange={e => setBomMaterialDraft({ ...bomMaterialDraft, quantity_per_unit: e.target.value })} className="h-9" /></div>
                       <div className="space-y-1.5"><label className="text-xs font-semibold">UOM</label><div className="flex h-9 items-center rounded-xl border px-3 text-xs">{rawMaterials.find(material => material.code === bomMaterialDraft.material_code)?.uom || "-"}</div></div>
@@ -1002,33 +1051,57 @@ function AssemblyMaterialRequestsPage() {
                           <th className="p-2 pl-3">Raw Material</th>
                           <th className="p-2 text-right">Qty per Product</th>
                           <th className="p-2 text-right font-semibold">Total Required Qty</th>
+                          <th className="p-2 text-right">Available in WH</th>
                           <th className="p-2 text-right pr-3">UOM</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/30">
-                        {bomPreview.materials?.map((item, idx) => {
-                          return (
-                            <tr
-                              key={item.material_code || `${item.material_name}-${idx}`}
-                              className="hover:bg-muted/20"
-                            >
-                              <td className="p-2 pl-3 font-medium text-foreground truncate max-w-[160px]">
-                                {item.material_code}
-                                <span className="block text-[10px] text-muted-foreground truncate font-normal">
-                                  {item.material_name}
-                                </span>
-                              </td>
-                              <td className="p-2 text-right">{item.quantity_per_unit}</td>
-                              <td className="p-2 text-right font-bold text-foreground">
-                                {item.required_quantity}
-                              </td>
-                              <td className="p-2 text-right pr-3 font-medium">{item.uom}</td>
-                            </tr>
-                          );
-                        })}
+                        {availableBomMaterials.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="p-3 text-center text-xs text-amber-600">
+                              No materials currently available in warehouse stock for this BOM.
+                            </td>
+                          </tr>
+                        ) : (
+                          availableBomMaterials.map((item, idx) => {
+                            return (
+                              <tr
+                                key={item.material_code || `${item.material_name}-${idx}`}
+                                className="hover:bg-muted/20"
+                              >
+                                <td className="p-2 pl-3 font-medium text-foreground truncate max-w-[160px]">
+                                  {item.material_code}
+                                  <span className="block text-[10px] text-muted-foreground truncate font-normal">
+                                    {item.material_name}
+                                  </span>
+                                </td>
+                                <td className="p-2 text-right">{item.quantity_per_unit}</td>
+                                <td className="p-2 text-right font-bold text-foreground">
+                                  {item.required_quantity}
+                                </td>
+                                <td className="p-2 text-right">
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 font-mono">
+                                    {item.available_quantity ?? 0}
+                                  </span>
+                                </td>
+                                <td className="p-2 text-right pr-3 font-medium">{item.uom}</td>
+                              </tr>
+                            );
+                          })
+                        )}
                       </tbody>
                     </table>
                   </div>
+                  {bomPreview.materials && bomPreview.materials.length > availableBomMaterials.length && (
+                    <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                      Note: {bomPreview.materials.length - availableBomMaterials.length} unavailable component(s) excluded. Only materials available in warehouse stock are shown to assembly.
+                    </p>
+                  )}
+                  {insufficientBomMaterials.length > 0 && (
+                    <p role="alert" className="text-xs font-medium text-rose-600 dark:text-rose-400">
+                      Not enough warehouse stock for {insufficientBomMaterials.map(item => item.material_code).join(", ")}. Reduce the production quantity or wait for stock before submitting.
+                    </p>
+                  )}
                 </div>
               ) : null}
 
@@ -1058,7 +1131,7 @@ function AssemblyMaterialRequestsPage() {
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={creating || showBomMaterial || savingBomMaterial || loadingBOM || !bomPreview || !bomPreview.materials?.length || bomPreview.product_code !== formData.product_code || Number(bomPreview.target_quantity) !== Number(formData.target_quantity)}
+                  disabled={creating || showBomMaterial || savingBomMaterial || loadingBOM || !bomPreview || !bomPreview.materials?.length || insufficientBomMaterials.length > 0 || bomPreview.product_code !== formData.product_code || Number(bomPreview.target_quantity) !== Number(formData.target_quantity)}
                   className="rounded-xl gap-2 bg-primary text-primary-foreground hover:bg-primary/90 font-semibold shadow-soft"
                 >
                   {creating && <RefreshCw className="size-3.5 animate-spin" />}
@@ -1173,6 +1246,7 @@ function AssemblyMaterialRequestsPage() {
                   >
                     <select
                       className="h-8 min-w-0 rounded-lg border border-input bg-card px-2 text-xs"
+                      disabled={loadingRawMaterials}
                       value={component.material_code}
                       required
                       onChange={(e) => {
@@ -1194,10 +1268,10 @@ function AssemblyMaterialRequestsPage() {
                         }));
                       }}
                     >
-                      <option value="">Select material...</option>
-                      {rawMaterials.map((material) => (
+                      <option value="">{loadingRawMaterials ? "Checking warehouse availability..." : rawMaterials.length ? "Select available material..." : "No available materials"}</option>
+                      {rawMaterials.filter((material) => Number(material.available_quantity) > 0).map((material) => (
                         <option key={material.id || material.code} value={material.code}>
-                          {material.name} ({material.code})
+                          {material.name} ({material.code}) · Avail: {material.available_quantity ?? 0} {material.uom}
                         </option>
                       ))}
                     </select>
@@ -1244,7 +1318,12 @@ function AssemblyMaterialRequestsPage() {
                 ))}
                 {!rawMaterials.length && (
                   <p className="text-[11px] text-amber-600">
-                    No active materials are available in Material Master.
+                    No raw materials currently available in warehouse stock. Please replenish inventory before defining BOM components.
+                  </p>
+                )}
+                {insufficientNewProductComponents.length > 0 && (
+                  <p role="alert" className="text-xs font-medium text-rose-600 dark:text-rose-400">
+                    Component quantity exceeds warehouse stock: {insufficientNewProductComponents.map(item => `${item.code} (${item.required} ${item.uom} required, ${item.available} available)`).join("; ")}. Reduce the quantity to continue.
                   </p>
                 )}
               </div>
@@ -1265,6 +1344,7 @@ function AssemblyMaterialRequestsPage() {
                   size="sm"
                   disabled={
                     addingProduct ||
+                    insufficientNewProductComponents.length > 0 ||
                     !newProductData.product_name.trim() ||
                     !newProductData.components.length ||
                     newProductData.components.some(

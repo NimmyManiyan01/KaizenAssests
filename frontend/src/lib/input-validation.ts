@@ -141,10 +141,18 @@ export function isValidAsnDriverMobileNumber(value: string): boolean {
   return /^[6-9]\d{9}$/.test(value.trim());
 }
 
+export function sanitizeAsnDriverName(value: string): string {
+  return value.replace(/[^A-Za-z .,'’-]/g, "");
+}
+
 export function isValidAsnDriverName(value: string): boolean {
   const name = value.trim();
-  return name.length >= 2 && name.length <= 100 &&
-    /^[A-Za-z .,'’\-]+$/.test(name) && (name.match(/[A-Za-z]/g)?.length ?? 0) >= 2;
+  return (
+    name.length >= 2 &&
+    name.length <= 100 &&
+    /^[A-Za-z .,'’-]+$/.test(name) &&
+    (name.match(/[A-Za-z]/g)?.length ?? 0) >= 2
+  );
 }
 
 export function isValidIdentifier(value: string, pattern = /^[A-Za-z0-9/_-]+$/): boolean {

@@ -401,7 +401,7 @@ async def test_global_3_level_hierarchy_view():
 async def test_putaway_completion_with_exact_bin_qr_and_validations():
     from decimal import Decimal
     from app.database.session import session_scope
-    from app.modules.procurement.infrastructure.persistence.models import MaterialModel, MaterialStockModel
+    from app.common.persistence.models import MaterialModel, MaterialStockModel
     from app.modules.receiving.infrastructure.persistence.models import GrnModel
     from app.modules.storage.infrastructure.persistence.models import PutawayTaskModel
 

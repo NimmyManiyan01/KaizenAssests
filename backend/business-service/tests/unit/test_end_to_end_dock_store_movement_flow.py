@@ -12,7 +12,7 @@ from app.modules.dock.infrastructure.persistence.models import (
     DockAllocationRequestModel,
     DockMasterModel,
 )
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
     MaterialModel,
     MaterialStockModel,
 )

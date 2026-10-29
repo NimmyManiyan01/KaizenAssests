@@ -16,7 +16,14 @@ import {
 } from "lucide-react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
@@ -31,7 +38,7 @@ type Arrival = {
   gate_entry_number: string;
   asn_id: string;
   asn_number: string;
-  po_number: string;
+  po_number?: string | null;
   supplier_name: string;
   vehicle_number: string;
   driver_name: string;
@@ -77,6 +84,49 @@ type Dock = {
   vehicle_number?: string;
 };
 
+type AsnTransportEntry = {
+  vehicle_number: string;
+  driver_name: string;
+  driver_contact: string;
+  has_active_gate_pass: boolean;
+};
+
+const normalizePlate = (value: unknown) =>
+  String(value || "")
+    .replace(/[\s-]/g, "")
+    .toUpperCase();
+
+function getAsnTransportEntries(asn: any): Omit<AsnTransportEntry, "has_active_gate_pass">[] {
+  const assignment = Array.isArray(asn?.logistics)
+    ? asn.logistics.find((item: any) => item?.type === "transport_assignment")
+    : null;
+  const vehicles = Array.isArray(assignment?.vehicles) ? assignment.vehicles : [];
+  if (vehicles.length) {
+    return vehicles
+      .map((item: any) => ({
+        vehicle_number: String(item?.vehicle_number || "").trim(),
+        driver_name: String(item?.driver_name || "").trim(),
+        driver_contact: String(item?.driver_contact || "").trim(),
+      }))
+      .filter((item: any) => item.vehicle_number);
+  }
+  const vehicleNumbers = String(asn?.vehicle_number || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const drivers = String(asn?.driver_name || "")
+    .split(",")
+    .map((value) => value.trim());
+  const contacts = String(asn?.driver_contact || "")
+    .split(",")
+    .map((value) => value.trim());
+  return vehicleNumbers.map((vehicle_number, index) => ({
+    vehicle_number,
+    driver_name: drivers[index] || "",
+    driver_contact: contacts[index] || "",
+  }));
+}
+
 function InboundArrivals() {
   const search = useSearch({ strict: false }) as any;
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
@@ -101,7 +151,8 @@ function InboundArrivals() {
   const [selectedSupplier, setSelectedSupplier] = useState("");
   const [selectedAsn, setSelectedAsn] = useState("");
   const [asnRecords, setAsnRecords] = useState<any[]>([]);
-  const [autoPoNumber, setAutoPoNumber] = useState("");
+  const [asnTransportEntries, setAsnTransportEntries] = useState<AsnTransportEntry[]>([]);
+  const [selectedTransportIndex, setSelectedTransportIndex] = useState(-1);
   const [autoExpectedDate, setAutoExpectedDate] = useState("");
   const [deliveryType, setDeliveryType] = useState("");
   const [remarksText, setRemarksText] = useState("");
@@ -144,7 +195,10 @@ function InboundArrivals() {
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      const [arrivalRows, dockRows] = await Promise.all([api.getInboundArrivals(true), api.getDocks()]);
+      const [arrivalRows, dockRows] = await Promise.all([
+        api.getInboundArrivals(true),
+        api.getDocks(),
+      ]);
       setArrivals(arrivalRows);
       setDocks(dockRows);
     } catch (error) {
@@ -172,14 +226,19 @@ function InboundArrivals() {
       arrival.supplier_name,
       arrival.vehicle_number,
       arrival.driver_name,
-    ].some((value) => String(value || "").toLowerCase().includes(query));
+    ].some((value) =>
+      String(value || "")
+        .toLowerCase()
+        .includes(query),
+    );
   });
   const totalArrivalPages = Math.max(1, Math.ceil(filteredArrivals.length / arrivalsPerPage));
   const visibleArrivals = filteredArrivals.slice(
     (arrivalPage - 1) * arrivalsPerPage,
     arrivalPage * arrivalsPerPage,
   );
-  const firstVisibleArrival = filteredArrivals.length === 0 ? 0 : (arrivalPage - 1) * arrivalsPerPage + 1;
+  const firstVisibleArrival =
+    filteredArrivals.length === 0 ? 0 : (arrivalPage - 1) * arrivalsPerPage + 1;
   const lastVisibleArrival = Math.min(arrivalPage * arrivalsPerPage, filteredArrivals.length);
 
   useEffect(() => {
@@ -192,15 +251,45 @@ function InboundArrivals() {
     });
   }, []);
 
-  const applyAsnDetails = (asn: any) => {
+  const applyAsnDetails = async (asn: any) => {
     if (!asn) return;
     setSelectedSupplier(asn.supplier_name || asn.supplier_company_name || "");
-    setAutoPoNumber(asn.po_number || "");
     setAutoExpectedDate(asn.expected_arrival_at?.split("T")[0] || asn.delivery_date || "");
-    setVehicleNumberInput(asn.vehicle_number || "");
-    setDriverNameInput(asn.driver_name || "");
-    setDriverMobileInput(asn.driver_contact || "");
     setAsnMaterials(asn.lines || asn.expected_materials || []);
+    const priorEntries = await api.getInboundArrivals(true).catch(() => arrivals);
+    const completedStatuses = new Set([
+      "REJECTED",
+      "DENIED_ENTRY",
+      "GATE_EXIT_COMPLETED",
+      "VEHICLE_EXITED",
+      "CHECKED_OUT",
+      "COMPLETED",
+    ]);
+    const usedVehicles = new Set(
+      (priorEntries || [])
+        .filter(
+          (entry: any) =>
+            String(entry.asn_id || "") === String(asn.id || asn.asn_id || "") ||
+            String(entry.asn_number || "").toLowerCase() ===
+              String(asn.asn_number || "").toLowerCase(),
+        )
+        .filter((entry: any) => !completedStatuses.has(String(entry.status || "").toUpperCase()))
+        .map((entry: any) => normalizePlate(entry.vehicle_number)),
+    );
+    const assigned = getAsnTransportEntries(asn).map((entry) => ({
+      ...entry,
+      has_active_gate_pass: usedVehicles.has(normalizePlate(entry.vehicle_number)),
+    }));
+    setAsnTransportEntries(assigned);
+    const nextIndex = assigned.findIndex((entry) => !entry.has_active_gate_pass);
+    setSelectedTransportIndex(nextIndex);
+    const selected = assigned[nextIndex];
+    setVehicleNumberInput(selected?.vehicle_number || "");
+    setDriverNameInput(selected?.driver_name || "");
+    setDriverMobileInput(selected?.driver_contact || "");
+    if (assigned.length && nextIndex < 0) {
+      toast.error("All supplier-assigned vehicles already have active gate passes for this ASN.");
+    }
   };
 
   const openVehicleCamera = async () => {
@@ -293,7 +382,7 @@ function InboundArrivals() {
       (asn) => String(asn.asn_number).toLowerCase() === number.toLowerCase(),
     );
     if (local) {
-      applyAsnDetails(local);
+      await applyAsnDetails(local);
       return;
     }
     const remote = await api.getAsn(number);
@@ -302,7 +391,7 @@ function InboundArrivals() {
         remote,
         ...prev.filter((asn) => asn.asn_number !== remote.asn_number),
       ]);
-      applyAsnDetails(remote);
+      await applyAsnDetails(remote);
     } else {
       toast.error("ASN not found", { description: `No ASN was found for ${number}.` });
     }
@@ -393,10 +482,7 @@ function InboundArrivals() {
     const upper = (statusStr || "").toUpperCase().trim();
     // Security may release an inbound vehicle only after receiving/GRN is
     // complete and the warehouse has released its dock assignment.
-    return [
-      "RECEIVING_COMPLETED",
-      "DOCK_RELEASED",
-    ].includes(upper);
+    return ["RECEIVING_COMPLETED", "DOCK_RELEASED"].includes(upper);
   };
 
   async function approveGateExit(arrival: Arrival) {
@@ -412,17 +498,23 @@ function InboundArrivals() {
     );
     if (!matchingArrival) {
       setExitVerified(false);
-      toast.error("Gate pass not found", { description: "Enter or scan the active gate pass for this vehicle." });
+      toast.error("Gate pass not found", {
+        description: "Enter or scan the active gate pass for this vehicle.",
+      });
       return;
     }
     if (matchingArrival.id !== exitTarget?.id) {
       setExitVerified(false);
-      toast.error("Wrong gate pass", { description: "This pass does not belong to the selected vehicle." });
+      toast.error("Wrong gate pass", {
+        description: "This pass does not belong to the selected vehicle.",
+      });
       return;
     }
     if (!isEligibleForInboundExit(matchingArrival.status)) {
       setExitVerified(false);
-      toast.error("Vehicle is not ready for exit", { description: "GRN/receiving must be completed and the dock must be released first." });
+      toast.error("Vehicle is not ready for exit", {
+        description: "GRN/receiving must be completed and the dock must be released first.",
+      });
       return;
     }
     setExitTarget(matchingArrival);
@@ -450,7 +542,7 @@ function InboundArrivals() {
       setExitVerified(false);
     } catch (error: any) {
       toast.error("Gate exit approval failed", {
-          description:
+        description:
           error?.message || "Ensure receiving/unloading is complete before approving vehicle exit.",
       });
     } finally {
@@ -546,7 +638,10 @@ function InboundArrivals() {
             >
               Previous
             </Button>
-            <span aria-label="Current page" className="min-w-8 text-center font-medium text-foreground">
+            <span
+              aria-label="Current page"
+              className="min-w-8 text-center font-medium text-foreground"
+            >
               {arrivalPage}
             </span>
             <Button
@@ -568,21 +663,61 @@ function InboundArrivals() {
         <DialogContent className="max-w-md rounded-2xl bg-card p-6 shadow-2xl">
           <DialogHeader>
             <DialogTitle>Vehicle Gate Exit</DialogTitle>
-            <DialogDescription>Enter the gate pass generated during gate entry to complete vehicle exit.</DialogDescription>
+            <DialogDescription>
+              Enter the gate pass generated during gate entry to complete vehicle exit.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-3">
             <div>
               <Label htmlFor="exit-gate-pass">Gate Pass Number *</Label>
               <div className="flex gap-2">
-                <Input id="exit-gate-pass" value={exitPass} onChange={(e) => { setExitPass(e.target.value.toUpperCase()); setExitVerified(false); }} placeholder="Enter or scan gate pass number" autoFocus />
-                <Button type="button" variant="outline" disabled={!exitPass.trim()} onClick={verifyGatePass}>Verify</Button>
+                <Input
+                  id="exit-gate-pass"
+                  value={exitPass}
+                  onChange={(e) => {
+                    setExitPass(e.target.value.toUpperCase());
+                    setExitVerified(false);
+                  }}
+                  placeholder="Enter or scan gate pass number"
+                  autoFocus
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!exitPass.trim()}
+                  onClick={verifyGatePass}
+                >
+                  Verify
+                </Button>
               </div>
             </div>
-            {exitVerified && exitTarget && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950"><p><b>Gate pass verified:</b> {exitTarget.gate_entry_number}</p><p><b>Vehicle:</b> {exitTarget.vehicle_number || "—"}</p><p><b>Driver:</b> {exitTarget.driver_name || "—"}</p><p><b>Status:</b> {exitTarget.status.replaceAll("_", " ")}</p></div>}
+            {exitVerified && exitTarget && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
+                <p>
+                  <b>Gate pass verified:</b> {exitTarget.gate_entry_number}
+                </p>
+                <p>
+                  <b>Vehicle:</b> {exitTarget.vehicle_number || "—"}
+                </p>
+                <p>
+                  <b>Driver:</b> {exitTarget.driver_name || "—"}
+                </p>
+                <p>
+                  <b>Status:</b> {exitTarget.status.replaceAll("_", " ")}
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setExitTarget(null)}>Cancel</Button>
-            <Button disabled={!exitVerified || Boolean(assigning)} onClick={() => void confirmGateExit()}>{assigning ? "Processing…" : "Confirm Exit"}</Button>
+            <Button variant="outline" onClick={() => setExitTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!exitVerified || Boolean(assigning)}
+              onClick={() => void confirmGateExit()}
+            >
+              {assigning ? "Processing…" : "Confirm Exit"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -726,18 +861,6 @@ function InboundArrivals() {
                   />
                 </div>
 
-                <div className="hidden">
-                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
-                    PO Number (Auto-Filled)
-                  </label>
-                  <input
-                    type="text"
-                    readOnly
-                    value={autoPoNumber}
-                    className="h-9 w-full rounded-xl border bg-muted/50 px-3 font-mono font-bold text-xs text-primary"
-                  />
-                </div>
-
                 {/* Expected Delivery Date Auto-Filled */}
                 <div>
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
@@ -868,6 +991,57 @@ function InboundArrivals() {
 
             {/* SECTION B: VEHICLE AND DRIVER DETAILS */}
             <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
+              {asnTransportEntries.length > 1 && (
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
+                    Supplier-assigned vehicles ({asnTransportEntries.length})
+                  </label>
+                  <select
+                    value={selectedTransportIndex}
+                    onChange={(event) => {
+                      const index = Number(event.target.value);
+                      const entry = asnTransportEntries[index];
+                      if (!entry || entry.has_active_gate_pass) return;
+                      setSelectedTransportIndex(index);
+                      setVehicleNumberInput(entry.vehicle_number);
+                      setDriverNameInput(entry.driver_name);
+                      setDriverMobileInput(entry.driver_contact);
+                      setVehiclePhotoBlob(null);
+                      setVehiclePhotoPreview(null);
+                      setUploadedVehiclePhoto(null);
+                    }}
+                    className="h-9 w-full rounded-xl border bg-background px-3 text-xs font-semibold focus:ring-1 focus:ring-primary"
+                  >
+                    {selectedTransportIndex < 0 && (
+                      <option value={-1}>No assigned vehicle is currently available</option>
+                    )}
+                    {asnTransportEntries.map((entry, index) => (
+                      <option
+                        key={`${entry.vehicle_number}-${index}`}
+                        value={index}
+                        disabled={entry.has_active_gate_pass}
+                      >
+                        Vehicle & Driver #{index + 1}: {entry.vehicle_number} ·{" "}
+                        {entry.driver_name || "Driver"}
+                        {entry.has_active_gate_pass ? " · Active gate pass" : " · Available"}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    The next vehicle without an active gate pass is selected automatically.
+                  </p>
+                </div>
+              )}
+              {asnTransportEntries.length > 0 &&
+                asnTransportEntries.every((entry) => entry.has_active_gate_pass) && (
+                  <p
+                    className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900"
+                    role="alert"
+                  >
+                    All supplier-assigned vehicles already have active gate passes for this ASN.
+                    Create another pass after a vehicle exits.
+                  </p>
+                )}
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
@@ -967,7 +1141,10 @@ function InboundArrivals() {
                   )}
                   {uploadedVehiclePhoto && (
                     <p className="mt-1 text-[10px] font-bold text-emerald-600">
-                      ✓ {uploadedVehiclePhoto.startsWith("vehicle-photo-") ? "vehicle-photo-captured" : uploadedVehiclePhoto}
+                      ✓{" "}
+                      {uploadedVehiclePhoto.startsWith("vehicle-photo-")
+                        ? "vehicle-photo-captured"
+                        : uploadedVehiclePhoto}
                     </p>
                   )}
                   {vehiclePhotoPreview && (
@@ -1134,7 +1311,10 @@ function InboundArrivals() {
                   />
                   {uploadedVehiclePhoto && (
                     <p className="text-[10px] font-bold text-emerald-600 mt-1">
-                      ✓ {uploadedVehiclePhoto.startsWith("vehicle-photo-") ? "vehicle-photo-captured" : uploadedVehiclePhoto}
+                      ✓{" "}
+                      {uploadedVehiclePhoto.startsWith("vehicle-photo-")
+                        ? "vehicle-photo-captured"
+                        : uploadedVehiclePhoto}
                     </p>
                   )}
                 </div>
@@ -1228,15 +1408,28 @@ function InboundArrivals() {
             </Button>
             <Button
               className="w-full rounded-xl"
-              disabled={!arrivals.some((arrival) => arrival.gate_entry_number === generatedGatePass && isEligibleForInboundExit(arrival.status))}
+              disabled={
+                !arrivals.some(
+                  (arrival) =>
+                    arrival.gate_entry_number === generatedGatePass &&
+                    isEligibleForInboundExit(arrival.status),
+                )
+              }
               title="Exit becomes available after GRN/receiving is complete and the dock is released"
               onClick={async () => {
                 const rows = await api.getInboundArrivals();
-                const arrival = rows.find((row: Arrival) => row.gate_entry_number === generatedGatePass);
+                const arrival = rows.find(
+                  (row: Arrival) => row.gate_entry_number === generatedGatePass,
+                );
                 setGeneratedGatePass(null);
                 if (arrival && isEligibleForInboundExit(arrival.status)) setExitTarget(arrival);
-                else if (arrival) toast.error("Exit is not ready", { description: "GRN/receiving must be completed and the dock must be released first." });
-                else toast.error("Gate pass was created, but its active visit could not be loaded.");
+                else if (arrival)
+                  toast.error("Exit is not ready", {
+                    description:
+                      "GRN/receiving must be completed and the dock must be released first.",
+                  });
+                else
+                  toast.error("Gate pass was created, but its active visit could not be loaded.");
               }}
             >
               Exit Vehicle
@@ -1332,7 +1525,13 @@ function ArrivalRows({
         </td>
         <td className="px-4 py-4">
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="outline" className="rounded-lg whitespace-nowrap" onClick={onToggle} aria-label={`View details for ${arrival.gate_entry_number || arrival.asn_number}`}>
+            <Button
+              size="sm"
+              variant="outline"
+              className="rounded-lg whitespace-nowrap"
+              onClick={onToggle}
+              aria-label={`View details for ${arrival.gate_entry_number || arrival.asn_number}`}
+            >
               <Eye className="size-3.5" /> Details
             </Button>
             {!isExited && (
@@ -1342,7 +1541,11 @@ function ArrivalRows({
                 disabled={busy || !isEligibleForInboundExit(arrival.status)}
                 onClick={() => onApproveExit(arrival)}
                 aria-label={`Exit vehicle ${arrival.vehicle_number || ""}`}
-                title={isEligibleForInboundExit(arrival.status) ? "Enter and verify the gate pass to complete vehicle exit" : "Vehicle is not ready for exit"}
+                title={
+                  isEligibleForInboundExit(arrival.status)
+                    ? "Enter and verify the gate pass to complete vehicle exit"
+                    : "Vehicle is not ready for exit"
+                }
               >
                 <ShieldCheck className="size-3.5" /> Exit
               </Button>

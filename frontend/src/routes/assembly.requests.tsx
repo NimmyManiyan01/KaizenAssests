@@ -115,11 +115,11 @@ function AssemblyRequestsPage() {
       setLoading(true);
       const [reqData, matData] = await Promise.all([
         api.getAssemblyRequisitions("Assembly"),
-        // Use the same persisted component catalog as Supplier Dashboard.
-        api.getMaterialComponents().catch(() => []),
+        api.getAssemblyAvailableMaterials().catch(() => api.getMaterialComponents("ACTIVE", true)),
       ]);
       setRequests(reqData || []);
-      setMasterMaterials(matData || []);
+      const availableOnly = (matData || []).filter((m: any) => (Number(m.available_quantity) || 0) > 0);
+      setMasterMaterials(availableOnly);
     } catch {
       toast.error("Failed to load assembly material requisitions");
     } finally {
@@ -815,7 +815,7 @@ function AssemblyRequestsPage() {
                                   <span className="font-mono font-bold text-primary">
                                     {m.material_code || m.code}
                                   </span>{" "}
-                                  — {m.material_name}
+                                  — {m.material_name || m.name} · Avail: {m.available_quantity ?? 0} {m.uom}
                                 </SelectItem>
                               ))}
                             </SelectContent>

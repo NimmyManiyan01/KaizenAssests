@@ -1672,7 +1672,7 @@ async def complete_putaway(
 
     # Warehouse users may execute only against the task's assigned store/rack;
     # the strict destination-store and assigned-rack checks below remain in force.
-    if not is_store_user and not is_warehouse_user and not can_execute_finished_goods and "ADMIN" not in roles_upper and "SUPERUSER" not in roles_upper:
+    if not is_store_user and not can_execute_finished_goods and "ADMIN" not in roles_upper and "SUPERUSER" not in roles_upper:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied: Only Store Keepers or Store Managers assigned to this Store can complete physical putaway",
@@ -1920,7 +1920,12 @@ async def complete_putaway(
             PutawayLocationAssignmentModel.destination_bin_id == target_bin.id,
         )
     )
-    if location_assignment is None and task.destination_bin_id != target_bin.id:
+    if (
+        location_assignment is None
+        and task.destination_bin_id != target_bin.id
+        and task.destination_zone_id is not None
+        and task.destination_zone_id != target_zone.id
+    ):
         raise HTTPException(status_code=422, detail="Scanned location is not assigned to this putaway task")
 
     # 3. Resolve or Create Storage Location for the Store Zone + Bin
@@ -2707,12 +2712,16 @@ async def resolve_bin_qr(
     target_zone: StoreZoneModel | None = None
     target_store: StoreModel | None = None
 
+    hyphen_scan = raw_scan.replace(" ", "-").replace("_", "-")
     # The printed Warehouse label contains qr_identifier, not just bin_code.
     # Resolve the persisted identifier first so repeated bin codes across stores
     # cannot select an unrelated destination.
     qr_result = await uow.session.execute(
         select(StoreBinModel).where(
-            func.upper(StoreBinModel.qr_identifier) == raw_scan.upper()
+            or_(
+                func.upper(StoreBinModel.qr_identifier) == raw_scan.upper(),
+                func.upper(StoreBinModel.qr_identifier) == hyphen_scan.upper(),
+            )
         )
     )
     bin_obj = qr_result.scalar_one_or_none()
@@ -2746,15 +2755,19 @@ async def resolve_bin_qr(
     # Step 3: Try exact and cleaned bin_code lookup
     if bin_obj is None:
         cand_code = raw_scan
-        if cand_code.upper().startswith("BIN-QR-") or cand_code.upper().startswith("QR-BIN-") or cand_code.upper().startswith("QR-"):
-            cand_code = cand_code.split("-", 2)[-1] if "-" in cand_code else cand_code
+        if cand_code.upper().startswith("BIN-QR-") or cand_code.upper().startswith("QR-BIN-") or cand_code.upper().startswith("QR-") or cand_code.upper().startswith("QR "):
+            cand_code = cand_code.split("-", 2)[-1] if "-" in cand_code else (cand_code.split(" ", 1)[-1] if " " in cand_code else cand_code)
+        cand_hyphen = cand_code.replace(" ", "-").replace("_", "-")
 
         bq = await uow.session.execute(
             select(StoreBinModel).where(
                 or_(
                     func.upper(StoreBinModel.bin_code) == raw_scan.upper(),
                     func.upper(StoreBinModel.bin_code) == cand_code.upper(),
+                    func.upper(StoreBinModel.bin_code) == hyphen_scan.upper(),
+                    func.upper(StoreBinModel.bin_code) == cand_hyphen.upper(),
                     StoreBinModel.bin_code.ilike(f"%{cand_code}%"),
+                    StoreBinModel.bin_code.ilike(f"%{cand_hyphen}%"),
                 )
             )
         )

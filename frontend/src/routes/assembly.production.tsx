@@ -35,6 +35,8 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { parsePositiveNumber } from "@/lib/input-validation";
+import { FgQrInput } from "@/components/wms/fg-qr-input";
+import type { AssemblyMaterialConsumptionSummary, AssemblyMaterialQrVerification } from "@/lib/api-client";
 
 export const Route = createFileRoute("/assembly/production")({
   beforeLoad: () => requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER"]),
@@ -109,6 +111,68 @@ function AssemblyProductionPage() {
 
   // Start Production Confirmation State
   const [startingOrderId, setStartingOrderId] = useState<string | null>(null);
+  const [consumptionOrder, setConsumptionOrder] = useState<AssemblyProductionOrder | null>(null);
+  const [consumptionSummary, setConsumptionSummary] = useState<AssemblyMaterialConsumptionSummary | null>(null);
+  const [scannedQr, setScannedQr] = useState("");
+  const [verifiedMaterial, setVerifiedMaterial] = useState<AssemblyMaterialQrVerification | null>(null);
+  const [consumptionQty, setConsumptionQty] = useState("");
+  const [verifyingQr, setVerifyingQr] = useState(false);
+  const [savingConsumption, setSavingConsumption] = useState(false);
+  const [consumptionError, setConsumptionError] = useState("");
+  const [pendingConsumptionKey, setPendingConsumptionKey] = useState<{ fingerprint: string; key: string } | null>(null);
+
+  const loadConsumptionSummary = async (orderId: string) => {
+    const summary = await api.getAssemblyMaterialConsumption(orderId);
+    setConsumptionSummary(summary);
+    return summary;
+  };
+
+  const handleOpenConsumption = async (order: AssemblyProductionOrder) => {
+    setConsumptionOrder(order);
+    setScannedQr(""); setVerifiedMaterial(null); setConsumptionQty(""); setConsumptionError("");
+    setConsumptionSummary(null);
+    try { await loadConsumptionSummary(order.id); }
+    catch (error: any) { setConsumptionError(error.message || "Could not load consumption history"); }
+  };
+
+  const handleVerifyMaterialQr = async () => {
+    if (!consumptionOrder || !scannedQr.trim()) return;
+    setVerifyingQr(true); setConsumptionError(""); setVerifiedMaterial(null); setConsumptionQty("");
+    try {
+      const verified = await api.verifyAssemblyMaterialQr(consumptionOrder.id, scannedQr.trim());
+      setVerifiedMaterial(verified);
+    } catch (error: any) { setConsumptionError(error.message || "Material QR could not be verified"); }
+    finally { setVerifyingQr(false); }
+  };
+
+  const handleSaveConsumption = async () => {
+    if (!consumptionOrder || !verifiedMaterial) return;
+    const quantity = parsePositiveNumber(consumptionQty);
+    if (quantity === null) { setConsumptionError("Enter a valid quantity greater than zero."); return; }
+    if (quantity > verifiedMaterial.remaining_quantity) {
+      setConsumptionError(`Quantity exceeds the verified remaining ${verifiedMaterial.remaining_quantity} ${verifiedMaterial.uom}.`); return;
+    }
+    const fingerprint = `${consumptionOrder.id}:${verifiedMaterial.material_qr}:${quantity}`;
+    const idempotencyKey = pendingConsumptionKey?.fingerprint === fingerprint
+      ? pendingConsumptionKey.key : crypto.randomUUID();
+    setPendingConsumptionKey({ fingerprint, key: idempotencyKey });
+    setSavingConsumption(true); setConsumptionError("");
+    try {
+      const result = await api.recordAssemblyMaterialConsumption(consumptionOrder.id, {
+        material_code: verifiedMaterial.material_code, grn_batch_id: verifiedMaterial.grn_batch_id,
+        material_qr: verifiedMaterial.material_qr, actual_consumed: quantity, uom: verifiedMaterial.uom,
+        idempotency_key: idempotencyKey,
+      });
+      toast.success(`Recorded ${result.consumed_quantity} ${result.uom} from batch ${verifiedMaterial.batch_number}`);
+      setScannedQr(""); setVerifiedMaterial(null); setConsumptionQty("");
+      setPendingConsumptionKey(null);
+      await loadConsumptionSummary(consumptionOrder.id);
+      await fetchOrders();
+    } catch (error: any) {
+      setConsumptionError(error.message || "Consumption could not be recorded. Retry the same quantity to safely replay the request.");
+    }
+    finally { setSavingConsumption(false); }
+  };
 
   const fetchOrders = async (isManual = false) => {
     if (isManual) setRefreshing(true);
@@ -145,7 +209,16 @@ function AssemblyProductionPage() {
     }
   };
 
-  const handleOpenCompleteModal = (order: AssemblyProductionOrder) => {
+  const handleOpenCompleteModal = async (order: AssemblyProductionOrder) => {
+    if (order.traceability_required) {
+      try {
+        const summary = await api.getAssemblyMaterialConsumption(order.id);
+        if (!summary.can_complete) {
+          toast.error(`Record verified consumption for: ${summary.missing_material_codes.join(", ")}`);
+          return;
+        }
+      } catch (error: any) { toast.error(error.message || "Could not verify material consumption"); return; }
+    }
     setCompleteOrder(order);
     setProducedQuantity(order.target_quantity);
   };
@@ -487,6 +560,12 @@ function AssemblyProductionPage() {
                         {/* Production Actions */}
                         <td className="py-3.5 px-3 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-2">
+                            {order.can_complete && order.traceability_required && (
+                              <Button size="sm" variant="outline" onClick={() => void handleOpenConsumption(order)}
+                                className="h-7 px-3 text-xs font-semibold gap-1.5 rounded-lg">
+                                <Package className="size-3.5" /> Record Material Consumption
+                              </Button>
+                            )}
                             {/* Action: Start Production */}
                             {order.can_start && (
                               <Button
@@ -561,6 +640,64 @@ function AssemblyProductionPage() {
             </div>
           )}
         </div>
+
+        <Dialog open={!!consumptionOrder} onOpenChange={(open) => !open && !savingConsumption && setConsumptionOrder(null)}>
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto p-6 rounded-2xl">
+            <DialogHeader className="border-b border-border/60 pb-3">
+              <DialogTitle className="flex items-center gap-2 text-lg font-bold"><Package className="size-5 text-primary" />Record Material Consumption</DialogTitle>
+              <DialogDescription>
+                {consumptionOrder?.order_number} · {consumptionOrder?.product_name} · {consumptionOrder?.status?.replaceAll("_", " ")}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 pt-3">
+              <FgQrInput value={scannedQr} onChange={(value) => { setScannedQr(value); setVerifiedMaterial(null); }}
+                disabled={verifyingQr || savingConsumption} label="Scan Material QR" inputId="assembly-material-qr" />
+              <Button size="sm" onClick={() => void handleVerifyMaterialQr()} disabled={!scannedQr.trim() || verifyingQr || savingConsumption}>
+                {verifyingQr ? "Verifying…" : "Verify Material"}
+              </Button>
+              {consumptionError && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{consumptionError}</div>}
+              {verifiedMaterial && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-emerald-800"><CheckCircle2 className="size-4" />Original material QR verified</div>
+                  <div className="grid grid-cols-2 gap-x-5 gap-y-2 text-xs sm:grid-cols-3">
+                    <div><span className="text-muted-foreground">Material</span><div className="font-semibold">{verifiedMaterial.material_name} ({verifiedMaterial.material_code})</div></div>
+                    <div><span className="text-muted-foreground">GRN Batch</span><div className="font-semibold">{verifiedMaterial.batch_number}</div></div>
+                    <div><span className="text-muted-foreground">Original QR identity</span><div className="font-mono font-semibold break-all">{verifiedMaterial.material_qr}</div></div>
+                    <div><span className="text-muted-foreground">Quantity issued</span><div className="font-semibold">{verifiedMaterial.quantity_issued} {verifiedMaterial.uom}</div></div>
+                    <div><span className="text-muted-foreground">Quantity received</span><div className="font-semibold">{verifiedMaterial.quantity_received} {verifiedMaterial.uom}</div></div>
+                    <div><span className="text-muted-foreground">Already consumed</span><div className="font-semibold">{verifiedMaterial.quantity_already_consumed} {verifiedMaterial.uom}</div></div>
+                    <div><span className="text-muted-foreground">Remaining consumable</span><div className="font-bold text-primary">{verifiedMaterial.remaining_quantity} {verifiedMaterial.uom}</div></div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label htmlFor="actual-material-consumption" className="text-xs font-semibold">Actual Quantity Consumed ({verifiedMaterial.uom}) *</label>
+                    <Input id="actual-material-consumption" type="number" min="0.0001" max={verifiedMaterial.remaining_quantity}
+                      step="0.0001" value={consumptionQty} onChange={(event) => setConsumptionQty(event.target.value)}
+                      disabled={savingConsumption} className="h-9 font-mono" />
+                  </div>
+                  <Button size="sm" onClick={() => void handleSaveConsumption()} disabled={savingConsumption || !consumptionQty || Number(consumptionQty) <= 0 || Number(consumptionQty) > verifiedMaterial.remaining_quantity}>
+                    {savingConsumption ? "Saving…" : "Confirm Consumption"}
+                  </Button>
+                </div>
+              )}
+              <section className="space-y-2">
+                <h3 className="text-sm font-semibold">Consumption History</h3>
+                {consumptionSummary?.events.length ? (
+                  <div className="overflow-x-auto rounded-lg border"><table className="w-full text-left text-xs">
+                    <thead className="bg-muted/50 text-muted-foreground"><tr>{["Material", "Original QR / Batch", "Quantity", "UOM", "Consumption Time", "Recorded By", "Status"].map((heading) => <th key={heading} className="px-2 py-2 font-semibold">{heading}</th>)}</tr></thead>
+                    <tbody className="divide-y">{consumptionSummary.events.map((event) => <tr key={event.consumption_event_id}>
+                      <td className="px-2 py-2">{event.material_code}</td><td className="px-2 py-2"><span className="font-mono">{event.material_qr}</span><div>{event.batch_number || event.grn_batch_id}</div></td>
+                      <td className="px-2 py-2">{event.consumed_quantity}</td><td className="px-2 py-2">{event.uom}</td><td className="px-2 py-2">{new Date(event.consumed_at).toLocaleString()}</td><td className="px-2 py-2">{event.recorded_by}</td><td className="px-2 py-2 text-emerald-700">{event.status}</td>
+                    </tr>)}</tbody>
+                  </table></div>
+                ) : <p className="text-xs text-muted-foreground">No verified consumption events recorded for this order.</p>}
+                {consumptionSummary?.traceability_required && !consumptionSummary.can_complete && (
+                  <p className="text-xs font-medium text-amber-700">Missing verified consumption: {consumptionSummary.missing_material_codes.join(", ")}</p>
+                )}
+              </section>
+            </div>
+            <DialogFooter><Button variant="outline" onClick={() => setConsumptionOrder(null)} disabled={savingConsumption}>Close</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* ========================================================================= */}
         {/* COMPLETE PRODUCTION MODAL */}

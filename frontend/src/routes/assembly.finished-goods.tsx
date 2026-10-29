@@ -1,12 +1,20 @@
+import { FgLoading, FgSections } from "@/components/wms/fg-sections";
 import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Fragment, useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { AppShell } from "@/components/wms/app-shell";
+import { FgQrInput } from "@/components/wms/fg-qr-input";
+import {
+  OriginalMaterialQrPreview,
+  PrintAllMaterialQrs,
+} from "@/components/wms/original-material-qr";
 import { requireRole } from "@/lib/auth-utils";
 import {
   api,
   type AssemblyFinishedGoodItem,
   type AssemblyFinishedGoodDetail,
+  type AssemblyFinishedGoodsTraceability,
+  type AssemblyFinishedGoodsTraceabilityMaterial,
 } from "@/lib/api-client";
 import QRCode from "qrcode";
 import {
@@ -14,6 +22,7 @@ import {
   Download,
   LayoutDashboard,
   Eye,
+  Layers3,
   PackageCheck,
   Printer,
   QrCode,
@@ -24,6 +33,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -42,10 +52,78 @@ export const Route = createFileRoute("/assembly/finished-goods")({
   component: AssemblyFinishedGoodsPage,
 });
 
+function TraceabilityInfo({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value?: string | number | null;
+  mono?: boolean;
+}) {
+  return (
+    <div className="min-w-0 space-y-1">
+      <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className={cn("break-words font-medium text-foreground", mono && "font-mono")}>
+        {value == null || value === "" ? "Unavailable" : value}
+      </dd>
+    </div>
+  );
+}
+
+// Keep all API quantity precision; the default locale formatter rounds to 3 decimals.
+function traceabilityQuantity(value: number) {
+  return value.toLocaleString(undefined, { maximumFractionDigits: 20 });
+}
+
+function TraceabilityCount({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl border border-border/70 bg-white p-4">
+      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p className="mt-1 text-xl font-semibold tabular-nums text-foreground">
+        {value.toLocaleString()}
+      </p>
+    </div>
+  );
+}
+
+function TraceabilityStatus({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    COMPLETE: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    VERIFIED: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    PARTIAL: "border-amber-200 bg-amber-50 text-amber-800",
+    UNLINKED: "border-slate-300 bg-slate-100 text-slate-700",
+    NOT_AVAILABLE: "border-slate-200 bg-slate-50 text-slate-600",
+  };
+  return (
+    <Badge
+      variant="outline"
+      className={cn("mt-2 rounded-full font-semibold", styles[status] || styles.NOT_AVAILABLE)}
+    >
+      {status}
+    </Badge>
+  );
+}
+
 function AssemblyFinishedGoodsPage() {
   const navigate = useNavigate();
   const [items, setItems] = useState<AssemblyFinishedGoodItem[]>([]);
   const [detailsFg, setDetailsFg] = useState<AssemblyFinishedGoodItem | null>(null);
+  const [traceabilityFg, setTraceabilityFg] = useState<AssemblyFinishedGoodItem | null>(null);
+  const [traceabilityData, setTraceabilityData] =
+    useState<AssemblyFinishedGoodsTraceability | null>(null);
+  const [traceabilityLoading, setTraceabilityLoading] = useState(false);
+  const [traceabilityError, setTraceabilityError] = useState<string | null>(null);
+  const [selectedMaterial, setSelectedMaterial] =
+    useState<AssemblyFinishedGoodsTraceabilityMaterial | null>(null);
+  const [qrMaterial, setQrMaterial] = useState<AssemblyFinishedGoodsTraceabilityMaterial | null>(
+    null,
+  );
+  const [traceabilityRefresh, setTraceabilityRefresh] = useState(0);
+  const [scanFg, setScanFg] = useState<AssemblyFinishedGoodItem | null>(null);
+  const [scannedQr, setScannedQr] = useState("");
+  const [verifyingQr, setVerifyingQr] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [expandedBatches, setExpandedBatches] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -56,6 +134,88 @@ function AssemblyFinishedGoodsPage() {
   const [qrDataUrl, setQrDataUrl] = useState<string>("");
   const [labelLoading, setLabelLoading] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
+  const traceabilityFgId = traceabilityFg?.id;
+
+  useEffect(() => {
+    setSelectedMaterial(null);
+    setQrMaterial(null);
+    if (!traceabilityFgId) {
+      setTraceabilityData(null);
+      setTraceabilityError(null);
+      setTraceabilityLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setTraceabilityData(null);
+    setTraceabilityError(null);
+    setTraceabilityLoading(true);
+    void api
+      .getAssemblyFinishedGoodsTraceability(traceabilityFgId)
+      .then((response) => {
+        if (!cancelled) setTraceabilityData(response);
+      })
+      .catch((error: Error & { status?: number }) => {
+        if (cancelled) return;
+        if (error.status === 401)
+          setTraceabilityError(
+            "Your session has expired. Sign in again to view material traceability.",
+          );
+        else if (error.status === 403)
+          setTraceabilityError(
+            "You do not have permission to view material traceability for this finished-goods batch.",
+          );
+        else if (error.status === 400)
+          setTraceabilityError(
+            "This finished-goods identifier is invalid. Refresh the inventory and select the batch again.",
+          );
+        else if (error.status === 404)
+          setTraceabilityError(
+            "This finished-goods record could not be found. Refresh the inventory and try again.",
+          );
+        else
+          setTraceabilityError(
+            "Material traceability could not be loaded. Check your connection and try again.",
+          );
+      })
+      .finally(() => {
+        if (!cancelled) setTraceabilityLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [traceabilityFgId, traceabilityRefresh]);
+
+  const verifyTraceabilityQr = async () => {
+    if (!scanFg || !scannedQr.trim() || verifyingQr) return;
+    setVerifyingQr(true);
+    setScanError(null);
+    try {
+      // Preserve the existing verification endpoint and original scanned payload.
+      const result = await api.verifyAssemblyFinishedGoodsQr(scanFg.id, scannedQr);
+      if (result.status !== "LABEL_VERIFIED" || result.fg_id !== scanFg.id) {
+        setScanError("The QR could not be verified for this finished-goods batch.");
+        return;
+      }
+      setTraceabilityFg(scanFg);
+      setScanFg(null);
+    } catch (error) {
+      const status = (error as { status?: number })?.status;
+      setScanError(
+        status === 401
+          ? "Your session has expired. Sign in again to verify this QR."
+          : status === 403
+            ? "You do not have permission to verify this finished-goods QR."
+            : status === 422
+              ? "This QR does not match the selected finished-goods batch. Scan its original label."
+              : status === 409
+                ? "This batch is not eligible for QR verification. Select a QC-approved batch."
+                : "The QR could not be verified. Check your connection and try again.",
+      );
+    } finally {
+      setVerifyingQr(false);
+    }
+  };
 
   const fetchItems = useCallback(async (isManual = false, background = false) => {
     if (isManual) setRefreshing(true);
@@ -229,6 +389,7 @@ function AssemblyFinishedGoodsPage() {
       }
     >
       <div className="min-w-0 space-y-6">
+        <FgLoading />
         {/* Main Work Center Table Card */}
         <div className="min-w-0 rounded-2xl border border-border/70 bg-card p-5 shadow-soft space-y-4">
           {/* Header & Controls */}
@@ -315,7 +476,8 @@ function AssemblyFinishedGoodsPage() {
                     </th>
                     <th scope="col" className="py-3 px-4">
                       Status
-                    <InformationTooltip help="finishedGoods" /></th>
+                      <InformationTooltip help="finishedGoods" />
+                    </th>
                     <th scope="col" className="py-3 px-4 text-right">
                       Actions
                     </th>
@@ -361,6 +523,7 @@ function AssemblyFinishedGoodsPage() {
                         >
                           {(fg.available_quantity ?? 0) > 0 ? "AVAILABLE" : "OUT OF STOCK"}
                         </span>
+                        {((fg.batches || [fg]) as any[]).filter(b => b.main_fg_id).map(b => <p key={b.id} className="mt-1 text-[11px]">{b.main_fg_id}: {b.dispatch_status} ({b.dispatched_sections}/8)</p>)}
                       </td>
 
                       {/* Label Actions */}
@@ -419,13 +582,18 @@ function AssemblyFinishedGoodsPage() {
               <table className="w-full min-w-[650px] text-left text-xs">
                 <thead className="sticky top-0 z-10 bg-muted text-[11px] uppercase text-muted-foreground">
                   <tr>
-                    {["Batch ID", "Manufacturing Date", "Available Qty", "Reserved Qty", "Status", "QR Label"].map(
-                      (label) => (
-                        <th key={label} className="border-b px-3 py-3 last:text-right">
-                          {label}
-                        </th>
-                      ),
-                    )}
+                    {[
+                      "Batch ID",
+                      "Manufacturing Date",
+                      "Available Qty",
+                      "Reserved Qty",
+                      "Status",
+                      "QR Label",
+                    ].map((label) => (
+                      <th key={label} className="border-b px-3 py-3 last:text-right">
+                        {label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
@@ -474,31 +642,61 @@ function AssemblyFinishedGoodsPage() {
                                 reserved > 0
                                   ? "border-blue-200 bg-blue-50 text-blue-700"
                                   : available > 0
-                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300"
-                                  : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300",
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300"
+                                    : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300",
                               )}
                             >
-                              {reserved > 0 ? (available > 0 ? "Partially Reserved" : "Reserved for Dispatch") : available > 0 ? "Available" : "Out of stock"}
+                              {reserved > 0
+                                ? available > 0
+                                  ? "Partially Reserved"
+                                  : "Reserved for Dispatch"
+                                : available > 0
+                                  ? "Available"
+                                  : "Out of stock"}
                             </span>
                           </td>
                           <td className="px-3 py-3 text-right">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 rounded-xl text-xs gap-1.5"
-                              onClick={() => {
-                                setDetailsFg(null);
-                                void handleOpenPrintModal(batch);
-                              }}
-                            >
-                              <QrCode className="size-3.5" />
-                              View/Print QR
-                            </Button>
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 rounded-xl text-xs gap-1.5 border-blue-200 text-blue-700 hover:bg-blue-50"
+                                onClick={() => setTraceabilityFg(batch)}
+                              >
+                                <Layers3 className="size-3.5" />
+                                Material Traceability
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 rounded-xl text-xs gap-1.5"
+                                onClick={() => {
+                                  setScannedQr("");
+                                  setScanError(null);
+                                  setScanFg(batch);
+                                }}
+                              >
+                                <QrCode className="size-3.5" /> Scan FG QR
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 rounded-xl text-xs gap-1.5"
+                                onClick={() => {
+                                  setDetailsFg(null);
+                                  void handleOpenPrintModal(batch);
+                                }}
+                              >
+                                <QrCode className="size-3.5" />
+                                View/Print QR
+                              </Button>
+                            </div>
                           </td>
                         </tr>
                         {expanded && (
                           <tr id={`batch-details-${batch.id}`} className="bg-muted/20">
                             <td colSpan={6} className="p-4">
+                              <FgSections sections={(batch as any).sections} />
                               <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
                                 {[
                                   ["Order Number", batch.order_number],
@@ -555,6 +753,458 @@ function AssemblyFinishedGoodsPage() {
           </DialogContent>
         </Dialog>
 
+        <Dialog
+          open={!!scanFg}
+          onOpenChange={(open) => {
+            if (!open && !verifyingQr) setScanFg(null);
+          }}
+        >
+          <DialogContent className="rounded-2xl sm:max-w-xl">
+            <DialogHeader>
+              <DialogTitle>Verify Finished Goods QR</DialogTitle>
+              <DialogDescription>
+                Scan the original label for{" "}
+                {scanFg?.batch_number || scanFg?.serial_number || "the selected batch"} to view its
+                material traceability.
+              </DialogDescription>
+            </DialogHeader>
+            <FgQrInput
+              value={scannedQr}
+              onChange={(value) => {
+                setScannedQr(value);
+                setScanError(null);
+              }}
+              disabled={verifyingQr}
+              inputId="fg-traceability-qr"
+            />
+            {scanError && (
+              <p role="alert" className="text-sm text-rose-700">
+                {scanError}
+              </p>
+            )}
+            <DialogFooter>
+              <Button variant="outline" disabled={verifyingQr} onClick={() => setScanFg(null)}>
+                Cancel
+              </Button>
+              <Button
+                disabled={verifyingQr || !scannedQr.trim()}
+                onClick={() => void verifyTraceabilityQr()}
+              >
+                {verifyingQr ? "Verifying..." : "Verify QR"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={!!traceabilityFg}
+          onOpenChange={(open) => {
+            if (!open) {
+              setTraceabilityFg(null);
+              setSelectedMaterial(null);
+            }
+          }}
+        >
+          <DialogContent className="flex w-[calc(100vw-2rem)] max-w-6xl max-h-[88dvh] flex-col gap-0 overflow-hidden rounded-2xl p-0">
+            <DialogHeader className="shrink-0 border-b border-border/60 p-5 pr-10">
+              <DialogTitle className="flex items-center gap-2 text-foreground">
+                <Layers3 className="size-5 text-primary" /> Material Traceability
+              </DialogTitle>
+              <DialogDescription className="text-xs">
+                Original GRN material batches consumed to manufacture this finished-goods batch.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="min-h-0 flex-1 overflow-auto p-5 space-y-5">
+              {traceabilityLoading && (
+                <div
+                  role="status"
+                  className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground"
+                >
+                  <RefreshCw className="size-4 animate-spin text-primary" />
+                  Loading material traceability...
+                </div>
+              )}
+
+              {traceabilityError && !traceabilityLoading && (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"
+                >
+                  <p>{traceabilityError}</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => setTraceabilityRefresh((value) => value + 1)}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              )}
+
+              <FgSections sections={(traceabilityData?.finished_goods as any)?.sections} />
+              {traceabilityData && !traceabilityLoading && (
+                <>
+                  <section aria-labelledby="fg-traceability-info-heading" className="space-y-2">
+                    <h3 id="fg-traceability-info-heading" className="text-sm font-semibold">
+                      Finished Goods Information
+                    </h3>
+                    <dl className="grid grid-cols-2 gap-3 rounded-xl border border-border/70 bg-white p-4 text-xs sm:grid-cols-4">
+                      <TraceabilityInfo
+                        label="Finished Goods Batch"
+                        value={traceabilityData.finished_goods.fg_batch_number}
+                      />
+                      <TraceabilityInfo
+                        label="Product Name"
+                        value={traceabilityData.finished_goods.product_name}
+                      />
+                      <TraceabilityInfo
+                        label="Product Code"
+                        value={traceabilityData.finished_goods.product_code}
+                        mono
+                      />
+                      <TraceabilityInfo
+                        label="Serial Number"
+                        value={traceabilityData.finished_goods.serial_number}
+                        mono
+                      />
+                      <TraceabilityInfo
+                        label="Finished Quantity"
+                        value={`${traceabilityData.finished_goods.finished_quantity} ${traceabilityData.finished_goods.uom}`}
+                      />
+                      <TraceabilityInfo
+                        label="QC Status"
+                        value={traceabilityData.finished_goods.qc_status}
+                      />
+                      <TraceabilityInfo
+                        label="Assembly Order"
+                        value={traceabilityData.assembly.assembly_order_number}
+                        mono
+                      />
+                      <TraceabilityInfo
+                        label="Production Status"
+                        value={traceabilityData.assembly.production_status}
+                      />
+                    </dl>
+                  </section>
+
+                  <section aria-labelledby="fg-traceability-summary-heading" className="space-y-2">
+                    <h3 id="fg-traceability-summary-heading" className="text-sm font-semibold">
+                      Traceability Summary
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      <div className="col-span-2 rounded-xl border border-border/70 bg-white p-4 sm:col-span-1">
+                        <p className="text-[11px] text-muted-foreground">Overall Status</p>
+                        <TraceabilityStatus status={traceabilityData.traceability.overall_status} />
+                      </div>
+                      <TraceabilityCount
+                        label="Total Material Batches"
+                        value={traceabilityData.traceability.total_material_batches}
+                      />
+                      <TraceabilityCount
+                        label="Verified Material Batches"
+                        value={traceabilityData.traceability.verified_material_batches}
+                      />
+                      <TraceabilityCount
+                        label="Unlinked Material Records"
+                        value={traceabilityData.traceability.unlinked_material_records}
+                      />
+                    </div>
+                    {traceabilityData.traceability.data_quality_warnings.length > 0 && (
+                      <ul className="space-y-1 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                        {traceabilityData.traceability.data_quality_warnings.map(
+                          (warning, index) => (
+                            <li key={`${index}-${warning}`}>{warning}</li>
+                          ),
+                        )}
+                      </ul>
+                    )}
+                    {["NOT_AVAILABLE", "UNLINKED"].includes(
+                      traceabilityData.traceability.overall_status,
+                    ) && (
+                      <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                        Traceability information is unavailable for this historical production
+                        record.
+                      </p>
+                    )}
+                    {traceabilityData.traceability.overall_status === "PARTIAL" && (
+                      <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                        Some material history is verified. Unlinked or missing records are listed
+                        separately below.
+                      </p>
+                    )}
+                  </section>
+
+                  <section aria-labelledby="fg-consumed-materials-heading" className="space-y-2">
+                    <h3 id="fg-consumed-materials-heading" className="text-sm font-semibold">
+                      Consumed Materials
+                    </h3>
+                    <PrintAllMaterialQrs
+                      key={traceabilityData.finished_goods.fg_id}
+                      data={traceabilityData}
+                    />
+                    {traceabilityData.consumed_materials.length === 0 ? (
+                      <p className="rounded-xl border border-border/70 bg-white p-5 text-center text-xs text-muted-foreground">
+                        No verified material batch records are available.
+                      </p>
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl border border-border/70 bg-white">
+                        <table className="w-full min-w-[1050px] text-left text-xs">
+                          <thead className="bg-muted/50 text-[10px] uppercase text-muted-foreground">
+                            <tr>
+                              {[
+                                "Material Name",
+                                "Material Code",
+                                "GRN Batch Number",
+                                "Actual Quantity Consumed",
+                                "UOM",
+                                "Original Material QR Reference",
+                                "Traceability Status",
+                                "Action",
+                              ].map((heading) => (
+                                <th key={heading} className="border-b px-3 py-3">
+                                  {heading}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border/60">
+                            {traceabilityData.consumed_materials.map((material) => (
+                              <tr
+                                key={`${material.material_code}-${material.grn_batch_id}-${material.original_qr_identity}`}
+                                className="align-top"
+                              >
+                                <td className="px-3 py-3 font-medium">{material.material_name}</td>
+                                <td className="px-3 py-3 font-mono">{material.material_code}</td>
+                                <td className="px-3 py-3 font-mono">
+                                  {material.batch_number || "Unavailable"}
+                                </td>
+                                <td className="px-3 py-3 text-right tabular-nums font-semibold">
+                                  {traceabilityQuantity(material.quantity_consumed)}
+                                </td>
+                                <td className="px-3 py-3">{material.uom}</td>
+                                <td
+                                  className="max-w-48 truncate px-3 py-3 font-mono"
+                                  title={material.original_qr_identity}
+                                >
+                                  {material.original_qr_identity}
+                                </td>
+                                <td className="px-3 py-3">
+                                  <TraceabilityStatus status="VERIFIED" />
+                                </td>
+                                <td className="px-3 py-3">
+                                  <div className="flex flex-wrap gap-2">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 whitespace-nowrap text-[11px]"
+                                      onClick={() => setSelectedMaterial(material)}
+                                    >
+                                      View Details
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 whitespace-nowrap text-[11px]"
+                                      onClick={() => setQrMaterial(material)}
+                                    >
+                                      View Original QR
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </section>
+
+                  {traceabilityData.unlinked_material_records.length > 0 && (
+                    <section aria-labelledby="fg-unlinked-materials-heading" className="space-y-2">
+                      <h3 id="fg-unlinked-materials-heading" className="text-sm font-semibold">
+                        Legacy / Unlinked Material Records
+                      </h3>
+                      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-slate-50">
+                        <table className="w-full min-w-[650px] text-left text-xs">
+                          <thead className="text-[10px] uppercase text-muted-foreground">
+                            <tr>
+                              {[
+                                "Material Code",
+                                "Batch Reference",
+                                "Quantity",
+                                "UOM",
+                                "Original QR Reference",
+                                "Reason",
+                                "Status",
+                              ].map((heading) => (
+                                <th key={heading} className="border-b px-3 py-3">
+                                  {heading}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200">
+                            {traceabilityData.unlinked_material_records.map((record, index) => (
+                              <tr
+                                key={
+                                  record.consumption_id ||
+                                  record.consumption_event_id ||
+                                  `${record.material_code}-${index}`
+                                }
+                                className="align-top"
+                              >
+                                <td className="px-3 py-3 font-mono">{record.material_code}</td>
+                                <td className="px-3 py-3 font-mono">
+                                  {record.batch_number || "Unverified"}
+                                </td>
+                                <td className="px-3 py-3 text-right tabular-nums">
+                                  {traceabilityQuantity(record.quantity_consumed)}
+                                </td>
+                                <td className="px-3 py-3">{record.uom}</td>
+                                <td className="px-3 py-3 font-mono">
+                                  {record.original_material_qr_reference || "Unavailable"}
+                                </td>
+                                <td className="max-w-md px-3 py-3">{record.reason}</td>
+                                <td className="px-3 py-3">
+                                  <TraceabilityStatus status="UNLINKED" />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  )}
+                </>
+              )}
+            </div>
+
+            <DialogFooter className="shrink-0 border-t border-border/60 px-5 py-3">
+              <Button variant="outline" size="sm" onClick={() => setTraceabilityFg(null)}>
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {qrMaterial && (
+          <OriginalMaterialQrPreview
+            key={`${qrMaterial.grn_batch_id}-${qrMaterial.original_qr_identity}`}
+            material={qrMaterial}
+            onClose={() => setQrMaterial(null)}
+          />
+        )}
+
+        <Dialog
+          open={!!selectedMaterial}
+          onOpenChange={(open) => !open && setSelectedMaterial(null)}
+        >
+          <DialogContent className="max-h-[85dvh] overflow-auto rounded-2xl sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Material Batch Details</DialogTitle>
+              <DialogDescription>Original GRN batch and consumption evidence.</DialogDescription>
+            </DialogHeader>
+            {selectedMaterial && (
+              <div className="space-y-5">
+                <section className="space-y-2">
+                  <h3 className="text-sm font-semibold">Material Information</h3>
+                  <dl className="grid grid-cols-2 gap-3 rounded-xl border border-border/70 bg-white p-4 text-xs sm:grid-cols-3">
+                    <TraceabilityInfo
+                      label="Material Name"
+                      value={selectedMaterial.material_name}
+                    />
+                    <TraceabilityInfo
+                      label="Material Code"
+                      value={selectedMaterial.material_code}
+                      mono
+                    />
+                    <TraceabilityInfo
+                      label="GRN Batch Number"
+                      value={selectedMaterial.batch_number}
+                      mono
+                    />
+                    <TraceabilityInfo
+                      label="GRN Reference"
+                      value={
+                        selectedMaterial.grn_reference.grn_number ||
+                        selectedMaterial.grn_reference.grn_id
+                      }
+                      mono
+                    />
+                    <TraceabilityInfo
+                      label="Supplier Name"
+                      value={selectedMaterial.supplier.supplier_name}
+                    />
+                    <TraceabilityInfo
+                      label="Actual Quantity Consumed"
+                      value={`${traceabilityQuantity(selectedMaterial.quantity_consumed)} ${selectedMaterial.uom}`}
+                    />
+                    <TraceabilityInfo label="Unit of Measurement" value={selectedMaterial.uom} />
+                  </dl>
+                </section>
+                <section className="space-y-2">
+                  <h3 className="text-sm font-semibold">Original QR Information</h3>
+                  <dl className="space-y-3 rounded-xl border border-border/70 bg-white p-4 text-xs">
+                    <TraceabilityInfo
+                      label="Original QR Identity / Reference"
+                      value={selectedMaterial.original_qr_identity}
+                      mono
+                    />
+                    <TraceabilityInfo
+                      label="Original QR Payload"
+                      value={
+                        selectedMaterial.original_qr_payload
+                          ? "Available in original GRN record"
+                          : "Unavailable"
+                      }
+                    />
+                    {selectedMaterial.original_qr_payload && (
+                      <div>
+                        <dt className="mb-1 text-muted-foreground">Stored Payload (read-only)</dt>
+                        <dd className="break-all rounded-lg bg-muted/50 p-3 font-mono text-[11px]">
+                          {selectedMaterial.original_qr_payload}
+                        </dd>
+                      </div>
+                    )}
+                    <div>
+                      <dt className="mb-2 text-muted-foreground">
+                        Linked Consumption Event References
+                      </dt>
+                      <dd className="space-y-2">
+                        {selectedMaterial.consumption_event_ids.map((eventId) => {
+                          const event = traceabilityData?.consumption_events.find(
+                            (item) => item.consumption_event_id === eventId,
+                          );
+                          return (
+                            <div
+                              key={eventId}
+                              className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/50 p-2"
+                            >
+                              <span className="break-all font-mono">{eventId}</span>
+                              <span className="whitespace-nowrap tabular-nums">
+                                {event
+                                  ? `${traceabilityQuantity(event.quantity_consumed)} ${event.uom} · ${new Date(event.consumed_at).toLocaleString()}`
+                                  : "Event details unavailable"}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSelectedMaterial(null)}>
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* PRINT QR LABEL MODAL */}
         {/* ========================================================================= */}
         <Dialog open={!!selectedFg} onOpenChange={(open) => !open && setSelectedFg(null)}>
@@ -577,6 +1227,7 @@ function AssemblyFinishedGoodsPage() {
               </div>
             ) : selectedFg ? (
               <div className="space-y-4 pt-2">
+                <FgSections sections={(selectedFg as any).sections} />
                 {/* Visual Label Preview */}
                 <div
                   ref={printRef}

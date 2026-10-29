@@ -9,7 +9,8 @@ from sqlalchemy import select, text
 
 from app.database.session import AsyncSessionFactory, engine
 from app.main import create_app
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
+    MaterialModel,
     MaterialStockModel,
     NotificationModel,
 )
@@ -53,6 +54,8 @@ async def cleanup_sk_test():
         hu_b_id = created.get("hu_b_id")
         rl_a_id = created.get("rl_a_id")
         rl_b_id = created.get("rl_b_id")
+        grn_line_a_id = created.get("grn_line_a_id")
+        grn_line_b_id = created.get("grn_line_b_id")
         da_id = created.get("da_id")
         grn_id = created.get("grn_id")
         ge_id = created.get("ge_id")
@@ -87,6 +90,9 @@ async def cleanup_sk_test():
 
         if rl_a_id and rl_b_id:
             await session.execute(text("DELETE FROM receiving_line WHERE id IN (:ra, :rb);"), {"ra": rl_a_id, "rb": rl_b_id})
+
+        if grn_line_a_id and grn_line_b_id:
+            await session.execute(text("DELETE FROM grn_line WHERE id IN (:ga, :gb);"), {"ga": grn_line_a_id, "gb": grn_line_b_id})
 
         if da_id:
             await session.execute(text("DELETE FROM dock_assignment WHERE id = :da;"), {"da": da_id})
@@ -146,6 +152,8 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
     da_id = uuid.uuid4()
     rl_a_id = uuid.uuid4()
     rl_b_id = uuid.uuid4()
+    grn_line_a_id = uuid.uuid4()
+    grn_line_b_id = uuid.uuid4()
     grn_id = uuid.uuid4()
     grn_number = f"TEST_SK_GRN_{uid_sfx}"
 
@@ -194,6 +202,14 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
         await conn.execute(
             text("INSERT INTO grn (id, grn_number, warehouse_id, status) VALUES (:id, :grn_num, 'Main Warehouse', 'GRN_POSTED')"),
             {"id": grn_id, "grn_num": grn_number},
+        )
+        await conn.execute(
+            text("INSERT INTO grn_line (id, grn_id, item_code, material_name, uom, received_quantity, good_quantity, accepted_quantity) VALUES (:id, :grn_id, :item_code, :material_name, 'PCS', 10, 10, 10)"),
+            {"id": grn_line_a_id, "grn_id": grn_id, "item_code": mat_a_code, "material_name": "Industrial Motor 100"},
+        )
+        await conn.execute(
+            text("INSERT INTO grn_line (id, grn_id, item_code, material_name, uom, received_quantity, good_quantity, accepted_quantity) VALUES (:id, :grn_id, :item_code, :material_name, 'PCS', 10, 10, 10)"),
+            {"id": grn_line_b_id, "grn_id": grn_id, "item_code": mat_b_code, "material_name": "Industrial Motor 200"},
         )
 
     async with AsyncSessionFactory() as session:
@@ -274,6 +290,23 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
         await session.flush()
 
         # 4. Seed Material Stock Record
+        session.add_all([
+            MaterialModel(
+                material_code=mat_a_code,
+                material_name="Industrial Motor 100",
+                category="Mechanical",
+                base_uom="PCS",
+                status="Active",
+            ),
+            MaterialModel(
+                material_code=mat_b_code,
+                material_name="Industrial Motor 200",
+                category="Mechanical",
+                base_uom="PCS",
+                status="Active",
+            ),
+        ])
+        await session.flush()
         stock_a = MaterialStockModel(
             material_code=mat_a_code,
             material_name="Industrial Motor 100",
@@ -344,6 +377,8 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
         "hu_b_id": hu_b.id,
         "rl_a_id": rl_a_id,
         "rl_b_id": rl_b_id,
+        "grn_line_a_id": grn_line_a_id,
+        "grn_line_b_id": grn_line_b_id,
         "da_id": da_id,
         "grn_id": grn_id,
         "ge_id": ge_id,
@@ -384,7 +419,7 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
     )
     assert resp_assign_a.status_code == 200, resp_assign_a.text
     assert resp_assign_a.json()["destination_store_id"] == store_a_id
-    assert resp_assign_a.json()["status"] == "ASSIGNED_TO_STORE"
+    assert resp_assign_a.json()["status"] == "ASSIGNED"
 
     resp_assign_b = await client.put(
         f"/api/storage/putaway-tasks/{task_b_id}/location",
@@ -393,7 +428,7 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
     )
     assert resp_assign_b.status_code == 200, resp_assign_b.text
     assert resp_assign_b.json()["destination_store_id"] == store_b_id
-    assert resp_assign_b.json()["status"] == "ASSIGNED_TO_STORE"
+    assert resp_assign_b.json()["status"] == "ASSIGNED"
 
     # Scenario 11: Inventory available is NOT updated merely on assignment
     async with AsyncSessionFactory() as session:
@@ -484,7 +519,7 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
         headers=headers_keeper_a,
     )
     assert resp_start_a.status_code == 200, resp_start_a.text
-    assert resp_start_a.json()["status"] == "PUTAWAY_IN_PROGRESS"
+    assert resp_start_a.json()["status"] == "IN_PROGRESS"
 
     # Confirm putaway
     resp_complete_a = await client.post(
@@ -498,7 +533,7 @@ async def test_complete_store_keeper_putaway_lifecycle_and_security(client: Asyn
     )
     assert resp_complete_a.status_code == 200, resp_complete_a.text
     comp_data = resp_complete_a.json()
-    assert comp_data["status"] == "PUTAWAY_COMPLETED"
+    assert comp_data["status"] == "COMPLETED"
     assert comp_data["inventory_available_after"] == 10.0
 
     # Verify inventory is now available in MaterialStock

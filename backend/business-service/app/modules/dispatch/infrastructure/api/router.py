@@ -499,14 +499,32 @@ async def scan_dispatch_package(
         raise HTTPException(409, detail=f"Dispatch is not ready for loading: {order.status}")
     if order.dispatch_type == "SUPPLIER_FINISHED_GOODS":
         pickup = (await db.execute(select(FinishedGoodsRequestModel).where(FinishedGoodsRequestModel.request_number == order.order_number))).scalar_one_or_none()
-        visit = (await db.execute(select(FinishedGoodsPickupGateVisitModel).where(
+        visits = (await db.execute(select(FinishedGoodsPickupGateVisitModel).where(
             FinishedGoodsPickupGateVisitModel.request_id == pickup.id,
             FinishedGoodsPickupGateVisitModel.status == "INSIDE_FACILITY",
-        ))).scalar_one_or_none() if pickup else None
-        if not visit:
+        ))).scalars().all() if pickup else []
+        if not visits:
             raise HTTPException(409, detail="Supplier vehicle must complete Gate Entry before loading")
-        if visit.vehicle_number.strip().upper() != pickup.vehicle_number.strip().upper() or visit.driver_name.strip().lower() != pickup.driver_name.strip().lower():
-            raise HTTPException(409, detail="Gate Entry vehicle or driver does not match the supplier pickup request")
+        approved_transports = [
+            entry for entry in (pickup.transport_entries or [])
+            if isinstance(entry, dict) and entry.get("vehicle_number")
+        ] if pickup else []
+        if not approved_transports and pickup and pickup.vehicle_number:
+            approved_transports = [{
+                "vehicle_number": pickup.vehicle_number,
+                "driver_name": pickup.driver_name,
+            }]
+        if approved_transports:
+            normalize = lambda value: "".join(ch for ch in str(value or "").upper() if ch.isalnum())
+            allowed_pairs = {
+                (normalize(entry.get("vehicle_number")), " ".join(str(entry.get("driver_name") or "").split()).casefold())
+                for entry in approved_transports
+            }
+            if not any(
+                (normalize(visit.vehicle_number), " ".join(str(visit.driver_name or "").split()).casefold()) in allowed_pairs
+                for visit in visits
+            ):
+                raise HTTPException(409, detail="Supplier Gate Entry vehicle and driver do not match the approved pickup assignment")
     qr = req.qr_code.strip()
     allocations = (await db.execute(select(AssemblyFinishedGoodsAllocationModel).where(
         AssemblyFinishedGoodsAllocationModel.dispatch_order_id == order.id,

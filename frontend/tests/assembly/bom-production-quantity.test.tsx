@@ -4,10 +4,10 @@ vi.mock("@tanstack/react-router", () => ({ createFileRoute: () => (options: any)
 vi.mock("@/components/wms/app-shell", () => ({ AppShell: ({ children, actions }: any) => <main>{actions}{children}</main> }));
 vi.mock("@/lib/auth-utils", () => ({ requireRole: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-vi.mock("@/lib/api-client", () => ({ api: { getAssemblyMaterialRequests: vi.fn(), getAssemblyProducts: vi.fn(), getMaterialComponents: vi.fn(), getProductBOM: vi.fn(), createAssemblyMaterialRequest: vi.fn(), addProductBOMMaterial: vi.fn() } }));
+vi.mock("@/lib/api-client", () => ({ api: { getAssemblyMaterialRequests: vi.fn(), getAssemblyAvailableMaterials: vi.fn().mockResolvedValue([]), getAssemblyProducts: vi.fn(), getMaterialComponents: vi.fn(), getProductBOM: vi.fn(), createAssemblyMaterialRequest: vi.fn(), addProductBOMMaterial: vi.fn() } }));
 import { Route } from "@/routes/assembly.material-requests";
 import { api } from "@/lib/api-client";
-const preview = (quantity: number) => ({ product_code: "FG-TEST", target_quantity: quantity, bom_number: "BOM-TEST", materials: [{ material_code: "MAT-100", material_name: "Pipe", quantity_per_unit: 100, required_quantity: quantity * 100, uom: "PCS" }] });
+const preview = (quantity: number) => ({ product_code: "FG-TEST", target_quantity: quantity, bom_number: "BOM-TEST", materials: [{ material_code: "MAT-100", material_name: "Pipe", quantity_per_unit: 100, required_quantity: quantity * 100, available_quantity: 100000, uom: "PCS" }] });
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(api.getAssemblyMaterialRequests).mockResolvedValue([]);
@@ -39,14 +39,18 @@ it("ignores a late response for the old production quantity", async () => {
 });
 
 it("adds a material beside the preview and refreshes calculated requirements", async () => {
+  vi.mocked(api.getAssemblyAvailableMaterials).mockResolvedValue([{ code:"MAT-ADD", material_code:"MAT-ADD", material_name:"Battery", available_quantity:1000, uom:"PCS" }] as any);
   vi.mocked(api.getMaterialComponents).mockResolvedValue([{code:"MAT-ADD",name:"Battery",uom:"PCS"}] as any);
   vi.mocked(api.addProductBOMMaterial).mockResolvedValue({material_code:"MAT-ADD",quantity_per_unit:2,uom:"PCS"});
   await open();await screen.findByText("1000");
   fireEvent.click(screen.getByRole("button",{name:"Add Material"}));
   expect(screen.getByRole("button",{name:"Submit Request to Warehouse"})).toBeDisabled();
-  fireEvent.change(screen.getByLabelText("Raw Material"),{target:{value:"MAT-ADD"}});
+  const material = screen.getByLabelText("Raw Material");
+  await waitFor(() => expect(material).toBeEnabled());
+  await screen.findByRole("option", { name: /MAT-ADD/ });
+  fireEvent.change(material,{target:{value:"MAT-ADD"}});
   fireEvent.change(screen.getByLabelText("Qty per Product"),{target:{value:"2"}});
-  vi.mocked(api.getProductBOM).mockImplementation(async (_code,qty) => ({...preview(qty!),materials:[...preview(qty!).materials,{material_code:"MAT-ADD",material_name:"Battery",quantity_per_unit:2,required_quantity:qty!*2,uom:"PCS"}]} as any));
+  vi.mocked(api.getProductBOM).mockImplementation(async (_code,qty) => ({...preview(qty!),materials:[...preview(qty!).materials,{material_code:"MAT-ADD",material_name:"Battery",quantity_per_unit:2,required_quantity:qty!*2,available_quantity:1000,uom:"PCS"}]} as any));
   fireEvent.click(screen.getByRole("button",{name:"Save Material"}));
   await waitFor(()=>expect(api.addProductBOMMaterial).toHaveBeenCalledWith("FG-TEST",{material_code:"MAT-ADD",quantity_per_unit:2}));
   expect(await screen.findByText("MAT-ADD")).toBeInTheDocument();expect(screen.getByText("20")).toBeInTheDocument();

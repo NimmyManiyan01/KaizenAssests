@@ -9,9 +9,17 @@ Integration tests for FastAPI REST APIs:
 - Health and Ops Endpoints (/health, /health/ready)
 """
 import base64
-import pytest
-from httpx import ASGITransport, AsyncClient
+from datetime import date, timedelta
+from decimal import Decimal
+import uuid
 
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
+
+from app.common.persistence.models import PurchaseOrderItemModel, PurchaseOrderModel, SupplierModel
+from app.database.session import AsyncSessionFactory
 from app.main import app
 
 
@@ -27,6 +35,81 @@ async def client():
         base_url="http://testserver",
     ) as ac:
         yield ac
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def seed_gate_purchase_orders():
+    """Provide deterministic PO master records for Gate API integration tests."""
+    po_numbers = (
+        "PO-1001",
+        "PO-1003",
+        "PO-1003-DIFF",
+        "PO-1004",
+        "PO-1005",
+    )
+    async with AsyncSessionFactory() as session:
+        supplier = await session.scalar(
+            select(SupplierModel).where(SupplierModel.supplier_code == "GATE-TEST-SUPPLIER")
+        )
+        if supplier is None:
+            supplier = SupplierModel(
+                id=uuid.uuid4(),
+                supplier_name="Gate Test Supplier",
+                registered_company_name="Gate Test Supplier Ltd",
+                vendor_type="MANUFACTURER",
+                category=["RAW_MATERIAL"],
+                industry="MANUFACTURING",
+                gstin="GATE-TEST-GSTIN-001",
+                supplier_code="GATE-TEST-SUPPLIER",
+                main_materials=["GATE-TEST-MATERIAL"],
+                status="Active",
+            )
+            session.add(supplier)
+            await session.flush()
+        for po_number in po_numbers:
+            purchase_order = await session.scalar(
+                select(PurchaseOrderModel).where(PurchaseOrderModel.po_number == po_number)
+            )
+            if purchase_order is None:
+                purchase_order = PurchaseOrderModel(
+                    id=uuid.uuid4(),
+                    po_number=po_number,
+                    po_date=date.today(),
+                    status="APPROVED",
+                    supplier_id=supplier.id,
+                    supplier_name="Gate Test Supplier",
+                    total_amount=Decimal("100.00"),
+                    expected_delivery_date=date.today() + timedelta(days=30),
+                )
+                session.add(purchase_order)
+                await session.flush()
+            else:
+                purchase_order.supplier_id = supplier.id
+                purchase_order.supplier_name = "Gate Test Supplier"
+                purchase_order.status = "APPROVED"
+
+            item = await session.scalar(
+                select(PurchaseOrderItemModel).where(
+                    PurchaseOrderItemModel.purchase_order_id == purchase_order.id
+                )
+            )
+            if item is None:
+                item = PurchaseOrderItemModel(
+                    id=uuid.uuid4(),
+                    purchase_order_id=purchase_order.id,
+                    material_code="GATE-TEST-MATERIAL",
+                    material_name="Gate Test Material",
+                    quantity=Decimal("100"),
+                    unit_price=Decimal("1"),
+                    uom="PCS",
+                )
+                session.add(item)
+        await session.commit()
+
+
+@pytest.fixture
+def gate_test_vehicle():
+    return f"TS-09-EA-{uuid.uuid4().int % 10000:04d}"
 
 
 import io
@@ -75,13 +158,12 @@ async def test_anpr_ocr_preview_full_match(client: AsyncClient):
 
 @pytest.mark.anyio
 async def test_purchase_order_lookup_endpoint(client: AsyncClient):
-    """Verify /api/gate/test/purchase-orders returns stored PO records."""
-    response = await client.get("/api/gate/test/purchase-orders")
+    """Verify the canonical purchase-order lookup returns a stored PO."""
+    response = await client.get("/api/gate/purchase-orders/PO-1001")
     assert response.status_code == 200, f"PO List failed: {response.text}"
     records = response.json()
-    assert isinstance(records, list)
-    po_numbers = [r["poNumber"] for r in records]
-    assert "PO-1001" in po_numbers
+    assert records["poNumber"] == "PO-1001"
+    assert records["supplierName"] == "Gate Test Supplier"
 
 
 
@@ -102,17 +184,14 @@ async def test_anpr_ocr_preview_unscheduled_arrival(client: AsyncClient):
 
 
 @pytest.mark.anyio
-async def test_gate_entry_lifecycle_create_verify_lookup(client: AsyncClient):
-    """Test full Gate Entry lifecycle: Reset -> Create -> Lookup -> Supervisor Approval."""
-    # 1. Reset dev entries
-    reset_res = await client.post("/api/gate-entries/reset-dev-entries")
-    assert reset_res.status_code == 200
-
-    # 2. Create Gate Entry
+async def test_gate_entry_lifecycle_create_verify_lookup(client: AsyncClient, gate_test_vehicle: str):
+    """Test Gate Entry create, lookup and supervisor approval."""
     img_b64 = make_dummy_image_base64()
     create_payload = {
-        "vehiclePlate": "KA-05-MN-5678",
+        "vehiclePlate": gate_test_vehicle,
         "poNumber": "PO-1001",
+        "supplierName": "Gate Test Supplier",
+        "totalQuantity": 100,
         "documentImageBase64": img_b64,
     }
 
@@ -123,10 +202,10 @@ async def test_gate_entry_lifecycle_create_verify_lookup(client: AsyncClient):
     entry_id = created_data["id"]
     gate_entry_number = created_data["gateEntryNumber"]
     assert entry_id is not None
-    assert gate_entry_number.startswith("GE-")
-    assert created_data["vehiclePlate"] == "KA-05-MN-5678"
+    assert gate_entry_number and len(gate_entry_number) == 6
+    assert created_data["vehiclePlate"] == gate_test_vehicle
     assert created_data["poNumber"] == "PO-1001"
-    assert created_data["status"] == "PO_VERIFIED"
+    assert created_data["status"] == "AWAITING_DOCK"
     assert created_data["ocrResult"] is not None
 
 
@@ -151,15 +230,14 @@ async def test_gate_entry_lifecycle_create_verify_lookup(client: AsyncClient):
 
 
 @pytest.mark.anyio
-async def test_duplicate_active_gate_entry_rejection(client: AsyncClient):
-    """Test that creating a second active Gate Entry for the same PO is rejected with HTTP 400, while same vehicle with different PO succeeds."""
-    # 1. Reset state
-    await client.post("/api/gate-entries/reset-dev-entries")
-
+async def test_duplicate_active_gate_entry_rejection(client: AsyncClient, gate_test_vehicle: str):
+    """Test duplicate active PO rejection and a second PO for the same vehicle."""
     img_b64 = make_dummy_image_base64()
     payload = {
-        "vehiclePlate": "TS-09-EA-1122",
+        "vehiclePlate": gate_test_vehicle,
         "poNumber": "PO-1003",
+        "supplierName": "Gate Test Supplier",
+        "totalQuantity": 100,
         "anprImageBase64": img_b64,
         "documentImageBase64": img_b64,
     }
@@ -168,32 +246,35 @@ async def test_duplicate_active_gate_entry_rejection(client: AsyncClient):
     res1 = await client.post("/api/gate-entries", json=payload)
     assert res1.status_code == 201
 
-    # 3. Duplicate PO creation attempt fails with 400 Bad Request
+    # 3. An active entry for this vehicle blocks another attempt with HTTP 409.
     res2 = await client.post("/api/gate-entries", json=payload)
-    assert res2.status_code == 400
+    assert res2.status_code == 409
     err_data = res2.json()
-    assert "Active gate entry attempt" in err_data["message"]
+    assert "already has active Gate Pass" in err_data["detail"]
 
-    # 4. Same vehicle with different PO succeeds with 201 Created
+    # The same vehicle remains blocked even when another PO is supplied.
     payload_diff_po = {
-        "vehiclePlate": "TS-09-EA-1122",
+        "vehiclePlate": gate_test_vehicle,
         "poNumber": "PO-1003-DIFF",
+        "supplierName": "Gate Test Supplier",
+        "totalQuantity": 100,
         "anprImageBase64": img_b64,
         "documentImageBase64": img_b64,
     }
     res3 = await client.post("/api/gate-entries", json=payload_diff_po)
-    assert res3.status_code == 201
+    assert res3.status_code == 409
+    assert "already has active Gate Pass" in res3.json()["detail"]
 
 
 @pytest.mark.anyio
-async def test_supervisor_rejection_flow(client: AsyncClient):
+async def test_supervisor_rejection_flow(client: AsyncClient, gate_test_vehicle: str):
     """Test supervisor rejection workflow."""
-    await client.post("/api/gate-entries/reset-dev-entries")
-
     img_b64 = make_dummy_image_base64()
     create_payload = {
-        "vehiclePlate": "TN-01-ZZ-9988",
+        "vehiclePlate": gate_test_vehicle,
         "poNumber": "PO-1004",
+        "supplierName": "Gate Test Supplier",
+        "totalQuantity": 100,
         "anprImageBase64": img_b64,
         "documentImageBase64": img_b64,
     }
@@ -214,14 +295,14 @@ async def test_supervisor_rejection_flow(client: AsyncClient):
 
 
 @pytest.mark.anyio
-async def test_verify_gate_entry_move_to_unscheduled(client: AsyncClient):
+async def test_verify_gate_entry_move_to_unscheduled(client: AsyncClient, gate_test_vehicle: str):
     """Test /api/gate-entries/{entry_id}/verify with UNSCHEDULED_ARRIVAL action."""
-    await client.post("/api/gate-entries/reset-dev-entries")
-
     img_b64 = make_dummy_image_base64()
     create_payload = {
-        "vehiclePlate": "MH-04-XX-1122",
+        "vehiclePlate": gate_test_vehicle,
         "poNumber": "PO-1005",
+        "supplierName": "Gate Test Supplier",
+        "totalQuantity": 100,
         "documentImageBase64": img_b64,
     }
 

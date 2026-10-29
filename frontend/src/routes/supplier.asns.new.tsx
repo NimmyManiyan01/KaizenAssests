@@ -56,12 +56,13 @@ import {
   isValidAsnDriverMobileNumber,
   isValidAsnDriverName,
   normalizeAsnVehicleNumber,
+  sanitizeAsnDriverName,
   sanitizeMobileNumber,
   sanitizeNumericQuantity,
 } from "@/lib/input-validation";
 
 export const Route = createFileRoute("/supplier/asns/new")({
-  beforeLoad: () => { },
+  beforeLoad: () => {},
   component: NewAsnPage,
 });
 
@@ -123,7 +124,6 @@ const statusStyles: Record<string, string> = {
   CANCELLED: "border-destructive/25 bg-danger-soft text-destructive",
 };
 
-
 function TapTooltip({ text, children }: { text: string; children: ReactElement }) {
   const [open, setOpen] = useState(false);
 
@@ -143,13 +143,14 @@ function StatusTooltip({ status }: { status: string }) {
   const [open, setOpen] = useState(false);
   const normalizedStatus = status.trim().toUpperCase();
   if (!normalizedStatus) {
-    return <span className="text-muted-foreground">—</span>;
+    return <span className="text-muted-foreground">â€”</span>;
   }
   const description = statusDescriptions[normalizedStatus];
   const badge = (
     <span
-      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusStyles[normalizedStatus] || "border-border bg-muted text-muted-foreground"
-        }`}
+      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${
+        statusStyles[normalizedStatus] || "border-border bg-muted text-muted-foreground"
+      }`}
     >
       {normalizedStatus.replaceAll("_", " ")}
     </span>
@@ -179,7 +180,7 @@ function StatusTooltip({ status }: { status: string }) {
 interface AsnRecord {
   id: string;
   asn_number: string;
-  po_number: string;
+  po_number?: string | null;
   supplier_name: string;
   destination_warehouse: string;
   vehicle_number: string;
@@ -191,6 +192,19 @@ interface AsnRecord {
   status: string;
   created_at: string;
   lines: any[];
+}
+
+interface TransportEntry {
+  id: string;
+  vehicleNumber: string;
+  driverName: string;
+  driverMobile: string;
+}
+
+interface TransportTouched {
+  vehicle: boolean;
+  driver: boolean;
+  contact: boolean;
 }
 
 const INITIAL_ASNS: AsnRecord[] = [];
@@ -234,6 +248,12 @@ function NewAsnPage() {
   const [supplierName, setSupplierName] = useState("");
   const [supplierCompanyName, setSupplierCompanyName] = useState("");
   const [expectedArrivalDate, setExpectedArrivalDate] = useState("");
+  const [transportEntries, setTransportEntries] = useState<TransportEntry[]>([
+    { id: "1", vehicleNumber: "", driverName: "", driverMobile: "" },
+  ]);
+  const [transportTouched, setTransportTouched] = useState<TransportTouched[]>([
+    { vehicle: false, driver: false, contact: false },
+  ]);
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [driverName, setDriverName] = useState("");
   const [driverMobile, setDriverMobile] = useState("");
@@ -242,10 +262,11 @@ function NewAsnPage() {
     { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" },
   ]);
 
-  const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [materialCatalog, setMaterialCatalog] = useState<any[]>([]);
-  const [selectedPo, setSelectedPo] = useState<any>(null);
   const currentUser = getUserInfo();
+  const supplierId = currentUser?.supplierId;
+  const supplierUsername = currentUser?.username;
+  const supplierFullName = currentUser?.full_name;
   const requestIdRef = useRef("");
   const submitInFlightRef = useRef(false);
 
@@ -278,22 +299,18 @@ function NewAsnPage() {
 
   useEffect(() => {
     loadAsnData();
-    void (
-      currentUser?.supplierId
-        ? api.getSupplier(currentUser.supplierId)
-        : api.getSuppliers({ search: currentUser?.username })
-    )
+    void (supplierId ? api.getSupplier(supplierId) : api.getSuppliers({ search: supplierUsername }))
       .then((result: any) => {
         const supplierRows = Array.isArray(result)
           ? result
           : result?.items || result?.suppliers || [];
         const supplier = supplierRows.length
           ? supplierRows.find(
-            (item: any) =>
-              String(item.id) === String(currentUser?.supplierId) ||
-              String(item.username || item.supplier_name || "").toLowerCase() ===
-              String(currentUser?.username || "").toLowerCase(),
-          )
+              (item: any) =>
+                String(item.id) === String(supplierId) ||
+                String(item.username || item.supplier_name || "").toLowerCase() ===
+                  String(supplierUsername || "").toLowerCase(),
+            )
           : result;
         const companyName =
           supplier?.registered_company_name ||
@@ -320,7 +337,7 @@ function NewAsnPage() {
           ),
         );
       });
-  }, [loadActiveMaterials]);
+  }, [loadActiveMaterials, supplierId, supplierUsername]);
 
   const loadAsnData = async () => {
     setLoading(true);
@@ -331,25 +348,51 @@ function NewAsnPage() {
       // passing a possibly stale client supplier id can incorrectly return an
       // empty list while the dashboard still shows the records.
       const remoteAsns = await api.getAsns();
-      const mapped = (Array.isArray(remoteAsns) ? remoteAsns : []).map((a: any) => ({
-        id: String(a.id || a.asn_number || ""),
-        asn_number: a.asn_number || "",
-        po_number: a.po_number || "",
-        supplier_name:
-          a.supplier_name || a.supplier_company_name || a.supplier?.supplier_name || "",
-        destination_warehouse:
-          a.destination_warehouse || a.warehouse_name || a.delivery_warehouse_name || "",
-        vehicle_number: a.vehicle_number || "",
-        driver_name: a.driver_name || "",
-        driver_contact: a.driver_contact || "",
-        // Preserve the persisted value returned by the API across reloads/sessions.
-        expected_arrival_at: a.expected_arrival_at || undefined,
-        expected_arrival_date: a.expected_arrival_date || undefined,
-        delivery_date: a.delivery_date || undefined,
-        status: a.status || "",
-        created_at: a.created_at || a.submitted_at || "",
-        lines: Array.isArray(a.lines) ? a.lines : [],
-      }));
+      const mapped = (Array.isArray(remoteAsns) ? remoteAsns : []).map((a: any) => {
+        const transportAssignment = Array.isArray(a.logistics)
+          ? a.logistics.find((entry: any) => entry?.type === "transport_assignment")
+          : undefined;
+        const transportEntries = Array.isArray(transportAssignment?.vehicles)
+          ? transportAssignment.vehicles
+          : [];
+        return {
+          id: String(a.id || a.asn_number || ""),
+          asn_number: a.asn_number || "",
+          po_number: a.po_number || "",
+          supplier_name:
+            a.supplier_name || a.supplier_company_name || a.supplier?.supplier_name || "",
+          destination_warehouse:
+            a.destination_warehouse || a.warehouse_name || a.delivery_warehouse_name || "",
+          vehicle_number:
+            transportEntries
+              .map((entry: any) => entry.vehicle_number)
+              .filter(Boolean)
+              .join(", ") ||
+            a.vehicle_number ||
+            "",
+          driver_name:
+            transportEntries
+              .map((entry: any) => entry.driver_name)
+              .filter(Boolean)
+              .join(", ") ||
+            a.driver_name ||
+            "",
+          driver_contact:
+            transportEntries
+              .map((entry: any) => entry.driver_contact)
+              .filter(Boolean)
+              .join(", ") ||
+            a.driver_contact ||
+            "",
+          // Preserve the persisted value returned by the API across reloads/sessions.
+          expected_arrival_at: a.expected_arrival_at || undefined,
+          expected_arrival_date: a.expected_arrival_date || undefined,
+          delivery_date: a.delivery_date || undefined,
+          status: a.status || "",
+          created_at: a.created_at || a.submitted_at || "",
+          lines: Array.isArray(a.lines) ? a.lines : [],
+        };
+      });
       setAsnList(mapped);
     } catch {
       setAsnList([]);
@@ -359,15 +402,22 @@ function NewAsnPage() {
     }
   };
 
-  const handleOpenCreateModal = async () => {
+  const handleOpenCreateModal = useCallback(async () => {
     // Reset state synchronously BEFORE opening dialog to prevent race condition
     requestIdRef.current = window.crypto.randomUUID();
     setAsnNumber("");
     setAsnFormErrors({});
     setSubmissionError("");
     setExpectedArrivalDate(todayDate());
-    setSupplierName(supplierCompanyName || currentUser?.full_name || currentUser?.username || "");
-    setSelectedPo(null);
+    setSupplierName(supplierCompanyName || supplierFullName || supplierUsername || "");
+    const initialEntryId =
+      typeof window !== "undefined" && window.crypto?.randomUUID
+        ? window.crypto.randomUUID()
+        : String(Date.now());
+    setTransportEntries([
+      { id: initialEntryId, vehicleNumber: "", driverName: "", driverMobile: "" },
+    ]);
+    setTransportTouched([{ vehicle: false, driver: false, contact: false }]);
     setVehicleNumber("");
     setDriverName("");
     setDriverMobile("");
@@ -391,35 +441,101 @@ function NewAsnPage() {
             : "The ASN number will be assigned when submitted.",
       });
     }
+  }, [supplierCompanyName, supplierFullName, supplierUsername]);
+
+  const handleAddTransportEntry = () => {
+    const newId =
+      typeof window !== "undefined" && window.crypto?.randomUUID
+        ? window.crypto.randomUUID()
+        : String(Date.now() + Math.random());
+    const nextIndex = transportEntries.length;
+    setTransportEntries((prev) => [
+      ...prev,
+      { id: newId, vehicleNumber: "", driverName: "", driverMobile: "" },
+    ]);
+    setTransportTouched((prev) => [...prev, { vehicle: false, driver: false, contact: false }]);
+    window.setTimeout(() => {
+      document.getElementById(`assignment-vehicle-${nextIndex}`)?.focus();
+    }, 50);
+  };
+
+  const handleRemoveTransportEntry = (index: number) => {
+    if (transportEntries.length <= 1) return;
+    setTransportEntries((prev) => prev.filter((_, i) => i !== index));
+    setTransportTouched((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const updateTransportEntry = (index: number, patch: Partial<TransportEntry>) => {
+    setTransportEntries((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, ...patch } : item)),
+    );
+  };
+
+  const updateTransportTouched = (index: number, patch: Partial<TransportTouched>) => {
+    setTransportTouched((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, ...patch } : item)),
+    );
+  };
+
+  const handleSelectRegisteredDriver = (index: number, selectedName: string) => {
+    if (!selectedName) return;
+    const d = registeredDrivers.find((row) => (row.driver_name || row.name) === selectedName);
+    const phone = d?.phone || d?.mobile_number || d?.phone_number;
+    const sanitized = phone ? sanitizeMobileNumber(String(phone)) : "";
+    updateTransportEntry(index, {
+      driverName: selectedName,
+      ...(sanitized ? { driverMobile: sanitized } : {}),
+    });
+    setTransportTouched((prev) =>
+      prev.map((t, i) =>
+        i === index ? { ...t, driver: true, ...(sanitized ? { contact: true } : {}) } : t,
+      ),
+    );
   };
 
   useEffect(() => {
     if (search?.open === "create") {
       void handleOpenCreateModal();
     }
-  }, [search?.open]);
+  }, [handleOpenCreateModal, search?.open]);
 
   const continueToAsnForm = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (assignmentSubmitting) return;
-    const normalizedVehicle = normalizeAsnVehicleNumber(vehicleNumber);
-    const normalizedDriver = driverName.trim().replace(/ +/g, " ");
-    const normalizedContact = driverMobile.trim();
-    setAssignmentTouched({ vehicle: true, driver: true, contact: true });
-    setVehicleNumber(normalizedVehicle);
-    setDriverName(normalizedDriver);
-    setDriverMobile(normalizedContact);
-    const invalidField = !isValidAsnVehicleNumber(normalizedVehicle)
-      ? "assignment-vehicle"
-      : !isValidAsnDriverName(normalizedDriver)
-        ? "assignment-driver"
-        : !isValidAsnDriverMobileNumber(normalizedContact)
-          ? "assignment-contact"
-          : "";
-    if (invalidField) {
-      document.getElementById(invalidField)?.focus();
-      return;
+
+    const normalizedEntries = transportEntries.map((entry) => ({
+      ...entry,
+      vehicleNumber: normalizeAsnVehicleNumber(entry.vehicleNumber),
+      driverName: entry.driverName.trim().replace(/ +/g, " "),
+      driverMobile: entry.driverMobile.trim(),
+    }));
+    setTransportEntries(normalizedEntries);
+    setTransportTouched(
+      normalizedEntries.map(() => ({ vehicle: true, driver: true, contact: true })),
+    );
+
+    if (normalizedEntries[0]) {
+      setVehicleNumber(normalizedEntries[0].vehicleNumber);
+      setDriverName(normalizedEntries[0].driverName);
+      setDriverMobile(normalizedEntries[0].driverMobile);
     }
+
+    for (let i = 0; i < normalizedEntries.length; i++) {
+      const entry = normalizedEntries[i];
+      if (!isValidAsnVehicleNumber(entry.vehicleNumber)) {
+        document.getElementById(`assignment-vehicle-${i}`)?.focus();
+        return;
+      }
+      if (!isValidAsnDriverName(entry.driverName)) {
+        document.getElementById(`assignment-driver-${i}`)?.focus();
+        return;
+      }
+      if (!isValidAsnDriverMobileNumber(entry.driverMobile)) {
+        document.getElementById(`assignment-contact-${i}`)?.focus();
+        return;
+      }
+    }
+
     setAssignmentSubmitting(true);
     window.setTimeout(() => {
       setIsAssignmentOpen(false);
@@ -470,8 +586,8 @@ function NewAsnPage() {
           index === targetIndex ? { ...line, ...createdMaterial } : line,
         );
       });
-      toast.success(`Component '${selectedMaterial.name}' saved to Database ✓`, {
-        description: `Code: ${selectedMaterial.code} · UOM: ${selectedMaterial.uom}`,
+      toast.success(`Component '${selectedMaterial.name}' saved to Database âœ“`, {
+        description: `Code: ${selectedMaterial.code} Â· UOM: ${selectedMaterial.uom}`,
       });
       setCustomMaterialName("");
       setIsMaterialPopupOpen(false);
@@ -484,39 +600,21 @@ function NewAsnPage() {
     }
   };
 
-  const selectPurchaseOrder = async (id: string) => {
-    if (!id) {
-      setSelectedPo(null);
-      setLines([]);
-      return;
-    }
-    const po = await api.getPurchaseOrder(id);
-    setSelectedPo(po);
-    const poLines = po?.lines || po?.items || po?.materials || po?.purchase_order_lines || [];
-    setLines(
-      poLines.map((line: any) => ({
-        item_code: line.item_code || line.material_code || line.code || "",
-        material_name: line.material_name || line.material?.name || line.name || "",
-        shipped_quantity: "",
-        remaining_quantity: Number(
-          line.remaining_quantity ??
-          line.remaining ??
-          line.balance_quantity ??
-          line.ordered_quantity ??
-          line.quantity ??
-          0,
-        ),
-        uom: line.uom || line.unit_of_measure || "PCS",
-      })),
-    );
-  };
-
   const handleFormSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (submitInFlightRef.current) return;
-    if (!isValidAsnVehicleNumber(vehicleNumber) || !isValidAsnDriverName(driverName) ||
-      !isValidAsnDriverMobileNumber(driverMobile)) {
-      setAssignmentTouched({ vehicle: true, driver: true, contact: true });
+    const isAllTransportValid =
+      transportEntries.length > 0 &&
+      transportEntries.every(
+        (entry) =>
+          isValidAsnVehicleNumber(normalizeAsnVehicleNumber(entry.vehicleNumber)) &&
+          isValidAsnDriverName(entry.driverName.trim().replace(/ +/g, " ")) &&
+          isValidAsnDriverMobileNumber(entry.driverMobile.trim()),
+      );
+    if (!isAllTransportValid) {
+      setTransportTouched(
+        transportEntries.map(() => ({ vehicle: true, driver: true, contact: true })),
+      );
       setIsModalOpen(false);
       setIsAssignmentOpen(true);
       return;
@@ -563,15 +661,45 @@ function NewAsnPage() {
     submitInFlightRef.current = true;
     setSubmitting(true);
     try {
+      const primaryVehicle = normalizeAsnVehicleNumber(
+        transportEntries[0]?.vehicleNumber || vehicleNumber,
+      );
+      const primaryDriver = (transportEntries[0]?.driverName || driverName)
+        .trim()
+        .replace(/ +/g, " ");
+      const primaryContact = (transportEntries[0]?.driverMobile || driverMobile).trim();
+
+      const allVehiclesStr = transportEntries
+        .map((e) => normalizeAsnVehicleNumber(e.vehicleNumber))
+        .filter(Boolean)
+        .join(", ");
+      const allDriversStr = transportEntries
+        .map((e) => e.driverName.trim().replace(/ +/g, " "))
+        .filter(Boolean)
+        .join(", ");
+      const allContactsStr = transportEntries
+        .map((e) => e.driverMobile.trim())
+        .filter(Boolean)
+        .join(", ");
+
       const payload = {
         client_request_id:
           requestIdRef.current || (requestIdRef.current = window.crypto.randomUUID()),
-        po_number: undefined,
         supplier_name: supplierName.trim(),
         expected_arrival_at: expectedArrivalDate,
-        vehicle_number: normalizeAsnVehicleNumber(vehicleNumber),
-        driver_name: driverName.trim().replace(/ +/g, " "),
-        driver_contact: driverMobile.trim(),
+        vehicle_number: primaryVehicle,
+        driver_name: primaryDriver,
+        driver_contact: primaryContact,
+        logistics: [
+          {
+            type: "transport_assignment",
+            vehicles: transportEntries.map((e) => ({
+              vehicle_number: normalizeAsnVehicleNumber(e.vehicleNumber),
+              driver_name: e.driverName.trim().replace(/ +/g, " "),
+              driver_contact: e.driverMobile.trim(),
+            })),
+          },
+        ],
         lines: lines.map((l) => ({
           material_id: l.material_id,
           item_code: l.item_code,
@@ -595,9 +723,9 @@ function NewAsnPage() {
         po_number: "",
         supplier_name: createdSupplierName,
         destination_warehouse: createdAsn?.destination_warehouse || "",
-        vehicle_number: createdAsn?.vehicle_number || payload.vehicle_number,
-        driver_name: createdAsn?.driver_name || payload.driver_name,
-        driver_contact: createdAsn?.driver_contact || payload.driver_contact,
+        vehicle_number: allVehiclesStr || createdAsn?.vehicle_number || primaryVehicle,
+        driver_name: allDriversStr || createdAsn?.driver_name || primaryDriver,
+        driver_contact: allContactsStr || createdAsn?.driver_contact || primaryContact,
         expected_arrival_at: createdAsn?.expected_arrival_at || expectedArrivalDate,
         status: createdAsn?.status || "SUBMITTED",
         created_at: createdAsn?.created_at || new Date().toISOString(),
@@ -687,13 +815,39 @@ function NewAsnPage() {
     setSupplierName(asn.supplier_name || "");
     setExpectedArrivalDate(
       asn.delivery_date ||
-      asn.expected_arrival_date ||
-      asn.expected_arrival_at?.split("T")[0] ||
-      "",
+        asn.expected_arrival_date ||
+        asn.expected_arrival_at?.split("T")[0] ||
+        "",
     );
-    setVehicleNumber(asn.vehicle_number || "");
-    setDriverName(asn.driver_name || "");
-    setDriverMobile(asn.driver_contact || "");
+    const vList = (asn.vehicle_number || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const dList = (asn.driver_name || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const cList = (asn.driver_contact || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const maxLen = Math.max(vList.length, dList.length, cList.length, 1);
+    const parsedEntries: TransportEntry[] = [];
+    for (let i = 0; i < maxLen; i++) {
+      parsedEntries.push({
+        id: String(Date.now() + i),
+        vehicleNumber: vList[i] || "",
+        driverName: dList[i] || "",
+        driverMobile: cList[i] || "",
+      });
+    }
+    setTransportEntries(parsedEntries);
+    setTransportTouched(
+      parsedEntries.map(() => ({ vehicle: false, driver: false, contact: false })),
+    );
+    setVehicleNumber(parsedEntries[0]?.vehicleNumber || "");
+    setDriverName(parsedEntries[0]?.driverName || "");
+    setDriverMobile(parsedEntries[0]?.driverMobile || "");
     setLines(
       asn.lines?.length
         ? asn.lines
@@ -716,7 +870,7 @@ function NewAsnPage() {
       a.supplier_name.toLowerCase().includes(q) ||
       a.vehicle_number.toLowerCase().includes(q) ||
       a.driver_name.toLowerCase().includes(q) ||
-      a.po_number.toLowerCase().includes(q)
+      (a.po_number || "").toLowerCase().includes(q)
     );
   });
   const clearFilters = () => {
@@ -729,27 +883,23 @@ function NewAsnPage() {
   const arrivalRange: DateRange | undefined =
     arrivalFrom || arrivalTo
       ? {
-        from: arrivalFrom ? new Date(`${arrivalFrom}T00:00:00`) : undefined,
-        to: arrivalTo ? new Date(`${arrivalTo}T00:00:00`) : undefined,
-      }
+          from: arrivalFrom ? new Date(`${arrivalFrom}T00:00:00`) : undefined,
+          to: arrivalTo ? new Date(`${arrivalTo}T00:00:00`) : undefined,
+        }
       : undefined;
   const arrivalRangeLabel =
     arrivalFrom && arrivalTo
-      ? `${displayFilterDate(arrivalFrom)} – ${displayFilterDate(arrivalTo)}`
+      ? `${displayFilterDate(arrivalFrom)} â€“ ${displayFilterDate(arrivalTo)}`
       : arrivalFrom
-        ? `${displayFilterDate(arrivalFrom)} – End date`
+        ? `${displayFilterDate(arrivalFrom)} â€“ End date`
         : arrivalTo
-          ? `Start date – ${displayFilterDate(arrivalTo)}`
+          ? `Start date â€“ ${displayFilterDate(arrivalTo)}`
           : "Filter date";
 
   return (
     <TooltipProvider delayDuration={150}>
       <AppShell
-        title={
-          <span className="inline-flex items-center gap-2">
-            Advance Shipment Notices
-          </span>
-        }
+        title={<span className="inline-flex items-center gap-2">Advance Shipment Notices</span>}
         subtitle="Create, track and download shipment notices"
       >
         <div className="w-full space-y-5 pb-10">
@@ -847,30 +997,22 @@ function NewAsnPage() {
                   <thead className="border-b border-border bg-muted/60 text-xs font-medium text-muted-foreground">
                     <tr>
                       <th scope="col" className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1.5">
-                          ASN Number
-
-                        </span>
+                        <span className="inline-flex items-center gap-1.5">ASN Number</span>
                       </th>
                       <th scope="col" className="px-4 py-3">
                         Supplier name
                       </th>
                       <th scope="col" className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1.5">
-                          Vehicle Number
-
-                        </span>
+                        <span className="inline-flex items-center gap-1.5">Vehicle Number</span>
                       </th>
                       <th scope="col" className="px-4 py-3">
                         <span className="inline-flex items-center gap-1.5">
                           Driver Name &amp; Mobile
-
                         </span>
                       </th>
                       <th scope="col" className="px-4 py-3">
                         <span className="inline-flex items-center gap-1.5">
                           Expected Arrival Date
-
                         </span>
                       </th>
                       <th scope="col" className="px-4 py-3">
@@ -888,7 +1030,6 @@ function NewAsnPage() {
                       <th scope="col" className="w-44 px-4 py-3 text-right">
                         <span className="inline-flex items-center justify-end gap-1.5">
                           Actions
-
                         </span>
                       </th>
                     </tr>
@@ -902,7 +1043,7 @@ function NewAsnPage() {
                         >
                           <span className="inline-flex items-center gap-2" role="status">
                             <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                            Loading delivery notices…
+                            Loading delivery noticesâ€¦
                           </span>
                         </td>
                       </tr>
@@ -930,14 +1071,16 @@ function NewAsnPage() {
                       filteredList.map((asn) => (
                         <tr key={asn.id} className="transition-colors hover:bg-muted/40">
                           <td className="px-4 py-3 font-mono font-medium text-primary">
-                            {asn.asn_number || "—"}
+                            {asn.asn_number || "â€”"}
                           </td>
-                          <td className="px-4 py-3 text-foreground">{asn.supplier_name || "—"}</td>
+                          <td className="px-4 py-3 text-foreground">
+                            {asn.supplier_name || "â€”"}
+                          </td>
                           <td className="px-4 py-3 font-mono text-foreground">
-                            {asn.vehicle_number || "—"}
+                            {asn.vehicle_number || "â€”"}
                           </td>
                           <td className="px-4 py-3">
-                            <span className="text-foreground">{asn.driver_name || "—"}</span>
+                            <span className="text-foreground">{asn.driver_name || "â€”"}</span>
                             {asn.driver_contact && (
                               <span className="ml-1 font-mono text-muted-foreground">
                                 ({asn.driver_contact})
@@ -947,16 +1090,16 @@ function NewAsnPage() {
                           <td className="px-4 py-3 text-muted-foreground">
                             {displayFilterDate(
                               asn.delivery_date ||
-                              asn.expected_arrival_date ||
-                              asn.expected_arrival_at?.split("T")[0] ||
-                              "",
-                            ) || "—"}
+                                asn.expected_arrival_date ||
+                                asn.expected_arrival_at?.split("T")[0] ||
+                                "",
+                            ) || "â€”"}
                           </td>
                           <td className="whitespace-nowrap px-4 py-3">
                             <StatusTooltip status="SUBMITTED" />
                           </td>
                           <td className="px-4 py-3 text-right tabular-nums text-foreground">
-                            {asn.lines?.length || 0} items ·{" "}
+                            {asn.lines?.length || 0} items Â·{" "}
                             {asn.lines?.reduce(
                               (sum: number, line: any) =>
                                 sum + Number(line.shipped_quantity ?? line.quantity ?? 0),
@@ -1060,7 +1203,7 @@ function NewAsnPage() {
                       {selectedAsn.delivery_date ||
                         selectedAsn.expected_arrival_date ||
                         selectedAsn.expected_arrival_at?.split("T")[0] ||
-                        "—"}
+                        "â€”"}
                     </p>
                   </div>
                   <div className="col-span-2 border-t pt-3">
@@ -1073,9 +1216,9 @@ function NewAsnPage() {
                             className="flex items-center justify-between gap-3 py-2"
                           >
                             <span className="font-semibold">
-                              {line.material_name || line.item_code || "—"}{" "}
+                              {line.material_name || line.item_code || "â€”"}{" "}
                               <span className="font-mono text-muted-foreground">
-                                ({line.item_code || "—"})
+                                ({line.item_code || "â€”"})
                               </span>
                             </span>
                             <span className="font-bold">
@@ -1130,166 +1273,249 @@ function NewAsnPage() {
               if (!assignmentSubmitting) setIsAssignmentOpen(open);
             }}
           >
-            <DialogContent className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-xl overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
+            <DialogContent className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-2xl overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
               <DialogHeader>
-                <DialogTitle className="text-lg font-black text-primary">
-                  Assign vehicle and driver
-                </DialogTitle>
+                <div className="flex flex-wrap items-center justify-between gap-3 pr-6">
+                  <DialogTitle className="text-lg font-black text-primary">
+                    Assign vehicle and driver
+                  </DialogTitle>
+                </div>
               </DialogHeader>
               <form onSubmit={continueToAsnForm} className="space-y-5">
                 <p className="text-sm text-muted-foreground">
                   Enter transport details. The complete ASN form will open after you continue.
                 </p>
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <div>
-                    <Label htmlFor="assignment-vehicle">Vehicle Number *</Label>
-                    <Input
-                      id="assignment-vehicle"
-                      required
-                      placeholder="e.g. KA01AB1234"
-                      value={vehicleNumber}
-                      onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())}
-                      onBlur={() => {
-                        setVehicleNumber((value) => normalizeAsnVehicleNumber(value));
-                        setAssignmentTouched((value) => ({ ...value, vehicle: true }));
-                      }}
-                      aria-invalid={
-                        assignmentTouched.vehicle && !isValidAsnVehicleNumber(vehicleNumber)
-                      }
-                      aria-describedby="assignment-vehicle-error"
-                      maxLength={20}
-                      className={formInputClass}
-                    />
-                    {assignmentTouched.vehicle && !vehicleNumber.trim() && (
-                      <p id="assignment-vehicle-error" className="mt-1 text-xs text-rose-600">
-                        Vehicle number is required.
-                      </p>
-                    )}
-                    {assignmentTouched.vehicle &&
-                      vehicleNumber.trim() &&
-                      !isValidAsnVehicleNumber(vehicleNumber) && (
-                        <p id="assignment-vehicle-error" className="mt-1 text-xs text-rose-600">
-                          Enter a valid registration, such as KA01AB1234 or 22BH1234AA.
-                        </p>
-                      )}
-                  </div>
-                  <div>
-                    <Label htmlFor="assignment-driver">Driver Name *</Label>
-                    {registeredDrivers.length > 0 && (
-                      <select
-                        aria-label="Select registered driver"
-                        className="mb-1.5 h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                        value={
-                          registeredDrivers.some((d) => (d.driver_name || d.name) === driverName)
-                            ? driverName
-                            : ""
+
+                <div className="space-y-4">
+                  {transportEntries.map((entry, index) => {
+                    const touched = transportTouched[index] || {
+                      vehicle: false,
+                      driver: false,
+                      contact: false,
+                    };
+                    const isVehicleValid = isValidAsnVehicleNumber(entry.vehicleNumber);
+                    const isDriverValid = isValidAsnDriverName(entry.driverName);
+                    const isContactValid = isValidAsnDriverMobileNumber(entry.driverMobile);
+
+                    return (
+                      <div
+                        key={entry.id || index}
+                        className={
+                          transportEntries.length > 1
+                            ? "relative rounded-xl border border-border/80 bg-muted/15 p-4 space-y-3 transition-colors hover:border-primary/40"
+                            : "space-y-3"
                         }
-                        onChange={(e) => {
-                          if (!e.target.value) return;
-                          const d = registeredDrivers.find(
-                            (row) => (row.driver_name || row.name) === e.target.value,
-                          );
-                          setDriverName(e.target.value);
-                          const phone = d?.phone || d?.mobile_number || d?.phone_number;
-                          if (phone) {
-                            setDriverMobile(sanitizeMobileNumber(String(phone)));
-                          }
-                          setAssignmentTouched((prev) => ({
-                            ...prev,
-                            driver: true,
-                            contact: true,
-                          }));
-                        }}
                       >
-                        <option value="">Choose registered driver...</option>
-                        {registeredDrivers.map((d) => (
-                          <option key={d.id} value={d.driver_name || d.name}>
-                            {d.driver_name || d.name}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                    <Input
-                      id="assignment-driver"
-                      required
-                      placeholder="Enter driver name"
-                      value={driverName}
-                      onChange={(e) => setDriverName(e.target.value)}
-                      onBlur={() => {
-                        setDriverName((value) => value.trim().replace(/ +/g, " "));
-                        setAssignmentTouched((value) => ({ ...value, driver: true }));
-                      }}
-                      aria-invalid={assignmentTouched.driver && !isValidAsnDriverName(driverName)}
-                      aria-describedby="assignment-driver-error"
-                      maxLength={100}
-                      className={formInputClass}
-                    />
-                    {assignmentTouched.driver && !driverName.trim() && (
-                      <p id="assignment-driver-error" className="mt-1 text-xs text-rose-600">
-                        Driver name is required.
-                      </p>
-                    )}
-                    {assignmentTouched.driver &&
-                      driverName.trim() &&
-                      !isValidAsnDriverName(driverName) && (
-                        <p id="assignment-driver-error" className="mt-1 text-xs text-rose-600">
-                          Enter 2–100 characters using letters, spaces, periods, commas, apostrophes or hyphens.
-                        </p>
-                      )}
-                  </div>
-                  <div>
-                    <Label htmlFor="assignment-contact">Driver Contact *</Label>
-                    <Input
-                      id="assignment-contact"
-                      required
-                      type="tel"
-                      value={driverMobile}
-                      onChange={(e) => setDriverMobile(sanitizeMobileNumber(e.target.value))}
-                      onBlur={() => setAssignmentTouched((value) => ({ ...value, contact: true }))}
-                      aria-invalid={
-                        assignmentTouched.contact && !isValidAsnDriverMobileNumber(driverMobile)
-                      }
-                      aria-describedby="assignment-contact-error"
-                      inputMode="numeric"
-                      maxLength={10}
-                      pattern="[6-9][0-9]{9}"
-                      className={formInputClass}
-                    />
-                    {assignmentTouched.contact && !driverMobile && (
-                      <p id="assignment-contact-error" className="mt-1 text-xs text-rose-600">
-                        Driver contact is required.
-                      </p>
-                    )}
-                    {assignmentTouched.contact &&
-                      driverMobile &&
-                      !isValidAsnDriverMobileNumber(driverMobile) && (
-                        <p id="assignment-contact-error" className="mt-1 text-xs text-rose-600">
-                          Enter a 10-digit Indian mobile number starting with 6–9.
-                        </p>
-                      )}
-                  </div>
+                        {transportEntries.length > 1 && (
+                          <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                            <span className="inline-flex items-center gap-1.5 text-xs font-bold text-foreground">
+                              <span className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
+                                {index + 1}
+                              </span>
+                              Vehicle & Driver #{index + 1}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRemoveTransportEntry(index)}
+                              className="h-7 px-2 text-xs text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950/30"
+                              title={`Remove vehicle #${index + 1}`}
+                            >
+                              <Trash2 className="mr-1 size-3.5" />
+                              Remove
+                            </Button>
+                          </div>
+                        )}
+
+                        <div className="grid gap-4 sm:grid-cols-3">
+                          <div>
+                            <Label htmlFor={`assignment-vehicle-${index}`}>Vehicle Number *</Label>
+                            <Input
+                              id={`assignment-vehicle-${index}`}
+                              required
+                              placeholder="e.g. KA01AB1234"
+                              value={entry.vehicleNumber}
+                              onChange={(e) =>
+                                updateTransportEntry(index, {
+                                  vehicleNumber: e.target.value.toUpperCase(),
+                                })
+                              }
+                              onBlur={() => {
+                                updateTransportEntry(index, {
+                                  vehicleNumber: normalizeAsnVehicleNumber(entry.vehicleNumber),
+                                });
+                                updateTransportTouched(index, { vehicle: true });
+                              }}
+                              aria-invalid={touched.vehicle && !isVehicleValid}
+                              aria-describedby={`assignment-vehicle-${index}-error`}
+                              maxLength={20}
+                              className={formInputClass}
+                            />
+                            {touched.vehicle && !entry.vehicleNumber.trim() && (
+                              <p
+                                id={`assignment-vehicle-${index}-error`}
+                                className="mt-1 text-xs text-rose-600"
+                              >
+                                Vehicle number is required.
+                              </p>
+                            )}
+                            {touched.vehicle && entry.vehicleNumber.trim() && !isVehicleValid && (
+                              <p
+                                id={`assignment-vehicle-${index}-error`}
+                                className="mt-1 text-xs text-rose-600"
+                              >
+                                Enter a valid registration, such as KA01AB1234 or 22BH1234AA.
+                              </p>
+                            )}
+                          </div>
+                          <div>
+                            <Label htmlFor={`assignment-driver-${index}`}>Driver Name *</Label>
+                            {registeredDrivers.length > 0 && (
+                              <select
+                                aria-label="Select registered driver"
+                                className="mb-1.5 h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                                value={
+                                  registeredDrivers.some(
+                                    (d) => (d.driver_name || d.name) === entry.driverName,
+                                  )
+                                    ? entry.driverName
+                                    : ""
+                                }
+                                onChange={(e) =>
+                                  handleSelectRegisteredDriver(index, e.target.value)
+                                }
+                              >
+                                <option value="">Choose registered driver...</option>
+                                {registeredDrivers.map((d) => (
+                                  <option key={d.id} value={d.driver_name || d.name}>
+                                    {d.driver_name || d.name}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                            <Input
+                              id={`assignment-driver-${index}`}
+                              required
+                              placeholder="Enter driver name"
+                              value={entry.driverName}
+                              onChange={(e) =>
+                                updateTransportEntry(index, {
+                                  driverName: sanitizeAsnDriverName(e.target.value),
+                                })
+                              }
+                              onBlur={() => {
+                                updateTransportEntry(index, {
+                                  driverName: entry.driverName.trim().replace(/ +/g, " "),
+                                });
+                                updateTransportTouched(index, { driver: true });
+                              }}
+                              aria-invalid={touched.driver && !isDriverValid}
+                              aria-describedby={`assignment-driver-${index}-error`}
+                              maxLength={100}
+                              className={formInputClass}
+                            />
+                            {touched.driver && !entry.driverName.trim() && (
+                              <p
+                                id={`assignment-driver-${index}-error`}
+                                className="mt-1 text-xs text-rose-600"
+                              >
+                                Driver name is required.
+                              </p>
+                            )}
+                            {touched.driver && entry.driverName.trim() && !isDriverValid && (
+                              <p
+                                id={`assignment-driver-${index}-error`}
+                                className="mt-1 text-xs text-rose-600"
+                              >
+                                Enter 2 to 100 characters using letters, spaces, periods, commas,
+                                apostrophes or hyphens.
+                              </p>
+                            )}
+                          </div>
+                          <div>
+                            <Label htmlFor={`assignment-contact-${index}`}>Driver Contact *</Label>
+                            <Input
+                              id={`assignment-contact-${index}`}
+                              required
+                              type="tel"
+                              value={entry.driverMobile}
+                              onChange={(e) =>
+                                updateTransportEntry(index, {
+                                  driverMobile: sanitizeMobileNumber(e.target.value),
+                                })
+                              }
+                              onBlur={() => updateTransportTouched(index, { contact: true })}
+                              aria-invalid={touched.contact && !isContactValid}
+                              aria-describedby={`assignment-contact-${index}-error`}
+                              inputMode="numeric"
+                              maxLength={10}
+                              pattern="[6-9][0-9]{9}"
+                              className={formInputClass}
+                            />
+                            {touched.contact && !entry.driverMobile && (
+                              <p
+                                id={`assignment-contact-${index}-error`}
+                                className="mt-1 text-xs text-rose-600"
+                              >
+                                Driver contact is required.
+                              </p>
+                            )}
+                            {touched.contact && entry.driverMobile && !isContactValid && (
+                              <p
+                                id={`assignment-contact-${index}-error`}
+                                className="mt-1 text-xs text-rose-600"
+                              >
+                                Enter a 10-digit Indian mobile number starting with 6â€“9.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div className="flex justify-end gap-2">
+
+                <div className="flex flex-col-reverse gap-3 pt-3 sm:flex-row sm:items-center sm:justify-between border-t border-border/70">
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={assignmentSubmitting}
-                    onClick={() => setIsAssignmentOpen(false)}
+                    size="sm"
+                    onClick={handleAddTransportEntry}
+                    className="h-9 rounded-lg border-border font-medium text-foreground hover:bg-muted"
                   >
-                    Cancel
+                    <Plus className="mr-1.5 size-4" />
+                    Add Vehicle & Driver
                   </Button>
-                  <Button
-                    type="submit"
-                    disabled={
-                      assignmentSubmitting ||
-                      !isValidAsnVehicleNumber(vehicleNumber) ||
-                      !isValidAsnDriverName(driverName) ||
-                      !isValidAsnDriverMobileNumber(driverMobile)
-                    }
-                  >
-                    {assignmentSubmitting && <Loader2 className="mr-2 size-4 animate-spin" />}
-                    Next
-                  </Button>
+
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={assignmentSubmitting}
+                      onClick={() => setIsAssignmentOpen(false)}
+                      className="rounded-lg"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      className="rounded-lg"
+                      disabled={
+                        assignmentSubmitting ||
+                        !transportEntries.length ||
+                        transportEntries.some(
+                          (entry) =>
+                            !isValidAsnVehicleNumber(entry.vehicleNumber) ||
+                            !isValidAsnDriverName(entry.driverName) ||
+                            !isValidAsnDriverMobileNumber(entry.driverMobile),
+                        )
+                      }
+                    >
+                      {assignmentSubmitting && <Loader2 className="mr-2 size-4 animate-spin" />}
+                      Next
+                    </Button>
+                  </div>
                 </div>
               </form>
             </DialogContent>
@@ -1339,7 +1565,10 @@ function NewAsnPage() {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <span className="inline-flex items-center"><Label htmlFor="expected-arrival-date">Expected arrival date *</Label><InformationTooltip help="arrivalDate" /></span>
+                      <span className="inline-flex items-center">
+                        <Label htmlFor="expected-arrival-date">Expected arrival date *</Label>
+                        <InformationTooltip help="arrivalDate" />
+                      </span>
                       <Input
                         id="expected-arrival-date"
                         type="date"
@@ -1390,22 +1619,49 @@ function NewAsnPage() {
                 </section>
 
                 <section className="space-y-3">
-                  <h3 className="border-b border-border pb-2 text-sm font-semibold text-foreground">
-                    Vehicle and driver summary
-                  </h3>
-                  <div className="grid gap-3 rounded-lg border border-border bg-muted/20 p-4 sm:grid-cols-3">
-                    <div>
-                      <p className="text-xs text-muted-foreground">Vehicle registration</p>
-                      <p className="mt-1 font-medium">{normalizeAsnVehicleNumber(vehicleNumber)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Driver name</p>
-                      <p className="mt-1 font-medium">{driverName.trim().replace(/\s+/g, " ")}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Driver mobile number</p>
-                      <p className="mt-1 font-medium">{driverMobile}</p>
-                    </div>
+                  <div className="flex items-center justify-between border-b border-border pb-2">
+                    <h3 className="text-sm font-semibold text-foreground">
+                      Vehicle and driver summary
+                    </h3>
+                    {transportEntries.length > 1 && (
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {transportEntries.length} vehicles assigned
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-2.5">
+                    {transportEntries.map((entry, index) => (
+                      <div
+                        key={entry.id || index}
+                        className="rounded-lg border border-border bg-muted/20 p-3.5 space-y-2"
+                      >
+                        {transportEntries.length > 1 && (
+                          <div className="text-xs font-bold text-primary">
+                            Vehicle & Driver #{index + 1}
+                          </div>
+                        )}
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          <div>
+                            <p className="text-xs text-muted-foreground">Vehicle registration</p>
+                            <p className="mt-1 font-medium font-mono text-sm">
+                              {normalizeAsnVehicleNumber(entry.vehicleNumber) || "â€”"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-muted-foreground">Driver name</p>
+                            <p className="mt-1 font-medium text-sm">
+                              {entry.driverName.trim().replace(/\s+/g, " ") || "â€”"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-muted-foreground">Driver mobile number</p>
+                            <p className="mt-1 font-medium font-mono text-sm">
+                              {entry.driverMobile || "â€”"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </section>
 
@@ -1508,13 +1764,13 @@ function NewAsnPage() {
                                 current.map((item, index) =>
                                   index === idx
                                     ? {
-                                      ...item,
-                                      material_id: material?.id || "",
-                                      item_code: material?.code || "",
-                                      material_name: material?.name || "",
-                                      shipped_quantity: item.shipped_quantity,
-                                      uom: material?.uom || "",
-                                    }
+                                        ...item,
+                                        material_id: material?.id || "",
+                                        item_code: material?.code || "",
+                                        material_name: material?.name || "",
+                                        shipped_quantity: item.shipped_quantity,
+                                        uom: material?.uom || "",
+                                      }
                                     : item,
                                 ),
                               );
@@ -1532,7 +1788,7 @@ function NewAsnPage() {
                             className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             <option value="">
-                              {materialLoading ? "Loading materials…" : "Select material"}
+                              {materialLoading ? "Loading materialsâ€¦" : "Select material"}
                             </option>
                             {materialCatalog.map((material) => (
                               <option key={material.id} value={material.id}>
@@ -1637,7 +1893,7 @@ function NewAsnPage() {
                           <Input
                             id={`uom-${idx}`}
                             readOnly
-                            value={line.uom || "—"}
+                            value={line.uom || "â€”"}
                             aria-label={`Unit of measure for material ${idx + 1}`}
                             className="h-10 rounded-lg border-border bg-muted/50 text-sm"
                           />

@@ -616,6 +616,7 @@ class QuotationMagicLinkModel(Base):
 
 class FinishedGoodsRequestModel(Base):
     __tablename__ = "finished_goods_request"
+    section_fg_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("assembly_finished_goods.id", ondelete="RESTRICT"), nullable=True)
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     request_number: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
@@ -645,6 +646,7 @@ class FinishedGoodsRequestModel(Base):
     vehicle_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     driver_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     driver_contact: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    transport_entries: Mapped[Optional[List[Dict[str, str]]]] = mapped_column(JSON, nullable=True)
     expected_pickup_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
 
 
@@ -724,4 +726,3 @@ class SupplierUserModel(Base):
     must_change_password: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     supplier: Mapped["SupplierModel"] = relationship("SupplierModel")
-

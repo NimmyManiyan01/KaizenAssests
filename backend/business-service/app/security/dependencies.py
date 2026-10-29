@@ -31,6 +31,20 @@ async def get_current_user(
 ) -> CurrentUser:
     settings = get_settings()
 
+    # Local supplier login tokens carry the supplier's persisted identity.
+    # The browser also sends role/name headers; those must not replace the
+    # token's supplier UUID with the display username used by the FG filter.
+    if (credentials is not None
+            and settings.environment.lower() in ("local", "test", "development")
+            and credentials.credentials.startswith("supplier-mock-token-")):
+        token_payload = credentials.credentials.removeprefix("supplier-mock-token-")
+        user_id = token_payload[:36]
+        supplier_id = token_payload[37:] if len(token_payload) > 37 else None
+        if supplier_id == "None":
+            supplier_id = None
+        return CurrentUser(subject=user_id or "supplier", username="supplier", roles=["SUPPLIER"],
+            permissions=[], raw_claims={"supplier_id": supplier_id} if supplier_id else {})
+
     # 1. Check custom proxy/test headers (X-User-Roles, X-User-Role, X-User-Name, X-User-Id)
     roles_hdr = (
         request.headers.get("X-User-Roles")
@@ -89,21 +103,13 @@ async def get_current_user(
 
     token = credentials.credentials
     if settings.environment.lower() in ("local", "test", "development"):
-        if token.startswith("supplier-mock-token-"):
-            token_payload = token.removeprefix("supplier-mock-token-")
-            user_id = token_payload[:36]
-            supplier_id = token_payload[37:] if len(token_payload) > 37 else None
-            
-            # Prevent literal "None" string from breaking _authenticated_supplier_id
-            if supplier_id == "None":
-                supplier_id = None
-                
+        if token == "mock-jwt-manager-token":
             return CurrentUser(
-                subject=user_id or "supplier",
-                username="supplier",
-                roles=["SUPPLIER"],
-                permissions=[],
-                raw_claims={"supplier_id": supplier_id} if supplier_id else {},
+                subject="manager",
+                username="manager",
+                roles=["MANAGER"],
+                permissions=["procurement:approve", "gate:approve"],
+                raw_claims={},
             )
         if token.startswith("mock-jwt-db-user-"):
             session_token = token.removeprefix("mock-jwt-db-user-")

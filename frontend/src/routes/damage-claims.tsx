@@ -12,12 +12,6 @@ import { getUserInfo } from "@/lib/auth-utils";
 import { isValidVehicleNumber } from "@/lib/input-validation";
 
 export const Route = createFileRoute("/damage-claims")({ component: Page });
-const resolutions = [
-  { value: "REPLACEMENT", label: "Replace Materials" },
-  { value: "CREDIT_NOTE", label: "Credit Note" },
-  { value: "REFUND", label: "Refund" },
-  { value: "RETURN_REPLACEMENT", label: "Return and Replace" },
-];
 const actionButtonClass = "h-10 rounded-lg";
 function Page() {
   const [claims, setClaims] = useState<any[]>([]),
@@ -63,12 +57,14 @@ function Page() {
       patch(claim.id, { validation: "Select a response before submitting this claim." });
       return;
     }
-    if (form.response === "ACCEPT" && !form.resolution) {
-      patch(claim.id, { validation: "Select a resolution before accepting this claim." });
-      return;
-    }
     patch(claim.id, { validation: "" });
-    void run(claim.id, () => api.respondToDamageClaim(claim.id, form), "Claim response submitted");
+    const response = {
+      ...form,
+      resolution: ["ACCEPT", "PARTIALLY_ACCEPT", "REPLACEMENT_OFFERED", "RETURN_ACCEPTED"].includes(form.response)
+        ? "REPLACEMENT"
+        : undefined,
+    };
+    void run(claim.id, () => api.respondToDamageClaim(claim.id, response), "Claim response submitted");
   };
   const patch = (id: string, data: any) =>
     setForms((all) => ({ ...all, [id]: { ...all[id], ...data } }));
@@ -199,22 +195,10 @@ function Page() {
                       </select>
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor={`claim-${c.id}-resolution`}>Resolution</Label>
-                      <select
-                        id={`claim-${c.id}-resolution`}
-                        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                        value={f.resolution || ""}
-                        onChange={(e) =>
-                          patch(c.id, { resolution: e.target.value, validation: "" })
-                        }
-                      >
-                        <option value="">Select resolution</option>
-                        {resolutions.map((r) => (
-                          <option key={r.value} value={r.value}>
-                            {r.label}
-                          </option>
-                        ))}
-                      </select>
+                      <Label>Resolution</Label>
+                      <div className="flex h-10 items-center rounded-lg border border-input bg-muted/50 px-3 text-sm font-medium">
+                        Replacement
+                      </div>
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor={`claim-${c.id}-remarks`}>Supplier remarks</Label>

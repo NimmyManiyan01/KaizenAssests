@@ -14,7 +14,7 @@ from app.security.dependencies import CurrentUser, get_current_user
 
 router = APIRouter(prefix="/api/damage-claims", tags=["damage-claims"])
 RESPONSES = {"ACCEPT", "REJECT", "PARTIALLY_ACCEPT", "REQUEST_MORE_INFORMATION", "REPLACEMENT_OFFERED", "RETURN_ACCEPTED", "DISPUTE", "DISPUTE_RAISED"}
-RESOLUTIONS = {"REPLACEMENT", "REPAIR_REWORK", "CREDIT_NOTE", "REFUND", "RETURN_REPLACEMENT"}
+RESOLUTIONS = {"REPLACEMENT"}
 now = lambda: datetime.datetime.now(datetime.timezone.utc)
 
 async def supplier_id_for_user(user: CurrentUser, uow: UnitOfWork):

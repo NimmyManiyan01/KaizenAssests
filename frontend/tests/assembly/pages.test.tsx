@@ -9,6 +9,7 @@ const { api, navigate } = vi.hoisted(() => ({
     [
       "getAssemblyDashboard",
       "getAssemblyMaterialRequests",
+      "getAssemblyAvailableMaterials",
       "getAssemblyFinishedGoodsInventorySummary",
       "getAssemblyProducts",
       "getProductBOM",
@@ -19,6 +20,9 @@ const { api, navigate } = vi.hoisted(() => ({
       "getAssemblyProductionOrders",
       "startAssemblyProduction",
       "completeAssemblyProduction",
+      "getAssemblyMaterialConsumption",
+      "verifyAssemblyMaterialQr",
+      "recordAssemblyMaterialConsumption",
       "getAssemblyQualityInspections",
       "performAssemblyQualityInspection",
       "getAssemblyFinishedGoods",
@@ -177,16 +181,14 @@ describe("Material request queue", () => {
     expect(screen.getByRole("button", { name: "All (5)" })).toBeInTheDocument();
     expect(api.getAssemblyMaterialRequests).toHaveBeenCalledTimes(1);
     await userEvent.click(screen.getByRole("button", { name: "All (5)" }));
-    await userEvent.type(
-      screen.getByRole("textbox", { name: "Search requisitions and materials" }),
-      "no-such-material",
-    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Search requisitions and materials" }), {
+      target: { value: "no-such-material" },
+    });
     expect(screen.queryByText("MR-1")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Clear search" }));
-    await userEvent.type(
-      screen.getByRole("textbox", { name: "Search requisitions and materials" }),
-      "Steel bolt",
-    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Search requisitions and materials" }), {
+      target: { value: "Steel bolt" },
+    });
     expect(screen.getByText("MR-1")).toBeInTheDocument();
   });
   it("keeps the queue compact and shows material quantities in Details", async () => {
@@ -232,7 +234,12 @@ describe("Material request queue", () => {
       api.getAssemblyProducts.mockResolvedValue([
         { id: "p1", product_code: "PUMP", product_name: "Pump" },
       ]);
-      api.getProductBOM.mockResolvedValue({ product_code: "PUMP", target_quantity: 10, bom_number: "BOM-1", materials: [item] });
+      api.getProductBOM.mockResolvedValue({
+        product_code: "PUMP",
+        target_quantity: 10,
+        bom_number: "BOM-1",
+        materials: [item],
+      });
       show(Requests);
       await screen.findByText("MR-1");
       await userEvent.click(screen.getByRole("button", { name: "New Material Request" }));
@@ -411,6 +418,44 @@ describe("Production, quality and finished goods", () => {
       }),
     );
   });
+  it("opens verified consumption for traceability orders and shows separate history", async () => {
+    api.getAssemblyProductionOrders.mockResolvedValue([
+      { ...productionOrder, traceability_required: true },
+    ]);
+    api.getAssemblyMaterialConsumption.mockResolvedValue({
+      assembly_order_id: "prod-1",
+      traceability_required: true,
+      traceability_status: "INCOMPLETE",
+      missing_material_codes: ["MAT-BOLT"],
+      can_complete: false,
+      events: [],
+    });
+    api.verifyAssemblyMaterialQr.mockResolvedValue({
+      material_code: "MAT-BOLT",
+      material_name: "Steel bolt",
+      grn_batch_id: "batch-1",
+      batch_number: "LOT-1",
+      material_qr: "QR-1",
+      quantity_issued: 20,
+      quantity_received: 20,
+      quantity_already_consumed: 0,
+      remaining_quantity: 20,
+      uom: "PCS",
+      verified: true,
+    });
+    api.recordAssemblyMaterialConsumption.mockResolvedValue({ consumed_quantity: 4, uom: "PCS" });
+    show(Production);
+    await screen.findByText("ASM-101");
+    await userEvent.click(screen.getByRole("button", { name: /Record Material Consumption/i }));
+    expect(
+      await screen.findByText("No verified consumption events recorded for this order."),
+    ).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Scan Material QR"), "QR-1");
+    await userEvent.click(screen.getByRole("button", { name: "Verify Material" }));
+    expect(await screen.findByText("Original material QR verified")).toBeInTheDocument();
+    expect(screen.getByText("LOT-1")).toBeInTheDocument();
+    expect(screen.getAllByText("20 PCS")).toHaveLength(3);
+  });
   it("submits quality quantities through the existing API", async () => {
     api.getAssemblyQualityInspections.mockResolvedValue([
       {
@@ -435,7 +480,7 @@ describe("Production, quality and finished goods", () => {
     await userEvent.click(screen.getByRole("button", { name: "Perform QC" }));
     const submit = await screen.findByRole("button", { name: "Submit QC Certification" });
     expect(submit).toBeDisabled();
-    const name = screen.getByLabelText("Inspector Name *");
+    const name = screen.getByLabelText("Quality Engineer Name *");
     await userEvent.type(name, "123");
     await userEvent.click(
       screen.getByRole("checkbox", { name: "Quality check performed by authorized person" }),
@@ -443,7 +488,7 @@ describe("Production, quality and finished goods", () => {
     expect(submit).toBeDisabled();
     await userEvent.clear(name);
     await userEvent.tab();
-    expect(screen.getByText(/Enter a valid inspector name/)).toBeInTheDocument();
+    expect(screen.getByText(/Enter a valid quality engineer name/)).toBeInTheDocument();
     await userEvent.type(name, "Asha Kumar");
     expect(submit).toBeEnabled();
     expect(screen.queryByText("Rework Qty")).not.toBeInTheDocument();
@@ -900,6 +945,7 @@ describe("Material request date submission", () => {
           material_code: "MAT-LAPT-001",
           material_name: "Laptop",
           required_quantity: 10,
+          available_quantity: 10,
           uom: "PCS",
         },
       ],
@@ -912,7 +958,7 @@ describe("Material request date submission", () => {
     await within(dialog).findByText("MAT-LAPT-001");
     const dateInput = dialog.querySelector('input[type="date"]') as HTMLInputElement;
     await userEvent.clear(dateInput);
-    await userEvent.type(dateInput, "2026-10-24");
+    await userEvent.type(dateInput, "2026-11-04");
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Submit Request to Warehouse" }),
     );
@@ -920,7 +966,7 @@ describe("Material request date submission", () => {
       expect(api.createAssemblyMaterialRequest).toHaveBeenCalledWith({
         product_code: "FG-LAPT-001",
         target_quantity: 10,
-        required_date: "2026-10-24",
+        required_date: "2026-11-04",
         remarks: "",
       }),
     );

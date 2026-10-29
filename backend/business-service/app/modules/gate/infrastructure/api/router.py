@@ -31,7 +31,7 @@ from app.common.email_utils import render_premium_email, send_email
 from app.database.session import UnitOfWork, get_uow
 from app.modules.gate.adapters.mock_adapters import InMemoryGateEntryRepository
 from app.modules.gate.infrastructure.persistence.models import DamagePhotoModel, DamageReportModel, DockAssignmentModel, DockModel, GateEntryAuditLogModel, GateEntryModel, GateExitModel, ReceivingLineModel, SupplierDamageClaimModel, VehicleExitApprovalModel, FinishedGoodsPickupGateVisitModel
-from app.modules.assembly.infrastructure.persistence.models import AssemblyFinishedGoodsAllocationModel, AssemblyFinishedGoodsModel
+from app.modules.assembly.infrastructure.persistence.models import AssemblyFinishedGoodsAllocationModel, AssemblyFinishedGoodsModel, FinishedGoodsSectionModel
 from app.modules.assembly.infrastructure.finished_goods import post_dispatch_stock
 from app.common.persistence.models import AsnLineModel, PurchaseOrderModel, AsnModel, MaterialModel, MaterialStockModel, NotificationModel, SupplierContactModel, SupplierModel, SupplierUserModel, FinishedGoodsRequestModel
 from app.modules.receiving.infrastructure.persistence.models import GrnDamageEvidenceModel, GrnLineModel, GrnModel, InventoryReceiptPostingModel
@@ -91,6 +91,7 @@ class FinishedGoodsPickupGateExitPayload(BaseModel):
     vehicle_number: str
     driver_name: str
     documents_verified: bool = False
+    section_qr_identities: list[str] = Field(default_factory=list, max_length=8)
 
 
 @router.post("/finished-goods-pickup", status_code=status.HTTP_201_CREATED)
@@ -100,20 +101,53 @@ async def create_finished_goods_pickup_gate_entry(
     uow: UnitOfWork = Depends(get_uow),
 ):
     async with uow:
-        request = (await uow.session.execute(select(FinishedGoodsRequestModel).where(FinishedGoodsRequestModel.request_number == payload.request_number))).scalar_one_or_none()
+        request = (await uow.session.execute(select(FinishedGoodsRequestModel).where(FinishedGoodsRequestModel.request_number == payload.request_number).with_for_update())).scalar_one_or_none()
         if not request: raise HTTPException(404, "Finished-goods dispatch request not found")
         if request.status == "CANCELLED": raise HTTPException(409, "This dispatch request is cancelled.")
         if request.status not in ("ALLOCATED", "APPROVED", "READY_FOR_PICKUP"): raise HTTPException(409, "This dispatch request is not approved.")
-        existing = (await uow.session.execute(select(FinishedGoodsPickupGateVisitModel).where(FinishedGoodsPickupGateVisitModel.request_id == request.id, FinishedGoodsPickupGateVisitModel.status == "INSIDE_FACILITY"))).scalar_one_or_none()
-        if existing: return {"gate_pass_number": existing.gate_pass_number, "status": existing.status, "request_number": request.request_number}
-        closed = (await uow.session.execute(select(FinishedGoodsPickupGateVisitModel).where(FinishedGoodsPickupGateVisitModel.request_id == request.id, FinishedGoodsPickupGateVisitModel.status == "CLOSED"))).scalar_one_or_none()
-        if closed: raise HTTPException(409, "This dispatch request has already exited.")
+        vehicle_number, driver_name, driver_contact = validate_transport(
+            payload.vehicle_number, payload.driver_name, payload.driver_contact
+        )
+        expected_transport_entries = request.transport_entries or ([{
+            "vehicle_number": request.vehicle_number,
+            "driver_name": request.driver_name,
+            "driver_contact": request.driver_contact,
+        }] if request.vehicle_number and request.driver_name and request.driver_contact else [])
+        if expected_transport_entries and not any(
+            normalize_vehicle(str(entry.get("vehicle_number") or "")) == vehicle_number
+            and " ".join(str(entry.get("driver_name") or "").split()).casefold() == driver_name.casefold()
+            and str(entry.get("driver_contact") or "").strip() == driver_contact
+            for entry in expected_transport_entries
+        ):
+            raise HTTPException(409, "Vehicle and driver do not match an assigned pair for this dispatch.")
+        if request.section_fg_id:
+            await uow.session.execute(select(func.pg_advisory_xact_lock(func.hashtext(vehicle_number))))
+            active_vehicle = await uow.session.scalar(select(FinishedGoodsPickupGateVisitModel.id).where(
+                FinishedGoodsPickupGateVisitModel.vehicle_number == vehicle_number,
+                FinishedGoodsPickupGateVisitModel.request_id != request.id,
+                FinishedGoodsPickupGateVisitModel.status.in_(["INSIDE_FACILITY", "READY_FOR_GATE_EXIT"])).limit(1))
+            if active_vehicle:
+                raise HTTPException(409, "Vehicle already has an active Gate Pass")
+        existing_visits = (await uow.session.execute(
+            select(FinishedGoodsPickupGateVisitModel)
+            .where(FinishedGoodsPickupGateVisitModel.request_id == request.id)
+            .with_for_update()
+        )).scalars().all()
+        used_vehicle_visit = next(
+            (visit for visit in existing_visits
+             if normalize_vehicle(visit.vehicle_number) == vehicle_number),
+            None,
+        )
+        if used_vehicle_visit:
+            if used_vehicle_visit.status == "INSIDE_FACILITY":
+                return {"gate_pass_number": used_vehicle_visit.gate_pass_number, "status": used_vehicle_visit.status, "request_number": request.request_number}
+            raise HTTPException(409, "This assigned vehicle already used its gate pass for this dispatch.")
         gate_pass = uuid.uuid4().hex.upper()[:6]
         while (await uow.session.execute(select(FinishedGoodsPickupGateVisitModel.id).where(FinishedGoodsPickupGateVisitModel.gate_pass_number == gate_pass))).scalar_one_or_none(): gate_pass = uuid.uuid4().hex.upper()[:6]
         now = datetime.datetime.now(datetime.timezone.utc)
-        visit = FinishedGoodsPickupGateVisitModel(request_id=request.id, gate_pass_number=gate_pass, supplier_id=request.supplier_id, supplier_name=request.supplier_name or request.requested_by, vehicle_number=payload.vehicle_number.upper(), driver_name=payload.driver_name, driver_contact=payload.driver_contact, status="INSIDE_FACILITY", arrived_at=now, entered_at=now, security_officer=user.username)
+        visit = FinishedGoodsPickupGateVisitModel(request_id=request.id, gate_pass_number=gate_pass, supplier_id=request.supplier_id, supplier_name=request.supplier_name or request.requested_by, vehicle_number=vehicle_number, driver_name=driver_name, driver_contact=driver_contact, status="INSIDE_FACILITY", arrived_at=now, entered_at=now, security_officer=user.username)
         uow.session.add(visit)
-        uow.session.add(NotificationModel(user_role="ASSEMBLY_MANAGER", title="Finished-goods pickup vehicle arrived", message=f"Pickup {request.request_number} arrived. Gate pass {gate_pass}. Vehicle {payload.vehicle_number.upper()}.", link="/assembly/dispatch"))
+        uow.session.add(NotificationModel(user_role="ASSEMBLY_MANAGER", title="Finished-goods pickup vehicle arrived", message=f"Pickup {request.request_number} arrived. Gate pass {gate_pass}. Vehicle {vehicle_number}.", link="/assembly/finished-goods" if request.section_fg_id else "/assembly/dispatch"))
         await uow.commit()
         return {"gate_pass_number": gate_pass, "request_number": request.request_number, "status": visit.status, "arrived_at": now.isoformat(), "visit_purpose": "FINISHED_GOODS_PICKUP"}
 
@@ -152,6 +186,10 @@ async def get_finished_goods_pickup_gate_pass(
             "uom": request.uom,
             "destination": request.warehouse,
             "documents_verified": visit.documents_verified,
+            "fg_id": str(request.section_fg_id) if request.section_fg_id else None,
+            "loaded_sections": [{"sub_id": r.sub_id, "qr_identity": r.qr_identity, "status": r.status} for r in
+                (await uow.session.scalars(select(FinishedGoodsSectionModel).where(
+                    FinishedGoodsSectionModel.gate_visit_id == visit.id))).all()],
         }
 
 
@@ -163,10 +201,37 @@ async def complete_finished_goods_pickup_gate_exit(
     async with uow:
         visit = (await uow.session.execute(select(FinishedGoodsPickupGateVisitModel).where(FinishedGoodsPickupGateVisitModel.gate_pass_number == gate_pass_number.upper().strip()))).scalar_one_or_none()
         if not visit: raise HTTPException(404, "Pickup gate pass not found")
-        if visit.status != "INSIDE_FACILITY": raise HTTPException(409, f"Gate pass is already {visit.status}")
+        if visit.status not in ("INSIDE_FACILITY", "READY_FOR_GATE_EXIT"): raise HTTPException(409, f"Gate pass is already {visit.status}")
         if visit.vehicle_number.upper() != payload.vehicle_number.upper().strip() or visit.driver_name.strip().lower() != payload.driver_name.strip().lower(): raise HTTPException(422, "Vehicle or driver does not match the original pickup gate entry")
         if not payload.documents_verified: raise HTTPException(422, "Required packing and dispatch documents must be verified")
         request = (await uow.session.execute(select(FinishedGoodsRequestModel).where(FinishedGoodsRequestModel.id == visit.request_id))).scalar_one_or_none()
+        if request and request.section_fg_id:
+            from app.modules.assembly.infrastructure.sections import transition_sections, section_summary
+            from app.modules.assembly.infrastructure.persistence.models import FinishedGoodsSectionModel
+            from sqlalchemy import update
+            if visit.status != "READY_FOR_GATE_EXIT":
+                raise HTTPException(409, "Assembly must confirm loading first")
+            loaded = (await uow.session.scalars(select(FinishedGoodsSectionModel.qr_identity).where(
+                FinishedGoodsSectionModel.gate_visit_id == visit.id, FinishedGoodsSectionModel.status == "LOADED"))).all()
+            if not loaded or set(loaded) != set(payload.section_qr_identities):
+                raise HTTPException(422, "Verify all and only the sections loaded on this vehicle")
+            claimed = await uow.session.execute(update(FinishedGoodsPickupGateVisitModel).where(
+                FinishedGoodsPickupGateVisitModel.id == visit.id, FinishedGoodsPickupGateVisitModel.status == "READY_FOR_GATE_EXIT").values(status="CLOSED"))
+            if claimed.rowcount != 1:
+                raise HTTPException(409, "Gate exit already confirmed")
+            await transition_sections(uow.session, request.section_fg_id, visit.id, payload.section_qr_identities, user.username, exiting=True)
+            visit.exited_at = datetime.datetime.now(datetime.timezone.utc)
+            visit.exit_approved_by = user.username
+            visit.documents_verified = True
+            closed_vehicles = set((await uow.session.scalars(select(FinishedGoodsPickupGateVisitModel.vehicle_number).where(
+                FinishedGoodsPickupGateVisitModel.request_id == request.id,
+                FinishedGoodsPickupGateVisitModel.status == "CLOSED"))).all())
+            closed_vehicles.add(visit.vehicle_number)
+            planned = {normalize_vehicle(str(t.get("vehicle_number") or "")) for t in (request.transport_entries or [])}
+            request.status = "DISPATCHED" if planned.issubset(closed_vehicles) else "READY_FOR_PICKUP"
+            summary = await section_summary(uow.session, request.section_fg_id)
+            await uow.commit()
+            return {"gate_pass_number": visit.gate_pass_number, "request_number": request.request_number, "exited_at": visit.exited_at.isoformat(), **summary}
         allocations = (await uow.session.execute(select(AssemblyFinishedGoodsAllocationModel).where(AssemblyFinishedGoodsAllocationModel.finished_goods_request_id == visit.request_id, AssemblyFinishedGoodsAllocationModel.status.in_(["ALLOCATED", "LOADED"])))).scalars().all()
         if not request or request.status != "ALLOCATED": raise HTTPException(409, "Dispatch request is not ready for gate exit")
         if not allocations: raise HTTPException(409, "No allocated finished goods found")
@@ -174,15 +239,42 @@ async def complete_finished_goods_pickup_gate_exit(
         dispatch = (await uow.session.execute(select(DispatchModel).where(DispatchModel.order_number == request.request_number).with_for_update())).scalar_one_or_none()
         if dispatch and dispatch.status not in ("READY_FOR_GATE_EXIT", "DISPATCHED", "GATE_OUT"):
             raise HTTPException(409, "Complete picking, packing and loading before Gate Exit")
-        await post_dispatch_stock(uow.session, request_id=visit.request_id)
-        if dispatch:
-            dispatch.status = "DISPATCHED"
         now = datetime.datetime.now(datetime.timezone.utc)
         visit.status = "CLOSED"; visit.exited_at = now; visit.exit_approved_by = user.username; visit.documents_verified = True
-        request.status = "DISPATCHED"
-        uow.session.add(NotificationModel(user_role="ASSEMBLY_MANAGER", title="Finished-goods gate exit completed", message=f"Pickup {request.request_number} exited through gate pass {visit.gate_pass_number}.", link="/assembly/dispatch"))
+        planned_transports = request.transport_entries or ([{
+            "vehicle_number": request.vehicle_number,
+            "driver_name": request.driver_name,
+            "driver_contact": request.driver_contact,
+        }] if request.vehicle_number else [])
+        planned_vehicles = {
+            normalize_vehicle(str(entry.get("vehicle_number") or ""))
+            for entry in planned_transports
+            if isinstance(entry, dict) and entry.get("vehicle_number")
+        }
+        if not planned_vehicles:
+            planned_vehicles = {normalize_vehicle(visit.vehicle_number)}
+        closed_result = await uow.session.execute(
+            select(FinishedGoodsPickupGateVisitModel.vehicle_number).where(
+                FinishedGoodsPickupGateVisitModel.request_id == request.id,
+                FinishedGoodsPickupGateVisitModel.status == "CLOSED",
+            )
+        )
+        closed_vehicles = {normalize_vehicle(number) for number in closed_result.scalars().all()}
+        closed_vehicles.add(normalize_vehicle(visit.vehicle_number))
+        final_vehicle_exited = planned_vehicles.issubset(closed_vehicles)
+        if final_vehicle_exited:
+            await post_dispatch_stock(uow.session, request_id=visit.request_id)
+            if dispatch:
+                dispatch.status = "DISPATCHED"
+            request.status = "DISPATCHED"
+        uow.session.add(NotificationModel(
+            user_role="ASSEMBLY_MANAGER",
+            title="Finished-goods pickup vehicle exited",
+            message=f"Pickup {request.request_number} vehicle {visit.vehicle_number} exited through gate pass {visit.gate_pass_number}." + (" All assigned vehicles have exited." if final_vehicle_exited else " Other assigned vehicles may still be collected."),
+            link="/assembly/dispatch",
+        ))
         await uow.commit()
-        return {"gate_pass_number": visit.gate_pass_number, "request_number": request.request_number, "visit_status": "EXITED", "gate_pass_status": "CLOSED", "dispatch_status": "DISPATCHED", "exited_at": now.isoformat()}
+        return {"gate_pass_number": visit.gate_pass_number, "request_number": request.request_number, "visit_status": "EXITED", "gate_pass_status": "CLOSED", "dispatch_status": dispatch.status if dispatch else request.status, "request_status": request.status, "all_assigned_vehicles_exited": final_vehicle_exited, "exited_at": now.isoformat()}
 logger = logging.getLogger(__name__)
 
 
@@ -236,9 +328,13 @@ def _asn_response(asn: AsnModel) -> dict:
 @preview_router.get("/expected-deliveries")
 async def list_expected_deliveries(
     supplier_id: str | None = Query(default=None),
+    user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ) -> list[dict]:
     query = select(AsnModel).options(selectinload(AsnModel.lines), selectinload(AsnModel.documents), selectinload(AsnModel.supplier)).order_by(AsnModel.created_at.desc())
+    if "SUPPLIER" in {role.upper() for role in user.roles}:
+        owner_id = await _authenticated_supplier_id(user, uow)
+        query = query.where(AsnModel.supplier_id == owner_id)
     if supplier_id:
         try:
             query = query.where(AsnModel.supplier_id == uuid.UUID(supplier_id))
@@ -276,21 +372,58 @@ DEFAULT_MATERIAL_COMPONENTS = [
 _custom_materials_store: list[dict] = []
 
 @preview_router.get("/materials")
-async def get_material_components(status_filter: str = Query(default="ACTIVE", alias="status"), uow: UnitOfWork = Depends(get_uow)) -> list[dict]:
+async def get_material_components(
+    status_filter: str = Query(default="ACTIVE", alias="status"),
+    available_only: bool = Query(default=False),
+    uow: UnitOfWork = Depends(get_uow)
+) -> list[dict]:
     materials: list[dict] = []
     try:
-        from app.common.persistence.models import MaterialModel
+        from app.common.persistence.models import MaterialModel, MaterialStockModel
+        from app.modules.storage.infrastructure.persistence.models import InventoryLocationBalanceModel
         res = await uow.session.execute(select(MaterialModel))
         db_mats = res.scalars().all()
-        materials.extend(
-            {"id": str(m.id), "code": m.material_code, "name": m.material_name, "category": m.category, "description": m.description, "uom": m.base_uom, "status": m.status, "created_at": m.created_at.isoformat() if m.created_at else None, "updated_at": m.updated_at.isoformat() if m.updated_at else None, "created_by": m.created_by, "updated_by": m.updated_by}
-            for m in db_mats
-            if m.material_code and m.material_name
+
+        stock_res = await uow.session.execute(
+            select(
+                MaterialStockModel.material_code,
+                func.coalesce(func.sum(MaterialStockModel.available_quantity), Decimal("0"))
+            ).group_by(MaterialStockModel.material_code)
         )
+        stock_map = {r[0]: float(r[1]) for r in stock_res.all()}
+
+        loc_res = await uow.session.execute(
+            select(
+                InventoryLocationBalanceModel.material_code,
+                func.coalesce(func.sum(InventoryLocationBalanceModel.available_quantity), Decimal("0"))
+            ).group_by(InventoryLocationBalanceModel.material_code)
+        )
+        loc_map = {r[0]: float(r[1]) for r in loc_res.all()}
+
+        for m in db_mats:
+            if m.material_code and m.material_name:
+                avail_qty = max(stock_map.get(m.material_code, 0.0), loc_map.get(m.material_code, 0.0))
+                materials.append({
+                    "id": str(m.id),
+                    "code": m.material_code,
+                    "name": m.material_name,
+                    "category": m.category,
+                    "description": m.description,
+                    "uom": m.base_uom,
+                    "status": m.status,
+                    "available_quantity": avail_qty,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                    "updated_at": m.updated_at.isoformat() if m.updated_at else None,
+                    "created_by": m.created_by,
+                    "updated_by": m.updated_by,
+                })
     except Exception:
         pass
 
-    return materials if status_filter.upper() == "ALL" else [material for material in materials if str(material.get("status") or "ACTIVE").upper() == status_filter.upper()]
+    filtered = materials if status_filter.upper() == "ALL" else [material for material in materials if str(material.get("status") or "ACTIVE").upper() == status_filter.upper()]
+    if available_only:
+        filtered = [m for m in filtered if (m.get("available_quantity") or 0) > 0]
+    return filtered
 
 
 @preview_router.post("/materials")
@@ -397,7 +530,11 @@ async def get_next_asn_number(uow: UnitOfWork = Depends(get_uow)) -> dict:
 
 
 @preview_router.get("/asn/{reference}")
-async def get_expected_delivery(reference: str, uow: UnitOfWork = Depends(get_uow)) -> dict:
+async def get_expected_delivery(
+    reference: str,
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> dict:
     normalized_reference = reference.strip().upper()
     filters = [func.upper(AsnModel.asn_number) == normalized_reference]
     try:
@@ -437,6 +574,10 @@ async def get_expected_delivery(reference: str, uow: UnitOfWork = Depends(get_uo
             )
     if asn is None:
         raise HTTPException(status_code=404, detail=f"ASN '{reference}' not found")
+    if "SUPPLIER" in {role.upper() for role in user.roles}:
+        owner_id = await _authenticated_supplier_id(user, uow)
+        if asn.supplier_id != owner_id:
+            raise HTTPException(status_code=404, detail=f"ASN '{reference}' not found")
     response = _asn_response(asn)
     gate_result = await uow.session.execute(
         select(GateEntryModel)
@@ -483,7 +624,11 @@ async def get_expected_delivery(reference: str, uow: UnitOfWork = Depends(get_uo
 
 
 @preview_router.get("/asns/{reference}/pdf")
-async def download_supplier_asn_pdf(reference: str, uow: UnitOfWork = Depends(get_uow)) -> Response:
+async def download_supplier_asn_pdf(
+    reference: str,
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> Response:
     """Render the official supplier ASN certificate from persisted data."""
     normalized = reference.strip().upper()
     filters = [func.upper(AsnModel.asn_number) == normalized]
@@ -499,6 +644,11 @@ async def download_supplier_asn_pdf(reference: str, uow: UnitOfWork = Depends(ge
     asn = result.scalars().first()
     if asn is None:
         raise HTTPException(status_code=404, detail=f"ASN '{reference}' not found")
+
+    if "SUPPLIER" in {role.upper() for role in user.roles}:
+        owner_id = await _authenticated_supplier_id(user, uow)
+        if asn.supplier_id != owner_id:
+            raise HTTPException(status_code=404, detail=f"ASN '{reference}' not found")
 
     details = next((item for item in (asn.logistics or []) if isinstance(item, dict) and item.get("type") == "asn_details"), {})
     supplier = details.get("supplier_name") or (asn.supplier.supplier_name if asn.supplier else "")
@@ -559,9 +709,14 @@ async def download_supplier_asn_pdf(reference: str, uow: UnitOfWork = Depends(ge
 
 
 @preview_router.post("/asns/{reference}/cancel")
-async def cancel_supplier_asn(reference: str, uow: UnitOfWork = Depends(get_uow)) -> dict:
+async def cancel_supplier_asn(
+    reference: str,
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> dict:
     normalized = reference.strip().upper()
     async with uow:
+        supplier_id = await _authenticated_supplier_id(user, uow)
         result = await uow.session.execute(
             select(AsnModel)
             .options(
@@ -569,7 +724,10 @@ async def cancel_supplier_asn(reference: str, uow: UnitOfWork = Depends(get_uow)
                 selectinload(AsnModel.documents),
                 selectinload(AsnModel.supplier),
             )
-            .where(func.upper(AsnModel.asn_number) == normalized)
+            .where(
+                func.upper(AsnModel.asn_number) == normalized,
+                AsnModel.supplier_id == supplier_id,
+            )
         )
         asn = result.scalars().first()
         if asn is None:
@@ -587,11 +745,19 @@ async def cancel_supplier_asn(reference: str, uow: UnitOfWork = Depends(get_uow)
 
 
 @preview_router.delete("/asns/{reference}")
-async def delete_supplier_asn(reference: str, uow: UnitOfWork = Depends(get_uow)) -> dict:
+async def delete_supplier_asn(
+    reference: str,
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> dict:
     normalized = reference.strip().upper()
     async with uow:
+        supplier_id = await _authenticated_supplier_id(user, uow)
         result = await uow.session.execute(
-            select(AsnModel).where(func.upper(AsnModel.asn_number) == normalized)
+            select(AsnModel).where(
+                func.upper(AsnModel.asn_number) == normalized,
+                AsnModel.supplier_id == supplier_id,
+            )
         )
         asn = result.scalars().first()
         if asn is None:
@@ -694,6 +860,44 @@ def _validate_asn_quantity(quantity: Decimal, uom: str) -> None:
         )
 
 
+def _validate_asn_transport_entries(payload: dict) -> tuple[list[dict[str, str]], list[dict]]:
+    logistics = payload.get("logistics")
+    logistics = [dict(entry) for entry in logistics if isinstance(entry, dict)] if isinstance(logistics, list) else []
+    assignments = [entry for entry in logistics if entry.get("type") == "transport_assignment"]
+
+    if assignments:
+        if len(assignments) != 1:
+            raise HTTPException(status_code=422, detail="Provide one transport assignment with all vehicle and driver pairs.")
+        submitted_entries = assignments[0].get("vehicles")
+        if not isinstance(submitted_entries, list) or not submitted_entries:
+            raise HTTPException(status_code=422, detail="At least one vehicle and driver pair is required.")
+    else:
+        submitted_entries = [{
+            "vehicle_number": payload.get("vehicle_number"),
+            "driver_name": payload.get("driver_name"),
+            "driver_contact": payload.get("driver_contact"),
+        }]
+
+    validated_entries = []
+    for entry in submitted_entries:
+        if not isinstance(entry, dict):
+            raise HTTPException(status_code=422, detail="Each vehicle and driver pair must be an object.")
+        vehicle_number, driver_name, driver_contact = validate_transport(
+            entry.get("vehicle_number"), entry.get("driver_name"), entry.get("driver_contact")
+        )
+        validated_entries.append({
+            "vehicle_number": vehicle_number,
+            "driver_name": driver_name,
+            "driver_contact": driver_contact,
+        })
+
+    if assignments:
+        assignments[0]["vehicles"] = validated_entries
+    else:
+        logistics.append({"type": "transport_assignment", "vehicles": validated_entries})
+    return validated_entries, logistics
+
+
 @preview_router.get("/supplier/warehouses")
 async def get_supplier_asn_warehouses(
     user: CurrentUser = Depends(get_current_user),
@@ -732,28 +936,34 @@ async def create_supplier_asn(
             raise HTTPException(status_code=422, detail="client_request_id must be a UUID") from exc
 
     po_number = str(payload.get("po_number") or "").strip()
-    po_filters = []
-    if po_number:
-        po_filters.append(func.upper(PurchaseOrderModel.po_number) == po_number.upper())
     raw_po_id = str(payload.get("po_id") or "").strip()
+    po_id = None
     if raw_po_id:
         try:
-            po_filters.append(PurchaseOrderModel.id == uuid.UUID(raw_po_id))
-        except ValueError:
-            pass
-    po_model = None
-    if po_filters:
-        po_result = await uow.session.execute(
-            select(PurchaseOrderModel)
-            .options(selectinload(PurchaseOrderModel.items))
-            .where(or_(*po_filters))
-        )
-        po_model = po_result.scalars().first()
-        if po_model and not po_number:
-            po_number = po_model.po_number
+            po_id = uuid.UUID(raw_po_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Purchase order reference is invalid") from exc
 
-    vehicle_number, driver_name, driver_contact = validate_transport(
-        payload.get("vehicle_number"), payload.get("driver_name"), payload.get("driver_contact"),
+    po_model = None
+    if po_id is not None or po_number:
+        po_statement = select(PurchaseOrderModel).options(selectinload(PurchaseOrderModel.items))
+        if po_id is not None:
+            po_statement = po_statement.where(PurchaseOrderModel.id == po_id)
+        if po_number:
+            po_statement = po_statement.where(func.upper(PurchaseOrderModel.po_number) == po_number.upper())
+        po_result = await uow.session.execute(po_statement)
+        po_model = po_result.scalars().first()
+        # Use one generic response for missing and cross-supplier POs so this
+        # endpoint does not disclose another supplier's PO existence/details.
+        if po_model is None or po_model.supplier_id != supplier_id:
+            raise HTTPException(status_code=404, detail="Purchase order not found or unavailable")
+        po_number = po_model.po_number
+
+    transport_entries, logistics = _validate_asn_transport_entries(payload)
+    vehicle_number, driver_name, driver_contact = (
+        transport_entries[0]["vehicle_number"],
+        transport_entries[0]["driver_name"],
+        transport_entries[0]["driver_contact"],
     )
 
     supplier_result = await uow.session.execute(
@@ -970,8 +1180,8 @@ async def create_supplier_asn(
     asn = AsnModel(
         asn_number=asn_number,
         supplier_id=supplier_id,
-        po_id=str(payload.get("po_id")) if payload.get("po_id") else None,
-        po_number=po_model.po_number if po_model else (po_number or None),
+        po_id=str(po_model.id) if po_model else None,
+        po_number=po_model.po_number if po_model else None,
         status=str(payload.get("status") or "SUBMITTED").upper(),
         warehouse_id=destination_store.warehouse_id if destination_store else None,
         vehicle_number=vehicle_number,
@@ -985,7 +1195,7 @@ async def create_supplier_asn(
         shipment_type=str(payload.get("shipment_type") or "STANDARD").upper(),
         invoice_number=str(payload.get("invoice_number") or "").strip() or None,
         challan_number=str(payload.get("challan_number") or "").strip() or None,
-        logistics=(payload.get("logistics") if isinstance(payload.get("logistics"), list) else []) + [{
+        logistics=logistics + [{
             "type": "asn_details",
             "supplier_name": supplier_name,
             "destination_warehouse": destination_warehouse,
@@ -1065,6 +1275,31 @@ def _canonical_warehouse_id(warehouse_id: str | None) -> str:
     if normalized.casefold() in {"main", "main warehouse", "wh_pune-01"}:
         return "WH_PUNE-01"
     return normalized.upper()
+
+
+async def _asn_supplier_name(session, asn: AsnModel, po: PurchaseOrderModel | None = None) -> str | None:
+    if asn.supplier_id:
+        supplier = await session.get(SupplierModel, asn.supplier_id)
+        if supplier:
+            return supplier.registered_company_name or supplier.supplier_name
+    details = next(
+        (item for item in (asn.logistics or []) if isinstance(item, dict) and item.get("type") == "asn_details"),
+        {},
+    )
+    return details.get("supplier_name") or (po.supplier_name if po else None)
+
+
+async def _warehouse_for_gate_assignment(session, asn: AsnModel, assignment: DockAssignmentModel, po: PurchaseOrderModel | None = None) -> str | None:
+    warehouse_id = asn.warehouse_id or (po.warehouse_id if po else None)
+    if not warehouse_id and assignment.assigned_store_id:
+        store = await session.get(StoreModel, assignment.assigned_store_id)
+        warehouse_id = store.warehouse_id if store else None
+    if not warehouse_id and assignment.dock_number:
+        dock = (await session.execute(
+            select(DockModel).where(DockModel.dock_number == assignment.dock_number)
+        )).scalar_one_or_none()
+        warehouse_id = dock.warehouse_id if dock else None
+    return _canonical_warehouse_id(warehouse_id) if warehouse_id else None
 
 
 def _quantity_result(ordered: float, received: float) -> tuple[str, float]:
@@ -1525,14 +1760,14 @@ async def _save_gate_entry(session, entry: GateEntry, document_data: bytes | Non
         gate_entry_number=entry.gate_entry_number,
         asn_id=uuid.UUID(entry.asn_id) if entry.asn_id else None,
         assigned_dock_id=entry.assigned_dock_id,
-        po_number=entry.po_number or "",
+        po_number=entry.po_number,
         vehicle_number=entry.vehicle_plate,
         driver_name=entry.driver_name or "Driver",
         driver_phone=getattr(entry, "driver_phone", None),
-        po_document_path=f"database://gate-entry/{entry.id}/po-document",
+        po_document_path=f"database://gate-entry/{entry.id}/po-document" if document_data else None,
         vehicle_photo_path=f"database://gate-entry/{entry.id}/vehicle-photo" if vehicle_data else None,
         status=entry.status.value if hasattr(entry.status, "value") else str(entry.status),
-        verification_type="MATCHED" if not mismatches else "MISMATCHED",
+        verification_type=("ASN_VERIFIED" if entry.asn_id and not entry.po_number else "MATCHED") if not mismatches else "MISMATCHED",
         mismatched_fields=mismatches,
         reasons=[],
         ocr_po_number=ocr.po_number if ocr else None,
@@ -1766,26 +2001,77 @@ async def create_gate_entry(
         if asn is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"ASN '{reference}' not found")
 
+    selected_transport = None
+    assigned_transports = []
+    if asn:
+        assignment = next(
+            (item for item in (asn.logistics or []) if isinstance(item, dict) and item.get("type") == "transport_assignment"),
+            None,
+        )
+        if assignment and isinstance(assignment.get("vehicles"), list):
+            assigned_transports = [item for item in assignment["vehicles"] if isinstance(item, dict)]
+        if not assigned_transports:
+            vehicles = [part.strip() for part in str(asn.vehicle_number or "").split(",") if part.strip()]
+            drivers = [part.strip() for part in str(asn.driver_name or "").split(",") if part.strip()]
+            contacts = [part.strip() for part in str(asn.driver_contact or "").split(",") if part.strip()]
+            assigned_transports = [
+                {"vehicle_number": vehicle, "driver_name": drivers[index] if index < len(drivers) else "",
+                 "driver_contact": contacts[index] if index < len(contacts) else ""}
+                for index, vehicle in enumerate(vehicles)
+            ]
+
+    requested_plate = request.vehicle_plate or (assigned_transports[0].get("vehicle_number") if assigned_transports else None) or (asn.vehicle_number if asn else None)
     try:
-        plate = normalize_vehicle_registration((asn.vehicle_number if asn else request.vehicle_plate) or "")
+        plate = normalize_vehicle_registration(requested_plate or "")
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    po_num = ((asn.po_number if asn else request.po_number) or (asn.asn_number if asn else "")).strip().upper()
+
+    if asn and assigned_transports:
+        selected_transport = next(
+            (item for item in assigned_transports
+             if normalize_vehicle(str(item.get("vehicle_number") or "")) == normalize_vehicle(plate)),
+            None,
+        )
+        if selected_transport is None:
+            raise HTTPException(status_code=422, detail="Select a vehicle assigned to this ASN by the supplier.")
+        expected_driver = str(selected_transport.get("driver_name") or "").strip()
+        expected_contact = str(selected_transport.get("driver_contact") or "").strip()
+        submitted_driver = str(request.driver_name or "").strip()
+        submitted_contact = str(request.driver_contact or "").strip()
+        if expected_driver and submitted_driver and submitted_driver.casefold() not in {"driver", expected_driver.casefold()}:
+            raise HTTPException(status_code=422, detail="Driver does not match the selected vehicle assignment.")
+        if expected_contact and submitted_contact and submitted_contact != expected_contact:
+            raise HTTPException(status_code=422, detail="Driver contact does not match the selected vehicle assignment.")
+    driver_name = (
+        str((selected_transport or {}).get("driver_name") or "").strip()
+        or str(request.driver_name or "").strip()
+        or (asn.driver_name if asn else "Driver")
+    )
+    driver_contact = (
+        str((selected_transport or {}).get("driver_contact") or "").strip()
+        or str(request.driver_contact or "").strip()
+        or (asn.driver_contact if asn else None)
+    )
+    po_num = ((asn.po_number if asn else request.po_number) or "").strip().upper() or None
 
     if not plate:
         raise DomainRuleViolationException("Vehicle number is mandatory.")
-    if not po_num:
-        raise DomainRuleViolationException("Purchase order number is mandatory.")
-    po_record = await _lookup_database_po(uow.session, po_num)
-    if asn and not (request.supplier_name and request.supplier_name.strip()):
-        supplier_name = (po_record.supplier_name if po_record else "").strip()
-        if not supplier_name and asn.supplier_id:
+    if asn is None and not po_num:
+        raise DomainRuleViolationException("A valid ASN reference is required for inbound receiving.")
+    po_record = await _lookup_database_po(uow.session, po_num) if po_num else None
+    if asn:
+        supplier_name = ""
+        if asn.supplier_id:
             supplier_result = await uow.session.execute(
                 select(SupplierModel).where(SupplierModel.id == asn.supplier_id)
             )
             supplier = supplier_result.scalars().first()
-            supplier_name = (supplier.supplier_name if supplier else "").strip()
-        request.supplier_name = supplier_name or "ASN Supplier"
+            if supplier is None:
+                raise HTTPException(status_code=409, detail="ASN supplier could not be resolved")
+            supplier_name = (supplier.registered_company_name or supplier.supplier_name or "").strip()
+        if not supplier_name:
+            supplier_name = (po_record.supplier_name if po_record else request.supplier_name or "ASN Supplier").strip()
+        request.supplier_name = supplier_name
     if asn and request.total_quantity is None:
         request.total_quantity = sum(float(line.shipped_quantity or 0) for line in asn.lines)
     if not (request.supplier_name and request.supplier_name.strip()):
@@ -1803,7 +2089,7 @@ async def create_gate_entry(
     if asn:
         ocr_res = OcrResult(
             po_number=po_num,
-            supplier_name=(po_record.supplier_name if po_record and po_record.supplier_name else request.supplier_name or ""),
+            supplier_name=request.supplier_name or "",
             material_description=", ".join(line.material_name or line.item_code for line in asn.lines),
             total_quantity=sum(float(line.shipped_quantity or 0) for line in asn.lines),
             po_date=po_record.po_date if po_record else "",
@@ -1842,9 +2128,9 @@ async def create_gate_entry(
     entry = GateEntry.create(
         vehicle_plate=plate,
         created_by=user.username,
-        driver_name=request.driver_name,
+        driver_name=driver_name,
         po_number=po_record.po_number if po_record else po_num,
-        po_id=str(asn.po_id) if asn and asn.po_id else None,
+        po_id=str(asn.po_id) if asn and asn.po_id else (str(po_record.po_id) if po_record and po_record.po_id else None),
         asn_id=str(asn.id) if asn else None,
         asn_number=asn.asn_number if asn else None,
         truck_photo_base64=request.truck_photo_base64,
@@ -1852,7 +2138,7 @@ async def create_gate_entry(
         status=computed_status,
         mismatched_fields=mismatches,
     )
-    entry.driver_phone = request.driver_contact or (asn.driver_contact if asn else None)
+    entry.driver_phone = driver_contact
     entry.gate_entry_number = gate_entry_num
     # Dock allocation is the warehouse control point for this flow.  A
     # separate gate-entry approval is not required before queuing the arrival.
@@ -2017,8 +2303,6 @@ async def list_inbound_arrivals(
             GateEntryStatus.CHECKED_OUT.value,
             GateEntryStatus.COMPLETED.value,
         ]))
-    # A single ASN must resolve to one gate entry. Newest-first ensures an
-    # older duplicate cannot surface a different gate-pass number.
     result = await uow.session.execute(arrivals_query.order_by(GateEntryModel.created_at.desc()))
     allocation_result = await uow.session.execute(select(DockAllocationRequestModel))
     allocations_by_gate_pass = {
@@ -2027,14 +2311,8 @@ async def list_inbound_arrivals(
         if allocation.existing_gate_pass_id
     }
     arrivals = []
-    seen_asn_keys: set[str] = set()
     for gate_entry, asn, po, assignment in result.all():
         allocation = allocations_by_gate_pass.get(gate_entry.gate_entry_number)
-        asn_key = str(asn.id) if asn else (asn.asn_number if asn else None)
-        if asn_key and asn_key in seen_asn_keys:
-            continue
-        if asn_key:
-            seen_asn_keys.add(asn_key)
         if store_scoped:
             if not assignment or not assignment.assigned_store_id:
                 continue
@@ -2057,9 +2335,9 @@ async def list_inbound_arrivals(
             "claim_id": str(asn.claim_id) if asn and asn.claim_id else None,
             "po_number": gate_entry.po_number,
             "supplier_name": (po.supplier_name if po else None) or gate_entry.ocr_supplier_name or "Unknown Supplier",
-            "vehicle_number": (asn.vehicle_number if asn else None) or gate_entry.vehicle_number,
-            "driver_name": (asn.driver_name if asn else None) or gate_entry.driver_name,
-            "driver_contact": asn.driver_contact if asn else None,
+            "vehicle_number": gate_entry.vehicle_number or (asn.vehicle_number if asn else None),
+            "driver_name": gate_entry.driver_name or (asn.driver_name if asn else None),
+            "driver_contact": gate_entry.driver_phone or (asn.driver_contact if asn else None),
             "truck_photo_base64": base64.b64encode(gate_entry.vehicle_photo_data).decode("ascii") if gate_entry.vehicle_photo_data else None,
             "document_image_base64": base64.b64encode(gate_entry.po_document_data).decode("ascii") if gate_entry.po_document_data else None,
             "arrival_time": gate_entry.created_at.isoformat(),
@@ -2420,13 +2698,14 @@ async def assign_arrival_dock(
     elif model.status != GateEntryStatus.AWAITING_DOCK.value:
         raise HTTPException(status_code=409, detail=f"Arrival in status {model.status} is not awaiting dock assignment")
 
-    po_result = await uow.session.execute(
-        select(PurchaseOrderModel).where(PurchaseOrderModel.po_number == model.po_number)
-    )
-    po = po_result.scalar_one_or_none()
-    # Unscheduled arrivals might not have a database PO record; allow assignment to continue.
-    if po is None and model.status != GateEntryStatus.AWAITING_DOCK.value:
-         raise HTTPException(status_code=409, detail=f"Purchase order {model.po_number} was not found")
+    po = None
+    if model.po_number:
+        po_result = await uow.session.execute(
+            select(PurchaseOrderModel).where(PurchaseOrderModel.po_number == model.po_number)
+        )
+        po = po_result.scalar_one_or_none()
+        if po is None and model.asn_id is None:
+            raise HTTPException(status_code=409, detail="Purchase order was not found")
     existing_assignment = await uow.session.execute(
         select(DockAssignmentModel.id).where(DockAssignmentModel.gate_entry_id == model.id)
     )
@@ -2451,6 +2730,29 @@ async def assign_arrival_dock(
         assigned_at=assigned_at,
     )
     uow.session.add(assignment)
+    # Gate-side allocation is also used by the vehicle queue. Keep its existing
+    # warehouse request in the same state as the persisted gate assignment so
+    # dock check-in can enforce DOCK_ASSIGNED without rejecting this valid path.
+    allocation = (await uow.session.execute(
+        select(DockAllocationRequestModel).where(
+            DockAllocationRequestModel.existing_gate_pass_id == model.gate_entry_number
+        ).with_for_update()
+    )).scalar_one_or_none()
+    if allocation is not None:
+        if allocation.status not in {"PENDING", "PENDING_ALLOCATION", "AWAITING_DOCK"}:
+            raise HTTPException(status_code=409, detail=f"Dock allocation is {allocation.status}, expected a pending request")
+        allocation.status = "DOCK_ASSIGNED"
+        allocation.assigned_by = user.username
+        allocation.assigned_at = assigned_at
+        allocation.assigned_store_id = store.id
+        allocation.assigned_store_code = store.store_code
+        allocation.assigned_store_name = store.store_name
+        master = (await uow.session.execute(select(DockMasterModel).where(
+            DockMasterModel.dock_code == dock_id
+        ).with_for_update())).scalar_one_or_none()
+        if master is not None:
+            allocation.assigned_dock_id = master.id
+            master.status = "OCCUPIED"
     if model.asn_id:
         asn = await uow.session.get(AsnModel, model.asn_id)
         if asn and not asn.warehouse_id:
@@ -2478,7 +2780,7 @@ async def assign_arrival_dock(
     notif_msg = (
         f"Vehicle {entry.vehicle_plate} (Gate Entry: {entry.gate_entry_number}) has arrived at Dock {dock_id} "
         f"and has been assigned to {store.store_name} ({store.store_code}). "
-        f"PO: {model.po_number}. Please proceed with the store-side unloading/receiving workflow."
+        f"ASN: {model.asn_id or 'Direct arrival'}. Please proceed with the store-side unloading/receiving workflow."
     )
     uow.session.add(NotificationModel(
         user_role=f"STR:{store.store_code}"[:32],
@@ -2505,7 +2807,7 @@ async def assign_arrival_dock(
         vehicle_number=model.vehicle_number,
         driver_name=model.driver_name,
         driver_phone=model.driver_phone,
-        asn_number=model.asn_number,
+        asn_number=asn.asn_number if model.asn_id and asn else None,
         po_number=model.po_number,
         notification_type="DOCK_ASSIGNED",
         idempotency_key=f"DOCK_ASSIGNED:{model.id}:{dock_id}",
@@ -2700,12 +3002,16 @@ async def record_receiving_quantities(
         raise HTTPException(status_code=409, detail="Dock assignment was not found")
     asn_result = await uow.session.execute(select(AsnModel).options(selectinload(AsnModel.lines)).where(AsnModel.id == assignment.asn_id))
     asn = asn_result.scalar_one_or_none()
-    po_result = await uow.session.execute(select(PurchaseOrderModel).options(selectinload(PurchaseOrderModel.items)).where(PurchaseOrderModel.id == assignment.po_id))
-    po = po_result.scalar_one_or_none()
-    if asn is None or po is None:
-        raise HTTPException(status_code=409, detail="ASN or purchase order details were not found")
+    po = None
+    if assignment.po_id:
+        po_result = await uow.session.execute(select(PurchaseOrderModel).options(selectinload(PurchaseOrderModel.items)).where(PurchaseOrderModel.id == assignment.po_id))
+        po = po_result.scalar_one_or_none()
+        if po is None:
+            raise HTTPException(status_code=409, detail="Purchase order details were not found")
+    if asn is None:
+        raise HTTPException(status_code=409, detail="ASN details were not found")
     asn_lines = {line.item_code: line for line in asn.lines}
-    po_quantities = {item.material_code: item.quantity for item in po.items}
+    po_quantities = {item.material_code: item.quantity for item in po.items} if po else {}
     submitted_codes = [item.item_code for item in request.items]
     if len(submitted_codes) != len(set(submitted_codes)):
         raise HTTPException(status_code=422, detail="Each material may only be submitted once")
@@ -2717,7 +3023,7 @@ async def record_receiving_quantities(
     response_items = []
     for submitted in request.items:
         asn_line = asn_lines[submitted.item_code]
-        ordered = po_quantities.get(submitted.item_code, 0)
+        ordered = po_quantities.get(submitted.item_code, asn_lines[submitted.item_code].shipped_quantity)
         received = submitted.received_quantity
         verification_status, exception_quantity = _quantity_result(float(ordered), received)
         line = ReceivingLineModel(
@@ -2732,6 +3038,7 @@ async def record_receiving_quantities(
             "item_code": submitted.item_code, "ordered_quantity": float(ordered),
             "shipped_quantity": float(asn_line.shipped_quantity), "received_quantity": received,
             "variance_to_po": received - float(ordered),
+            "variance_to_asn": received - float(asn_lines[submitted.item_code].shipped_quantity),
             "variance_to_shipped": received - float(asn_line.shipped_quantity),
             "verification_status": verification_status, "exception_quantity": exception_quantity,
         })
@@ -3100,10 +3407,14 @@ async def generate_handling_units(
         raise HTTPException(status_code=409, detail="Complete condition verification before generating material labels")
     if any(line.inspection_required for line in lines) and model.status not in {GateEntryStatus.QUALITY_PASSED.value, GateEntryStatus.RECEIVING_COMPLETED.value}:
         raise HTTPException(status_code=409, detail="Required quality inspections must pass before generating labels")
-    po = await uow.session.get(PurchaseOrderModel, assignment.po_id)
+    po = await uow.session.get(PurchaseOrderModel, assignment.po_id) if assignment.po_id else None
     asn = await uow.session.get(AsnModel, assignment.asn_id)
-    if po is None or asn is None:
-        raise HTTPException(status_code=409, detail="PO or ASN context was not found")
+    if asn is None:
+        raise HTTPException(status_code=409, detail="ASN context was not found")
+    supplier_name = await _asn_supplier_name(uow.session, asn, po)
+    warehouse_id = await _warehouse_for_gate_assignment(uow.session, asn, assignment, po)
+    if not warehouse_id:
+        raise HTTPException(status_code=409, detail="A receiving warehouse could not be resolved from the ASN and dock assignment")
     existing_result = await uow.session.execute(select(HandlingUnitModel).where(HandlingUnitModel.receiving_line_id.in_([line.id for line in lines])))
     by_line = {unit.receiving_line_id: unit for unit in existing_result.scalars().all()}
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -3117,9 +3428,9 @@ async def generate_handling_units(
             unit = HandlingUnitModel(
                 hu_number=hu_number, barcode_value=hu_number, receiving_line_id=line.id,
                 item_code=line.item_code, material_name=line.material_name or line.item_code,
-                quantity=line.good_quantity, uom=line.uom or "PCS", supplier_name=po.supplier_name,
+                quantity=line.good_quantity, uom=line.uom or "PCS", supplier_name=supplier_name,
                 po_number=model.po_number, asn_number=asn.asn_number,
-                warehouse_id=_canonical_warehouse_id(asn.warehouse_id or po.warehouse_id), current_location="RECEIVING_AREA",
+                warehouse_id=warehouse_id, current_location="RECEIVING_AREA",
                 status="QR_GENERATED", generated_by=user.username, generated_at=now, updated_at=now,
             )
             uow.session.add(unit)
@@ -3168,10 +3479,14 @@ async def complete_receiving(
     entry = _gate_entry_from_model(model)
     entry.complete_receiving()
     completed_at = datetime.datetime.now(datetime.timezone.utc)
-    po = await uow.session.get(PurchaseOrderModel, assignment.po_id)
+    po = await uow.session.get(PurchaseOrderModel, assignment.po_id) if assignment.po_id else None
     asn = await uow.session.get(AsnModel, assignment.asn_id)
-    if po is None or asn is None:
-        raise HTTPException(status_code=409, detail="PO or ASN context was not found for GRN creation")
+    if asn is None:
+        raise HTTPException(status_code=409, detail="ASN context was not found for GRN creation")
+    supplier_name = await _asn_supplier_name(uow.session, asn, po)
+    warehouse_id = await _warehouse_for_gate_assignment(uow.session, asn, assignment, po)
+    if not warehouse_id:
+        raise HTTPException(status_code=409, detail="A receiving warehouse could not be resolved from the ASN and dock assignment")
     grn_prefix = f"GRN-{completed_at.year}-"
     last_number_result = await uow.session.execute(select(func.max(GrnModel.grn_number)).where(GrnModel.grn_number.like(f"{grn_prefix}%")))
     last_number = last_number_result.scalar_one_or_none()
@@ -3183,8 +3498,8 @@ async def complete_receiving(
     grn_id = uuid.uuid4()
     grn = GrnModel(
         id=grn_id, grn_number=grn_number, po_id=assignment.po_id, po_number=model.po_number,
-        asn_id=asn.id, asn_number=asn.asn_number, supplier_name=po.supplier_name,
-        vehicle_number=assignment.vehicle_number, warehouse_id=_canonical_warehouse_id(asn.warehouse_id or po.warehouse_id),
+        asn_id=asn.id, asn_number=asn.asn_number, supplier_name=supplier_name,
+        vehicle_number=assignment.vehicle_number, warehouse_id=warehouse_id,
         dock_number=assignment.dock_number, status="GRN_DRAFT",
     )
     grn.lines = [
@@ -3551,7 +3866,7 @@ async def list_vehicle_exit_queue(
         select(GateEntryModel, DockAssignmentModel, AsnModel, PurchaseOrderModel, GrnModel, VehicleExitApprovalModel)
         .join(DockAssignmentModel, DockAssignmentModel.gate_entry_id == GateEntryModel.id)
         .join(AsnModel, AsnModel.id == DockAssignmentModel.asn_id)
-        .join(PurchaseOrderModel, PurchaseOrderModel.id == DockAssignmentModel.po_id)
+        .outerjoin(PurchaseOrderModel, PurchaseOrderModel.id == DockAssignmentModel.po_id)
         .join(GrnModel, GrnModel.id == DockAssignmentModel.prepared_grn_id)
         .outerjoin(VehicleExitApprovalModel, VehicleExitApprovalModel.gate_entry_id == GateEntryModel.id)
         .where(GateEntryModel.status.in_([GateEntryStatus.RECEIVING_COMPLETED.value, GateEntryStatus.EXIT_APPROVED.value]))
@@ -3560,7 +3875,7 @@ async def list_vehicle_exit_queue(
     )
     return [{"gate_entry_id": str(entry.id), "gate_entry_number": entry.gate_entry_number,
              "asn_id": str(asn.id), "asn_number": asn.asn_number,
-             "po_id": str(po.id), "po_number": po.po_number,
+             "po_id": str(po.id) if po else None, "po_number": po.po_number if po else None,
              "grn_id": str(grn.id), "grn_number": grn.grn_number, "grn_status": grn.status,
              "vehicle_number": assignment.vehicle_number, "driver_name": entry.driver_name,
              "driver_phone": entry.driver_phone, "dock_number": assignment.dock_number,
@@ -3579,7 +3894,7 @@ async def approve_vehicle_exit(
     user: CurrentUser = Depends(require_permission("gate:verify")),
     uow: UnitOfWork = Depends(get_uow),
 ):
-    if not all([request.asn_verified, request.po_verified, request.grn_verified, request.receiving_verified, request.vehicle_verified, request.driver_verified]):
+    if not all([request.asn_verified, request.grn_verified, request.receiving_verified, request.vehicle_verified, request.driver_verified]):
         raise HTTPException(status_code=422, detail="All security verification checks must be confirmed")
     try:
         gate_id = uuid.UUID(entry_id)
@@ -3596,11 +3911,13 @@ async def approve_vehicle_exit(
     if assignment is None or assignment.receiving_completed_at is None or assignment.dock_released_at is None or assignment.prepared_grn_id is None:
         raise HTTPException(status_code=409, detail="Receiving, GRN preparation, and dock release must be completed")
     asn = await uow.session.get(AsnModel, assignment.asn_id)
-    po = await uow.session.get(PurchaseOrderModel, assignment.po_id)
+    po = await uow.session.get(PurchaseOrderModel, assignment.po_id) if assignment.po_id else None
     grn_result = await uow.session.execute(select(GrnModel).options(selectinload(GrnModel.lines)).where(GrnModel.id == assignment.prepared_grn_id))
     grn = grn_result.scalar_one_or_none()
-    if asn is None or po is None or grn is None:
-        raise HTTPException(status_code=409, detail="ASN, PO, or GRN verification context is missing")
+    if asn is None or grn is None:
+        raise HTTPException(status_code=409, detail="ASN or GRN verification context is missing")
+    if po is not None and not request.po_verified:
+        raise HTTPException(status_code=422, detail="Purchase order verification must be confirmed when a PO is linked")
     if grn.status != "GRN_POSTED":
         raise HTTPException(status_code=409, detail="GRN must be posted before vehicle exit approval")
     existing = await uow.session.execute(select(VehicleExitApprovalModel.id).where(VehicleExitApprovalModel.gate_entry_id == gate_entry.id))
@@ -3608,7 +3925,7 @@ async def approve_vehicle_exit(
         raise HTTPException(status_code=409, detail="Vehicle exit was already approved")
     approved_at = datetime.datetime.now(datetime.timezone.utc)
     approval = VehicleExitApprovalModel(
-        gate_entry_id=gate_entry.id, dock_assignment_id=assignment.id, asn_id=asn.id, po_id=po.id, grn_id=grn.id,
+        gate_entry_id=gate_entry.id, dock_assignment_id=assignment.id, asn_id=asn.id, po_id=po.id if po else None, grn_id=grn.id,
         vehicle_number=assignment.vehicle_number, driver_name=gate_entry.driver_name,
         exit_document_reference=request.exit_document_reference.strip(), approved_by=user.username, approved_at=approved_at,
     )
@@ -3675,7 +3992,7 @@ async def approve_vehicle_exit(
     uow.session.add(NotificationModel(user_role="WAREHOUSE", title="Vehicle Exit Approved", message=f"Security approved exit for {assignment.vehicle_number} against {grn.grn_number}.", link="/vehicle-exit"))
     await uow.session.flush()
     return {"gate_entry_id": str(gate_entry.id), "status": gate_entry.status, "vehicle_number": assignment.vehicle_number,
-            "asn_number": asn.asn_number, "po_number": po.po_number, "grn_number": grn.grn_number,
+            "asn_number": asn.asn_number, "po_number": po.po_number if po else None, "grn_number": grn.grn_number,
             "exit_document_reference": approval.exit_document_reference,
             "approved_by": user.username, "approved_at": approved_at.isoformat(),
             "transaction_completed": True, "vehicle_departure_authorized": True,
@@ -3693,7 +4010,7 @@ async def list_gate_exit_queue(
         .join(VehicleExitApprovalModel, VehicleExitApprovalModel.gate_entry_id == GateEntryModel.id)
         .join(DockAssignmentModel, DockAssignmentModel.gate_entry_id == GateEntryModel.id)
         .join(AsnModel, AsnModel.id == VehicleExitApprovalModel.asn_id)
-        .join(PurchaseOrderModel, PurchaseOrderModel.id == VehicleExitApprovalModel.po_id)
+        .outerjoin(PurchaseOrderModel, PurchaseOrderModel.id == VehicleExitApprovalModel.po_id)
         .join(GrnModel, GrnModel.id == VehicleExitApprovalModel.grn_id)
         .outerjoin(GateExitModel, GateExitModel.gate_entry_id == GateEntryModel.id)
         .where(GateEntryModel.status.in_([GateEntryStatus.EXIT_APPROVED.value, GateEntryStatus.GATE_EXIT_COMPLETED.value]))
@@ -3701,7 +4018,7 @@ async def list_gate_exit_queue(
     )
     return [{"gate_entry_id": str(entry.id), "gate_entry_number": entry.gate_entry_number,
              "vehicle_number": approval.vehicle_number, "driver_name": approval.driver_name,
-             "asn_id": str(asn.id), "asn_number": asn.asn_number, "po_number": po.po_number,
+             "asn_id": str(asn.id), "asn_number": asn.asn_number, "po_number": po.po_number if po else None,
              "grn_number": grn.grn_number, "dock_number": assignment.dock_number,
              "exit_document_reference": approval.exit_document_reference,
              "exit_approved_by": approval.approved_by, "exit_approved_at": approval.approved_at.isoformat(),
@@ -3787,7 +4104,7 @@ async def list_grn_drafts(
             "grn_number": grn.grn_number or f"GRN-{str(grn.id)[:8]}",
             "status": grn.status or "COMPLETED",
             "po_id": str(grn.po_id) if grn.po_id else None,
-            "po_number": grn.po_number or "PO-1001",
+            "po_number": grn.po_number,
             "asn_id": str(grn.asn_id) if grn.asn_id else None,
             "asn_number": grn.asn_number or "ASN-001",
             "supplier_name": grn.supplier_name or "Supplier",
@@ -3873,8 +4190,8 @@ async def post_grn(
         raise NotFoundException(f"GRN '{grn_id}' not found")
     if grn.status != "GRN_DRAFT":
         raise HTTPException(status_code=409, detail="Only a GRN draft can be posted")
-    if not all([grn.po_id, grn.po_number, grn.asn_id, grn.asn_number, grn.supplier_name, grn.vehicle_number, grn.warehouse_id, grn.dock_number]):
-        raise HTTPException(status_code=409, detail="GRN shipment references are incomplete")
+    if not all([grn.asn_id, grn.asn_number, grn.supplier_name, grn.vehicle_number, grn.warehouse_id, grn.dock_number]):
+        raise HTTPException(status_code=409, detail="GRN ASN shipment references are incomplete")
     assignment_result = await uow.session.execute(select(DockAssignmentModel).where(DockAssignmentModel.prepared_grn_id == grn.id))
     assignment = assignment_result.scalar_one_or_none()
     if assignment is None:
@@ -4140,10 +4457,14 @@ async def verify_gate_entry(
         veh_plate = model.vehicle_number
         if not veh_plate:
             raise HTTPException(status_code=422, detail="Gate entry must have a vehicle number before approval")
-        supplier = entry.ocr_result.supplier_name if (hasattr(entry, "ocr_result") and entry.ocr_result) else None
+        supplier = entry.ocr_result.supplier_name if entry.ocr_result else model.ocr_supplier_name
         po_num = model.po_number
-        mat_desc = model.material_description
-        qty = getattr(entry, "total_quantity", None)
+        mat_desc = entry.ocr_result.material_description if entry.ocr_result else model.ocr_product_material
+        qty = (
+            entry.ocr_result.total_quantity
+            if entry.ocr_result and entry.ocr_result.total_quantity is not None
+            else float(model.ocr_quantity) if model.ocr_quantity is not None else None
+        )
 
         from app.modules.dock.application.service import DockAllocationService
         await DockAllocationService.auto_create_allocation_request(

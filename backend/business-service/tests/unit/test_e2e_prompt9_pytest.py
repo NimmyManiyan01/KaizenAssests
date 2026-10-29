@@ -14,7 +14,7 @@ from app.modules.gate.infrastructure.persistence.models import (
     GateEntryModel,
     GateExitModel,
 )
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
     AsnModel,
     MaterialStockModel,
     NotificationModel,

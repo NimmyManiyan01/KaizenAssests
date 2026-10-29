@@ -9,14 +9,16 @@ from sqlalchemy import select, text
 
 from app.database.session import AsyncSessionFactory, engine
 from app.main import create_app
-from app.modules.procurement.infrastructure.persistence.models import MaterialStockModel
+from app.common.persistence.models import MaterialModel, MaterialStockModel
 from app.modules.storage.infrastructure.persistence.models import (
     HandlingUnitModel,
     InventoryLocationBalanceModel,
     PutawayTaskModel,
     StorageLocationModel,
 )
+from app.modules.receiving.infrastructure.persistence.models import GrnLineModel
 from app.modules.store.infrastructure.persistence.models import (
+    StoreBinModel,
     StoreManagerUserModel,
     StoreModel,
     StoreZoneModel,
@@ -236,7 +238,33 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
         session.add_all([zone, other_zone])
         await session.flush()
 
+        bin_obj = StoreBinModel(
+            store_id=store.id,
+            zone_id=zone.id,
+            bin_code=f"BIN-MEC-{uuid.uuid4().hex[:5].upper()}",
+            bin_name="Mechanical Putaway Bin",
+            rack="R01",
+            shelf="S01",
+            capacity=Decimal("500.0"),
+            occupied_quantity=Decimal("0.0"),
+            status="ACTIVE",
+        )
+        session.add(bin_obj)
+        await session.flush()
+
         mat_code = f"MOT-{uuid.uuid4().hex[:6].upper()}"
+
+        session.add(GrnLineModel(
+            grn_id=grn_id,
+            item_code=mat_code,
+            material_name="Industrial Motor",
+            uom="PCS",
+            ordered_quantity=Decimal("10.0"),
+            received_quantity=Decimal("10.0"),
+            accepted_quantity=Decimal("10.0"),
+            good_quantity=Decimal("10.0"),
+            damaged_quantity=Decimal("0.0"),
+        ))
 
         # 3. Seed Handling Unit (Material QR payload)
         hu_number = f"HU-{uuid.uuid4().hex[:8].upper()}"
@@ -276,6 +304,13 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
             reorder_point=Decimal("5.0"),
         )
         session.add(stock)
+        session.add(MaterialModel(
+            material_code=mat_code,
+            material_name="Industrial Motor",
+            category="Mechanical",
+            base_uom="PCS",
+            status="Active",
+        ))
 
         # 5. Seed Putaway Task assigned to Store + Zone
         task = PutawayTaskModel(
@@ -292,6 +327,9 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
             destination_store_id=store.id,
             destination_zone_id=zone.id,
             destination_zone=zone.zone_code,
+            destination_bin_id=bin_obj.id,
+            destination_bin=bin_obj.bin_code,
+            destination_bin_code=bin_obj.bin_code,
             status="PUTAWAY_PENDING",
             created_by="system",
             created_at=datetime.datetime.now(datetime.timezone.utc),
@@ -303,6 +341,8 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
         hu_val = hu_number
         zone_id = str(zone.id)
         zone_code = zone.zone_code
+        bin_id = str(bin_obj.id)
+        bin_code = bin_obj.bin_code
         other_zone_code = other_zone.zone_code
         store_id = str(store.id)
         store_code = store.store_code
@@ -323,7 +363,7 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
     # Assign location to ensure storage_location exists
     assign_resp = await client.put(
         f"/api/storage/putaway-tasks/{task_id}/location",
-        json={"store_id": store_id, "zone_id": zone_id},
+        json={"store_id": store_id, "zone_id": zone_id, "bin_id": bin_id},
         headers=headers_wh,
     )
     assert assign_resp.status_code == 200
@@ -331,14 +371,14 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
     # Start Putaway as Store Keeper
     start_resp = await client.post(f"/api/storage/putaway-tasks/{task_id}/start", headers=headers_keeper)
     assert start_resp.status_code == 200
-    assert start_resp.json()["status"] == "PUTAWAY_IN_PROGRESS"
+    assert start_resp.json()["status"] == "IN_PROGRESS"
 
     # Test 1: Invalid Material QR -> Rejected 422
     resp_bad_mat = await client.post(
         f"/api/storage/putaway-tasks/{task_id}/complete",
         json={
             "material_scan": "INVALID-HU-999",
-            "location_scan": zone_code,
+            "location_scan": bin_code,
             "quantity": 10.0,
         },
         headers=headers_keeper,
@@ -364,17 +404,18 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
         f"/api/storage/putaway-tasks/{task_id}/complete",
         json={
             "material_scan": hu_val,
-            "location_scan": zone_code,
+            "location_scan": bin_code,
             "quantity": 15.0,
         },
         headers=headers_keeper,
     )
-    assert resp_over_qty.status_code == 422
+    assert resp_over_qty.status_code == 422, resp_over_qty.text
     assert "exceeds" in resp_over_qty.json()["detail"].lower()
 
     # Test 4: Valid Putaway with structured Phase 4 Zone QR JSON payload
     zone_qr_payload = json.dumps({
-        "type": "ZONE_QR",
+        "type": "BIN_QR",
+        "bin_code": bin_code,
         "zone_id": zone_id,
         "zone_code": zone_code,
         "store_id": store_id,
@@ -392,14 +433,14 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
         f"/api/storage/putaway-tasks/{task_id}/complete",
         json={
             "material_scan": material_qr_payload,
-            "location_scan": zone_qr_payload,
+            "location_scan": bin_code,
             "quantity": 10.0,
         },
         headers=headers_keeper,
     )
-    assert resp_complete.status_code == 200
+    assert resp_complete.status_code == 200, resp_complete.text
     comp_data = resp_complete.json()
-    assert comp_data["status"] == "PUTAWAY_COMPLETED"
+    assert comp_data["status"] == "COMPLETED"
     assert comp_data["inventory_available_after"] >= 10.0
 
     # Test 5: Attempting to complete an already completed task -> Rejected 409
@@ -407,7 +448,7 @@ async def test_putaway_qr_scanning_and_completion_flow(client: AsyncClient):
         f"/api/storage/putaway-tasks/{task_id}/complete",
         json={
             "material_scan": material_qr_payload,
-            "location_scan": zone_qr_payload,
+            "location_scan": bin_code,
             "quantity": 10.0,
         },
         headers=headers_keeper,
