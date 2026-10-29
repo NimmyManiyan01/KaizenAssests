@@ -6,10 +6,10 @@ export interface UserInfo {
   username: string;
   roles: string[];
   supplierId?: string;
-  store_id?: string;
-  store_code?: string;
-  storeId?: string;
-  storeCode?: string;
+  warehouse_ref_id?: string;
+  warehouse_code?: string;
+  warehouseRefId?: string;
+  warehouseCode?: string;
   employee_id?: string;
   full_name?: string;
   page_permissions?: Record<string, PageAccess>;
@@ -60,6 +60,17 @@ export function getUserInfo(): UserInfo | null {
       !Array.isArray(user.roles) ||
       !user.roles.every((role) => typeof role === "string")
     ) {
+      return null;
+    }
+
+    // Remove sessions manufactured by the retired username-based development
+    // login. Staff sessions must now be backed by a user_account row.
+    if (
+      user.token.startsWith("mock-jwt-") &&
+      !user.token.startsWith("mock-jwt-db-user-") &&
+      user.token !== "mock-jwt-supplier-token"
+    ) {
+      clearAuthSession();
       return null;
     }
 
@@ -128,8 +139,8 @@ export function getRequiredRolesForPath(pathname: string): string[] | null {
     ];
   if (pathname === "/grn" || pathname === "/receiving")
     return ["GRN", "GRN_MANAGER", "RECEIVING", "WAREHOUSE", "ADMIN", "SUPERUSER"];
-  if (pathname === "/warehouse/stores")
-    return ["WAREHOUSE", "WAREHOUSE_MANAGER", "ADMIN", "SUPERUSER"];
+  if (pathname === "/inventory")
+    return ["WAREHOUSE", "WAREHOUSE_MANAGER", "WAREHOUSE_OPERATOR", "ADMIN", "SUPERUSER"];
   if (
     pathname.startsWith("/warehouse") ||
     pathname === "/warehouse-dashboard" ||
@@ -142,19 +153,20 @@ export function getRequiredRolesForPath(pathname: string): string[] | null {
     return [
       "WAREHOUSE",
       "WAREHOUSE_MANAGER",
-      "STORE_MANAGER",
-      "STORE_KEEPER",
+      "WAREHOUSE_OPERATOR",
+      "WAREHOUSE_OPERATOR",
       "ADMIN",
       "SUPERUSER",
     ];
-  if (pathname === "/my-store") return ["STORE_MANAGER", "STORE_KEEPER", "ADMIN", "SUPERUSER"];
+  if (pathname === "/inventory") return ["WAREHOUSE_OPERATOR", "ADMIN", "SUPERUSER"];
   return null;
 }
 
 export function requireRouteAccess(pathname: string, search = ""): void {
   requireAuth();
   const user = getUserInfo();
-  if (getPageAccess(user?.page_permissions, pathname, search) === null) {
+  const supplierDamageClaims = pathname === "/damage-claims" && hasRole("SUPPLIER");
+  if (!supplierDamageClaims && getPageAccess(user?.page_permissions, pathname, search) === null) {
     redirectToDefault(user, pathname, search);
   }
   const requiredRoles = getRequiredRolesForPath(pathname);
@@ -209,7 +221,6 @@ export function getSafeRedirectPath(redirectPath: unknown): string | null {
 
 export function getDefaultRouteForUser(user = getUserInfo()): string {
   const roles = user?.roles || [];
-  const username = (user?.username || "").toLowerCase();
   const permissions = user?.page_permissions;
 
   const permittedDefault = (target: string): string | null => {
@@ -229,9 +240,7 @@ export function getDefaultRouteForUser(user = getUserInfo()): string {
     roles.includes("GRN_MANAGER") ||
     roles.includes("OPERATIONS_MANAGER") ||
     roles.includes("OPERATIONS") ||
-    roles.includes("RECEIVING") ||
-    username === "grn" ||
-    username.includes("grn")
+    roles.includes("RECEIVING")
   ) {
     const target = permittedDefault("/grn?tab=dashboard");
     if (target) return target;
@@ -239,8 +248,7 @@ export function getDefaultRouteForUser(user = getUserInfo()): string {
 
   if (
     roles.includes("WAREHOUSE") ||
-    roles.includes("WAREHOUSE_MANAGER") ||
-    username.includes("warehouse")
+    roles.includes("WAREHOUSE_MANAGER")
   ) {
     const target = permittedDefault("/warehouse-dashboard");
     if (target) return target;
@@ -261,7 +269,7 @@ export function getDefaultRouteForUser(user = getUserInfo()): string {
     const target = permittedDefault("/assembly-dashboard");
     if (target) return target;
   }
-  if (roles.includes("STORE_MANAGER") || roles.includes("STORE_KEEPER")) {
+  if (roles.includes("WAREHOUSE_OPERATOR") || roles.includes("WAREHOUSE_OPERATOR")) {
     const target = permittedDefault("/inventory?tab=dashboard");
     if (target) return target;
   }

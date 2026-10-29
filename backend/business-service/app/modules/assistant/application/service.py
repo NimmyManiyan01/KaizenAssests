@@ -8,6 +8,8 @@ from typing import Any, Dict, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.assistant.application.data_retriever import AssistantDataRetriever
+from app.modules.assistant.application.intents import normalize_query, is_mutation
+from app.modules.assistant.application.knowledge import workflow_guide, unsupported_detail
 from app.modules.assistant.application.role_policy import (
     can_access_category,
     canonical_roles,
@@ -19,21 +21,10 @@ from app.security.dependencies import CurrentUser
 
 logger = logging.getLogger("ams.assistant.service")
 
-STANDARD_FALLBACK = (
-    "I’m the Kaizen AMS operations assistant. I can help with warehouse inventory, "
-    "purchase orders, inbound and gate entries, putaway, assembly, and dispatch. "
-    "Please ask a question about one of these areas."
-)
 READ_ONLY_REPLY = (
     "I can look up operational information, but I can’t create, edit, approve, reserve, "
     "issue, or otherwise change records. Please use the relevant AMS workflow."
 )
-UNSUPPORTED_REPLY = (
-    "I can help with live warehouse records and basic receiving, putaway, inventory, "
-    "assembly, and dispatch guidance. Please include a record number or ask about one "
-    "of those workflows."
-)
-
 DOMAIN_TERMS = re.compile(
     r"\b(warehouses?|inventory|stocks?|materials?|skus?|items?|batches?|lots?|bins?|zones?|"
     r"racks?|shelves?|aisles?|locations?|putaway|stow|storage|"
@@ -50,12 +41,6 @@ DOMAIN_TERMS = re.compile(
     r"dashboard|kpis?|metrics?|reports?)\b",
     re.IGNORECASE,
 )
-MUTATION_REQUEST = re.compile(
-    r"^\s*(?:(?:please|can you|could you|would you|i want you to|i need you to)\s+)*(?:create|add|edit|"
-    r"update|change|delete|remove|approve|reject|issue|reserve|allocate|"
-    r"cancel|execute|submit|post|assign|unassign|release|close|complete|mark|upload|import)\b",
-    re.IGNORECASE,
-)
 GREETING = re.compile(r"^(hi|hello|hey|good morning|good afternoon|good evening)[!. ]*$", re.I)
 THANKS = re.compile(r"^(thanks|thank you|thx|appreciate it)[!. ]*$", re.I)
 HELP_REQUEST = re.compile(
@@ -65,7 +50,7 @@ HELP_REQUEST = re.compile(
 )
 FOLLOW_UP = re.compile(
     r"\b(what about|how about|and (?:the|those|pending|open|today)|those|them|it|"
-    r"pending ones?|open ones?|today|yesterday|this week|same|more|details?|status)\b",
+    r"pending ones?|open ones?|today|yesterday|this week|last week|this month|cancelled ones?|completed ones?|same|more|details?|status)\b",
     re.I,
 )
 ADMIN_TOPIC = re.compile(
@@ -79,40 +64,6 @@ ADMIN_LIVE_QUERY = re.compile(
     r"show|list|latest|recent)\b",
     re.I,
 )
-
-SPELLING_VARIANTS = {
-    "inventry": "inventory",
-    "invntory": "inventory",
-    "warehosue": "warehouse",
-    "recieving": "receiving",
-    "receving": "receiving",
-    "putway": "putaway",
-    "put-away": "putaway",
-    "assambly": "assembly",
-    "asemmbly": "assembly",
-    "despatch": "dispatch",
-    "dispach": "dispatch",
-    "suplier": "supplier",
-    "suppplier": "supplier",
-    "vehical": "vehicle",
-    "vechicle": "vehicle",
-    "reciept": "receipt",
-    "puchase": "purchase",
-    "pruchase": "purchase",
-    "quanity": "quantity",
-    "availble": "available",
-    "manufaturing": "manufacturing",
-    "quarentine": "quarantine",
-    "allotement": "allocation",
-}
-
-
-def normalize_query(query: str) -> str:
-    """Normalize common operational spelling variants before intent matching."""
-    normalized = query
-    for variant, replacement in SPELLING_VARIANTS.items():
-        normalized = re.sub(rf"\b{re.escape(variant)}\b", replacement, normalized, flags=re.I)
-    return normalized
 
 
 class AssistantService:
@@ -130,13 +81,24 @@ class AssistantService:
                 continue
             previous = normalize_query(message.content)
             if self.data_retriever.detect_category(previous):
-                return f"{previous}. Follow-up request: {query}"
+                if re.fullmatch(r"(?:show\s+(?:me\s+)?)?(?:more\s+)?(?:details?|status)(?:\s+(?:please|of\s+(?:it|that)))?[?.!]*", query, re.I):
+                    return f"{previous}. {query}"
+                # Keep the topic, but replace old filters and identifiers. A follow-up
+                # for yesterday must not silently retain today's date or old status.
+                topic = self.data_retriever.detect_category(previous)
+                topic_words = {"purchase_orders": "purchase orders", "gate_entries": "inbound arrivals",
+                               "locations": "warehouse zones", "docks": "docks", "putaway": "putaway",
+                               "inventory": "inventory", "assembly": "assembly", "dispatch": "dispatch",
+                               "admin": "users"}
+                return f"{topic_words[topic]} {query}"
         return query
 
     async def retrieve_context(
         self, query: str, user: CurrentUser, session: AsyncSession
     ) -> Optional[Dict[str, Any]]:
         category = self.data_retriever.detect_category(query)
+        if category and not can_access_category(user.roles, category):
+            return {"category": category, "authorized": False, "reason": unauthorized_reply(user.roles, category)}
         if not category:
             return None
         methods = {
@@ -165,6 +127,8 @@ class AssistantService:
         if facts.get("error"):
             return "I couldn’t retrieve those records because of a temporary database issue. Please try again."
         if not facts.get("found", True):
+            if facts.get("total") == 0:
+                return "No matching records were found (0 matches)."
             if facts.get("category") == "docks" and re.search(r"\bhow\s+many\b", query, re.IGNORECASE):
                 return "There are 0 warehouse docks configured."
             if facts.get("category") == "locations" and re.search(r"\bhow\s+many\b", query, re.IGNORECASE):
@@ -266,7 +230,15 @@ class AssistantService:
             return "No matching records were found."
 
         period = f" from {facts['period_label']}" if facts.get("period_label") else ""
-        lines = [f"{label}{'s' if len(records) != 1 else ''}{period} ({len(records)}):"]
+        total = facts.get("total")
+        if total is None and re.search(r"\b(how many|count|number of|total)\b", query, re.I):
+            return (f"I retrieved {len(records)} {label.lower()} records in a limited result list. "
+                    "This lookup does not provide a total count. Narrow the search with a record number.")
+        if total is not None and re.search(r"\b(how many|count|number of|total)\b", query, re.I):
+            return f"Matching {label.lower()} records{period}: {total}."
+        heading = f"{label}{'s' if len(records) != 1 else ''}{period} ({len(records)}"
+        heading += f" of {total}" if total is not None else ""
+        lines = [heading + "):"]
         for item in records[:10]:
             if category == "inventory":
                 name = item.get("material_name") or item.get("material_code", "Material")
@@ -278,6 +250,9 @@ class AssistantService:
                 detail = f"available {quantity} {uom}"
                 if total is not None and total != quantity:
                     detail += f", on hand {total} {uom}"
+                allocated = item.get("allocated")
+                if allocated is not None:
+                    detail += f", allocated {allocated} {uom}"
                 if location:
                     detail += f", location {location}"
                 lines.append(f"• {name}{f' ({code})' if code else ''}: {detail}.")
@@ -306,13 +281,16 @@ class AssistantService:
                         details.append(f"{title} {value}")
                 title = f"{identifier}: " if identifier else ""
                 lines.append(f"• {title}{'; '.join(details) or 'record found'}.")
-        if len(records) == 10:
-            lines.append("Showing up to 10 records. Add a record number to narrow the search.")
+        if facts.get("limited", True):
+            lines.append("This is a limited result list, not a total count. Add a record number to narrow the search.")
         return "\n".join(lines)
 
     @staticmethod
     def _workflow_reply(query: str) -> Optional[str]:
         q = query.lower()
+        curated = workflow_guide(query)
+        if curated:
+            return curated
         # Short, plain-language definitions for the labels users see in the
         # warehouse dashboard. Keep these ahead of broader workflow matches.
         metric_replies = []
@@ -390,7 +368,7 @@ class AssistantService:
              "A cycle count compares physical stock with the recorded balance for selected materials or locations. Investigate differences and post approved adjustments through the inventory workflow."),
             (r"\b(material\s+issue|issue\s+material|issue\s+stock)\b",
              "Material issue records stock handed to an approved request or production order. Confirm the request, eligible batch, quantity, and destination before posting the issue."),
-            (r"\b(finished\s+goods|fg\s+store|fg\s+pickup)\b",
+            (r"\b(finished\s+goods|fg\s+warehouse|fg\s+pickup)\b",
              "Finished goods move from completed assembly and quality checks into finished-goods storage, then into an approved dispatch or supplier pickup workflow."),
             (r"\b(vehicle\s+(?:entry|exit)|check[ -]?in|check[ -]?out|gate\s*out)\b",
              "Vehicle entry verifies the expected delivery or pickup, driver, vehicle, and documents. Vehicle exit is completed only after the related receiving or dispatch checks are satisfied."),
@@ -417,13 +395,13 @@ class AssistantService:
     ) -> AssistantChatResponse:
         original_query = normalize_query(request.message.strip())
         query = self._resolve_contextual_query(request, original_query)
-        if MUTATION_REQUEST.search(query):
+        if is_mutation(original_query):
             reply = READ_ONLY_REPLY
         elif GREETING.fullmatch(query):
-            reply = "Hello! I can help with Kaizen AMS warehouse and operations questions. What would you like to look up?"
+            reply = "Hello! " + capabilities_reply(user.roles)
         elif THANKS.fullmatch(query):
             reply = "You’re welcome. Ask whenever you need help with an AMS operations lookup."
-        elif HELP_REQUEST.search(query):
+        elif HELP_REQUEST.search(query) and not self.data_retriever.detect_category(query):
             reply = capabilities_reply(user.roles)
         elif ADMIN_TOPIC.search(query) and not ADMIN_LIVE_QUERY.search(query):
             if "ADMIN" not in canonical_roles(user.roles):
@@ -436,13 +414,18 @@ class AssistantService:
                     "Use the Admin workspace for user access, assembly-unit setup, and audit logs. "
                     "The assistant can explain these controls but cannot change them."
                 )
-        elif not DOMAIN_TERMS.search(query):
-            reply = STANDARD_FALLBACK
+        elif not DOMAIN_TERMS.search(query) and not self.data_retriever.detect_category(query) and not re.search(r"\borders?\b", query, re.I):
+            reply = capabilities_reply(user.roles)
         else:
             category = self.data_retriever.detect_category(query)
+            if "SUPPLIER" in canonical_roles(user.roles) and re.search(r"\b(?:explain|how|steps)\b", query, re.I) and re.search(r"\b(?:finished goods|fg)\s+pickup\b", query, re.I):
+                return AssistantChatResponse(
+                    reply=workflow_guide(query) or "Use the supplier finished-goods pickup request workflow.",
+                    model="rules-v2-role-aware", role="assistant",
+                )
             if category and not can_access_category(user.roles, category):
                 return AssistantChatResponse(
-                    reply=unauthorized_reply(user.roles, category),
+                    reply=("This is an administration-only topic. " if category == "admin" else "") + unauthorized_reply(user.roles, category),
                     model="rules-v2-role-aware",
                     role="assistant",
                 )
@@ -454,13 +437,31 @@ class AssistantService:
                 re.IGNORECASE,
             ))
             asks_for_live_records = bool(re.search(
-                r"\b(show|list|find|search|look\s+up|lookup|status|how\s+many|count|"
-                r"available|availability|on[ -]hand|where\s+is|which|details|records?)\b",
+                r"\b(show|list|find|search|look\s+up|lookup|status|how\s+many|count|total|number\s+of|"
+                r"available|availability|on[ -]hand|where\s+is|which|details|records?|pending|open|active|completed|cancelled|today|yesterday|summary|progress)\b",
                 query,
                 re.IGNORECASE,
             )) or bool(re.search(r"\b(?:PO|GE|GATE|ASN|AO|ASSY|WO|DISP|DO|MAT|RM|PKG|FG|ITEM|TASK|PUT|PT)-[A-Z0-9-]+\b", query, re.I))
-            reply = self._workflow_reply(query) if asks_for_guidance and not asks_for_live_records else None
+            explicit_explanation = bool(re.search(
+                r"^(?:please\s+)?(?:explain\b|define\b|how\s+(?:do|does|can|should|to)\b|"
+                r"what\s+(?:does|do)\b.*\bmean\b|what\s+is\s+(?:a|an)\b)|"
+                r"\b(?:meaning|definition|difference\s+between)\b", query, re.I,
+            ))
+            reply = self._workflow_reply(query) if explicit_explanation or (asks_for_guidance and not asks_for_live_records) else None
             reply = reply or ""
+            if not reply and asks_for_live_records and session is not None and re.search(r"\b(?:zones?|bins?)\b", query, re.I) and re.search(r"\bdocks?\b", query, re.I):
+                sections = []
+                for area, topic in (("locations", "zones and bins"), ("docks", "docks")):
+                    if not can_access_category(user.roles, area):
+                        sections.append(unauthorized_reply(user.roles, area))
+                        continue
+                    scoped_query = ("how many " if re.search(r"\b(?:how many|count|total|number of)\b", query, re.I) else "show ") + topic
+                    facts = await self.retrieve_context(scoped_query, user, session)
+                    if facts:
+                        sections.append(self._format_records(facts, scoped_query))
+                reply = "\n\n".join(sections)
+            if not reply:
+                reply = unsupported_detail(query, category) or ""
             if not reply and session is not None:
                 facts = await self.retrieve_context(query, user, session)
                 if facts:
@@ -468,7 +469,9 @@ class AssistantService:
             if not reply and category is None:
                 reply = self._workflow_reply(query) or ""
             if not reply:
-                reply = UNSUPPORTED_REPLY
+                reply = ("Which area do you mean: inventory, purchase orders, inbound, putaway, assembly, or dispatch? "
+                         "Ask 'what can you do?' for examples available to your role." if category is None else
+                         "I cannot retrieve live records in this session. Please try again from the assistant chat, or ask me to explain the workflow.")
 
         return AssistantChatResponse(reply=reply, model="rules-v2-role-aware", role="assistant")
 

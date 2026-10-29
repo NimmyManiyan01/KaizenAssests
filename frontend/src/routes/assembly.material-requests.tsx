@@ -157,17 +157,17 @@ function AssemblyMaterialRequestsPage() {
   const [creating, setCreating] = useState(false);
   const [formData, setFormData] = useState({
     product_code: "",
-    target_quantity: 10,
-    required_date: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
+    target_quantity: "",
+    required_date: "",
     remarks: "",
   });
 
   const [requiredDateError, setRequiredDateError] = useState<string | null>(null);
   const openCreateRequest = () => {
     setFormData({
-      product_code: products[0]?.product_code || "",
-      target_quantity: 10,
-      required_date: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
+      product_code: "",
+      target_quantity: "",
+      required_date: "",
       remarks: "",
     });
     setRequiredDateError(null);
@@ -354,14 +354,6 @@ function AssemblyMaterialRequestsPage() {
       ]);
       setRawMaterials(Array.isArray(materialRows) ? materialRows : []);
       setProducts(productRows);
-      if (
-        productRows.length > 0 &&
-        !productRows.some((p) => p.product_code === formData.product_code)
-      ) {
-        setFormData((prev) => ({ ...prev, product_code: productRows[0]?.product_code || "" }));
-      } else if (productRows.length === 0) {
-        setFormData((prev) => ({ ...prev, product_code: "" }));
-      }
     } catch (err: any) {
       console.error("Failed to load products master:", err);
     }
@@ -860,8 +852,8 @@ function AssemblyMaterialRequestsPage() {
         {/* CREATE MATERIAL REQUEST MODAL */}
         {/* ========================================================================= */}
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-          <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-3xl max-h-[90dvh] overflow-y-auto overflow-x-hidden p-6 rounded-2xl">
-            <DialogHeader className="border-b border-border/60 pb-4 pr-6 text-left">
+          <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-3xl max-h-[calc(100dvh-1rem)] overflow-y-auto overflow-x-hidden p-4 sm:p-5 rounded-2xl">
+            <DialogHeader className="border-b border-border/60 pb-3 pr-6 text-left">
               <DialogTitle className="text-lg font-bold text-foreground flex items-center gap-2">
                 <Boxes className="size-5 text-primary" />
                 Request Raw Materials from Warehouse
@@ -872,7 +864,7 @@ function AssemblyMaterialRequestsPage() {
               </DialogDescription>
             </DialogHeader>
 
-            <form onSubmit={handleCreateRequest} className="min-w-0 space-y-5 pt-2">
+            <form onSubmit={handleCreateRequest} className="min-w-0 space-y-3 pt-1">
               {/* Product Selection */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">

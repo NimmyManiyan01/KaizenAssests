@@ -20,24 +20,12 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import { api, type AssistantChatMessage } from "@/lib/api-client";
 import { getUserInfo } from "@/lib/auth-utils";
 
-const defaultSuggestedQuestions = [
-  "Show today’s inbound arrivals",
-  "Show available inventory",
-  "Show pending putaway tasks",
-  "Explain the GRN workflow",
-  "How does FIFO picking work?",
-  "Explain damaged material claims",
-  "Show active assembly orders",
-  "Show dispatch status",
-  "How many zones, bins, and docks are configured?",
-];
-
 const roleSuggestedQuestions: Record<string, string[]> = {
   ADMIN: ["Show today's inbound arrivals", "Show available inventory", "Show active assembly orders", "Show dispatch status", "What can you do?"],
   WAREHOUSE: ["Show available inventory", "Show pending putaway tasks", "Show today's inbound arrivals", "Where is material MAT-001?", "How many zones, bins, and docks are configured?"],
   GATE_SECURITY: ["Show today's inbound arrivals", "Show the vehicle queue", "Which docks are available?", "Show dispatches ready for gate out", "Explain vehicle check-in and check-out"],
   GRN: ["Show arrivals waiting for receiving", "Show open purchase orders", "Explain the GRN workflow", "Show pending putaway tasks", "Explain damaged material handling"],
-  STORE_MANAGER: ["Show available inventory", "Show pending putaway tasks", "Where is material MAT-001?", "Explain FIFO picking", "Show warehouse zones and bins"],
+  WAREHOUSE_OPERATOR: ["Show available inventory", "Show pending putaway tasks", "Where is material MAT-001?", "Explain FIFO picking", "Show warehouse zones and bins"],
   ASSEMBLY_MANAGER: ["Show active assembly orders", "Show material availability", "Explain material requests", "Show production progress", "Explain finished goods handover"],
   DISPATCH_MANAGER: ["Show dispatch status", "Show outbound orders", "Explain picking and packing", "Explain loading and gate out", "Show available inventory"],
   SUPPLIER: ["Show my purchase orders", "Show my inbound ASN status", "Explain ASN creation", "Explain damaged material claims", "Explain finished goods pickup"],
@@ -45,19 +33,20 @@ const roleSuggestedQuestions: Record<string, string[]> = {
 
 const roleAliases: Record<string, string> = {
   SUPERUSER: "ADMIN", SUPER_ADMIN: "ADMIN", ADMIN_OFFICER: "ADMIN",
-  WAREHOUSE_MANAGER: "WAREHOUSE", STORE_KEEPER: "STORE_MANAGER",
-  STORE_OPERATOR: "STORE_MANAGER", ASSEMBLY: "ASSEMBLY_MANAGER",
+  WAREHOUSE_MANAGER: "WAREHOUSE",
+  WAREHOUSE_OPERATOR: "WAREHOUSE_OPERATOR", ASSEMBLY: "ASSEMBLY_MANAGER",
   DISPATCH: "DISPATCH_MANAGER",
 };
 
-function getSuggestedQuestions() {
+function getSuggestedQuestions(): string[] {
   const roles = getUserInfo()?.roles || [];
   for (const rawRole of roles) {
     const role = rawRole.toUpperCase().replaceAll("-", "_").replaceAll(" ", "_");
-    const suggestions = roleSuggestedQuestions[role] || roleSuggestedQuestions[roleAliases[role]];
+    const alias = roleAliases[role];
+    const suggestions = roleSuggestedQuestions[role] || (alias ? roleSuggestedQuestions[alias] : undefined);
     if (suggestions) return suggestions;
   }
-  return defaultSuggestedQuestions;
+  return ["What can you do?"];
 }
 
 const roleModules: Record<string, { label: string; links: { label: string; to: string }[] }> = {
@@ -81,10 +70,10 @@ const roleModules: Record<string, { label: string; links: { label: string; to: s
       { label: "Dock management", to: "/dock-management" },
     ],
   },
-  STORE_MANAGER: {
-    label: "Store",
+  WAREHOUSE_OPERATOR: {
+    label: "Warehouse",
     links: [
-      { label: "My store", to: "/my-store" },
+      { label: "My warehouse", to: "/inventory" },
       { label: "Inventory", to: "/inventory" },
       { label: "Putaway tasks", to: "/putaway-tasks" },
     ],
@@ -154,11 +143,14 @@ function getModule() {
     RECEIVING: "GRN",
     ASSEMBLY: "ASSEMBLY_MANAGER",
     DISPATCH: "DISPATCH_MANAGER",
-    STORE_KEEPER: "STORE_MANAGER",
+    WAREHOUSE_OPERATOR: "WAREHOUSE_OPERATOR",
   };
   return (
-    roles.map((role) => roleModules[role] || roleModules[aliases[role]]).find(Boolean) ||
-    roleModules.WAREHOUSE
+    roles.map((rawRole) => {
+      const role = rawRole.trim().toUpperCase().replaceAll("-", "_").replaceAll(" ", "_");
+      const alias = roleAliases[role] || aliases[role];
+      return roleModules[role] || (alias ? roleModules[alias] : undefined);
+    }).find(Boolean) || { label: "Operations", links: [] }
   );
 }
 
@@ -167,7 +159,7 @@ function getShortcutIcon(label: string) {
   if (/inventory|material/i.test(label)) return Boxes;
   if (/putaway/i.test(label)) return PackageCheck;
   if (/dock|inbound/i.test(label)) return Truck;
-  if (/zone|bin|store/i.test(label)) return Building2;
+  if (/zone|bin|warehouse/i.test(label)) return Building2;
   if (/setting/i.test(label)) return Settings;
   if (/request/i.test(label)) return ClipboardList;
   return Boxes;
@@ -179,7 +171,7 @@ function getShortcutTone(label: string) {
     return "bg-emerald-100 text-emerald-700 group-hover:bg-emerald-200";
   if (/putaway/i.test(label)) return "bg-amber-100 text-amber-700 group-hover:bg-amber-200";
   if (/dock|inbound/i.test(label)) return "bg-orange-100 text-orange-700 group-hover:bg-orange-200";
-  if (/zone|bin|store/i.test(label))
+  if (/zone|bin|warehouse/i.test(label))
     return "bg-indigo-100 text-indigo-700 group-hover:bg-indigo-200";
   if (/setting/i.test(label)) return "bg-slate-200 text-slate-700 group-hover:bg-slate-300";
   return "bg-violet-100 text-violet-700 group-hover:bg-violet-200";
@@ -195,7 +187,17 @@ export function SecureAssistant() {
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const module = useMemo(getModule, [location.pathname]);
-  const suggestedQuestions = useMemo(getSuggestedQuestions, [location.pathname]);
+  const [suggestedQuestions, setSuggestedQuestions] = useState(getSuggestedQuestions);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setSuggestedQuestions(getSuggestedQuestions());
+    api.assistantCapabilities().then((capabilities) => {
+      if (!cancelled) setSuggestedQuestions(capabilities.suggestions);
+    }).catch(() => { /* Keep local role suggestions while the server is unavailable. */ });
+    return () => { cancelled = true; };
+  }, [open, location.pathname]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -226,7 +228,7 @@ export function SecureAssistant() {
     setLoading(true);
 
     try {
-      const response = await api.assistantChat(text, history);
+      const response = await api.assistantChat(text, history.slice(-40));
       setMessages([...newMessages, { role: "assistant", content: response.reply }]);
     } catch (err: any) {
       const errorMsg =
@@ -244,6 +246,7 @@ export function SecureAssistant() {
     if (lastUserIdx === -1) return;
     const actualIdx = messages.length - 1 - lastUserIdx;
     const lastUserMsg = messages[actualIdx];
+    if (!lastUserMsg) return;
     const prevHistory = messages.slice(0, actualIdx);
     void handleSend(lastUserMsg.content, prevHistory);
   };

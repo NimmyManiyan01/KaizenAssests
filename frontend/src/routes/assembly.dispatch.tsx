@@ -32,6 +32,8 @@ type Pickup = {
   dispatch_id?: string;
   dispatch_status?: string;
   requested_on?: string;
+  created_at?: string;
+  submitted_at?: string;
   priority_rank?: number | null;
   workflow_status?: string;
   processing_group?: "0" | "1" | "2" | "COMPLETE";
@@ -141,10 +143,15 @@ function AssemblyDispatchPage() {
     if (!isCurrent()) return (result || []) as Pickup[];
     setRequests(
       [...(result || [])].sort(
-        (a: Pickup, b: Pickup) =>
-          (a.priority_rank ?? Infinity) - (b.priority_rank ?? Infinity) ||
-          (a.requested_on || "").localeCompare(b.requested_on || "") ||
-          a.id.localeCompare(b.id),
+        (a: Pickup, b: Pickup) => {
+          const requestTime = (request: Pickup) => {
+            const value = Date.parse(request.requested_on || request.created_at || request.submitted_at || "");
+            return Number.isNaN(value) ? 0 : value;
+          };
+          return requestTime(b) - requestTime(a) ||
+            String(b.request_number || "").localeCompare(String(a.request_number || ""), undefined, { numeric: true }) ||
+            b.id.localeCompare(a.id);
+        },
       ),
     );
     setError("");
@@ -608,6 +615,7 @@ function AssemblyDispatchPage() {
                             <th className="p-3">FIFO Batch</th>
                             <th className="p-3 text-right">Quantity</th>
                             <th className="p-3 text-right">Verification</th>
+                            <th className="p-3 text-right">QR Label</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -624,6 +632,9 @@ function AssemblyDispatchPage() {
                                   ? "Verified"
                                   : "Scan required"}
                               </td>
+                              <td className="p-3 text-right">
+                                <PackageQrActions packageNumber={batch.qr_code} title="Finished Goods QR" buttonLabel="View FG QR" />
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -631,6 +642,9 @@ function AssemblyDispatchPage() {
                     </div>
                     {!picked ? (
                       <>
+                        <p className="text-xs text-muted-foreground">
+                          Scan a finished-goods label for one of the allocated FIFO batches. Raw-material QR labels are not accepted here.
+                        </p>
                         <FgQrInput value={qr} onChange={setQr} disabled={busy} />
                         <div className="flex flex-wrap gap-2">
                           <Button
@@ -644,7 +658,7 @@ function AssemblyDispatchPage() {
                                 );
                                 if (!batch)
                                   throw new Error(
-                                    "Scan a finished-goods QR allocated to this request",
+                                    "This QR does not match an allocated finished good. Use View FG QR on one of the listed FIFO batches, then scan that label.",
                                   );
                                 const result = await api.scanAllocatedFinishedGoods(
                                   dispatch.id,

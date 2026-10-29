@@ -18,7 +18,7 @@ const ROADMAP_WAYPOINTS: [number, number, number][] = [
   [-6.5, 0.16, -6], // 2: Turn into receiving
   [-5.8, 0.16, -25], // 3: Receiving Dock Bay (Stage 2)
   [2.2, 0.16, -48], // 4: Turn into high-bay aisle
-  [3.5, 0.16, -74], // 5: Store / Putaway Rack (Stage 3)
+  [3.5, 0.16, -74], // 5: Warehouse / Putaway Rack (Stage 3)
   [-4.0, 0.16, -98], // 6: Turn into inventory matrix
   [0.0, 0.16, -118], // 7: Inventory Center (Stage 4)
   [5.5, 0.16, -142], // 8: Turn into assembly line

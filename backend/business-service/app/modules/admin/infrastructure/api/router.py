@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -8,12 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import desc, func, or_, select
 
-from app.common.persistence.models import AsnModel, FinishedGoodsRequestModel, SupplierModel, SupplierUserModel
+from app.common.persistence.models import AsnModel, FinishedGoodsRequestModel, SupplierAddressModel, SupplierContactModel, SupplierModel, SupplierUserModel
 from app.database.session import UnitOfWork, get_uow
 from app.modules.assembly.infrastructure.persistence.models import AssemblyOrderModel, AssemblyUnitModel
-from app.modules.gate.infrastructure.persistence.models import GateEntryModel
+from app.modules.gate.infrastructure.persistence.models import GateEntryModel, SupplierDamageClaimModel
 from app.modules.receiving.infrastructure.persistence.models import GrnModel
-from app.modules.store.infrastructure.persistence.models import StoreManagerUserModel
+from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel, WarehouseModel
 from app.security.dependencies import CurrentUser, get_current_user
 from app.modules.admin.infrastructure.persistence.models import SystemAuditLogModel
 
@@ -70,12 +71,17 @@ class UserUpdate(BaseModel):
 
 
 class AssemblyUnitCreate(BaseModel):
-    unit_code: str = Field(min_length=2, max_length=64)
     unit_name: str = Field(min_length=2, max_length=128)
     description: str | None = Field(default=None, max_length=255)
 
 
-def serialize_user(account: StoreManagerUserModel) -> dict:
+class AssemblyUnitUpdate(BaseModel):
+    unit_name: str | None = Field(default=None, min_length=2, max_length=128)
+    description: str | None = Field(default=None, max_length=255)
+    status: str | None = None
+
+
+def serialize_user(account: UserAccountModel) -> dict:
     return {
         "id": str(account.id),
         "employee_id": account.employee_id,
@@ -92,7 +98,7 @@ def serialize_user(account: StoreManagerUserModel) -> dict:
     }
 
 
-def is_current_account(account: StoreManagerUserModel, user: CurrentUser) -> bool:
+def is_current_account(account: UserAccountModel, user: CurrentUser) -> bool:
     """Match every identity shape emitted by the supported auth providers."""
     stable_candidates = {
         user.subject.strip().lower(),
@@ -125,18 +131,20 @@ async def overview(
         return int(result.scalar_one())
 
     accounts = (await uow.session.execute(
-        select(StoreManagerUserModel).order_by(StoreManagerUserModel.role, StoreManagerUserModel.full_name)
+        select(UserAccountModel).order_by(UserAccountModel.role, UserAccountModel.full_name)
     )).scalars().all()
     total_users = len(accounts)
-    active_users = await count(StoreManagerUserModel, StoreManagerUserModel.status == "ACTIVE")
+    active_users = await count(UserAccountModel, UserAccountModel.status == "ACTIVE")
     operation_totals = {
         "gate_entries": await count(GateEntryModel),
         "grns": await count(GrnModel),
         "assembly_orders": await count(AssemblyOrderModel),
+        "warehouses": await count(WarehouseModel),
+        "active_warehouses": await count(WarehouseModel, func.upper(WarehouseModel.status) == "ACTIVE"),
     }
 
     module_definitions = {
-        "WAREHOUSE_MANAGER": ("Warehouse", "/inventory?tab=dashboard", "Inventory and store operations"),
+        "WAREHOUSE_MANAGER": ("Warehouse", "/inventory?tab=dashboard", "Inventory and warehouse operations"),
         "GATE_SECURITY": ("Gate", "/gate-dashboard", "Vehicle entry, verification and exit"),
         "GRN": ("GRN / Receiving", "/grn?tab=dashboard", "Goods receipt and receiving reports"),
         "ASSEMBLY_MANAGER": ("Assembly", "/assembly-dashboard", "Production, quality and finished goods"),
@@ -319,12 +327,16 @@ async def create_assembly_unit(
     _: CurrentUser = Depends(require_admin),
     uow: UnitOfWork = Depends(get_uow),
 ) -> dict:
-    code = payload.unit_code.strip().upper().replace(" ", "-")
-    duplicate = await uow.session.execute(
-        select(AssemblyUnitModel.id).where(func.upper(AssemblyUnitModel.unit_code) == code)
-    )
-    if duplicate.first():
-        raise HTTPException(status_code=409, detail="Assembly unit code already exists")
+    existing_codes = (await uow.session.execute(
+        select(AssemblyUnitModel.unit_code).order_by(AssemblyUnitModel.unit_code).with_for_update()
+    )).scalars().all()
+    sequence_numbers = [
+        int(match.group(1))
+        for value in existing_codes
+        if (match := re.fullmatch(r"UNIT-(\d+)", (value or "").strip().upper()))
+    ]
+    next_number = max(sequence_numbers, default=0) + 1
+    code = f"UNIT-{next_number:02d}"
     unit = AssemblyUnitModel(
         unit_code=code,
         unit_name=payload.unit_name.strip(),
@@ -336,14 +348,51 @@ async def create_assembly_unit(
     return {"id": str(unit.id), "code": unit.unit_code, "name": unit.unit_name, "description": unit.description, "status": unit.status}
 
 
+@router.patch("/assembly-units/{unit_id}")
+async def update_assembly_unit(
+    unit_id: uuid.UUID,
+    payload: AssemblyUnitUpdate,
+    _: CurrentUser = Depends(require_admin),
+    uow: UnitOfWork = Depends(get_uow),
+) -> dict:
+    unit = await uow.session.get(AssemblyUnitModel, unit_id)
+    if unit is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assembly unit not found")
+    if payload.unit_name is not None:
+        unit.unit_name = payload.unit_name.strip()
+    if payload.description is not None:
+        unit.description = payload.description.strip() or None
+    if payload.status is not None:
+        normalized_status = payload.status.strip().upper()
+        if normalized_status not in {"ACTIVE", "INACTIVE"}:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Status must be ACTIVE or INACTIVE")
+        unit.status = normalized_status
+    await uow.commit()
+    return {"id": str(unit.id), "code": unit.unit_code, "name": unit.unit_name, "description": unit.description, "status": unit.status}
+
+
 @router.get("/suppliers")
 async def suppliers(
     _: CurrentUser = Depends(require_admin),
     uow: UnitOfWork = Depends(get_uow),
 ) -> list[dict]:
     supplier_rows = (await uow.session.execute(
-        select(SupplierModel).order_by(SupplierModel.supplier_name)
+        select(SupplierModel)
+        .where(
+            or_(
+                SupplierModel.supplier_code.is_(None),
+                func.upper(SupplierModel.supplier_code) != "SUP-DEFAULT",
+            )
+        )
+        .order_by(SupplierModel.supplier_name)
     )).scalars().all()
+    supplier_ids = [supplier.id for supplier in supplier_rows]
+    contacts = {contact.supplier_id: contact for contact in (await uow.session.execute(
+        select(SupplierContactModel).where(SupplierContactModel.supplier_id.in_(supplier_ids))
+    )).scalars().all()} if supplier_ids else {}
+    addresses = {address.supplier_id: address for address in (await uow.session.execute(
+        select(SupplierAddressModel).where(SupplierAddressModel.supplier_id.in_(supplier_ids))
+    )).scalars().all()} if supplier_ids else {}
     asn_counts = dict((await uow.session.execute(
         select(AsnModel.supplier_id, func.count(AsnModel.id))
         .where(AsnModel.supplier_id.is_not(None))
@@ -357,6 +406,14 @@ async def suppliers(
     usernames = dict((await uow.session.execute(
         select(SupplierUserModel.supplier_id, SupplierUserModel.username)
     )).all())
+    user_accounts = {account.username.lower(): account for account in (await uow.session.execute(
+        select(UserAccountModel).where(func.lower(UserAccountModel.username).in_([name.lower() for name in usernames.values()]))
+    )).scalars().all()} if usernames else {}
+    claim_counts = dict((await uow.session.execute(
+        select(SupplierDamageClaimModel.supplier_id, func.count(SupplierDamageClaimModel.id))
+        .where(SupplierDamageClaimModel.supplier_id.in_(supplier_ids))
+        .group_by(SupplierDamageClaimModel.supplier_id)
+    )).all()) if supplier_ids else {}
 
     return [
         {
@@ -365,6 +422,13 @@ async def suppliers(
             "supplier_name": supplier.supplier_name,
             "registered_company_name": supplier.registered_company_name,
             "username": usernames.get(supplier.id),
+            "user_id": (user_accounts.get((usernames.get(supplier.id) or "").lower()).id if user_accounts.get((usernames.get(supplier.id) or "").lower()) else None),
+            "user_status": (user_accounts.get((usernames.get(supplier.id) or "").lower()).status if user_accounts.get((usernames.get(supplier.id) or "").lower()) else None),
+            "page_permissions": (user_accounts.get((usernames.get(supplier.id) or "").lower()).page_permissions if user_accounts.get((usernames.get(supplier.id) or "").lower()) else {}),
+            "contact_name": contacts[supplier.id].primary_contact_name if supplier.id in contacts else None,
+            "email": contacts[supplier.id].primary_email if supplier.id in contacts else (user_accounts.get((usernames.get(supplier.id) or "").lower()).email if user_accounts.get((usernames.get(supplier.id) or "").lower()) else None),
+            "phone": contacts[supplier.id].phone if supplier.id in contacts else None,
+            "address": addresses[supplier.id].registered_address if supplier.id in addresses else None,
             "vendor_type": supplier.vendor_type,
             "industry": supplier.industry,
             "category": supplier.category or [],
@@ -375,6 +439,7 @@ async def suppliers(
             "performance_score": float(supplier.performance_score or 0),
             "asn_count": int(asn_counts.get(supplier.id, 0)),
             "dispatch_count": int(dispatch_counts.get(str(supplier.id), 0)),
+            "damage_claim_count": int(claim_counts.get(supplier.id, 0)),
             "created_at": supplier.created_at,
         }
         for supplier in supplier_rows
@@ -387,7 +452,7 @@ async def users(
     uow: UnitOfWork = Depends(get_uow),
 ) -> list[dict]:
     result = await uow.session.execute(
-        select(StoreManagerUserModel).order_by(StoreManagerUserModel.created_at.desc())
+        select(UserAccountModel).order_by(UserAccountModel.created_at.desc())
     )
     return [serialize_user(account) for account in result.scalars().all()]
 
@@ -413,17 +478,17 @@ async def create_user(
             raise HTTPException(status_code=422, detail="Selected Assembly Unit does not exist")
 
     duplicate = await uow.session.execute(
-        select(StoreManagerUserModel.id).where(
+        select(UserAccountModel.id).where(
             or_(
-                func.lower(StoreManagerUserModel.username) == payload.username.strip().lower(),
-                func.lower(StoreManagerUserModel.email) == payload.email.strip().lower(),
+                func.lower(UserAccountModel.username) == payload.username.strip().lower(),
+                func.lower(UserAccountModel.email) == payload.email.strip().lower(),
             )
         )
     )
     if duplicate.first():
         raise HTTPException(status_code=409, detail="Username or email already exists")
 
-    account = StoreManagerUserModel(
+    account = UserAccountModel(
         employee_id=generate_employee_id(),
         username=payload.username.strip(),
         full_name=payload.full_name.strip(),
@@ -470,7 +535,7 @@ async def update_user(
     current_user: CurrentUser = Depends(require_admin),
     uow: UnitOfWork = Depends(get_uow),
 ) -> dict:
-    account = await uow.session.get(StoreManagerUserModel, user_id)
+    account = await uow.session.get(UserAccountModel, user_id)
     if not account:
         raise HTTPException(status_code=404, detail="User not found")
     current_account = is_current_account(account, current_user)
@@ -483,11 +548,11 @@ async def update_user(
         username = (payload.username or account.username).strip()
         email = (payload.email or account.email).strip().lower()
         duplicate = await uow.session.execute(
-            select(StoreManagerUserModel.id).where(
-                StoreManagerUserModel.id != account.id,
+            select(UserAccountModel.id).where(
+                UserAccountModel.id != account.id,
                 or_(
-                    func.lower(StoreManagerUserModel.username) == username.lower(),
-                    func.lower(StoreManagerUserModel.email) == email,
+                    func.lower(UserAccountModel.username) == username.lower(),
+                    func.lower(UserAccountModel.email) == email,
                 ),
             )
         )
@@ -497,8 +562,17 @@ async def update_user(
         account.email = email
         if supplier_user is not None:
             supplier_user.username = username
+            supplier_contact = (await uow.session.execute(
+                select(SupplierContactModel).where(SupplierContactModel.supplier_id == supplier_user.supplier_id)
+            )).scalars().first()
+            if supplier_contact is not None:
+                supplier_contact.primary_email = email
     if payload.full_name is not None:
         account.full_name = payload.full_name.strip()
+        if supplier_user is not None:
+            supplier = await uow.session.get(SupplierModel, supplier_user.supplier_id)
+            if supplier is not None:
+                supplier.supplier_name = account.full_name
     if payload.role is not None:
         role = payload.role.strip().upper().replace(" ", "_")
         if role not in ROLE_VALUES:
@@ -527,6 +601,10 @@ async def update_user(
         if current_account and next_status == "INACTIVE":
             raise HTTPException(status_code=422, detail="You cannot deactivate your own account")
         account.status = next_status
+        if supplier_user is not None:
+            supplier = await uow.session.get(SupplierModel, supplier_user.supplier_id)
+            if supplier is not None:
+                supplier.status = "Active" if next_status == "ACTIVE" else "Inactive"
     if payload.password is not None:
         account.password_hash = hashlib.sha256(payload.password.encode()).hexdigest()
         account.auth_token_hash = None

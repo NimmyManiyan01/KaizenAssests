@@ -9,6 +9,7 @@ export const ROLE_PAGES: Record<string, PermissionPage[]> = {
   SUPPLIER: [
     { key: "/supplier-dashboard", label: "Dashboard" },
     { key: "/supplier/asns", label: "ASN Management" },
+    { key: "/damage-claims", label: "Damage Claims" },
     { key: "/supplier/dispatch", label: "FG Dispatch Requests" },
   ],
   WAREHOUSE_MANAGER: [

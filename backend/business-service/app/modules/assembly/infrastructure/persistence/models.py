@@ -213,8 +213,8 @@ class AssemblyFinishedGoodsModel(Base):
     batch_number: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, unique=True, index=True)
     qr_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     qr_verified_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    store_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        GUID, ForeignKey("store.id", ondelete="SET NULL"), nullable=True, index=True
+    warehouse_ref_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        GUID, ForeignKey("warehouse_configuration.id", ondelete="SET NULL"), nullable=True, index=True
     )
     posted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)

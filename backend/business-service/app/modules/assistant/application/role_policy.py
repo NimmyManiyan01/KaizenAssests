@@ -9,9 +9,6 @@ ROLE_ALIASES = {
     "SUPER_ADMIN": "ADMIN",
     "ADMIN_OFFICER": "ADMIN",
     "WAREHOUSE_MANAGER": "WAREHOUSE",
-    "STORE_MANAGER": "STORE",
-    "STORE_KEEPER": "STORE",
-    "STORE_OPERATOR": "STORE",
     "ASSEMBLY_MANAGER": "ASSEMBLY",
     "ASSEMBLY_OPERATOR": "ASSEMBLY",
     "DISPATCH_MANAGER": "DISPATCH",
@@ -19,6 +16,11 @@ ROLE_ALIASES = {
     "PROCUREMENT_MANAGER": "PROCUREMENT",
     "PROCUREMENT_OFFICER": "PROCUREMENT",
     "QUALITY_MANAGER": "QUALITY",
+    "QUALITY_INSPECTOR": "QUALITY",
+    "GATE_OPERATOR": "GATE_SECURITY",
+    "GATE_OFFICER": "GATE_SECURITY",
+    "GRN_MANAGER": "GRN",
+    "RECEIVING_OPERATOR": "RECEIVING",
     "QC": "QUALITY",
 }
 
@@ -28,15 +30,15 @@ ALL_CATEGORIES = frozenset({
 })
 
 # This controls assistant visibility, not application write permissions. The data
-# retriever still applies record-level restrictions (supplier ownership, store, etc.).
+# retriever still applies record-level restrictions (supplier ownership, warehouse, etc.).
 ROLE_CATEGORIES = {
     "ADMIN": ALL_CATEGORIES,
-    "WAREHOUSE": ALL_CATEGORIES,
-    "MANAGER": ALL_CATEGORIES,
+    "WAREHOUSE": ALL_CATEGORIES - {"admin"},
+    "MANAGER": ALL_CATEGORIES - {"admin"},
     "GATE_SECURITY": frozenset({"gate_entries", "docks", "dispatch"}),
     "GRN": frozenset({"gate_entries", "docks", "purchase_orders", "inventory", "putaway"}),
     "RECEIVING": frozenset({"gate_entries", "docks", "purchase_orders", "inventory", "putaway"}),
-    "STORE": frozenset({"inventory", "putaway", "locations"}),
+    "WAREHOUSE_OPERATOR": frozenset({"inventory", "putaway", "locations"}),
     "ASSEMBLY": frozenset({"assembly", "inventory", "locations"}),
     "DISPATCH": frozenset({"dispatch", "inventory", "gate_entries", "docks"}),
     "SUPPLIER": frozenset({"purchase_orders", "gate_entries"}),
@@ -78,7 +80,7 @@ ROLE_SUGGESTIONS = {
         "Explain the GRN workflow", "Show pending putaway tasks",
         "Explain damaged material handling",
     ),
-    "STORE": (
+    "WAREHOUSE_OPERATOR": (
         "Show available inventory", "Show pending putaway tasks",
         "Where is material MAT-001?", "Explain FIFO picking",
         "Show warehouse zones and bins",
@@ -100,11 +102,11 @@ ROLE_SUGGESTIONS = {
     ),
     "PROCUREMENT": (
         "Show open purchase orders", "Show supplier orders",
-        "Show material shortages", "Show inbound ASN status",
+        "Show out of stock inventory", "Show inbound ASN status",
         "Explain purchase order fulfillment",
     ),
     "QUALITY": (
-        "Show quarantined stock", "Explain quality inspection",
+        "Explain quarantined stock", "Explain quality inspection",
         "Explain damaged material handling", "Show assembly orders",
         "Explain stock release from quality hold",
     ),
@@ -132,25 +134,22 @@ def allowed_categories(roles: Iterable[str] | None) -> set[str]:
 
 
 def can_access_category(roles: Iterable[str] | None, category: str) -> bool:
-    canonical = canonical_roles(roles)
-    # Unknown/custom roles retain the retriever's stricter legacy checks. This
-    # avoids unexpectedly locking out an existing deployment-specific role.
-    if not canonical.intersection(ROLE_CATEGORIES):
-        return True
     return category in allowed_categories(roles)
 
 
 def primary_role(roles: Iterable[str] | None) -> str:
     canonical = canonical_roles(roles)
     priority = (
-        "ADMIN", "WAREHOUSE", "GRN", "RECEIVING", "GATE_SECURITY", "STORE",
+        "ADMIN", "WAREHOUSE", "GRN", "RECEIVING", "GATE_SECURITY", "WAREHOUSE_OPERATOR",
         "ASSEMBLY", "DISPATCH", "SUPPLIER", "PROCUREMENT", "QUALITY", "FINANCE", "MANAGER",
     )
     return next((role for role in priority if role in canonical), next(iter(canonical), "USER"))
 
 
 def suggestions_for_roles(roles: Iterable[str] | None) -> tuple[str, ...]:
-    return ROLE_SUGGESTIONS.get(primary_role(roles), ROLE_SUGGESTIONS["WAREHOUSE"])
+    role = primary_role(roles)
+    role = {"RECEIVING": "GRN", "MANAGER": "WAREHOUSE"}.get(role, role)
+    return ROLE_SUGGESTIONS.get(role, ("What can you do?",))
 
 
 def capabilities_reply(roles: Iterable[str] | None) -> str:

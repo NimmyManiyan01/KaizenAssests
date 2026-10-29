@@ -127,7 +127,7 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { value: "READY", label: "BAY STATUS" },
     ],
     telemetry: [
-      { label: "STORE MGR", value: "Rajesh V." },
+      { label: "WAREHOUSE_OPERATOR MGR", value: "Rajesh V." },
       { label: "BAY NUMBER", value: "D-04" },
       { label: "ROUTE SIGNAL", value: "SENT TO GATE" },
     ],
@@ -299,12 +299,12 @@ export const JOURNEY_STAGES: JourneyStage[] = [
   {
     id: "warehouse-issue",
     number: "11",
-    chapter: "STORE ISSUE",
+    chapter: "WAREHOUSE_OPERATOR ISSUE",
     title: "WAREHOUSE MATERIAL ISSUE",
     headline: "Warehouse operator picks & delivers requested components.",
     description:
       "Warehouse keeper picks required components from storage racks, scans QR code for verification, and delivers to assembly staging area.",
-    department: "Store Issue",
+    department: "Warehouse Issue",
     document: "Pick Slip & Material Issue Voucher",
     nextProcess: "Step 12: Production Starts",
     route: "/inventory",
@@ -318,7 +318,7 @@ export const JOURNEY_STAGES: JourneyStage[] = [
     telemetry: [
       { label: "PICK LOCATION", value: "BIN-MEC-Z01" },
       { label: "KEEPER", value: "Venkatesh K." },
-      { label: "TRANSFER", value: "STORE TO ASSEMBLY" },
+      { label: "TRANSFER", value: "WAREHOUSE_OPERATOR TO ASSEMBLY" },
     ],
     cameraPosition: [-4.0, 4.5, -125.0],
     cameraTarget: [0.0, 1.8, -145.0],

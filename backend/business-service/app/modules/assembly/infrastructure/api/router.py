@@ -28,7 +28,7 @@ from app.modules.assembly.infrastructure.persistence.models import (
     BillOfMaterialsItemModel,
     BillOfMaterialsModel,
 )
-from app.modules.store.infrastructure.persistence.models import StoreBinModel
+from app.modules.warehouse.infrastructure.persistence.models import WarehouseBinModel
 from app.modules.storage.infrastructure.persistence.models import (
     InventoryLocationBalanceModel,
     InventoryMovementHistoryModel,
@@ -1454,7 +1454,7 @@ async def complete_assembly_picking_task(
         # in the same transaction so the Inventory screen reflects the pickup.
         # The scanned bin is authoritative. Older tasks may carry a generic
         # warehouse id (for example WH-01) while the persisted rack balance
-        # belongs to the store warehouse shown in the Inventory screen.
+        # belongs to the warehouse shown in the Inventory screen.
         zone_scan = payload.zone_scan.strip()
         location_filters = [
             func.lower(InventoryLocationBalanceModel.material_code) == material_code.lower(),
@@ -1471,8 +1471,8 @@ async def complete_assembly_picking_task(
                     func.upper(StorageLocationModel.location_code) == zone_scan.upper(),
                     func.upper(StorageLocationModel.location_code) == f"LOC-{zone_scan.upper()}",
                     StorageLocationModel.bin_id.in_(
-                        select(StoreBinModel.id).where(
-                            func.upper(StoreBinModel.qr_identifier) == zone_scan.upper()
+                        select(WarehouseBinModel.id).where(
+                            func.upper(WarehouseBinModel.qr_identifier) == zone_scan.upper()
                         )
                     ),
                 )
@@ -1608,7 +1608,7 @@ async def complete_assembly_picking_task(
                 stock_after=location_balance.available_quantity,
                 performed_by=current_user.username if current_user and current_user.username else "Warehouse Operator",
                 warehouse_id=location_balance.warehouse_id,
-                store_id=picked_location.store_id,
+                warehouse_ref_id=picked_location.warehouse_ref_id,
                 reference_document=task.task_number,
                 remarks="FIFO-checked Assembly pick",
                 performed_at=now,
