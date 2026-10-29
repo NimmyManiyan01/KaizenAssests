@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from app.modules.gate.application.transport_validation import validate_transport, validate_gate_duplicates
+from app.modules.gate.infrastructure.api.router import _validate_asn_transport_entries
 
 
 class TransportTests(unittest.TestCase):
@@ -33,6 +34,36 @@ class TransportTests(unittest.TestCase):
             self.assertEqual(validate_transport("KA02AH2755", name, "9876543210")[1], name)
 
 
+class AsnTransportAssignmentTests(unittest.TestCase):
+    def test_multiple_transport_pairs_are_validated_and_normalized(self):
+        entries, logistics = _validate_asn_transport_entries({
+            "logistics": [{
+                "type": "transport_assignment",
+                "vehicles": [
+                    {"vehicle_number": "ka 02 ah 2755", "driver_name": "Driver One", "driver_contact": "9876543210"},
+                    {"vehicle_number": "TN09AB1234", "driver_name": "Driver Two", "driver_contact": "9876543211"},
+                ],
+            }],
+        })
+
+        self.assertEqual([entry["vehicle_number"] for entry in entries], ["KA02AH2755", "TN09AB1234"])
+        self.assertEqual(logistics[0]["vehicles"], entries)
+
+    def test_invalid_pair_in_assignment_is_rejected(self):
+        with self.assertRaises(HTTPException) as error:
+            _validate_asn_transport_entries({
+                "logistics": [{
+                    "type": "transport_assignment",
+                    "vehicles": [
+                        {"vehicle_number": "KA02AH2755", "driver_name": "Driver One", "driver_contact": "9876543210"},
+                        {"vehicle_number": "TN09AB1234", "driver_name": "Driver 2", "driver_contact": "9876543211"},
+                    ],
+                }],
+            })
+
+        self.assertEqual(error.exception.status_code, 422)
+
+
 class GateDuplicateTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -54,11 +85,9 @@ class GateDuplicateTests(unittest.IsolatedAsyncioTestCase):
             await validate_gate_duplicates(self.session, "ka 02 ah 2755", uuid.uuid4())
         self.assertEqual(error.exception.status_code, 409)
 
-    async def test_same_asn_cannot_create_second_pass_even_after_exit(self):
-        await self.insert("GATE_EXIT_COMPLETED")
-        with self.assertRaises(HTTPException) as error:
-            await validate_gate_duplicates(self.session, "TN09AB1234", self.asn_id)
-        self.assertIn("already exists for this ASN", error.exception.detail)
+    async def test_same_asn_can_create_another_pass_for_a_different_vehicle(self):
+        await self.insert("AT_DOCK")
+        await validate_gate_duplicates(self.session, "TN09AB1234", self.asn_id)
 
     async def test_repeat_delivery_after_exit_is_allowed_for_new_asn(self):
         await self.insert("GATE_EXIT_COMPLETED")

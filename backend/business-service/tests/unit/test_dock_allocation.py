@@ -16,9 +16,10 @@ from app.modules.dock.infrastructure.persistence.models import (
     DockStatusHistoryModel,
 )
 # Ensure models are imported
-from app.modules.procurement.infrastructure.persistence.models import NotificationModel
+from app.common.persistence.models import AsnModel, NotificationModel
 import app.modules.receiving.infrastructure.persistence.models  # noqa
 import app.modules.gate.infrastructure.persistence.models  # noqa
+from app.modules.gate.infrastructure.persistence.models import DockAssignmentModel, DockModel, GateEntryModel
 
 
 from app.database.session import AsyncSessionFactory, engine
@@ -32,6 +33,15 @@ async def async_session():
 
     async with AsyncSessionFactory() as session:
         # Reset tables and seed test docks
+        gate_numbers = ["GP-2026-00200", "GP-2026-00125"]
+        asn_numbers = ["ASN-DOCK-00200", "ASN-DOCK-00125"]
+        gate_ids = select(GateEntryModel.id).where(GateEntryModel.gate_entry_number.in_(gate_numbers))
+        await session.execute(delete(DockAssignmentModel).where(DockAssignmentModel.gate_entry_id.in_(gate_ids)))
+        await session.execute(delete(GateEntryModel).where(GateEntryModel.gate_entry_number.in_(gate_numbers)))
+        await session.execute(delete(AsnModel).where(AsnModel.asn_number.in_(asn_numbers)))
+        await session.execute(delete(DockModel).where(DockModel.dock_number.in_(
+            ["RM-01", "RM-02", "CH-01", "CH-02", "EL-01", "EL-02", "EC-01", "EC-02", "MR-01"]
+        )))
         await session.execute(delete(DockStatusHistoryModel))
         await session.execute(delete(DockAllocationHistoryModel))
         await session.execute(delete(DockAllocationRequestModel))
@@ -39,8 +49,19 @@ async def async_session():
         await session.execute(delete(NotificationModel))
         await session.commit()
 
-        await DockAllocationService.seed_default_docks_if_empty(session)
-        from app.modules.gate.infrastructure.persistence.models import GateEntryModel
+        session.add_all([
+            DockMasterModel(dock_code=code, dock_name=code, dock_type=dock_type)
+            for dock_type, prefix, count in (
+                ("RAW_MATERIAL", "RM", 2),
+                ("CHEMICAL_HAZARDOUS", "CH", 2),
+                ("ELECTRICAL", "EL", 2),
+                ("ELECTRONICS", "EC", 2),
+                ("MAIN_RECEIVING", "MR", 1),
+            )
+            for index in range(1, count + 1)
+            for code in [f"{prefix}-{index:02d}"]
+        ])
+        await session.commit()
         await session.execute(update(GateEntryModel).values(status="GATE_EXIT_COMPLETED"))
         await session.commit()
 
@@ -51,6 +72,17 @@ async def async_session():
         await session.execute(delete(DockStatusHistoryModel))
         await session.execute(delete(DockAllocationHistoryModel))
         await session.execute(delete(DockAllocationRequestModel))
+        await session.execute(delete(DockAssignmentModel).where(DockAssignmentModel.gate_entry_id.in_(
+            select(GateEntryModel.id).where(GateEntryModel.gate_entry_number.in_(gate_numbers))
+        )))
+        await session.execute(delete(GateEntryModel).where(
+            GateEntryModel.gate_entry_number.in_(gate_numbers)
+        ))
+        await session.execute(delete(AsnModel).where(AsnModel.asn_number.in_(asn_numbers)))
+        await session.execute(delete(DockModel).where(DockModel.dock_number.in_(
+            ["RM-01", "RM-02", "CH-01", "CH-02", "EL-01", "EL-02", "EC-01", "EC-02", "MR-01"]
+        )))
+        await session.execute(delete(DockMasterModel))
         await session.commit()
 
 
@@ -120,18 +152,32 @@ async def test_auto_create_allocation_request_idempotent(async_session):
     )
     assert req2.id == req1.id
 
-    # Verify no pre-allocation notification was sent during request creation
-    from app.modules.procurement.infrastructure.persistence.models import NotificationModel
+    # Request creation emits one idempotent notification for the waiting vehicle.
+    from app.common.persistence.models import NotificationModel
     notifs = (await async_session.execute(select(NotificationModel).where(NotificationModel.user_role == "WAREHOUSE"))).scalars().all()
-    assert len(notifs) == 0
+    assert len(notifs) == 1
+    assert notifs[0].title == "Truck waiting for dock"
 
 
 @pytest.mark.asyncio
 async def test_dock_allocation_lifecycle(async_session):
     # 1. Seed docks
     await DockAllocationService.seed_default_docks_if_empty(async_session)
-    docks = await DockAllocationService.list_docks(async_session)
+    docks = await DockAllocationService.list_docks(async_session, dock_type="RAW_MATERIAL")
     dock1 = docks[0]  # RM-01
+    asn_id = uuid.uuid4()
+    async_session.add(AsnModel(
+        id=asn_id, asn_number="ASN-DOCK-00200", status="EXPECTED", vehicle_number="KA05CD9876"
+    ))
+    async_session.add(GateEntryModel(
+        asn_id=asn_id,
+        gate_entry_number="GP-2026-00200",
+        vehicle_number="KA05CD9876",
+        driver_name="Test Driver",
+        security_officer_id="test",
+        status="SECURITY_APPROVED",
+    ))
+    await async_session.flush()
 
     # 2. Create allocation request
     req = await DockAllocationService.auto_create_allocation_request(
@@ -155,17 +201,17 @@ async def test_dock_allocation_lifecycle(async_session):
     assert allocated.assigned_dock_id == dock1.id
 
     updated_dock = (await async_session.execute(select(DockMasterModel).where(DockMasterModel.id == dock1.id))).scalar_one()
-    assert updated_dock.status == DockStatus.RESERVED.value
+    assert updated_dock.status == DockStatus.OCCUPIED.value
 
-    # Attempting to release dock while RESERVED must fail with HTTP 400
+    # Release is rejected until the receiving workflow is completed.
     with pytest.raises(HTTPException) as exc_info:
         await DockAllocationService.release_dock(
             session=async_session,
             allocation_request_id=req.id,
             performed_by="Warehouse Manager",
         )
-    assert exc_info.value.status_code == 400
-    assert "Dock can only be released when it is OCCUPIED" in exc_info.value.detail
+    assert exc_info.value.status_code == 409
+    assert "Receiving must be completed" in exc_info.value.detail
 
     # 4. Mark Vehicle Arrived (RESERVED -> OCCUPIED)
     arrived = await DockAllocationService.mark_vehicle_arrived(
@@ -173,7 +219,7 @@ async def test_dock_allocation_lifecycle(async_session):
         allocation_request_id=req.id,
         performed_by="Warehouse Manager",
     )
-    assert arrived.status == "OCCUPIED"
+    assert arrived.status == "AT_DOCK"
     assert arrived.arrived_at is not None
 
     updated_dock = (await async_session.execute(select(DockMasterModel).where(DockMasterModel.id == dock1.id))).scalar_one()
@@ -212,8 +258,21 @@ async def test_dock_allocation_lifecycle(async_session):
 @pytest.mark.asyncio
 async def test_dock_notifications_on_allocation(async_session):
     await DockAllocationService.seed_default_docks_if_empty(async_session)
-    docks = await DockAllocationService.list_docks(async_session)
+    docks = await DockAllocationService.list_docks(async_session, dock_type="RAW_MATERIAL")
     dock1 = docks[0]  # RM-01
+    asn_id = uuid.uuid4()
+    async_session.add(AsnModel(
+        id=asn_id, asn_number="ASN-DOCK-00125", status="EXPECTED", vehicle_number="KA01AB1234"
+    ))
+    async_session.add(GateEntryModel(
+        asn_id=asn_id,
+        gate_entry_number="GP-2026-00125",
+        vehicle_number="KA01AB1234",
+        driver_name="Test Driver",
+        security_officer_id="test",
+        status="SECURITY_APPROVED",
+    ))
+    await async_session.flush()
 
     req = await DockAllocationService.auto_create_allocation_request(
         session=async_session,
@@ -230,7 +289,7 @@ async def test_dock_notifications_on_allocation(async_session):
     )
 
     # Check notification records in session
-    from app.modules.procurement.infrastructure.persistence.models import NotificationModel
+    from app.common.persistence.models import NotificationModel
 
     notifs = (await async_session.execute(select(NotificationModel).where(NotificationModel.link.like(f"%{req.id}%")))).scalars().all()
     roles_notified = {n.user_role for n in notifs}
@@ -239,8 +298,9 @@ async def test_dock_notifications_on_allocation(async_session):
     assert "WAREHOUSE_OPERATOR" in roles_notified
 
     qi_notif = next(n for n in notifs if n.user_role == "QUALITY_INSPECTOR")
-    assert qi_notif.title == "DOCK ALLOCATION CONFIRMED"
-    assert "GP-2026-00125" in qi_notif.message
+    assert qi_notif.title == "DOCK ALLOCATED"
+    assert "Dock RM-01" in qi_notif.message
+    assert "KA01AB1234" in qi_notif.message
     assert "KA01AB1234" in qi_notif.message
     assert "Proceed directly to Dock" in qi_notif.message
     assert qi_notif.dock_code == dock1.dock_code
@@ -255,7 +315,7 @@ async def test_dock_notifications_on_allocation(async_session):
 @pytest.mark.asyncio
 async def test_conflict_on_already_reserved_dock(async_session):
     await DockAllocationService.seed_default_docks_if_empty(async_session)
-    docks = await DockAllocationService.list_docks(async_session)
+    docks = await DockAllocationService.list_docks(async_session, dock_type="RAW_MATERIAL")
     dock1 = docks[0]  # RM-01
 
     req1 = await DockAllocationService.auto_create_allocation_request(
@@ -292,7 +352,7 @@ async def test_conflict_on_already_reserved_dock(async_session):
 @pytest.mark.asyncio
 async def test_dock_reassignment(async_session):
     await DockAllocationService.seed_default_docks_if_empty(async_session)
-    docks = await DockAllocationService.list_docks(async_session)
+    docks = await DockAllocationService.list_docks(async_session, dock_type="RAW_MATERIAL")
     dock1 = docks[0]  # RM-01
     dock2 = docks[1]  # RM-02
 

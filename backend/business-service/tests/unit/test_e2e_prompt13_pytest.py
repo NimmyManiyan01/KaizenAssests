@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 from app.main import app
 from app.database.session import session_scope
 from app.modules.dispatch.infrastructure.persistence.models import DispatchModel, DispatchItemModel, DriverModel, VehicleModel
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
     MaterialRequestModel,
     RfqModel,
     SupplierModel,

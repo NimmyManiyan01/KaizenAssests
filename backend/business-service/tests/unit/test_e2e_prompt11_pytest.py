@@ -31,7 +31,7 @@ from app.modules.assembly.infrastructure.persistence.models import (
     AssemblyMaterialConsumptionModel,
     AssemblyTeamModel,
 )
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
     FinishedGoodsRequestModel,
     MaterialRequestModel,
     MaterialStockModel,

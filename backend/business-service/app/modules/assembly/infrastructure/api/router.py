@@ -10,9 +10,9 @@ import unicodedata
 from types import SimpleNamespace
 from sqlalchemy.exc import IntegrityError
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select, text
 
 from app.database.session import UnitOfWork, get_uow
 from app.modules.assembly.infrastructure.finished_goods import allocate_fifo, stock_quantities, dispatch_priorities, enforce_dispatch_priority
@@ -22,6 +22,7 @@ from app.modules.assembly.infrastructure.persistence.models import (
     AssemblyOrderModel,
     AssemblyMaterialReceiptModel,
     AssemblyMaterialConsumptionModel,
+    AssemblyMaterialConsumptionEventModel,
     AssemblyScrapModel,
     AssemblyQualityInspectionModel,
     AssemblyRoutingRevisionModel,
@@ -33,6 +34,12 @@ from app.modules.storage.infrastructure.persistence.models import (
     InventoryLocationBalanceModel,
     InventoryMovementHistoryModel,
     StorageLocationModel,
+)
+from app.modules.receiving.infrastructure.persistence.models import (
+    GrnModel,
+    GrnBatchModel,
+    GrnBatchQrModel,
+    GrnLineModel,
 )
 from app.common.persistence.models import (
     MaterialModel,
@@ -47,13 +54,21 @@ from app.common.persistence.models import (
 from app.security.dependencies import CurrentUser, get_current_user
 from app.modules.dispatch.infrastructure.persistence.models import DispatchModel, DispatchItemModel
 from app.modules.gate.infrastructure.persistence.models import FinishedGoodsPickupGateVisitModel
+from app.modules.gate.application.transport_validation import validate_transport
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/assembly", tags=["assembly"])
 
 
+class SupplierTransportEntryPayload(BaseModel):
+    vehicle_number: str = Field(..., min_length=1)
+    driver_name: str = Field(..., min_length=1)
+    driver_contact: str = Field(..., min_length=1)
+
+
 class SupplierFinishedGoodsDispatchRequestPayload(BaseModel):
+    finished_goods_id: Optional[uuid.UUID] = None
     product_code: str = Field(..., min_length=1)
     product_name: str = Field(..., min_length=1)
     quantity: Decimal = Field(..., gt=0)
@@ -61,6 +76,7 @@ class SupplierFinishedGoodsDispatchRequestPayload(BaseModel):
     vehicle_number: str = Field(..., min_length=1)
     driver_name: str = Field(..., min_length=1)
     driver_contact: str = Field(..., min_length=3)
+    transport_entries: Optional[List[SupplierTransportEntryPayload]] = None
     expected_pickup_date: date
     remarks: Optional[str] = None
 
@@ -98,20 +114,56 @@ async def create_supplier_finished_goods_dispatch_request(
     uow: UnitOfWork = Depends(get_uow),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    vehicle_number = payload.vehicle_number.strip().upper()
-    driver_name = " ".join(payload.driver_name.split())
-    driver_contact = payload.driver_contact.strip()
-    if not re.fullmatch(r"[A-Z]{2}\s?\d{1,2}\s?[A-Z]{1,3}\s?\d{4}", vehicle_number):
-        raise HTTPException(422, "Enter a valid vehicle number.")
-    if not re.fullmatch(r"[A-Za-z][A-Za-z .-]*", driver_name):
-        raise HTTPException(422, "Driver name is required.")
-    if not re.fullmatch(r"[6-9]\d{9}", driver_contact):
-        raise HTTPException(422, "Enter a valid 10-digit mobile number.")
+    if not payload.finished_goods_id and "SUPPLIER" in {r.upper() for r in current_user.roles}:
+        raise HTTPException(422, "Select a QC-approved FG for pickup")
+    transport_payloads = payload.transport_entries
+    if transport_payloads is not None and not transport_payloads:
+        raise HTTPException(422, "At least one vehicle and driver entry is required.")
+    raw_transport_entries = (
+        [entry.model_dump() for entry in transport_payloads]
+        if transport_payloads is not None
+        else [{
+            "vehicle_number": payload.vehicle_number,
+            "driver_name": payload.driver_name,
+            "driver_contact": payload.driver_contact,
+        }]
+    )
+    transport_entries = []
+    for entry in raw_transport_entries:
+        vehicle_number, driver_name, driver_contact = validate_transport(
+            entry["vehicle_number"], entry["driver_name"], entry["driver_contact"]
+        )
+        transport_entries.append({
+            "vehicle_number": vehicle_number,
+            "driver_name": driver_name,
+            "driver_contact": driver_contact,
+        })
+    vehicle_number, driver_name, driver_contact = (
+        transport_entries[0]["vehicle_number"],
+        transport_entries[0]["driver_name"],
+        transport_entries[0]["driver_contact"],
+    )
     if payload.expected_pickup_date < datetime.now(timezone(timedelta(hours=5, minutes=30))).date():
         raise HTTPException(422, "Select today or a future pickup date.")
     if payload.quantity != payload.quantity.to_integral_value():
         raise HTTPException(422, "Dispatch quantity must be a whole number.")
+    if not {r.upper() for r in current_user.roles}.intersection({"SUPPLIER", "ADMIN", "SUPERUSER"}):
+        raise HTTPException(403, "Supplier access required")
     async with uow:
+        selected_fg = None
+        if payload.finished_goods_id:
+            await require_section_schema(uow.session)
+            selected_fg = await uow.session.scalar(select(AssemblyFinishedGoodsModel).where(AssemblyFinishedGoodsModel.id == payload.finished_goods_id).with_for_update())
+            if not selected_fg:
+                raise HTTPException(404, "Finished goods record not found")
+            if selected_fg.status not in ("QC_APPROVED", "AVAILABLE"):
+                raise HTTPException(409, "FG is not QC approved")
+            summary = await section_summary(uow.session, selected_fg.id)
+            if len(summary["sections"]) != 8:
+                raise HTTPException(409, "Assembly must create the eight transport sections before pickup registration")
+            if not summary["remaining_sections"]:
+                raise HTTPException(409, "No sections available")
+            payload.product_code, payload.product_name = selected_fg.product_code, selected_fg.product_name
         now = datetime.now()
         year = now.strftime("%Y")
         prefix = f"FGD-{year}-"
@@ -131,12 +183,14 @@ async def create_supplier_finished_goods_dispatch_request(
         request_number = f"{prefix}{sequence:03d}"
         supplier_id = current_user.raw_claims.get("supplier_id") or current_user.subject
         row = FinishedGoodsRequestModel(
+            section_fg_id=selected_fg.id if selected_fg else None,
             request_number=request_number, material_code=payload.product_code, material_name=payload.product_name,
             quantity=payload.quantity, uom=payload.uom, warehouse="ASSEMBLY", requested_by=current_user.username,
             department="SUPPLIER", priority="MEDIUM", required_date=payload.expected_pickup_date,
-            requested_date=now.date(), remarks=payload.remarks, status="PENDING_ASSEMBLY", supplier_id=str(supplier_id),
+            requested_date=now.date(), remarks=payload.remarks, status="READY_FOR_PICKUP" if selected_fg else "PENDING_ASSEMBLY", supplier_id=str(supplier_id),
             supplier_name=current_user.username, vehicle_number=vehicle_number, driver_name=driver_name,
-            driver_contact=driver_contact, expected_pickup_date=payload.expected_pickup_date,
+            driver_contact=driver_contact, transport_entries=transport_entries,
+            expected_pickup_date=payload.expected_pickup_date,
         )
         uow.session.add(row)
         uow.session.add(NotificationModel(user_role="ASSEMBLY_MANAGER", title="Supplier FG dispatch request", message=f"{request_number} requests {payload.quantity:g} {payload.uom} of {payload.product_name}.", link="/assembly/dispatch"))
@@ -144,9 +198,28 @@ async def create_supplier_finished_goods_dispatch_request(
         return {"request_number": request_number, "status": row.status, "supplier_id": str(supplier_id)}
 
 
-def _supplier_dispatch_state(request, dispatch, visit):
+def _supplier_dispatch_state(request, dispatch, visits):
     """One backend classification for badges, filters and security completion."""
-    pickup_exit = bool(visit and visit.status == "CLOSED" and visit.exited_at and visit.exit_approved_by)
+    visits = visits if isinstance(visits, list) else ([visits] if visits else [])
+    planned = request.transport_entries or ([{
+        "vehicle_number": request.vehicle_number,
+        "driver_name": request.driver_name,
+        "driver_contact": request.driver_contact,
+    }] if request.vehicle_number else [])
+    planned_vehicles = {
+        "".join(char for char in str(entry.get("vehicle_number") or "").upper() if char.isalnum())
+        for entry in planned
+        if isinstance(entry, dict) and entry.get("vehicle_number")
+    }
+    exited_visits = [
+        visit for visit in visits
+        if visit.status == "CLOSED" and visit.exited_at and visit.exit_approved_by
+    ]
+    exited_vehicles = {
+        "".join(char for char in str(visit.vehicle_number or "").upper() if char.isalnum())
+        for visit in exited_visits
+    }
+    pickup_exit = bool(exited_visits) and (not planned_vehicles or planned_vehicles.issubset(exited_vehicles))
     dispatch_exit = bool(dispatch and dispatch.gate_exit_completed_at and dispatch.gate_exit_security_officer
                          and dispatch.gate_exit_vehicle_verified and dispatch.gate_exit_driver_verified
                          and dispatch.gate_exit_loaded_goods_verified)
@@ -166,7 +239,7 @@ def _supplier_dispatch_state(request, dispatch, visit):
         workflow_status, group = raw, "1"
     else:
         workflow_status, group = raw, "0"
-    exit_time = visit.exited_at if pickup_exit else dispatch.gate_exit_completed_at if dispatch_exit else None
+    exit_time = max((visit.exited_at for visit in exited_visits), default=None) if pickup_exit else dispatch.gate_exit_completed_at if dispatch_exit else None
     return {"workflow_status": workflow_status, "processing_group": group,
             "gate_exit_confirmed": exited, "gate_exited_at": exit_time.isoformat() if exit_time else None}
 
@@ -180,8 +253,12 @@ async def list_supplier_finished_goods_dispatch_requests(
         if not any(role.upper() in {"ASSEMBLY", "ASSEMBLY_MANAGER", "ADMIN", "SUPERUSER", "GATE", "SECURITY", "GATE_SECURITY"} for role in current_user.roles):
             query = query.where(FinishedGoodsRequestModel.supplier_id == str(current_user.raw_claims.get("supplier_id") or current_user.subject))
         rows = (await uow.session.execute(query.order_by(FinishedGoodsRequestModel.created_at, FinishedGoodsRequestModel.id))).scalars().all()
+        if not rows:
+            return []
         visits = (await uow.session.execute(select(FinishedGoodsPickupGateVisitModel))).scalars().all()
-        visit_by_request = {str(visit.request_id): visit for visit in visits}
+        visits_by_request = {}
+        for visit in visits:
+            visits_by_request.setdefault(str(visit.request_id), []).append(visit)
         dispatches = (await uow.session.execute(select(DispatchModel).where(DispatchModel.order_number.in_([r.request_number for r in rows])))).scalars().all()
         dispatch_by_number = {d.order_number: d for d in dispatches}
         allocated_rows = (await uow.session.execute(
@@ -208,18 +285,38 @@ async def list_supplier_finished_goods_dispatch_requests(
         results = []
         for r in rows:
             dispatch = dispatch_by_number.get(r.request_number)
-            visit = visit_by_request.get(str(r.id))
-            workflow = _supplier_dispatch_state(r, dispatch, visit)
+            request_visits = visits_by_request.get(str(r.id), [])
+            active_visits = [visit for visit in request_visits if visit.status == "INSIDE_FACILITY"]
+            active_visit = max(active_visits, key=lambda visit: visit.created_at) if active_visits else None
+            latest_visit = max(request_visits, key=lambda visit: visit.created_at) if request_visits else None
+            displayed_visit = active_visit or latest_visit
+            workflow = _supplier_dispatch_state(r, dispatch, request_visits)
             results.append({"id": str(r.id), "request_number": r.request_number,
+                "fg_id": str(r.section_fg_id) if r.section_fg_id else None,
+                **(await section_summary(uow.session, r.section_fg_id) if r.section_fg_id else {}),
                 "dispatch_number": r.request_number, "order_number": r.request_number,
                 "supplier_name": r.supplier_name, "product_code": r.material_code,
                 "product_name": r.material_name, "quantity": float(r.quantity), "uom": r.uom,
                 "items": [{"material_code": r.material_code, "material_name": r.material_name, "quantity_ordered": float(r.quantity), "uom": r.uom}],
                 "vehicle_number": r.vehicle_number, "driver_name": r.driver_name, "driver_contact": r.driver_contact,
+                "transport_entries": r.transport_entries or ([{
+                    "vehicle_number": r.vehicle_number,
+                    "driver_name": r.driver_name,
+                    "driver_contact": r.driver_contact,
+                }] if r.vehicle_number and r.driver_name and r.driver_contact else []),
                 "expected_pickup_date": (r.expected_pickup_date or r.required_date).isoformat(), "status": r.status,
                 "dispatch_id": str(dispatch.id) if dispatch else None, "dispatch_status": dispatch.status if dispatch else None,
                 "allocated_batches": allocations_by_request.get(r.id, []),
-                "gate_pass_number": visit.gate_pass_number if visit else None, "gate_pass_status": "CLOSED" if workflow["gate_exit_confirmed"] else visit.status if visit else None,
+                "gate_pass_number": displayed_visit.gate_pass_number if displayed_visit else None,
+                "gate_pass_status": displayed_visit.status if displayed_visit else None,
+                "gate_passes": [{
+                    "gate_pass_number": visit.gate_pass_number,
+                    "vehicle_number": visit.vehicle_number,
+                    "driver_name": visit.driver_name,
+                    "status": visit.status,
+                    "arrived_at": visit.arrived_at.isoformat() if visit.arrived_at else None,
+                    "exited_at": visit.exited_at.isoformat() if visit.exited_at else None,
+                } for visit in request_visits],
                 "created_at": r.created_at.isoformat() if r.created_at else None,
                 "requested_on": r.created_at.isoformat() if r.created_at else None,
                 **priorities.get(r.id, {"priority_rank": None, "next_to_process": False, "allocation_eligible": False, "priority_reason": None}),
@@ -240,6 +337,8 @@ async def allocate_supplier_finished_goods_fifo(
         except ValueError: raise HTTPException(400, "Invalid dispatch request identifier")
         await enforce_dispatch_priority(uow.session, request_uuid)
         request = (await uow.session.execute(select(FinishedGoodsRequestModel).where(FinishedGoodsRequestModel.id == request_uuid).with_for_update())).scalar_one_or_none()
+        if request and request.section_fg_id:
+            raise HTTPException(409, "Use Assembly FG Loading for transport sections; FIFO stock allocation is not applicable")
         if not request: raise HTTPException(404, "Finished-goods dispatch request not found")
         if request.status not in ("PENDING_ASSEMBLY", "APPROVED", "ALLOCATED"):
             raise HTTPException(409, f"Request is already {request.status}")
@@ -639,6 +738,64 @@ async def list_assembly_products(
         return products
 
 
+@router.get("/available-materials")
+async def list_assembly_available_materials(
+    uow: UnitOfWork = Depends(get_uow),
+    current_user: Optional[CurrentUser] = Depends(get_current_user),
+) -> list[dict]:
+    """
+    Returns only active raw materials that currently have available stock in the warehouse
+    (available_quantity > 0) so Assembly can only add and request in-stock materials for BOM.
+    """
+    async with uow:
+        # Fetch active materials
+        mat_res = await uow.session.execute(
+            select(MaterialModel)
+            .where(func.upper(MaterialModel.status) == "ACTIVE")
+            .order_by(MaterialModel.material_name)
+        )
+        materials = mat_res.scalars().all()
+
+        # Fetch available stock by material code from MaterialStockModel
+        stock_res = await uow.session.execute(
+            select(
+                MaterialStockModel.material_code,
+                func.coalesce(func.sum(MaterialStockModel.available_quantity), Decimal("0"))
+            )
+            .group_by(MaterialStockModel.material_code)
+        )
+        stock_map = {row[0]: float(row[1]) for row in stock_res.all()}
+
+        # Rack/location balances are the physical source used by warehouse picking.
+        # Use aggregate material stock only for materials without location records;
+        # taking max() can expose stale aggregate quantities after a rack is empty.
+        loc_res = await uow.session.execute(
+            select(
+                InventoryLocationBalanceModel.material_code,
+                func.coalesce(func.sum(InventoryLocationBalanceModel.available_quantity), Decimal("0"))
+            )
+            .group_by(InventoryLocationBalanceModel.material_code)
+        )
+        loc_map = {row[0]: float(row[1]) for row in loc_res.all()}
+
+        available_materials = []
+        for m in materials:
+            m_code = m.material_code
+            avail_stock = loc_map[m_code] if m_code in loc_map else stock_map.get(m_code, 0.0)
+            if avail_stock > 0:
+                available_materials.append({
+                    "id": str(m.id),
+                    "code": m.material_code,
+                    "name": m.material_name,
+                    "category": m.category,
+                    "description": m.description or "",
+                    "uom": m.base_uom or "PCS",
+                    "status": m.status,
+                    "available_quantity": avail_stock,
+                })
+        return available_materials
+
+
 class CreateBOMComponentPayload(BaseModel):
     material_code: str
     material_name: str
@@ -734,12 +891,42 @@ async def create_assembly_product(
         for itm in items_to_add:
             if not itm.material_code.strip() or not itm.material_name.strip() or itm.quantity_per_unit <= 0 or not (itm.uom or "").strip():
                 raise HTTPException(status_code=400, detail="Each BOM component requires a material, positive quantity, and UOM.")
+            
+            # Section rule: In Bill of Materials, only available materials should be allowed for assembly
+            clean_mat_code = itm.material_code.strip()
+            stock_res = await uow.session.execute(
+                select(func.coalesce(func.sum(MaterialStockModel.available_quantity), Decimal("0")))
+                .where(MaterialStockModel.material_code == clean_mat_code)
+            )
+            avail_stock = float(stock_res.scalar() or Decimal("0"))
+            if avail_stock <= 0:
+                loc_res = await uow.session.execute(
+                    select(func.coalesce(func.sum(InventoryLocationBalanceModel.available_quantity), Decimal("0")))
+                    .where(InventoryLocationBalanceModel.material_code == clean_mat_code)
+                )
+                avail_stock = float(loc_res.scalar() or Decimal("0"))
+            if avail_stock <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Material '{clean_mat_code}' has no available stock in warehouse. Only available materials can be added to the Bill of Materials."
+                )
+            required_per_product = Decimal(str(itm.quantity_per_unit))
+            if required_per_product > Decimal(str(avail_stock)):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Insufficient warehouse stock for '{clean_mat_code}': "
+                        f"BOM requires {required_per_product} {itm.uom}, "
+                        f"but only {avail_stock} is available."
+                    ),
+                )
+
             bom_item = BillOfMaterialsItemModel(
                 id=uuid.uuid4(),
                 bom_id=bom.id,
-                material_code=itm.material_code.strip(),
+                material_code=clean_mat_code,
                 material_name=itm.material_name.strip(),
-                quantity_per_unit=Decimal(str(itm.quantity_per_unit)),
+                quantity_per_unit=required_per_product,
                 uom=itm.uom or "PCS",
                 created_at=datetime.now(),
             )
@@ -756,7 +943,6 @@ async def create_assembly_product(
             "uom": "PCS",
             "message": f"Product '{bom.product_name}' registered successfully with BOM {bom.bom_number}."
         }
-
 
 
 class AddProductBomMaterialPayload(BaseModel):
@@ -779,6 +965,25 @@ async def add_product_bom_material(product_code: str, payload: AddProductBomMate
         func.upper(MaterialModel.status) == "ACTIVE"))
     if material is None:
         raise HTTPException(422, "Select an active raw material from the material master")
+    
+    # Check live warehouse stock availability
+    stock_res = await uow.session.execute(
+        select(func.coalesce(func.sum(MaterialStockModel.available_quantity), Decimal("0")))
+        .where(MaterialStockModel.material_code == material.material_code)
+    )
+    avail_stock = float(stock_res.scalar() or Decimal("0"))
+    if avail_stock <= 0:
+        loc_res = await uow.session.execute(
+            select(func.coalesce(func.sum(InventoryLocationBalanceModel.available_quantity), Decimal("0")))
+            .where(InventoryLocationBalanceModel.material_code == material.material_code)
+        )
+        avail_stock = float(loc_res.scalar() or Decimal("0"))
+    if avail_stock <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Material '{material.material_code}' is currently unavailable in warehouse stock. Only available materials can be added to the BOM."
+        )
+
     existing = await uow.session.scalar(select(BillOfMaterialsItemModel.id).where(
         BillOfMaterialsItemModel.bom_id == bom.id,
         func.upper(BillOfMaterialsItemModel.material_code) == material.material_code.upper()))
@@ -819,6 +1024,7 @@ async def update_product_bom_material(product_code: str, payload: AddProductBomM
 async def get_product_bom(
     product_code: str,
     quantity: float = Query(1.0, gt=0, description="Quantity to calculate BOM requirements for"),
+    available_only: bool = Query(False, description="Filter to only available materials in warehouse"),
     uow: UnitOfWork = Depends(get_uow),
     current_user: Optional[CurrentUser] = Depends(get_current_user),
 ):
@@ -860,6 +1066,13 @@ async def get_product_bom(
             .where(MaterialStockModel.material_code == bi.material_code)
         )
         avail_stock = float(stock_res.scalar() or Decimal("0"))
+        if avail_stock <= 0:
+            loc_res = await uow.session.execute(
+                select(func.coalesce(func.sum(InventoryLocationBalanceModel.available_quantity), Decimal("0")))
+                .where(InventoryLocationBalanceModel.material_code == bi.material_code)
+            )
+            avail_stock = float(loc_res.scalar() or Decimal("0"))
+
         shortage = max(0.0, req_qty - avail_stock)
         item_status = "AVAILABLE" if avail_stock >= req_qty else "SHORTAGE"
 
@@ -878,6 +1091,9 @@ async def get_product_bom(
             "uom": bi.uom or "PCS",
             "status": item_status,
         })
+
+    if available_only:
+        calculated_materials = [m for m in calculated_materials if m["available_quantity"] > 0]
 
     return {
         "product_code": bom.product_code,
@@ -963,6 +1179,7 @@ async def create_assembly_material_request(
 
         # 3. Calculate materials
         calculated_materials = []
+        insufficient_materials = []
         for bi in bom_items:
             req_qty = payload.target_quantity * Decimal(str(bi.quantity_per_unit))
             stock_res = await uow.session.execute(
@@ -971,6 +1188,11 @@ async def create_assembly_material_request(
             )
             avail_stock = stock_res.scalar() or Decimal("0")
             shortage = max(Decimal("0"), req_qty - avail_stock)
+            if shortage > 0:
+                insufficient_materials.append(
+                    f"{bi.material_code}: requires {req_qty} {bi.uom or 'PCS'}, "
+                    f"only {avail_stock} available"
+                )
             calculated_materials.append({
                 "material_code": bi.material_code,
                 "material_name": bi.material_name,
@@ -983,6 +1205,12 @@ async def create_assembly_material_request(
                 "uom": bi.uom or "PCS",
                 "status": "REQUESTED",
             })
+
+        if insufficient_materials:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Insufficient warehouse stock. " + "; ".join(insufficient_materials),
+            )
 
         # 4. Sequential MR Number Generation (MR-YYYY-XXXXXX)
         current_year = datetime.now().year
@@ -2380,6 +2608,7 @@ async def list_production_orders(
                 "material_request_number": o.request_number,
                 "can_start": can_start,
                 "can_complete": can_complete,
+                "traceability_required": bool(o.traceability_required),
                 "started_at": o.started_at.isoformat() if o.started_at else None,
                 "completed_at": o.completed_at.isoformat() if o.completed_at else None,
                 "created_at": o.created_at.isoformat() if o.created_at else None,
@@ -2420,6 +2649,34 @@ async def start_production(
                 detail=f"Cannot start production: Required materials have not been confirmed as received yet (current status: '{order.status}'). Please confirm material receipt first.",
             )
 
+        # Orders with an Assembly receipt that cites an original batch QR enter
+        # the verified-consumption workflow. Legacy receipts without a resolvable
+        # batch QR remain on the existing compatibility path.
+        if not order.traceability_required:
+            receipt_rows = (await uow.session.execute(
+                select(AssemblyMaterialReceiptModel).where(
+                    AssemblyMaterialReceiptModel.assembly_order_id == order.id,
+                    AssemblyMaterialReceiptModel.material_qr.is_not(None),
+                )
+            )).scalars().all()
+            for receipt in receipt_rows:
+                scanned_identity = (receipt.material_qr or "").strip()
+                if not scanned_identity:
+                    continue
+                original_qr_id = await uow.session.scalar(
+                    select(GrnBatchQrModel.id).where(
+                        func.upper(func.trim(GrnBatchQrModel.item_code)) == receipt.material_code.strip().upper(),
+                        GrnBatchQrModel.batch_id.is_not(None),
+                        or_(
+                            GrnBatchQrModel.qr_code == scanned_identity,
+                            GrnBatchQrModel.qr_payload == scanned_identity,
+                        ),
+                    ).limit(1)
+                )
+                if original_qr_id:
+                    order.traceability_required = True
+                    break
+
         operator_name = (
             current_user.username
             if current_user and current_user.username
@@ -2447,6 +2704,411 @@ async def start_production(
             "target_quantity": float(order.planned_quantity),
             "produced_quantity": float(order.completed_quantity),
         }
+
+
+class MaterialConsumptionPayload(BaseModel):
+    material_code: str = Field(..., min_length=1, max_length=64)
+    grn_batch_id: uuid.UUID
+    material_qr: str = Field(..., min_length=1, max_length=128)
+    actual_consumed: Decimal = Field(..., gt=0, max_digits=18, decimal_places=4)
+    uom: str = Field(..., min_length=1, max_length=32)
+    idempotency_key: str = Field(..., min_length=1, max_length=128)
+
+
+def _consumption_event_response(event: AssemblyMaterialConsumptionEventModel, remaining: Decimal) -> dict:
+    return {
+        "consumption_event_id": str(event.id),
+        "assembly_order_id": str(event.assembly_order_id),
+        "material_code": event.material_code,
+        "grn_batch_id": str(event.grn_batch_id),
+        "original_material_qr_reference": event.material_qr,
+        "consumed_quantity": float(event.actual_consumed),
+        "uom": event.uom,
+        "consumed_at": event.consumed_at.isoformat(),
+        "authorized_operator": event.recorded_by,
+        "idempotency_key": event.idempotency_key,
+        "remaining_quantity": float(max(Decimal("0"), remaining)),
+        "traceability_status": "VERIFIED",
+    }
+
+
+async def _remaining_for_consumption_event(session, event: AssemblyMaterialConsumptionEventModel) -> Decimal:
+    order = await session.get(AssemblyOrderModel, event.assembly_order_id)
+    if order is None or not order.pick_task_id or not order.material_issue_id:
+        return Decimal("0")
+    pick_task = await session.get(PickTaskModel, order.pick_task_id)
+    material_issue = (await session.execute(select(
+        MaterialIssueModel.id, MaterialIssueModel.pick_task_id, MaterialIssueModel.issue_number
+    ).where(MaterialIssueModel.id == order.material_issue_id))).first()
+    batch_number = await session.scalar(select(GrnBatchModel.batch_number).where(GrnBatchModel.id == event.grn_batch_id))
+    receipt = await session.scalar(select(AssemblyMaterialReceiptModel).where(
+        AssemblyMaterialReceiptModel.assembly_order_id == order.id,
+        AssemblyMaterialReceiptModel.material_issue_id == order.material_issue_id,
+        func.upper(func.trim(AssemblyMaterialReceiptModel.material_code)) == event.material_code.upper(),
+    ))
+    if not pick_task or not material_issue or not batch_number or not receipt:
+        return Decimal("0")
+
+    issued = await session.scalar(select(func.coalesce(func.sum(InventoryMovementHistoryModel.quantity), 0)).where(
+        func.upper(func.trim(InventoryMovementHistoryModel.movement_type)) == "TAKEAWAY",
+        func.upper(func.trim(InventoryMovementHistoryModel.to_location)) == "ASSEMBLY",
+        func.upper(func.trim(InventoryMovementHistoryModel.material_code)) == event.material_code.upper(),
+        InventoryMovementHistoryModel.batch_lot == batch_number,
+        InventoryMovementHistoryModel.reference_document == pick_task.task_number,
+    )) or Decimal("0")
+    batch_consumed = await session.scalar(select(func.coalesce(func.sum(AssemblyMaterialConsumptionEventModel.actual_consumed), 0)).where(
+        AssemblyMaterialConsumptionEventModel.assembly_order_id == order.id,
+        AssemblyMaterialConsumptionEventModel.grn_batch_id == event.grn_batch_id,
+        func.upper(func.trim(AssemblyMaterialConsumptionEventModel.material_code)) == event.material_code.upper(),
+    )) or Decimal("0")
+    material_consumed = await session.scalar(select(func.coalesce(func.sum(AssemblyMaterialConsumptionEventModel.actual_consumed), 0)).where(
+        AssemblyMaterialConsumptionEventModel.assembly_order_id == order.id,
+        func.upper(func.trim(AssemblyMaterialConsumptionEventModel.material_code)) == event.material_code.upper(),
+    )) or Decimal("0")
+    returned = Decimal("0")
+    if session.bind.dialect.name == "postgresql":
+        has_returns_table = await session.scalar(text("SELECT to_regclass('public.material_return') IS NOT NULL"))
+        if has_returns_table:
+            returned = await session.scalar(text("""
+                SELECT coalesce(sum(returned_quantity), 0) FROM material_return
+                 WHERE issue_number = :issue_number
+                   AND upper(trim(status)) = 'PROCESSED'
+                   AND upper(trim(material_code)) = upper(trim(:material_code))
+                   AND batch_number = :batch_number
+            """), {"issue_number": material_issue.issue_number, "material_code": event.material_code,
+                  "batch_number": batch_number}) or Decimal("0")
+    batch_remaining = Decimal(str(issued)) - Decimal(str(batch_consumed)) - Decimal(str(returned))
+    receipt_remaining = Decimal(str(receipt.received_quantity)) - Decimal(str(material_consumed))
+    return max(Decimal("0"), min(batch_remaining, receipt_remaining))
+
+
+def _require_assembly_traceability_role(current_user: CurrentUser) -> None:
+    if not {role.upper() for role in (current_user.roles or [])}.intersection(
+        {"ASSEMBLY", "ASSEMBLY_MANAGER", "ASSEMBLY_OPERATOR", "ADMIN", "SUPERUSER"}
+    ):
+        raise HTTPException(status_code=403, detail="Assembly access is required")
+
+
+async def _get_assembly_traceability_order(session, order_id: str):
+    try:
+        order_uuid = uuid.UUID(order_id)
+        query = select(AssemblyOrderModel).where(
+            or_(AssemblyOrderModel.id == order_uuid, AssemblyOrderModel.order_number == order_id)
+        )
+    except ValueError:
+        query = select(AssemblyOrderModel).where(AssemblyOrderModel.order_number == order_id)
+    order = (await session.execute(query)).scalars().first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Assembly order not found")
+    return order
+
+
+@router.get("/orders/{order_id}/material-consumption")
+async def get_material_consumption_history(
+    order_id: str,
+    uow: UnitOfWork = Depends(get_uow),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Return separate verified consumption events and completion readiness."""
+    _require_assembly_traceability_role(current_user)
+    async with uow:
+        order = await _get_assembly_traceability_order(uow.session, order_id)
+        events = (await uow.session.execute(
+            select(AssemblyMaterialConsumptionEventModel)
+            .where(AssemblyMaterialConsumptionEventModel.assembly_order_id == order.id)
+            .order_by(AssemblyMaterialConsumptionEventModel.consumed_at.desc())
+        )).scalars().all()
+        totals: dict[str, Decimal] = {}
+        for event in events:
+            code = event.material_code.strip().upper()
+            totals[code] = totals.get(code, Decimal("0")) + Decimal(str(event.actual_consumed))
+        requirements = []
+        for item in order.items or []:
+            if not isinstance(item, dict) or not item.get("material_code"):
+                continue
+            code = str(item["material_code"]).strip()
+            if code.upper() not in {entry["material_code"].upper() for entry in requirements}:
+                requirements.append({"material_code": code, "material_name": item.get("material_name") or code,
+                                     "verified_consumed": float(totals.get(code.upper(), Decimal("0")))})
+        required = bool(order.traceability_required)
+        missing = [entry["material_code"] for entry in requirements if entry["verified_consumed"] <= 0]
+        return {
+            "assembly_order_id": str(order.id), "traceability_required": required,
+            "traceability_status": "VERIFIED" if required and not missing else ("INCOMPLETE" if required else "LEGACY"),
+            "missing_material_codes": missing if required else [],
+            "can_complete": not (required and bool(missing)),
+            "events": [{
+                "consumption_event_id": str(event.id), "material_code": event.material_code,
+                "grn_batch_id": str(event.grn_batch_id), "batch_number": await uow.session.scalar(
+                    select(GrnBatchModel.batch_number).where(GrnBatchModel.id == event.grn_batch_id)),
+                "material_qr": event.material_qr, "consumed_quantity": float(event.actual_consumed),
+                "uom": event.uom, "consumed_at": event.consumed_at.isoformat(),
+                "recorded_by": event.recorded_by, "status": "VERIFIED",
+            } for event in events],
+        }
+
+
+@router.get("/orders/{order_id}/material-consumption/verify")
+async def verify_material_consumption_qr(
+    order_id: str,
+    scanned_qr: str = Query(..., min_length=1, max_length=2048),
+    uow: UnitOfWork = Depends(get_uow),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Resolve only a persisted original GRN QR with order-specific issue evidence."""
+    _require_assembly_traceability_role(current_user)
+    async with uow:
+        order = await _get_assembly_traceability_order(uow.session, order_id)
+        if order.status not in ("IN_PRODUCTION", "IN-PROGRESS", "RUNNING"):
+            raise HTTPException(status_code=409, detail="Order must be in production to verify material")
+        # GRN labels encode a descriptive payload. Resolve its material and lot
+        # fields back to the already persisted QR row, then submit that canonical
+        # identity to Phase 2A; never treat the scanned text as a new identity.
+        scanned_value = scanned_qr.strip()
+        qr = await uow.session.scalar(select(GrnBatchQrModel).where(GrnBatchQrModel.qr_code == scanned_value))
+        if qr is None:
+            material_match = re.search(r"^Material Code:\s*(.+?)\s*$", scanned_value, re.IGNORECASE | re.MULTILINE)
+            batch_match = re.search(r"^Batch Number:\s*(.+?)\s*$", scanned_value, re.IGNORECASE | re.MULTILINE)
+            if material_match and batch_match:
+                qr = await uow.session.scalar(
+                    select(GrnBatchQrModel)
+                    .join(GrnBatchModel, GrnBatchModel.id == GrnBatchQrModel.batch_id)
+                    .join(GrnLineModel, GrnLineModel.id == GrnBatchModel.grn_line_id)
+                    .where(
+                        func.upper(func.trim(GrnBatchQrModel.item_code)) == material_match.group(1).strip().upper(),
+                        func.upper(func.trim(GrnBatchModel.batch_number)) == batch_match.group(1).strip().upper(),
+                    )
+                )
+        if qr is None:
+            raise HTTPException(status_code=404, detail="This is not a recognized original material QR")
+        code = (qr.item_code or "").strip()
+        line = next((entry for entry in (order.items or []) if isinstance(entry, dict)
+                     and str(entry.get("material_code") or "").strip().casefold() == code.casefold()), None)
+        if line is None:
+            raise HTTPException(status_code=409, detail="This material is not assigned to the selected Assembly order")
+        if not order.pick_task_id or not order.material_issue_id:
+            raise HTTPException(status_code=409, detail="Order has no linked Warehouse pick and issue records")
+        task = await uow.session.get(PickTaskModel, order.pick_task_id)
+        issue = (await uow.session.execute(select(MaterialIssueModel.issue_number).where(
+            MaterialIssueModel.id == order.material_issue_id,
+            MaterialIssueModel.pick_task_id == order.pick_task_id))).first()
+        if not task or not issue:
+            raise HTTPException(status_code=409, detail="Order's linked Warehouse issue is invalid")
+        batch = (await uow.session.execute(select(GrnBatchModel.batch_number, GrnLineModel.material_name)
+            .join(GrnLineModel, GrnLineModel.id == GrnBatchModel.grn_line_id)
+            .where(GrnBatchModel.id == qr.batch_id, func.upper(func.trim(GrnLineModel.item_code)) == code.upper()))).first()
+        if not batch:
+            raise HTTPException(status_code=409, detail="GRN batch does not match the material QR")
+        receipt = await uow.session.scalar(select(AssemblyMaterialReceiptModel).where(
+            AssemblyMaterialReceiptModel.assembly_order_id == order.id,
+            AssemblyMaterialReceiptModel.material_issue_id == order.material_issue_id,
+            func.upper(func.trim(AssemblyMaterialReceiptModel.material_code)) == code.upper()))
+        if not receipt:
+            raise HTTPException(status_code=409, detail="Assembly has not confirmed receipt of this material")
+        issued = await uow.session.scalar(select(func.coalesce(func.sum(InventoryMovementHistoryModel.quantity), 0)).where(
+            func.upper(func.trim(InventoryMovementHistoryModel.movement_type)) == "TAKEAWAY",
+            func.upper(func.trim(InventoryMovementHistoryModel.to_location)) == "ASSEMBLY",
+            func.upper(func.trim(InventoryMovementHistoryModel.material_code)) == code.upper(),
+            InventoryMovementHistoryModel.batch_lot == batch.batch_number,
+            InventoryMovementHistoryModel.reference_document == task.task_number)) or Decimal("0")
+        if issued <= 0:
+            raise HTTPException(status_code=409, detail="This GRN batch was not issued to the selected Assembly order")
+        consumed = await uow.session.scalar(select(func.coalesce(func.sum(AssemblyMaterialConsumptionEventModel.actual_consumed), 0)).where(
+            AssemblyMaterialConsumptionEventModel.assembly_order_id == order.id,
+            AssemblyMaterialConsumptionEventModel.grn_batch_id == qr.batch_id,
+            func.upper(func.trim(AssemblyMaterialConsumptionEventModel.material_code)) == code.upper())) or Decimal("0")
+        material_consumed = await uow.session.scalar(select(func.coalesce(func.sum(AssemblyMaterialConsumptionEventModel.actual_consumed), 0)).where(
+            AssemblyMaterialConsumptionEventModel.assembly_order_id == order.id,
+            func.upper(func.trim(AssemblyMaterialConsumptionEventModel.material_code)) == code.upper())) or Decimal("0")
+        remaining = max(Decimal("0"), min(Decimal(str(issued)) - Decimal(str(consumed)),
+                                           Decimal(str(receipt.received_quantity)) - Decimal(str(material_consumed))))
+        name = await uow.session.scalar(select(MaterialModel.material_name).where(MaterialModel.material_code == code))
+        return {"material_code": code, "material_name": name or (batch.material_name or code),
+                "grn_batch_id": str(qr.batch_id), "batch_number": batch.batch_number,
+                "material_qr": qr.qr_code, "quantity_issued": float(issued),
+                "quantity_received": float(receipt.received_quantity), "quantity_already_consumed": float(consumed),
+                "remaining_quantity": float(remaining), "uom": receipt.uom, "verified": True}
+
+
+@router.post("/orders/{order_id}/material-consumption", status_code=201)
+async def record_material_consumption(
+    order_id: str,
+    payload: MaterialConsumptionPayload,
+    uow: UnitOfWork = Depends(get_uow),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Record an idempotent actual-consumption event against an original GRN QR."""
+    if not {role.upper() for role in (current_user.roles or [])}.intersection(
+        {"ASSEMBLY", "ASSEMBLY_MANAGER", "ADMIN", "SUPERUSER"}
+    ):
+        raise HTTPException(status_code=403, detail="Only authorized Assembly operators can record consumption")
+
+    material_code = payload.material_code.strip()
+    material_qr = payload.material_qr.strip()
+    uom = payload.uom.strip()
+    idempotency_key = payload.idempotency_key.strip()
+    if not material_code or not material_qr or not uom or not idempotency_key:
+        raise HTTPException(status_code=422, detail="Material, original QR, UOM, and idempotency key are required")
+
+    async with uow:
+        try:
+            order_uuid = uuid.UUID(order_id)
+            order_query = select(AssemblyOrderModel).where(
+                or_(AssemblyOrderModel.id == order_uuid, AssemblyOrderModel.order_number == order_id)
+            )
+        except ValueError:
+            order_query = select(AssemblyOrderModel).where(AssemblyOrderModel.order_number == order_id)
+
+        order = (await uow.session.execute(order_query.with_for_update())).scalars().first()
+        if order is None:
+            raise HTTPException(status_code=404, detail=f"Assembly Order '{order_id}' not found")
+
+        # A retried request returns the already-recorded event if every identity
+        # and quantity field matches; reuse of a key for different data conflicts.
+        existing = await uow.session.scalar(select(AssemblyMaterialConsumptionEventModel).where(
+            AssemblyMaterialConsumptionEventModel.idempotency_key == idempotency_key
+        ))
+        if existing:
+            same_request = (
+                existing.assembly_order_id == order.id
+                and existing.material_code.strip().casefold() == material_code.casefold()
+                and existing.grn_batch_id == payload.grn_batch_id
+                and existing.material_qr == material_qr
+                and existing.actual_consumed == payload.actual_consumed
+                and existing.uom.strip().casefold() == uom.casefold()
+            )
+            if not same_request:
+                raise HTTPException(status_code=409, detail="Idempotency key was already used for a different consumption transaction")
+            remaining = await _remaining_for_consumption_event(uow.session, existing)
+            return _consumption_event_response(existing, remaining)
+
+        if order.status not in ("IN_PRODUCTION", "IN-PROGRESS", "RUNNING"):
+            raise HTTPException(status_code=409, detail=f"Order must be in production before recording consumption (status: {order.status})")
+
+        item = next((line for line in (order.items or []) if isinstance(line, dict)
+                     and str(line.get("material_code") or "").strip().casefold() == material_code.casefold()), None)
+        if item is None:
+            raise HTTPException(status_code=422, detail="Material is not listed on this Assembly Order or as an authorized substitution")
+
+        if not order.pick_task_id or not order.material_issue_id:
+            raise HTTPException(status_code=409, detail="Order has no linked Warehouse pick and issue records")
+        pick_task = await uow.session.get(PickTaskModel, order.pick_task_id)
+        material_issue = (await uow.session.execute(select(
+            MaterialIssueModel.id, MaterialIssueModel.pick_task_id, MaterialIssueModel.issue_number
+        ).where(MaterialIssueModel.id == order.material_issue_id))).first()
+        if not pick_task or not material_issue or material_issue.pick_task_id != pick_task.id:
+            raise HTTPException(status_code=409, detail="Order's linked Warehouse issue is invalid")
+
+        qr_row = await uow.session.scalar(select(GrnBatchQrModel).where(
+            GrnBatchQrModel.qr_code == material_qr,
+            GrnBatchQrModel.batch_id == payload.grn_batch_id,
+            func.upper(func.trim(GrnBatchQrModel.item_code)) == material_code.upper(),
+        ).with_for_update())
+        if qr_row is None:
+            raise HTTPException(status_code=422, detail="Original material QR does not match the supplied GRN batch and material")
+
+        batch = (await uow.session.execute(
+            select(GrnBatchModel.batch_number, GrnLineModel.item_code)
+            .join(GrnLineModel, GrnLineModel.id == GrnBatchModel.grn_line_id)
+            .where(GrnBatchModel.id == payload.grn_batch_id)
+            .with_for_update()
+        )).first()
+        if batch is None or batch.item_code.strip().casefold() != material_code.casefold():
+            raise HTTPException(status_code=422, detail="GRN batch does not belong to this material")
+        batch_number = batch.batch_number
+
+        receipt = await uow.session.scalar(select(AssemblyMaterialReceiptModel).where(
+            AssemblyMaterialReceiptModel.assembly_order_id == order.id,
+            AssemblyMaterialReceiptModel.material_issue_id == material_issue.id,
+            func.upper(func.trim(AssemblyMaterialReceiptModel.material_code)) == material_code.upper(),
+        ).with_for_update())
+        if receipt is None:
+            raise HTTPException(status_code=409, detail="Assembly has not confirmed receipt of this material")
+        if uom.casefold() != receipt.uom.strip().casefold():
+            raise HTTPException(status_code=422, detail=f"Consumption UOM must match the Assembly receipt UOM ({receipt.uom})")
+
+        movements = (await uow.session.execute(select(
+            InventoryMovementHistoryModel.quantity, InventoryMovementHistoryModel.uom
+        ).where(
+            func.upper(func.trim(InventoryMovementHistoryModel.movement_type)) == "TAKEAWAY",
+            func.upper(func.trim(InventoryMovementHistoryModel.to_location)) == "ASSEMBLY",
+            func.upper(func.trim(InventoryMovementHistoryModel.material_code)) == material_code.upper(),
+            InventoryMovementHistoryModel.batch_lot == batch_number,
+            InventoryMovementHistoryModel.reference_document == pick_task.task_number,
+        ).with_for_update())).all()
+        if not movements:
+            raise HTTPException(status_code=409, detail="This GRN batch was not issued to the linked Assembly order")
+        if any((movement.uom or "").strip().casefold() != uom.casefold() for movement in movements):
+            raise HTTPException(status_code=422, detail="Warehouse issue UOM does not match the consumption UOM")
+        issued_quantity = sum((Decimal(str(movement.quantity)) for movement in movements), Decimal("0"))
+
+        existing_batch_consumed = await uow.session.scalar(select(
+            func.coalesce(func.sum(AssemblyMaterialConsumptionEventModel.actual_consumed), 0)
+        ).where(
+            AssemblyMaterialConsumptionEventModel.assembly_order_id == order.id,
+            func.upper(func.trim(AssemblyMaterialConsumptionEventModel.material_code)) == material_code.upper(),
+            AssemblyMaterialConsumptionEventModel.grn_batch_id == payload.grn_batch_id,
+        )) or Decimal("0")
+        existing_material_consumed = await uow.session.scalar(select(
+            func.coalesce(func.sum(AssemblyMaterialConsumptionEventModel.actual_consumed), 0)
+        ).where(
+            AssemblyMaterialConsumptionEventModel.assembly_order_id == order.id,
+            func.upper(func.trim(AssemblyMaterialConsumptionEventModel.material_code)) == material_code.upper(),
+        )) or Decimal("0")
+        received_quantity = Decimal(str(receipt.received_quantity))
+        batch_remaining = issued_quantity - Decimal(str(existing_batch_consumed))
+        receipt_remaining = received_quantity - Decimal(str(existing_material_consumed))
+
+        # The DB trigger also accounts for processed batch returns and serializes
+        # order writes. This application check gives the operator a useful limit.
+        if uow.session.bind.dialect.name == "postgresql":
+            has_returns_table = await uow.session.scalar(text("SELECT to_regclass('public.material_return') IS NOT NULL"))
+            if has_returns_table:
+                returned = await uow.session.scalar(text("""
+                    SELECT coalesce(sum(returned_quantity), 0)
+                    FROM material_return
+                    WHERE issue_number = :issue_number
+                      AND upper(trim(status)) = 'PROCESSED'
+                      AND upper(trim(material_code)) = upper(trim(:material_code))
+                      AND batch_number = :batch_number
+                """), {"issue_number": material_issue.issue_number, "material_code": material_code,
+                      "batch_number": batch_number})
+                batch_remaining -= Decimal(str(returned or 0))
+
+        available = max(Decimal("0"), min(batch_remaining, receipt_remaining))
+        if payload.actual_consumed > available:
+            raise HTTPException(status_code=409, detail={
+                "message": "Consumption exceeds verified material available at Assembly",
+                "available_quantity": float(available),
+                "uom": uom,
+            })
+
+        event = AssemblyMaterialConsumptionEventModel(
+            id=uuid.uuid4(),
+            assembly_order_id=order.id,
+            material_code=material_code,
+            grn_batch_id=payload.grn_batch_id,
+            grn_batch_qr_id=qr_row.id,
+            material_qr=qr_row.qr_code,
+            idempotency_key=idempotency_key,
+            actual_consumed=payload.actual_consumed,
+            uom=uom,
+            consumed_at=datetime.now(),
+            recorded_by=current_user.username,
+        )
+        uow.session.add(event)
+        order.traceability_required = True
+        try:
+            await uow.session.flush()
+            await uow.commit()
+        except IntegrityError as exc:
+            await uow.session.rollback()
+            if "idempotency" in str(exc.orig).casefold() or "already been recorded" in str(exc.orig).casefold():
+                raise HTTPException(status_code=409, detail="This consumption transaction has already been recorded") from exc
+            raise HTTPException(status_code=409, detail="Database rejected the consumption transaction: verify the batch and available quantity") from exc
+
+        remaining = available - payload.actual_consumed
+        return _consumption_event_response(event, remaining)
 
 
 class CompleteProductionPayload(BaseModel):
@@ -2494,6 +3156,45 @@ async def complete_production(
                 detail=f"Cannot complete production: Order '{order.order_number}' is in status '{order.status}', not 'IN_PRODUCTION'.",
             )
 
+        verified_consumption_by_code: dict[str, Decimal] = {}
+        if order.traceability_required:
+            required_material_codes = {
+                str(item.get("material_code") or "").strip().casefold()
+                for item in _group_material_lines(order.items or [])
+                if item.get("material_code")
+            }
+            verified_rows = (await uow.session.execute(
+                select(
+                    AssemblyMaterialConsumptionEventModel.material_code,
+                    func.sum(AssemblyMaterialConsumptionEventModel.actual_consumed),
+                )
+                .join(
+                    GrnBatchQrModel,
+                    (GrnBatchQrModel.id == AssemblyMaterialConsumptionEventModel.grn_batch_qr_id)
+                    & (GrnBatchQrModel.batch_id == AssemblyMaterialConsumptionEventModel.grn_batch_id)
+                    & (GrnBatchQrModel.qr_code == AssemblyMaterialConsumptionEventModel.material_qr)
+                    & (func.upper(func.trim(GrnBatchQrModel.item_code)) == func.upper(func.trim(AssemblyMaterialConsumptionEventModel.material_code))),
+                )
+                .where(AssemblyMaterialConsumptionEventModel.assembly_order_id == order.id)
+                .group_by(AssemblyMaterialConsumptionEventModel.material_code)
+            )).all()
+            verified_consumption_by_code = {
+                str(code).strip().casefold(): Decimal(str(quantity))
+                for code, quantity in verified_rows
+            }
+            missing_materials = sorted(
+                code for code in required_material_codes
+                if verified_consumption_by_code.get(code, Decimal("0")) <= 0
+            )
+            if missing_materials:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "message": "Verified actual consumption is required for every order material before production can complete",
+                        "missing_material_codes": missing_materials,
+                    },
+                )
+
         required_steps = [step for step in (order.assembly_steps or []) if isinstance(step, dict) and step.get("required", True)]
         if required_steps:
             completed_keys = {str(value).strip().casefold() for value in payload.completed_steps}
@@ -2525,7 +3226,11 @@ async def complete_production(
             code = item.get("material_code") if isinstance(item, dict) else None
             if not code:
                 continue
-            actual = Decimal(str(item.get("issued_quantity", item.get("required_quantity", 0)) or 0))
+            actual = (
+                verified_consumption_by_code.get(str(code).strip().casefold(), Decimal("0"))
+                if order.traceability_required
+                else Decimal(str(item.get("issued_quantity", item.get("required_quantity", 0)) or 0))
+            )
             consumption = (await uow.session.execute(select(AssemblyMaterialConsumptionModel).where(
                 AssemblyMaterialConsumptionModel.assembly_order_id == order.id,
                 AssemblyMaterialConsumptionModel.material_code == code,
@@ -2743,6 +3448,7 @@ async def perform_quality_inspection(
        - Status set to AVAILABLE
     """
     async with uow:
+        await require_section_schema(uow.session)
         try:
             ord_uuid = uuid.UUID(payload.order_id)
             q = select(AssemblyOrderModel).where(
@@ -2842,6 +3548,7 @@ async def perform_quality_inspection(
             inspection.updated_at = now
 
         fg_created = None
+        new_fg = False
         # Step 8 & 9: Only QC-passed products become Finished Goods with unique QR
         if payload.passed_quantity > Decimal("0") or previous_passed > Decimal("0"):
             fg_res = await uow.session.execute(
@@ -2860,6 +3567,7 @@ async def perform_quality_inspection(
             serial_str = f"SN-{order.product_code or 'FG'}-{order.order_number}-{unique_token}"
 
             if not fg:
+                new_fg = True
                 fg = AssemblyFinishedGoodsModel(
                     assembly_order_id=order.id,
                     product_code=order.product_code or "UNKNOWN",
@@ -2889,6 +3597,15 @@ async def perform_quality_inspection(
                 fg.updated_at = now
 
             await uow.session.flush()
+            if new_fg:
+                await assign_section_main_id(uow.session, fg)
+            if qc_status == "QC_APPROVED" and fg.section_main_id:
+                owner_ids = (await uow.session.scalars(select(FinishedGoodsRequestModel.supplier_id).where(
+                    FinishedGoodsRequestModel.work_order_id == order.id,
+                    FinishedGoodsRequestModel.supplier_id.is_not(None)))).all()
+                if len(set(owner_ids)) == 1:
+                    fg.section_supplier_id = owner_ids[0]
+                await generate_sections(uow.session, fg)
             fg_created = {
                 "fg_id": str(fg.id),
                 "product_code": fg.product_code,
@@ -2898,6 +3615,7 @@ async def perform_quality_inspection(
                 "status": fg.status,
                 "location_code": fg.location_code,
                 "qr_code": fg.qr_code,
+                **(await section_summary(uow.session, fg.id)),
                 "serial_number": fg.serial_number,
                 "batch_number": fg.batch_number,
             }
@@ -2981,7 +3699,7 @@ async def list_assembly_finished_goods(
             .order_by(AssemblyFinishedGoodsModel.posted_at.desc())
         )
 
-        res = await uow.session.execute(q)
+        res = await uow.session.execute(await compatible_fg_read(uow.session, q))
         rows = res.all()
 
         results = []
@@ -3020,6 +3738,7 @@ async def list_assembly_finished_goods(
                 "warehouse_id": fg.warehouse_id,
                 "location_code": fg.location_code,
                 "qr_code": fg.qr_code,
+                **(await section_summary(uow.session, fg.id)),
                 "serial_number": fg.serial_number,
                 "posted_at": fg.posted_at.isoformat() if fg.posted_at else None,
             })
@@ -3056,7 +3775,7 @@ async def get_finished_goods_inventory_summary(
     async with uow:
         produced = (await uow.session.execute(select(func.coalesce(func.sum(AssemblyOrderModel.completed_quantity), 0)).where(AssemblyOrderModel.completed_quantity > 0))).scalar_one()
         inspected = (await uow.session.execute(select(AssemblyQualityInspectionModel))).scalars().all()
-        finished_goods = (await uow.session.execute(select(AssemblyFinishedGoodsModel))).scalars().all()
+        finished_goods = (await uow.session.execute(await compatible_fg_read(uow.session, select(AssemblyFinishedGoodsModel)))).scalars().all()
         totals = [await stock_quantities(uow.session, fg) for fg in finished_goods]
         reserved = sum(t["reserved_quantity"] for t in totals)
         dispatched = sum(t["dispatched_quantity"] for t in totals)
@@ -3113,7 +3832,7 @@ async def get_assembly_finished_goods_detail(
                 )
             )
 
-        res = await uow.session.execute(q)
+        res = await uow.session.execute(await compatible_fg_read(uow.session, q))
         row = res.first()
         if not row:
             raise HTTPException(status_code=404, detail=f"Finished goods record '{fg_id}' not found.")
@@ -3140,6 +3859,7 @@ async def get_assembly_finished_goods_detail(
             "warehouse_id": fg.warehouse_id,
             "location_code": fg.location_code,
             "qr_code": fg.qr_code,
+            **(await section_summary(uow.session, fg.id)),
             "serial_number": fg.serial_number,
             "batch_number": fg.batch_number,
             "posted_at": fg.posted_at.isoformat() if fg.posted_at else None,
@@ -3152,11 +3872,234 @@ async def get_assembly_finished_goods_detail(
                 "serial_number": fg.serial_number,
                 "batch_number": fg.batch_number,
                 "qr_code": fg.qr_code,
+            **(await section_summary(uow.session, fg.id)),
                 "location": fg.location_code,
                 "inspected_by": qc.inspected_by if qc else "QC Certified",
                 "date": fg.posted_at.strftime("%Y-%m-%d %H:%M") if fg.posted_at else None,
                 "qc_status": fg.status,
             },
+        }
+
+
+def _parse_finished_goods_qr_identity(value: str) -> dict[str, str]:
+    """Parse the existing FG|KEY:value payload without creating a new identity."""
+    if not value.startswith("FG|"):
+        raise ValueError("not an FG payload")
+    fields: dict[str, str] = {}
+    for part in value.split("|")[1:]:
+        key, separator, field_value = part.partition(":")
+        key = key.strip().upper()
+        if not separator or not key or not field_value.strip():
+            raise HTTPException(status_code=400, detail="Malformed finished-goods QR identity")
+        if key in {"CODE", "ORDER", "BATCH"} and key in fields:
+            raise HTTPException(status_code=400, detail="Ambiguous finished-goods QR identity")
+        fields[key] = field_value.strip()
+    if not all(fields.get(key) for key in ("CODE", "ORDER", "BATCH")):
+        raise HTTPException(status_code=400, detail="Malformed finished-goods QR identity")
+    return fields
+
+
+@router.get("/finished-goods/{fg_id:path}/traceability")
+async def get_finished_goods_traceability(
+    fg_id: str = Path(..., min_length=1, max_length=512),
+    uow: UnitOfWork = Depends(get_uow),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Read-only backward traceability for one persisted finished-goods batch."""
+    allowed_roles = {"ASSEMBLY", "ASSEMBLY_MANAGER", "QUALITY", "QC", "ADMIN", "SUPERUSER"}
+    if not current_user or not current_user.subject:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not (allowed_roles.intersection(role.upper() for role in (current_user.roles or [])) or
+            {"quality:inspect", "assembly:quality:inspect", "assembly:traceability:read"}.intersection(current_user.permissions or [])):
+        raise HTTPException(status_code=403, detail="Not authorized to view Assembly finished-goods traceability")
+
+    async with uow:
+        fg_order_query = select(AssemblyFinishedGoodsModel, AssemblyOrderModel).join(
+            AssemblyOrderModel, AssemblyOrderModel.id == AssemblyFinishedGoodsModel.assembly_order_id
+        )
+        fg_order_query = await compatible_fg_read(uow.session, fg_order_query)
+        fg = order = None
+        try:
+            fg_uuid = uuid.UUID(fg_id)
+            resolved = (await uow.session.execute(fg_order_query.where(AssemblyFinishedGoodsModel.id == fg_uuid))).all()
+        except ValueError:
+            resolved = (await uow.session.execute(fg_order_query.where(or_(
+                AssemblyFinishedGoodsModel.qr_code == fg_id,
+                AssemblyFinishedGoodsModel.serial_number == fg_id,
+                AssemblyFinishedGoodsModel.batch_number == fg_id,
+            )).limit(5))).all()
+            if not resolved and fg_id.startswith("FG|"):
+                identity = _parse_finished_goods_qr_identity(fg_id)
+                resolved = (await uow.session.execute(fg_order_query.where(
+                    AssemblyFinishedGoodsModel.batch_number == identity["BATCH"],
+                    AssemblyFinishedGoodsModel.product_code == identity["CODE"],
+                    AssemblyOrderModel.order_number == identity["ORDER"],
+                ).limit(5))).all()
+        distinct = {str(row[0].id): row for row in resolved}
+        if len(distinct) > 1:
+            raise HTTPException(status_code=409, detail="Finished-goods identity matches multiple records")
+        if not distinct:
+            raise HTTPException(status_code=404, detail="Finished-goods record not found")
+        fg, order = next(iter(distinct.values()))
+
+        # One persisted FG batch per work order is an existing database invariant.
+        # Confirm it before attributing order-level consumption to this FG identity.
+        fg_count = await uow.session.scalar(select(func.count(AssemblyFinishedGoodsModel.id)).where(
+            AssemblyFinishedGoodsModel.assembly_order_id == order.id
+        )) or 0
+        qc = await uow.session.scalar(select(AssemblyQualityInspectionModel).where(
+            AssemblyQualityInspectionModel.assembly_order_id == order.id
+        ))
+
+        event_rows = (await uow.session.execute(
+            select(
+                AssemblyMaterialConsumptionEventModel,
+                GrnBatchQrModel.qr_code,
+                GrnBatchQrModel.qr_payload,
+                GrnBatchQrModel.item_code,
+                GrnBatchModel.batch_number,
+                GrnLineModel.item_code,
+                GrnLineModel.material_name,
+                GrnLineModel.uom,
+                GrnModel.grn_number,
+                GrnModel.id,
+                GrnModel.supplier_name,
+                GrnModel.supplier_company_name,
+            )
+            .select_from(AssemblyMaterialConsumptionEventModel)
+            .outerjoin(GrnBatchQrModel, and_(
+                GrnBatchQrModel.id == AssemblyMaterialConsumptionEventModel.grn_batch_qr_id,
+                GrnBatchQrModel.batch_id == AssemblyMaterialConsumptionEventModel.grn_batch_id,
+                GrnBatchQrModel.qr_code == AssemblyMaterialConsumptionEventModel.material_qr,
+            ))
+            .outerjoin(GrnBatchModel, GrnBatchModel.id == AssemblyMaterialConsumptionEventModel.grn_batch_id)
+            .outerjoin(GrnLineModel, GrnLineModel.id == GrnBatchModel.grn_line_id)
+            .outerjoin(GrnModel, GrnModel.id == GrnLineModel.grn_id)
+            .where(AssemblyMaterialConsumptionEventModel.assembly_order_id == order.id)
+            .order_by(AssemblyMaterialConsumptionEventModel.consumed_at, AssemblyMaterialConsumptionEventModel.id)
+        )).all()
+        legacy_rows = (await uow.session.execute(select(AssemblyMaterialConsumptionModel).where(
+            AssemblyMaterialConsumptionModel.assembly_order_id == order.id
+        ))).scalars().all()
+
+        valid_events: list[dict[str, Any]] = []
+        unlinked_records: list[dict[str, Any]] = []
+        grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
+        verified_by_material: dict[str, Decimal] = {}
+        all_material_batch_keys: set[tuple[str, str]] = set()
+        for row in event_rows:
+            event, qr_code, qr_payload, qr_item_code, batch_number, line_code, material_name, line_uom, grn_number, grn_id, supplier_name, supplier_company_name = row
+            all_material_batch_keys.add((event.material_code.strip().upper(), str(event.grn_batch_id)))
+            is_verified = bool(
+                qr_code and qr_payload and str(qr_payload).strip()
+                and event.material_qr == qr_code
+                and qr_item_code and qr_item_code.strip().casefold() == event.material_code.strip().casefold()
+                and batch_number and line_code
+                and line_code.strip().casefold() == event.material_code.strip().casefold()
+            )
+            event_data = {
+                "consumption_event_id": str(event.id), "material_code": event.material_code,
+                "grn_batch_id": str(event.grn_batch_id), "batch_number": batch_number,
+                "original_material_qr_reference": event.material_qr,
+                "quantity_consumed": float(event.actual_consumed), "uom": event.uom,
+                "consumed_at": event.consumed_at.isoformat(), "recorded_by": event.recorded_by,
+                "traceability_status": "VERIFIED" if is_verified else "UNLINKED",
+            }
+            if not is_verified:
+                unlinked_records.append({**event_data, "reason": "Original GRN batch, QR identity, or stored QR payload is missing or inconsistent."})
+                continue
+            valid_events.append(event_data)
+            material_key = event.material_code.strip().upper()
+            verified_by_material[material_key] = verified_by_material.get(material_key, Decimal("0")) + Decimal(str(event.actual_consumed))
+            group_key = (material_key, str(event.grn_batch_id), str(event.grn_batch_qr_id))
+            if group_key not in grouped:
+                grouped[group_key] = {
+                    "material_code": event.material_code, "material_name": material_name or event.material_code,
+                    "grn_batch_id": str(event.grn_batch_id), "batch_number": batch_number,
+                    "original_qr_identity": qr_code, "original_qr_payload": qr_payload,
+                    "quantity_consumed": Decimal("0"), "uom": event.uom,
+                    "grn_reference": {"grn_id": str(grn_id) if grn_id else None,
+                                      "grn_number": grn_number},
+                    "supplier": {"supplier_name": supplier_company_name or supplier_name,
+                                 "source": "GRN supplier snapshot" if (supplier_company_name or supplier_name) else None},
+                    "consumption_event_ids": [],
+                }
+            group = grouped[group_key]
+            group["quantity_consumed"] += Decimal(str(event.actual_consumed))
+            group["consumption_event_ids"].append(str(event.id))
+
+        # Legacy aggregate rows are considered unlinked only when they are not
+        # represented by verified event totals (Phase 2A mirrors those totals).
+        for legacy in legacy_rows:
+            code = legacy.material_code.strip().upper()
+            amount = Decimal(str(legacy.actual_consumed))
+            event_amount = verified_by_material.get(code, Decimal("0"))
+            if event_amount < amount:
+                unlinked_records.append({
+                    "consumption_id": str(legacy.id), "material_code": legacy.material_code,
+                    "quantity_consumed": float(amount), "uom": legacy.uom,
+                    "traceability_status": "UNLINKED",
+                    "reason": "Historical aggregate consumption has no verified original batch/QR allocation.",
+                })
+
+        expected_codes: set[str] = set()
+        for item in order.items or []:
+            if isinstance(item, dict) and item.get("material_code"):
+                expected_codes.add(str(item["material_code"]).strip().upper())
+        warnings: list[str] = []
+        if not expected_codes:
+            warnings.append("Assembly order has no material requirement lines available for completeness comparison.")
+        elif not expected_codes.issubset(set(verified_by_material)):
+            warnings.append("One or more required material codes have no verified consumption event.")
+        if fg_count != 1:
+            warnings.append("Finished-goods allocation to a single work-order output is not uniquely established.")
+        if any(not entry["supplier"].get("supplier_name") for entry in grouped.values()):
+            warnings.append("One or more GRNs have no supplier-name snapshot; a supplier record relationship is not stored on GRN.")
+        if unlinked_records:
+            warnings.append("Some material consumption records do not have a complete original batch and QR relationship.")
+        verified_codes = set(verified_by_material)
+        has_any_consumption = bool(event_rows or legacy_rows)
+        all_events_linked = len(valid_events) == len(event_rows)
+        complete = bool(
+            has_any_consumption and event_rows and all_events_linked and not unlinked_records
+            and expected_codes and expected_codes.issubset(verified_codes) and fg_count == 1
+        )
+        if not has_any_consumption:
+            traceability_status = "NOT_AVAILABLE"
+        elif complete:
+            traceability_status = "COMPLETE"
+        elif valid_events:
+            traceability_status = "PARTIAL"
+        else:
+            traceability_status = "UNLINKED"
+
+        consumed_materials = []
+        for group in grouped.values():
+            group["quantity_consumed"] = float(group["quantity_consumed"])
+            consumed_materials.append(group)
+        return {
+            "finished_goods": {
+                "fg_id": str(fg.id), "fg_batch_number": fg.batch_number,
+                "serial_number": fg.serial_number, "product_code": fg.product_code,
+                "product_name": fg.product_name, "finished_quantity": float(fg.quantity),
+                "uom": fg.uom, "qc_status": qc.status if qc else fg.status,
+                "qr_identity": fg.qr_code,
+                **(await section_summary(uow.session, fg.id)),
+            },
+            "assembly": {
+                "assembly_order_id": str(order.id), "assembly_order_number": order.order_number,
+                "production_status": order.status,
+            },
+            "traceability": {
+                "overall_status": traceability_status,
+                "total_material_batches": len(all_material_batch_keys),
+                "verified_material_batches": len({(entry["material_code"].strip().upper(), entry["grn_batch_id"]) for entry in grouped.values()}),
+                "unlinked_material_records": len(unlinked_records),
+                "data_quality_warnings": warnings,
+            },
+            "consumed_materials": consumed_materials,
+            "consumption_events": valid_events,
+            "unlinked_material_records": unlinked_records,
         }
 
 
@@ -3176,7 +4119,7 @@ async def verify_finished_goods_qr(
             fg_uuid = uuid.UUID(fg_id)
         except ValueError:
             raise HTTPException(400, "Invalid finished-goods identifier")
-        fg = (await uow.session.execute(select(AssemblyFinishedGoodsModel).where(AssemblyFinishedGoodsModel.id == fg_uuid))).scalar_one_or_none()
+        fg = (await uow.session.execute(await compatible_fg_read(uow.session, select(AssemblyFinishedGoodsModel).where(AssemblyFinishedGoodsModel.id == fg_uuid)))).scalar_one_or_none()
         if not fg:
             raise HTTPException(404, "Finished-goods batch not found")
         if fg.status not in ("QC_APPROVED", "AVAILABLE"):
@@ -3191,3 +4134,71 @@ async def verify_finished_goods_qr(
 
 
 
+
+from app.modules.assembly.infrastructure.sections import assign_section_main_id, generate_sections, section_summary, transition_sections, compatible_fg_read, require_section_schema
+from app.modules.assembly.infrastructure.persistence.models import FinishedGoodsSectionModel
+
+@router.get("/supplier/pickup-finished-goods")
+async def supplier_pickup_finished_goods(current_user: CurrentUser = Depends(get_current_user), uow: UnitOfWork = Depends(get_uow)):
+    if "SUPPLIER" not in {r.upper() for r in current_user.roles}:
+        raise HTTPException(403, "Supplier access required")
+    async with uow:
+        await require_section_schema(uow.session)
+        rows = (await uow.session.scalars(select(AssemblyFinishedGoodsModel).order_by(
+            AssemblyFinishedGoodsModel.product_name, AssemblyFinishedGoodsModel.posted_at))).all()
+        result = []
+        for fg in rows:
+            summary = await section_summary(uow.session, fg.id)
+            reason = None
+            if fg.status not in ("QC_APPROVED", "AVAILABLE"):
+                reason = "QC approval required"
+            elif len(summary["sections"]) != 8:
+                reason = "Assembly must create transport sections"
+            elif not summary["remaining_sections"]:
+                reason = "No available sections for pickup"
+            result.append({"id": str(fg.id), "main_fg_id": fg.section_main_id or fg.batch_number or str(fg.id),
+                "product_code": fg.product_code, "product_name": fg.product_name,
+                "remaining_sections": summary["remaining_sections"], "quantity": summary["remaining_sections"], "uom": fg.uom,
+                "dispatch_eligible": reason is None, "eligibility_reason": reason, "qc_status": fg.status})
+        return result
+
+@router.get("/fg-loading")
+async def fg_loading(current_user: CurrentUser = Depends(get_current_user), uow: UnitOfWork = Depends(get_uow)):
+    _require_assembly_traceability_role(current_user)
+    async with uow:
+        await require_section_schema(uow.session)
+        rows = (await uow.session.execute(select(FinishedGoodsPickupGateVisitModel, FinishedGoodsRequestModel).join(
+            FinishedGoodsRequestModel, FinishedGoodsPickupGateVisitModel.request_id == FinishedGoodsRequestModel.id).where(
+            FinishedGoodsRequestModel.section_fg_id.is_not(None), FinishedGoodsPickupGateVisitModel.status.in_(["INSIDE_FACILITY", "READY_FOR_GATE_EXIT"])))).all()
+        if not rows:
+            return []
+        result = []
+        for v, r in rows:
+            summary = await section_summary(uow.session, r.section_fg_id) if r.section_fg_id else {}
+            result.append({
+                "gate_pass_number": v.gate_pass_number,
+                "vehicle_number": v.vehicle_number,
+                "fg_id": str(r.section_fg_id) if r.section_fg_id else None,
+                "status": v.status,
+                **summary
+            })
+        return result
+
+class SectionScans(BaseModel):
+    qr_identities: List[str] = Field(min_length=1, max_length=8)
+
+@router.post("/fg-loading/{gate_pass}/confirm")
+async def confirm_fg_loading(gate_pass: str, payload: SectionScans, current_user: CurrentUser = Depends(get_current_user), uow: UnitOfWork = Depends(get_uow)):
+    if not {r.upper() for r in current_user.roles}.intersection({"ASSEMBLY", "ASSEMBLY_MANAGER", "ASSEMBLY_OPERATOR", "ADMIN", "SUPERUSER"}):
+        raise HTTPException(403, "Assembly loading access required")
+    async with uow:
+        await require_section_schema(uow.session)
+        visit = await uow.session.scalar(select(FinishedGoodsPickupGateVisitModel).where(FinishedGoodsPickupGateVisitModel.gate_pass_number == gate_pass).with_for_update())
+        if not visit or visit.status != "INSIDE_FACILITY":
+            raise HTTPException(409, "Vehicle must be inside facility and not already loaded")
+        request = await uow.session.get(FinishedGoodsRequestModel, visit.request_id)
+        if not request.section_fg_id:
+            raise HTTPException(409, "Legacy pickup uses existing loading workflow")
+        await transition_sections(uow.session, request.section_fg_id, visit.id, payload.qr_identities, current_user.username)
+        visit.status = "READY_FOR_GATE_EXIT"
+        return {"status": visit.status}

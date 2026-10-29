@@ -302,7 +302,7 @@ function AssemblyQualityPage() {
                 <input
                   type="text"
                   aria-label="Search this queue"
-                  placeholder="Search order, product or inspector..."
+                  placeholder="Search order, product or quality engineer..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="h-11 w-full rounded-xl border border-border bg-card pl-9 pr-8 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/40"
@@ -376,7 +376,7 @@ function AssemblyQualityPage() {
                     <th className="py-3 px-3">Produced Qty</th>
                     <th className="py-3 px-3">QC Breakdown<InformationTooltip help="qc" /></th>
                     <th className="py-3 px-3">QC Status<InformationTooltip help="workflowStatus" /></th>
-                    <th className="py-3 px-3">Inspector & Date</th>
+                    <th className="py-3 px-3">Quality Engineer & Date</th>
                     <th className="py-3 px-3 text-right">Action</th>
                   </tr>
                 </thead>
@@ -443,7 +443,7 @@ function AssemblyQualityPage() {
                         {getQcStatusBadge(qualityGroup(item))}
                       </td>
 
-                      {/* Inspector & Date */}
+                      {/* Quality Engineer & Date */}
                       <td className="py-3.5 px-3 whitespace-nowrap">
                         {item.inspected_by ? (
                           <div className="flex flex-col text-[11px]">
@@ -558,25 +558,25 @@ function AssemblyQualityPage() {
                   </label>
                   <div className="space-y-1.5">
                     <label
-                      htmlFor="qc-inspector-name"
+                      htmlFor="qc-quality-engineer-name"
                       className="text-xs font-semibold text-foreground"
                     >
-                      Inspector Name *
+                      Quality Engineer Name *
                     </label>
                     <Input
-                      id="qc-inspector-name"
+                      id="qc-quality-engineer-name"
                       value={inspectorName}
                       onChange={(e) => setInspectorName(e.target.value)}
                       onBlur={() => setInspectorTouched(true)}
                       required
                       maxLength={128}
                       aria-invalid={inspectorTouched && !isValidInspectorName(inspectorName)}
-                      aria-describedby="qc-inspector-name-help"
-                      placeholder="Enter inspector name"
+                      aria-describedby="qc-quality-engineer-name-help"
+                      placeholder="Enter quality engineer name"
                       className="h-9 text-sm rounded-xl"
                     />
                     <p
-                      id="qc-inspector-name-help"
+                      id="qc-quality-engineer-name-help"
                       className={cn(
                         "text-xs",
                         inspectorTouched && !isValidInspectorName(inspectorName)
@@ -585,7 +585,7 @@ function AssemblyQualityPage() {
                       )}
                     >
                       {inspectorTouched && !isValidInspectorName(inspectorName)
-                        ? "Enter a valid inspector name (2-128 characters, at least two letters)."
+                        ? "Enter a valid quality engineer name (2-128 characters, at least two letters)."
                         : "Required. Use letters, spaces, periods, apostrophes or hyphens."}
                     </p>
                   </div>

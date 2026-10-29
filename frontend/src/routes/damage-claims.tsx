@@ -14,12 +14,6 @@ import { getUserInfo } from "@/lib/auth-utils";
 import { isValidVehicleNumber } from "@/lib/input-validation";
 
 export const Route = createFileRoute("/damage-claims")({ component: Page });
-const resolutions = [
-  { value: "REPLACEMENT", label: "Replace Materials" },
-  { value: "CREDIT_NOTE", label: "Credit Note" },
-  { value: "REFUND", label: "Refund" },
-  { value: "RETURN_REPLACEMENT", label: "Return and Replace" },
-];
 const actionButtonClass = "h-10 rounded-lg";
 function Page() {
   const navigate = useNavigate();
@@ -69,12 +63,14 @@ function Page() {
       patch(claim.id, { validation: "Select a response before submitting this claim." });
       return;
     }
-    if (form.response === "ACCEPT" && !form.resolution) {
-      patch(claim.id, { validation: "Select a resolution before accepting this claim." });
-      return;
-    }
     patch(claim.id, { validation: "" });
-    void run(claim.id, () => api.respondToDamageClaim(claim.id, form), "Claim response submitted");
+    const response = {
+      ...form,
+      resolution: ["ACCEPT", "PARTIALLY_ACCEPT", "REPLACEMENT_OFFERED", "RETURN_ACCEPTED"].includes(form.response)
+        ? "REPLACEMENT"
+        : undefined,
+    };
+    void run(claim.id, () => api.respondToDamageClaim(claim.id, response), "Claim response submitted");
   };
   const patch = (id: string, data: any) =>
     setForms((all) => ({ ...all, [id]: { ...all[id], ...data } }));

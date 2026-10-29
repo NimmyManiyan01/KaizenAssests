@@ -158,14 +158,8 @@ async def get_dashboard_stats(
     combined_entries = []
     seen_vehicles = set()
     seen_gate_passes = set()
-    seen_asns = set()
 
     for m in gate_models:
-        if m.asn_id:
-            asn_key = str(m.asn_id)
-            if asn_key in seen_asns:
-                continue
-            seen_asns.add(asn_key)
         v_num = (m.vehicle_number or "").upper().strip()
         gp_no = (m.gate_entry_number or "").upper().strip()
         status_upper = (m.status or "").upper().strip()

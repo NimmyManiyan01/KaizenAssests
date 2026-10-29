@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Optional
 import uuid
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, JSON, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, GUID
@@ -49,6 +49,7 @@ class AssemblyOrderModel(Base):
     planned_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("1"))
     completed_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0"))
     rejected_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0"))
+    traceability_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     assigned_line: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     assigned_operator: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -130,6 +131,45 @@ class AssemblyMaterialConsumptionModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
 
 
+class AssemblyMaterialConsumptionEventModel(Base):
+    """Append-only material consumption tied to the original warehouse batch."""
+
+    __tablename__ = "assembly_material_consumption_event"
+    __table_args__ = (
+        CheckConstraint("actual_consumed > 0", name="ck_assembly_consumption_event_positive_qty"),
+        CheckConstraint("length(trim(idempotency_key)) > 0", name="ck_assembly_consumption_event_idempotency_key"),
+        CheckConstraint(
+            "(material_qr IS NULL AND grn_batch_qr_id IS NULL) OR "
+            "(material_qr IS NOT NULL AND grn_batch_qr_id IS NOT NULL)",
+            name="ck_assembly_consumption_event_qr_pair",
+        ),
+        UniqueConstraint("idempotency_key", name="uq_assembly_consumption_event_idempotency"),
+        Index("ix_assembly_material_consumption_event_order", "assembly_order_id"),
+        Index("ix_assembly_material_consumption_event_order_time", "assembly_order_id", "consumed_at"),
+        Index("ix_assembly_material_consumption_event_material", "material_code"),
+        Index("ix_assembly_material_consumption_event_batch", "grn_batch_id"),
+        Index("ix_assembly_material_consumption_event_batch_qr", "grn_batch_qr_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    assembly_order_id: Mapped[uuid.UUID] = mapped_column(
+        GUID, ForeignKey("assembly_order.id", ondelete="RESTRICT"), nullable=False
+    )
+    material_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    grn_batch_id: Mapped[uuid.UUID] = mapped_column(
+        GUID, ForeignKey("grn_batch.id", ondelete="RESTRICT"), nullable=False
+    )
+    grn_batch_qr_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        GUID, ForeignKey("grn_batch_qr.id", ondelete="RESTRICT"), nullable=True
+    )
+    material_qr: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    actual_consumed: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    uom: Mapped[str] = mapped_column(String(32), nullable=False)
+    consumed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    recorded_by: Mapped[str] = mapped_column(String(128), nullable=False)
+
+
 class AssemblyScrapModel(Base):
     __tablename__ = "assembly_scrap"
 
@@ -194,6 +234,10 @@ class AssemblyReworkOrderModel(Base):
 
 class AssemblyFinishedGoodsModel(Base):
     __tablename__ = "assembly_finished_goods"
+    section_supplier_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    section_main_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, unique=True)
+
+
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     assembly_order_id: Mapped[uuid.UUID] = mapped_column(
@@ -218,6 +262,26 @@ class AssemblyFinishedGoodsModel(Base):
     )
     posted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+
+class FinishedGoodsSectionModel(Base):
+    __tablename__ = "finished_goods_section"
+    __table_args__ = (
+        UniqueConstraint("finished_goods_id", "section_number", name="uq_fg_section_number"),
+        CheckConstraint("section_number BETWEEN 1 AND 8", name="ck_fg_section_number"),
+        CheckConstraint("status IN ('AVAILABLE', 'LOADED', 'DISPATCHED')", name="ck_fg_section_status"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    finished_goods_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("assembly_finished_goods.id", ondelete="RESTRICT"), nullable=False, index=True)
+    section_number: Mapped[int] = mapped_column(nullable=False)
+    sub_id: Mapped[str] = mapped_column(String(160), unique=True, nullable=False)
+    qr_identity: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="AVAILABLE", nullable=False)
+    gate_visit_id: Mapped[Optional[str]] = mapped_column(String(64), ForeignKey("finished_goods_pickup_gate_visit.id", ondelete="RESTRICT"), nullable=True)
+    loaded_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    loaded_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    dispatched_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    dispatched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class AssemblyFinishedGoodsAllocationModel(Base):

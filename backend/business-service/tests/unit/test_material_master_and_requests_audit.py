@@ -6,7 +6,7 @@ from httpx import AsyncClient, ASGITransport
 from sqlalchemy import select, delete, or_
 from app.main import app
 from app.database.session import engine, AsyncSessionFactory
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
     MaterialModel,
     MaterialRequestModel,
 )

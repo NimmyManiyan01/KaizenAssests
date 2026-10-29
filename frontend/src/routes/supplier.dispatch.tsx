@@ -1,7 +1,7 @@
 import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
-import { Eye, Loader2, PackageCheck, Plus, RefreshCw, X } from "lucide-react";
+import { Eye, Loader2, PackageCheck, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,16 +13,38 @@ import { api } from "@/lib/api-client";
 import {
   localDateInput,
   pickupDateError,
-  isValidMobileNumber,
-  isValidPersonName,
-  isValidVehicleNumber,
+  isValidAsnDriverMobileNumber,
+  isValidAsnDriverName,
+  isValidAsnVehicleNumber,
+  normalizeAsnVehicleNumber,
   parsePositiveNumber,
   requiredText,
+  sanitizeAsnDriverName,
   sanitizeMobileNumber,
-  sanitizePersonName,
   sanitizeVehicleNumber,
 } from "@/lib/input-validation";
 import { toast } from "sonner";
+
+type TransportEntry = {
+  id: string;
+  vehicleNumber: string;
+  driverName: string;
+  driverContact: string;
+  touched: boolean;
+};
+
+let nextTransportEntryId = 0;
+
+function createTransportEntry(): TransportEntry {
+  nextTransportEntryId += 1;
+  return {
+    id: `transport-${nextTransportEntryId}`,
+    vehicleNumber: "",
+    driverName: "",
+    driverContact: "",
+    touched: false,
+  };
+}
 
 export const Route = createFileRoute("/supplier/dispatch")({
   component: SupplierDispatchPage,
@@ -31,13 +53,11 @@ export const Route = createFileRoute("/supplier/dispatch")({
 function SupplierDispatchPage() {
   const [open, setOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
-  const [vehicleNumber, setVehicleNumber] = React.useState("");
-  const [driverName, setDriverName] = React.useState("");
-  const [driverContact, setDriverContact] = React.useState("");
+  const [transportEntries, setTransportEntries] = React.useState([createTransportEntry()]);
   const [expectedPickupDate, setExpectedPickupDate] = React.useState("");
   const [pickupDateTouched, setPickupDateTouched] = React.useState(false);
   const [finishedGoods, setFinishedGoods] = React.useState<
-    Array<{ code: string; name: string; quantity: number; uom: string }>
+    Array<{ id: string; mainId: string; code: string; name: string; quantity: number; uom: string; eligible: boolean; reason?: string }>
   >([]);
   const [finishedGoodsLoading, setFinishedGoodsLoading] = React.useState(false);
   const [finishedGoodsError, setFinishedGoodsError] = React.useState<string>();
@@ -58,25 +78,15 @@ function SupplierDispatchPage() {
     setFinishedGoodsLoading(true);
     setFinishedGoodsError(undefined);
     try {
-      const rows = await api.getAssemblyFinishedGoods();
+      const rows = await api.getSupplierPickupFinishedGoods();
       if (!Array.isArray(rows)) {
         throw new Error("Finished goods response was invalid.");
       }
-      const available = rows
-        .filter(
-          (row: any) =>
-            ["AVAILABLE", "QC_APPROVED"].includes(String(row.status).toUpperCase()) &&
-            Number(row.quantity) > 0,
-        )
-        .map((row: any) => ({
-          code: row.product_code,
-          name: row.product_name || row.product_code,
-          quantity: Number(row.quantity),
-          uom: row.uom || "",
-        }))
-        .filter(
-          (row, index, all) => all.findIndex((candidate) => candidate.code === row.code) === index,
-        );
+      const available = rows.map((row: any) => ({
+        id: row.id, mainId: row.main_fg_id || row.batch_number || row.id, code: row.product_code,
+        name: `${row.product_name} - ${row.main_fg_id}`,
+        quantity: Number(row.remaining_sections), uom: row.uom, eligible: row.dispatch_eligible !== false, reason: row.eligibility_reason,
+      }));
       setFinishedGoods(available);
     } catch (error) {
       setFinishedGoods([]);
@@ -123,20 +133,30 @@ function SupplierDispatchPage() {
       .map((item) => requiredText(item.name))
       .filter((value): value is string => Boolean(value));
     const firstQuantity = parsePositiveNumber(goods[0]?.quantity);
-    const vehicle = requiredText(vehicleNumber);
-    const driver = requiredText(driverName);
-    const contact = requiredText(driverContact);
-    if (!names.length || firstQuantity === null || !vehicle || !driver || !contact) {
+    const validTransportEntries = transportEntries.map((entry) => ({
+      vehicle_number: normalizeAsnVehicleNumber(entry.vehicleNumber),
+      driver_name: entry.driverName.trim().replace(/\s+/g, " "),
+      driver_contact: entry.driverContact.trim(),
+    }));
+    const firstTransport = validTransportEntries[0];
+    if (!names.length || firstQuantity === null || !firstTransport) {
       toast.error("Enter a finished good, positive quantity, vehicle, driver, and contact");
       return;
     }
     if (
-      !isValidVehicleNumber(vehicle) ||
-      !isValidPersonName(driver) ||
-      !isValidMobileNumber(contact)
+      transportEntries.some(
+        (entry, index) =>
+          !isValidAsnVehicleNumber(entry.vehicleNumber) ||
+          !isValidAsnDriverName(entry.driverName) ||
+          !isValidAsnDriverMobileNumber(entry.driverContact) ||
+          !validTransportEntries[index]?.vehicle_number ||
+          !validTransportEntries[index]?.driver_name ||
+          !validTransportEntries[index]?.driver_contact,
+      )
     ) {
+      setTransportEntries((entries) => entries.map((entry) => ({ ...entry, touched: true })));
       toast.error(
-        "Use letters, numbers and spaces for vehicle, letters and spaces for driver, and exactly 10 digits for contact",
+        "Enter valid Indian vehicle numbers, driver names without digits, and 10-digit Indian mobile numbers for every vehicle and driver.",
       );
       return;
     }
@@ -148,19 +168,26 @@ function SupplierDispatchPage() {
     const selectedGood = finishedGoods.find(
       (good) => good.name === names[0] || good.code === names[0],
     );
+    if (!selectedGood) { toast.error("Select a QC-approved finished product"); return; }
+    if (!selectedGood.eligible) { toast.error(selectedGood.reason || "This FG is not ready for section dispatch"); return; }
     if (selectedGood && firstQuantity > selectedGood.quantity) {
       toast.error("Quantity exceeds available finished goods stock");
       return;
     }
+    const vehicle = firstTransport.vehicle_number;
+    const driver = firstTransport.driver_name;
+    const contact = firstTransport.driver_contact;
     setSubmitting(true);
     try {
       const createdDispatch = await api.createSupplierFinishedGoodsDispatchRequest({
+        finished_goods_id: selectedGood?.id,
         product_code: selectedGood?.code || names[0] || "FINISHED-GOOD",
         product_name: names[0] || "Finished Good",
         quantity: firstQuantity,
         vehicle_number: vehicle,
         driver_name: driver,
         driver_contact: contact,
+        transport_entries: validTransportEntries,
         expected_pickup_date: expectedPickupDate,
         /* request metadata is persisted by the supplier request endpoint */
         /* legacy dispatch fields below are intentionally ignored */
@@ -168,10 +195,15 @@ function SupplierDispatchPage() {
         customer_name: "Warehouse",
         dispatch_type: "Finished Goods",
         warehouse_id: "WH-01",
-        contact_person: driverName,
-        contact_phone: driverContact,
-        transporter: vehicleNumber,
-        notes: `Vehicle: ${vehicleNumber}\nDriver: ${driverName}\nDriver contact: ${driverContact}`,
+        contact_person: driver,
+        contact_phone: contact,
+        transporter: vehicle,
+        notes: validTransportEntries
+          .map(
+            (entry) =>
+              `Vehicle: ${entry.vehicle_number}\nDriver: ${entry.driver_name}\nDriver contact: ${entry.driver_contact}`,
+          )
+          .join("\n\n"),
         items: goods.map((item) => ({
           material_code: item.name.trim().toUpperCase().replace(/\s+/g, "-") || "FINISHED-GOOD",
           material_name: item.name.trim(),
@@ -190,14 +222,16 @@ function SupplierDispatchPage() {
       if (dispatchKey) {
         const savedDetails = JSON.parse(window.localStorage.getItem(dispatchDetailsKey) || "{}");
         savedDetails[dispatchKey] = {
-          vehicle_number: vehicleNumber,
-          driver_name: driverName,
-          driver_contact: driverContact,
+          vehicle_number: vehicle,
+          driver_name: driver,
+          driver_contact: contact,
+          transport_entries: validTransportEntries,
         };
         window.localStorage.setItem(dispatchDetailsKey, JSON.stringify(savedDetails));
       }
       toast.success("Dispatch created successfully");
       setOpen(false);
+      setTransportEntries([createTransportEntry()]);
       setGoods([{ name: "", quantity: "", custom: false }]);
       setExpectedPickupDate("");
       void loadDispatchHistory();
@@ -221,6 +255,7 @@ function SupplierDispatchPage() {
           onClick={() => {
             void loadAssemblyFinishedGoods();
             setPickupDateTouched(false);
+            setTransportEntries([createTransportEntry()]);
             setOpen(true);
           }}
         >
@@ -366,9 +401,12 @@ function SupplierDispatchPage() {
           <DialogHeader>
             <DialogTitle>Create Dispatch</DialogTitle>
           </DialogHeader>
-          <form onSubmit={submitDispatch} className="space-y-5">
+          <form onSubmit={submitDispatch} className="space-y-5" noValidate>
             <div className="space-y-1.5">
-              <span className="inline-flex items-center"><Label htmlFor="pickup-date">Expected pickup date *</Label><InformationTooltip help="pickupDate" /></span>
+              <span className="inline-flex items-center">
+                <Label htmlFor="pickup-date">Expected pickup date *</Label>
+                <InformationTooltip help="pickupDate" />
+              </span>
               <Input
                 id="pickup-date"
                 className="h-10 rounded-lg"
@@ -383,48 +421,211 @@ function SupplierDispatchPage() {
                 aria-describedby="pickup-date-error"
               />
               {pickupDateTouched && pickupDateError(expectedPickupDate) && (
-                <p id="pickup-date-error" role="alert" className="text-xs text-rose-600">{pickupDateError(expectedPickupDate)}</p>
+                <p id="pickup-date-error" role="alert" className="text-xs text-rose-600">
+                  {pickupDateError(expectedPickupDate)}
+                </p>
               )}
             </div>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="vehicle-number">Vehicle number *</Label>
-                <Input
-                  id="vehicle-number"
-                  className="h-10 rounded-lg"
-                  required
-                  value={vehicleNumber}
-                  onChange={(e) => setVehicleNumber(sanitizeVehicleNumber(e.target.value))}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="driver-name">Driver name *</Label>
-                <Input
-                  id="driver-name"
-                  className="h-10 rounded-lg"
-                  required
-                  value={driverName}
-                  onChange={(e) => setDriverName(sanitizePersonName(e.target.value))}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="driver-contact">Driver contact *</Label>
-                <Input
-                  id="driver-contact"
-                  className="h-10 rounded-lg"
-                  required
-                  type="tel"
-                  maxLength={10}
-                  value={driverContact}
-                  onChange={(e) => setDriverContact(sanitizeMobileNumber(e.target.value))}
-                />
-              </div>
+            <div className="space-y-3">
+              {transportEntries.map((entry, index) => {
+                const vehicleValid = isValidAsnVehicleNumber(entry.vehicleNumber);
+                const driverValid = isValidAsnDriverName(entry.driverName);
+                const contactValid = isValidAsnDriverMobileNumber(entry.driverContact);
+
+                return (
+                  <div
+                    key={entry.id}
+                    className={
+                      transportEntries.length > 1
+                        ? "space-y-3 rounded-lg border border-border p-3"
+                        : "space-y-3"
+                    }
+                  >
+                    {transportEntries.length > 1 && (
+                      <div className="flex items-center justify-between border-b border-border pb-2">
+                        <span className="text-sm font-semibold">
+                          Vehicle &amp; Driver #{index + 1}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Remove vehicle and driver ${index + 1}`}
+                          onClick={() =>
+                            setTransportEntries((entries) =>
+                              entries.filter((candidate) => candidate.id !== entry.id),
+                            )
+                          }
+                        >
+                          <Trash2 className="mr-1.5 size-4" />
+                          Remove
+                        </Button>
+                      </div>
+                    )}
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`vehicle-number-${entry.id}`}>Vehicle number *</Label>
+                        <Input
+                          id={`vehicle-number-${entry.id}`}
+                          className="h-10 rounded-lg"
+                          required
+                          placeholder="e.g. KA01AB1234"
+                          value={entry.vehicleNumber}
+                          aria-invalid={entry.touched && !vehicleValid}
+                          aria-describedby={`vehicle-number-${entry.id}-error`}
+                          onChange={(e) =>
+                            setTransportEntries((entries) =>
+                              entries.map((candidate) =>
+                                candidate.id === entry.id
+                                  ? {
+                                      ...candidate,
+                                      vehicleNumber: sanitizeVehicleNumber(
+                                        e.target.value,
+                                      ).toUpperCase(),
+                                    }
+                                  : candidate,
+                              ),
+                            )
+                          }
+                          onBlur={() =>
+                            setTransportEntries((entries) =>
+                              entries.map((candidate) =>
+                                candidate.id === entry.id
+                                  ? {
+                                      ...candidate,
+                                      vehicleNumber: normalizeAsnVehicleNumber(
+                                        candidate.vehicleNumber,
+                                      ),
+                                      touched: true,
+                                    }
+                                  : candidate,
+                              ),
+                            )
+                          }
+                        />
+                        {entry.touched && !vehicleValid && (
+                          <p
+                            id={`vehicle-number-${entry.id}-error`}
+                            role="alert"
+                            className="text-xs text-rose-600"
+                          >
+                            Enter a valid registration, such as KA01AB1234 or 22BH1234AA.
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`driver-name-${entry.id}`}>Driver name *</Label>
+                        <Input
+                          id={`driver-name-${entry.id}`}
+                          className="h-10 rounded-lg"
+                          required
+                          placeholder="Enter driver name"
+                          value={entry.driverName}
+                          aria-invalid={entry.touched && !driverValid}
+                          aria-describedby={`driver-name-${entry.id}-error`}
+                          onChange={(e) =>
+                            setTransportEntries((entries) =>
+                              entries.map((candidate) =>
+                                candidate.id === entry.id
+                                  ? {
+                                      ...candidate,
+                                      driverName: sanitizeAsnDriverName(e.target.value),
+                                    }
+                                  : candidate,
+                              ),
+                            )
+                          }
+                          onBlur={() =>
+                            setTransportEntries((entries) =>
+                              entries.map((candidate) =>
+                                candidate.id === entry.id
+                                  ? {
+                                      ...candidate,
+                                      driverName: candidate.driverName.trim().replace(/ +/g, " "),
+                                      touched: true,
+                                    }
+                                  : candidate,
+                              ),
+                            )
+                          }
+                        />
+                        {entry.touched && !driverValid && (
+                          <p
+                            id={`driver-name-${entry.id}-error`}
+                            role="alert"
+                            className="text-xs text-rose-600"
+                          >
+                            Enter a 2–100 character driver name using letters and standard name
+                            punctuation.
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`driver-contact-${entry.id}`}>Driver contact *</Label>
+                        <Input
+                          id={`driver-contact-${entry.id}`}
+                          className="h-10 rounded-lg"
+                          required
+                          type="tel"
+                          inputMode="numeric"
+                          maxLength={10}
+                          placeholder="10-digit mobile number"
+                          value={entry.driverContact}
+                          aria-invalid={entry.touched && !contactValid}
+                          aria-describedby={`driver-contact-${entry.id}-error`}
+                          onChange={(e) =>
+                            setTransportEntries((entries) =>
+                              entries.map((candidate) =>
+                                candidate.id === entry.id
+                                  ? {
+                                      ...candidate,
+                                      driverContact: sanitizeMobileNumber(e.target.value),
+                                    }
+                                  : candidate,
+                              ),
+                            )
+                          }
+                          onBlur={() =>
+                            setTransportEntries((entries) =>
+                              entries.map((candidate) =>
+                                candidate.id === entry.id
+                                  ? { ...candidate, touched: true }
+                                  : candidate,
+                              ),
+                            )
+                          }
+                        />
+                        {entry.touched && !contactValid && (
+                          <p
+                            id={`driver-contact-${entry.id}-error`}
+                            role="alert"
+                            className="text-xs text-rose-600"
+                          >
+                            Enter a 10-digit Indian mobile number starting with 6–9.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg"
+                onClick={() =>
+                  setTransportEntries((entries) => [...entries, createTransportEntry()])
+                }
+              >
+                <Plus className="mr-1.5 size-4" />
+                Add Vehicle &amp; Driver
+              </Button>
             </div>
             <div className="space-y-3">
               <div>
                 <h3 className="font-semibold">Finished goods</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Choose from available stock in Assembly and enter the quantity being dispatched.
+                  All finished goods are listed. Products awaiting QC or transport sections are shown but cannot be dispatched yet. Assembly selects the sections for loading.
                 </p>
               </div>
               {finishedGoodsError && (
@@ -449,10 +650,12 @@ function SupplierDispatchPage() {
               )}
               {!finishedGoodsLoading && !finishedGoodsError && finishedGoods.length === 0 && (
                 <p className="rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
-                  No finished goods are currently available in Assembly.
+                  No finished goods records are currently available in Assembly.
                 </p>
               )}
+              <p className="text-sm">{(() => { const selected = finishedGoods.find(g => g.name === goods[0]?.name || g.code === goods[0]?.name); return selected ? `FG ID: ${selected.mainId} - Remaining sections: ${selected.quantity}` : "Select a finished product to see its FG ID and remaining sections."; })()}</p>
               {goods.map((item, index) => (
+
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto]" key={index}>
                   <div className="space-y-1.5">
                     <Label htmlFor={`finished-good-${index}`}>Finished good *</Label>
@@ -488,27 +691,6 @@ function SupplierDispatchPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor={`finished-good-quantity-${index}`}>Quantity *</Label>
-                    <Input
-                      id={`finished-good-quantity-${index}`}
-                      aria-label={`Quantity for finished good ${index + 1}`}
-                      required
-                      className="h-10 rounded-lg text-right"
-                      min="0.01"
-                      step="any"
-                      type="number"
-                      placeholder="Quantity"
-                      value={item.quantity}
-                      onChange={(e) =>
-                        setGoods((rows) =>
-                          rows.map((row, i) =>
-                            i === index ? { ...row, quantity: e.target.value } : row,
-                          ),
-                        )
-                      }
-                    />
-                  </div>
                   {goods.length > 1 && (
                     <Button
                       type="button"
@@ -536,7 +718,12 @@ function SupplierDispatchPage() {
               <Button
                 type="submit"
                 className="h-10 rounded-lg"
-                disabled={submitting || finishedGoodsLoading || finishedGoods.length === 0 || !!pickupDateError(expectedPickupDate)}
+                disabled={
+                  submitting ||
+                  finishedGoodsLoading ||
+                  finishedGoods.length === 0 ||
+                  !!pickupDateError(expectedPickupDate)
+                }
               >
                 {submitting && <Loader2 className="mr-2 size-4 animate-spin" />}
                 {submitting ? "Creating…" : "Create Dispatch"}
@@ -595,6 +782,24 @@ function SupplierDispatchPage() {
                   </p>
                 </div>
               </div>
+              {(selectedDispatch.transport_entries || []).length > 1 && (
+                <div>
+                  <h3 className="mb-2 font-semibold">Assigned vehicles and drivers</h3>
+                  <div className="space-y-2">
+                    {selectedDispatch.transport_entries.map((entry: any, index: number) => (
+                      <div
+                        key={`${entry.vehicle_number}-${index}`}
+                        className="rounded-lg border border-border p-3"
+                      >
+                        <p className="font-medium">
+                          {entry.vehicle_number} · {entry.driver_name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">{entry.driver_contact}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div>
                 <h3 className="mb-2 font-semibold">Finished goods</h3>
                 <div className="overflow-x-auto rounded-lg border border-border">

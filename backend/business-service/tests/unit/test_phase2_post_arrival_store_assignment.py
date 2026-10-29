@@ -12,7 +12,7 @@ from app.modules.gate.infrastructure.persistence.models import (
     DockModel,
     GateEntryModel,
 )
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
     AsnModel,
     AsnLineModel,
     MaterialModel,

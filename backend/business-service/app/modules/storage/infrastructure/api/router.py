@@ -1853,7 +1853,12 @@ async def complete_putaway(
             PutawayLocationAssignmentModel.destination_bin_id == target_bin.id,
         )
     )
-    if location_assignment is None and task.destination_bin_id != target_bin.id:
+    if (
+        location_assignment is None
+        and task.destination_bin_id != target_bin.id
+        and task.destination_zone_id is not None
+        and task.destination_zone_id != target_zone.id
+    ):
         raise HTTPException(status_code=422, detail="Scanned location is not assigned to this putaway task")
 
     # 3. Resolve or Create Storage Location for the Warehouse Zone + Bin
@@ -2640,6 +2645,7 @@ async def resolve_bin_qr(
     target_zone: WarehouseZoneModel | None = None
     target_warehouse: WarehouseModel | None = None
 
+    hyphen_scan = raw_scan.replace(" ", "-").replace("_", "-")
     # The printed Warehouse label contains qr_identifier, not just bin_code.
     # Resolve the persisted identifier first so repeated bin codes across warehouses
     # cannot select an unrelated destination.
@@ -2679,8 +2685,9 @@ async def resolve_bin_qr(
     # Step 3: Try exact and cleaned bin_code lookup
     if bin_obj is None:
         cand_code = raw_scan
-        if cand_code.upper().startswith("BIN-QR-") or cand_code.upper().startswith("QR-BIN-") or cand_code.upper().startswith("QR-"):
-            cand_code = cand_code.split("-", 2)[-1] if "-" in cand_code else cand_code
+        if cand_code.upper().startswith("BIN-QR-") or cand_code.upper().startswith("QR-BIN-") or cand_code.upper().startswith("QR-") or cand_code.upper().startswith("QR "):
+            cand_code = cand_code.split("-", 2)[-1] if "-" in cand_code else (cand_code.split(" ", 1)[-1] if " " in cand_code else cand_code)
+        cand_hyphen = cand_code.replace(" ", "-").replace("_", "-")
 
         bq = await uow.session.execute(
             select(WarehouseBinModel).where(

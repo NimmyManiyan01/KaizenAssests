@@ -74,6 +74,8 @@ scratch/
 *.db
 *.db.backup*
 kaizenX/
+*.xml
+backend/business-service/final-backend-selection.txt
 
 # Android & Gradle cache
 .gradle/

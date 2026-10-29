@@ -31,7 +31,7 @@ from sqlalchemy import delete, func, select, text
 
 from app.main import app
 from app.database.session import session_scope
-from app.modules.procurement.infrastructure.persistence.models import (
+from app.common.persistence.models import (
     MaterialModel,
     MaterialStockModel,
     NotificationModel,
