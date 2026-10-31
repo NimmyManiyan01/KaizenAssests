@@ -1,5 +1,5 @@
 import { InformationTooltip } from "@/components/ui/information-tooltip";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, Search } from "lucide-react";
 import { PackageQrActions } from "@/components/wms/package-qr-actions";
@@ -21,6 +21,7 @@ type Batch = {
 };
 type Pickup = {
   id: string;
+  fg_id?: string | null;
   request_number: string;
   supplier_name?: string;
   product_name: string;
@@ -569,13 +570,26 @@ function AssemblyDispatchPage() {
               </p>
             ) : (
               <>
-                {step === 0 && selected.next_to_process === false && (
+                {step === 0 && selected.fg_id && (
+                  <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
+                    <p className="font-semibold">Transport-section pickup</p>
+                    <p>
+                      This request uses the finished-good section flow, so FIFO allocation is not
+                      required. Gate Security must record the vehicle arrival first. The section QR
+                      codes can then be verified and loaded from Finished Goods Records.
+                    </p>
+                    <Button asChild className="rounded-xl">
+                      <Link to="/assembly/finished-goods">Open Finished Goods Records</Link>
+                    </Button>
+                  </div>
+                )}
+                {step === 0 && !selected.fg_id && selected.next_to_process === false && (
                   <p role="status" className="text-xs text-muted-foreground">
                     {selected.priority_reason ||
                       "An older eligible request must be allocated first. Open the request marked Next to Process."}
                   </p>
                 )}
-                {step === 0 && (
+                {step === 0 && !selected.fg_id && (
                   <div className="space-y-3">
                     <label className="flex items-start gap-2 text-xs">
                       <input

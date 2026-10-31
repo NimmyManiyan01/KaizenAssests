@@ -135,7 +135,7 @@ function initials(name?: string | null) {
   return (name || "U").trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
 }
 
-export default function AdminRoute() {
+function AdminRoute() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [loading, setLoading] = useState(true);

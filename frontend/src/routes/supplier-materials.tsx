@@ -6,6 +6,7 @@ import {
   Loader2,
   PackagePlus,
   Plus,
+  RefreshCw,
   Search,
   Trash2,
   ToggleLeft,
@@ -223,31 +224,47 @@ function SupplierMaterials() {
     <TooltipProvider delayDuration={150}>
       <AppShell
         title={
-          <span className="inline-flex items-center gap-2">
-            Materials
+          <span className="supplier-page-title inline-flex items-center gap-3">
+            <span className="supplier-page-title-icon inline-flex size-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-primary">
+              <PackagePlus className="size-5" aria-hidden="true" />
+            </span>
+            Material Master
           </span>
         }
         subtitle="Create and manage the materials available for your ASN submissions."
         actions={
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={openAdd}
-                className="h-10 rounded-lg bg-primary text-sm font-medium text-primary-foreground shadow-none hover:bg-primary/90"
-              >
-                <Plus className="size-4" /> Add Material
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent
-              side="bottom"
-              className="rounded-lg border border-border bg-popover text-xs font-medium text-popover-foreground shadow-soft"
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              data-refresh-control="true"
+              aria-label="Refresh material master"
+              title="Refresh material master"
+              disabled={loading}
+              onClick={() => void loadMaterials()}
             >
-              Add a new material to your supplier catalog.
-            </TooltipContent>
-          </Tooltip>
+              {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={openAdd}
+                  className="h-10 rounded-lg bg-primary text-sm font-medium text-primary-foreground shadow-none hover:bg-primary/90"
+                >
+                  <Plus className="size-4" /> Add Material
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent
+                side="bottom"
+                className="rounded-lg border border-border bg-popover text-xs font-medium text-popover-foreground shadow-soft"
+              >
+                Add a new material to your supplier catalog.
+              </TooltipContent>
+            </Tooltip>
+          </div>
         }
       >
-        <Card className="rounded-xl border-border bg-card shadow-sm">
+        <Card className="supplier-module-page rounded-xl border-border bg-card shadow-sm">
           <CardHeader className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
             <CardTitle className="flex items-center gap-2 text-base font-semibold">
               <PackagePlus className="size-4 text-primary" /> Material catalog

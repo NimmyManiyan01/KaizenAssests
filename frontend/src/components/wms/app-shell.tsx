@@ -651,6 +651,10 @@ export function AppShell({
                 ))}
               {nav.map((item, index) => {
                 const active = isActiveNavItem(item.to);
+                const [itemPath, itemQuery = ""] = item.to.split("?", 2);
+                const itemSearch = itemQuery
+                  ? Object.fromEntries(new URLSearchParams(itemQuery).entries())
+                  : undefined;
                 return (
                   <div key={`${item.label}-${item.to}`}>
                     {item.section && item.section !== nav[index - 1]?.section && (
@@ -659,11 +663,10 @@ export function AppShell({
                       </p>
                     )}
                     <Link
-                    to={item.to as any}
-                    onClick={(e) => {
-                      e.preventDefault();
+                    to={itemPath as any}
+                    search={itemSearch as any}
+                    onClick={() => {
                       setMobileSidebarOpen(false);
-                      void navigate({ to: item.to as any });
                     }}
 
                     className={cn(
@@ -742,6 +745,10 @@ export function AppShell({
             ))}
           {nav.map((item, index) => {
             const active = isActiveNavItem(item.to);
+            const [itemPath, itemQuery = ""] = item.to.split("?", 2);
+            const itemSearch = itemQuery
+              ? Object.fromEntries(new URLSearchParams(itemQuery).entries())
+              : undefined;
             return (
               <div key={`${item.label}-${item.to}`}>
                 {!desktopSidebarCollapsed && item.section && item.section !== nav[index - 1]?.section && (
@@ -750,11 +757,8 @@ export function AppShell({
                   </p>
                 )}
                 <Link
-                to={item.to as any}
-                onClick={(e) => {
-                  e.preventDefault();
-                  void navigate({ to: item.to as any });
-                }}
+                to={itemPath as any}
+                search={itemSearch as any}
 
                 className={cn(
                   "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground transition-all",
@@ -915,18 +919,19 @@ export function AppShell({
             </form>}
 
             <div className="ml-auto flex items-center gap-1.5">
-                    <Link
-                      to="/notifications"
+                    <a
+                      href="/notifications"
                       aria-label="Notifications"
+                      title="Open notifications"
                       className="relative grid size-10 place-items-center rounded-xl bg-transparent text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus:bg-transparent focus-visible:outline-none"
                     >
                       <Bell className="size-[18px]" />
                       {unreadNotifications > 0 && (
-                        <span className="absolute right-2 top-2 grid size-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-white">
+                        <span className="pointer-events-none absolute right-2 top-2 grid size-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-white">
                           {unreadNotifications}
                         </span>
                       )}
-                    </Link>
+                    </a>
               <div className="group relative ml-1 flex items-center gap-2.5 rounded-xl border border-border bg-card py-1.5 pl-1.5 pr-3 transition-colors hover:bg-accent/50">
                 <span
                   suppressHydrationWarning
@@ -959,13 +964,20 @@ export function AppShell({
           <div role="status" aria-live="polite" className="fixed right-5 top-20 z-[80] w-[min(380px,calc(100vw-2rem))] rounded-xl border border-primary/20 bg-card p-4 shadow-xl">
             <div className="flex items-start gap-3">
               <Bell className="mt-0.5 size-5 text-primary" />
-              <div className="min-w-0 flex-1">
+              <Link
+                to="/notifications"
+                onClick={dismissAlert}
+                className="min-w-0 flex-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                aria-label={`Open notification: ${notificationAlert.title || "New notification"}`}
+              >
                 <p className="text-sm font-bold">{notificationAlert.title || "New notification"}</p>
                 <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">
                   {notificationAlert.message ||
                     notificationAlert.body ||
                     "Open Notification Center to view this update."}
                 </p>
+              </Link>
+              <div>
                 <Link to="/notifications" onClick={dismissAlert} className="mt-2 inline-block text-xs font-semibold text-primary">View notifications</Link>
               </div>
               <button
@@ -982,7 +994,7 @@ export function AppShell({
         <main className={cn("page-enter flex-1 px-4 py-6 lg:px-7", isWarehouseWorkspace && "px-5 py-5 lg:px-8 lg:py-6")}>
           <div className={cn("mx-auto w-full max-w-[1360px]", isWarehouseWorkspace && "max-w-[1680px]")}>
             {(title || subtitle || actions) && (
-              <div className={cn("mb-6 flex flex-wrap items-end justify-between gap-4", ["/assembly/material-requests", "/assembly/production", "/assembly/quality", "/assembly/finished-goods", "/assembly/dispatch"].includes(path) && "material-requests-header", path === "/supplier-dashboard" && "supplier-heading-image", path.startsWith("/admin") && "rounded-2xl border border-white/70 bg-white/35 p-5 shadow-sm backdrop-blur-sm", path === "/assembly-dashboard" && "assembly-dashboard-hero", path === "/gate-dashboard" && "gate-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") === "dashboard" && "grn-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") !== "dashboard" && "grn-form-header")}>
+              <div className={cn("mb-6 flex flex-wrap items-end justify-between gap-4", ["/assembly/material-requests", "/assembly/production", "/assembly/quality", "/assembly/finished-goods", "/assembly/dispatch"].includes(path) && "material-requests-header", path === "/supplier-dashboard" && "supplier-heading-image", ["/supplier/asns/new", "/supplier/dispatch", "/damage-claims", "/supplier-materials"].includes(path) && "supplier-module-header", ["/vehicle-queue", "/gate/finished-goods-pickup", "/gate/finished-goods-pickup-exit"].includes(path) && "gate-entry-header", path === "/notifications" && "notifications-header", path.startsWith("/admin") && "rounded-2xl border border-white/70 bg-white/35 p-5 shadow-sm backdrop-blur-sm", path === "/assembly-dashboard" && "assembly-dashboard-hero", path === "/gate-dashboard" && "gate-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") === "dashboard" && "grn-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") !== "dashboard" && "grn-form-header")}>
                 <div>
                   {title && <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">{title}{pageHelp[path] && <InformationTooltip help={pageHelp[path]} placement="title" />}</h1>}
                   {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
@@ -1226,6 +1238,7 @@ function parseDockAllocationDetails(n: any) {
 }
 
 export function DockAllocationNotificationCard({ notification }: { notification: any }) {
+  const navigate = useNavigate();
   const details = parseDockAllocationDetails(notification);
   const additionalFields = [
     ["Driver", details.driverName],
@@ -1237,9 +1250,26 @@ export function DockAllocationNotificationCard({ notification }: { notification:
     ["Dock type", details.dockType],
     ["Warehouse", details.warehouseName],
   ].filter(([, value]) => value && value !== "N/A");
+  const openAllocation = () => {
+    const link = String(notification.link || "");
+    const destination = link.startsWith("/") ? link : "/dock-management";
+    void navigate({ to: destination as any });
+  };
 
   return (
-    <div className="notification-centre-card relative overflow-hidden rounded-xl border border-border bg-card p-4 text-foreground">
+    <div
+      className="notification-centre-card relative cursor-pointer overflow-hidden rounded-xl border border-border bg-card p-4 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      onClick={openAllocation}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openAllocation();
+        }
+      }}
+      role="link"
+      tabIndex={0}
+      aria-label={`Open dock allocation for gate pass ${details.gatePass}`}
+    >
       {!notification.is_read && <div className="absolute inset-y-0 left-0 w-1 bg-primary" />}
       <div className="notification-centre-body flex items-start gap-3">
         <div className="notification-centre-icon grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
@@ -1263,7 +1293,7 @@ export function DockAllocationNotificationCard({ notification }: { notification:
           </dl>
           <p className="text-xs text-muted-foreground">Proceed directly to Dock {details.dockCode}.</p>
           {additionalFields.length > 0 && (
-            <details className="border-t pt-2">
+            <details className="border-t pt-2" onClick={(event) => event.stopPropagation()}>
               <summary className="w-fit cursor-pointer text-xs font-medium text-primary">View allocation details</summary>
               <dl className="mt-3 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
                 {additionalFields.map(([label, value]) => (

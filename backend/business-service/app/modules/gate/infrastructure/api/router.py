@@ -121,7 +121,11 @@ async def create_finished_goods_pickup_gate_entry(
         ):
             raise HTTPException(409, "Vehicle and driver do not match an assigned pair for this dispatch.")
         if request.section_fg_id:
-            await uow.session.execute(select(func.pg_advisory_xact_lock(func.hashtext(vehicle_number))))
+            # PostgreSQL uses an advisory lock to serialize simultaneous entries
+            # for the same vehicle. SQLite has no pg_advisory_xact_lock function;
+            # its transaction-level write locking provides the local-dev guard.
+            if uow.session.bind.dialect.name == "postgresql":
+                await uow.session.execute(select(func.pg_advisory_xact_lock(func.hashtext(vehicle_number))))
             active_vehicle = await uow.session.scalar(select(FinishedGoodsPickupGateVisitModel.id).where(
                 FinishedGoodsPickupGateVisitModel.vehicle_number == vehicle_number,
                 FinishedGoodsPickupGateVisitModel.request_id != request.id,
@@ -941,16 +945,18 @@ def _validate_asn_transport_entries(payload: dict) -> tuple[list[dict[str, str]]
         }]
 
     validated_entries = []
-    for entry in submitted_entries:
+    for index, entry in enumerate(submitted_entries):
         if not isinstance(entry, dict):
             raise HTTPException(status_code=422, detail="Each vehicle and driver pair must be an object.")
         vehicle_number, driver_name, driver_contact = validate_transport(
             entry.get("vehicle_number"), entry.get("driver_name"), entry.get("driver_contact")
         )
         validated_entries.append({
+            "id": str(entry.get("id") or f"vehicle-{index + 1}"),
             "vehicle_number": vehicle_number,
             "driver_name": driver_name,
             "driver_contact": driver_contact,
+            "materials": [],
         })
 
     if assignments:
@@ -1067,7 +1073,8 @@ async def create_supplier_asn(
     if not submitted_lines:
         raise HTTPException(status_code=422, detail="at least one material line is required")
     validated_lines: list[tuple[dict, Decimal, uuid.UUID]] = []
-    submitted_material_ids: set[uuid.UUID] = set()
+    submitted_material_assignments: set[tuple[uuid.UUID, str]] = set()
+    transport_ids = {entry["id"] for entry in transport_entries}
     for raw_line in submitted_lines:
         if not isinstance(raw_line, dict):
             raise HTTPException(status_code=422, detail="each ASN line must be an object")
@@ -1094,13 +1101,17 @@ async def create_supplier_asn(
             material_uuid = uuid.UUID(material_id)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="material_id must be a valid material identifier") from exc
-        if material_uuid in submitted_material_ids:
-            raise HTTPException(status_code=422, detail="A material cannot be selected more than once in the same ASN")
-        submitted_material_ids.add(material_uuid)
+        vehicle_id = str(raw_line.get("carrying_vehicle_id") or (transport_entries[0]["id"] if transport_entries else ""))
+        if vehicle_id not in transport_ids:
+            raise HTTPException(status_code=422, detail="Assign each material to a vehicle in the transport assignment")
+        assignment_key = (material_uuid, vehicle_id)
+        if assignment_key in submitted_material_assignments:
+            raise HTTPException(status_code=422, detail="A material can only appear once per vehicle")
+        submitted_material_assignments.add(assignment_key)
         validated_lines.append((raw_line, validated_quantity, material_uuid))
 
     material_result = await uow.session.execute(
-        select(MaterialModel).where(MaterialModel.id.in_(submitted_material_ids))
+        select(MaterialModel).where(MaterialModel.id.in_({material_id for material_id, _ in submitted_material_assignments}))
     )
     materials_by_id = {material.id: material for material in material_result.scalars().all()}
     canonical_lines: list[tuple[dict, Decimal]] = []
@@ -1132,6 +1143,27 @@ async def create_supplier_asn(
             )
         )
     validated_lines = canonical_lines
+
+    # Store each vehicle's material manifest in its transport assignment while
+    # keeping the ASN material lines as totals for the whole shipment.
+    transport_by_id = {entry["id"]: entry for entry in transport_entries}
+    totals_by_material: dict[str, tuple[dict, Decimal]] = {}
+    for raw_line, quantity in validated_lines:
+        vehicle_id = str(raw_line.get("carrying_vehicle_id") or transport_entries[0]["id"])
+        transport_by_id[vehicle_id]["materials"].append({
+            "material_id": str(raw_line["material_id"]),
+            "item_code": raw_line["item_code"],
+            "material_name": raw_line["material_name"],
+            "shipped_quantity": float(quantity),
+            "uom": raw_line["uom"],
+        })
+        code = str(raw_line["item_code"]).casefold()
+        if code in totals_by_material:
+            prior_line, prior_quantity = totals_by_material[code]
+            totals_by_material[code] = (prior_line, prior_quantity + quantity)
+        else:
+            totals_by_material[code] = (raw_line, quantity)
+    validated_asn_totals = list(totals_by_material.values())
 
     if po_model and validated_lines:
         ordered_by_code: dict[str, Decimal] = {}
@@ -1266,7 +1298,7 @@ async def create_supplier_asn(
         }],
     )
     uow.session.add(asn)
-    for raw_line, quantity in validated_lines:
+    for raw_line, quantity in validated_asn_totals:
         asn.lines.append(AsnLineModel(
             material_id=uuid.UUID(str(raw_line["material_id"])) if raw_line.get("material_id") else None,
             item_code=str(raw_line.get("item_code") or raw_line.get("material_code") or "ITEM"),
@@ -1337,6 +1369,46 @@ def _canonical_warehouse_id(warehouse_id: str | None) -> str:
     if normalized.casefold() in {"main", "main warehouse", "wh_pune-01"}:
         return "WH_PUNE-01"
     return normalized.upper()
+
+
+def _assigned_materials_for_vehicle(asn: AsnModel, vehicle_number: str | None) -> list[dict] | None:
+    """Return a vehicle's ASN manifest, or None for legacy ASNs without one."""
+    target = normalize_vehicle(str(vehicle_number or ""))
+    assignment = next(
+        (entry for entry in (asn.logistics or []) if isinstance(entry, dict) and entry.get("type") == "transport_assignment"),
+        None,
+    )
+    vehicles = assignment.get("vehicles", []) if isinstance(assignment, dict) else []
+    vehicle_index = next(
+        (
+            index
+            for index, entry in enumerate(vehicles)
+            if isinstance(entry, dict)
+            and normalize_vehicle(str(entry.get("vehicle_number") or "")) == target
+        ),
+        None,
+    )
+    vehicle = vehicles[vehicle_index] if vehicle_index is not None else None
+    materials = vehicle.get("materials") if isinstance(vehicle, dict) else None
+    if isinstance(materials, list):
+        return materials
+    if vehicle_index is None or len(vehicles) <= 1:
+        return None
+
+    # Legacy multi-vehicle ASNs stored only shipment totals and omitted each
+    # vehicle's manifest. Preserve the supplier's vehicle order and allocate
+    # those legacy lines deterministically instead of showing every material
+    # against every truck.
+    return [
+        {
+            "item_code": line.item_code,
+            "material_name": line.material_name,
+            "shipped_quantity": float(line.shipped_quantity or 0),
+            "uom": line.uom,
+        }
+        for line_index, line in enumerate(asn.lines or [])
+        if line_index % len(vehicles) == vehicle_index
+    ]
 
 
 async def _asn_supplier_name(session, asn: AsnModel, po: PurchaseOrderModel | None = None) -> str | None:
@@ -1412,40 +1484,44 @@ async def _lookup_database_po(
         return None
 
     try:
-        result = await session.execute(
-            select(PurchaseOrderModel)
-            .options(selectinload(PurchaseOrderModel.items))
-            .where(func.upper(PurchaseOrderModel.po_number) == target)
-        )
-        exact = result.scalars().first()
-        if exact:
-            return _po_record_from_model(exact)
-
-        if not allow_partial:
-            return None
-
-        candidates_result = await session.execute(
-            select(PurchaseOrderModel)
-            .options(selectinload(PurchaseOrderModel.items))
-            .where(func.upper(PurchaseOrderModel.po_number).like(f"{target}-%"))
-            .order_by(PurchaseOrderModel.created_at.desc())
-        )
-        candidates = candidates_result.scalars().all()
-        if len(candidates) == 1:
-            return _po_record_from_model(candidates[0])
-        if candidates:
-            candidate_numbers = [candidate.po_number for candidate in candidates]
-            shipment_result = await session.execute(
-                select(AsnModel.po_number)
-                .where(AsnModel.po_number.in_(candidate_numbers))
-                .order_by(AsnModel.created_at.desc())
-                .limit(1)
+        # PO enrichment is optional for ASN-first gate entries. If a legacy PO
+        # schema is incomplete, roll back only this lookup so later ASN and gate
+        # writes can still use the request transaction.
+        async with session.begin_nested():
+            result = await session.execute(
+                select(PurchaseOrderModel)
+                .options(selectinload(PurchaseOrderModel.items))
+                .where(func.upper(PurchaseOrderModel.po_number) == target)
             )
-            shipment_po_number = shipment_result.scalar_one_or_none()
-            matched = next((candidate for candidate in candidates if candidate.po_number == shipment_po_number), None)
-            if matched:
-                return _po_record_from_model(matched)
-        return None
+            exact = result.scalars().first()
+            if exact:
+                return _po_record_from_model(exact)
+
+            if not allow_partial:
+                return None
+
+            candidates_result = await session.execute(
+                select(PurchaseOrderModel)
+                .options(selectinload(PurchaseOrderModel.items))
+                .where(func.upper(PurchaseOrderModel.po_number).like(f"{target}-%"))
+                .order_by(PurchaseOrderModel.created_at.desc())
+            )
+            candidates = candidates_result.scalars().all()
+            if len(candidates) == 1:
+                return _po_record_from_model(candidates[0])
+            if candidates:
+                candidate_numbers = [candidate.po_number for candidate in candidates]
+                shipment_result = await session.execute(
+                    select(AsnModel.po_number)
+                    .where(AsnModel.po_number.in_(candidate_numbers))
+                    .order_by(AsnModel.created_at.desc())
+                    .limit(1)
+                )
+                shipment_po_number = shipment_result.scalar_one_or_none()
+                matched = next((candidate for candidate in candidates if candidate.po_number == shipment_po_number), None)
+                if matched:
+                    return _po_record_from_model(matched)
+            return None
     except Exception as exc:
         logger.warning(f"Database lookup exception for PO '{target}': {exc}")
         return None
@@ -1564,7 +1640,7 @@ async def scan_with_local_ocr(
                 for candidate in text.splitlines() + [text]:
                     compact = re.sub(r"[^A-Z0-9]", "", candidate.upper())
                     match = re.search(
-                        r"(?:\d{2}BH\d{4}[A-Z]{2}|[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4})",
+                        r"(?:\d{2}BH\d{4}[A-Z]{2}|[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4})",
                         compact,
                     )
                     if not match:
@@ -2121,6 +2197,16 @@ async def create_gate_entry(
     if asn is None and not po_num:
         raise DomainRuleViolationException("A valid ASN reference is required for inbound receiving.")
     po_record = await _lookup_database_po(uow.session, po_num) if po_num else None
+    assigned_materials = _assigned_materials_for_vehicle(asn, plate) if asn else None
+    vehicle_materials = assigned_materials if assigned_materials is not None else ([
+        {
+            "item_code": line.item_code,
+            "material_name": line.material_name,
+            "shipped_quantity": float(line.shipped_quantity or 0),
+            "uom": line.uom,
+        }
+        for line in (asn.lines if asn else [])
+    ])
     if asn:
         supplier_name = ""
         if asn.supplier_id:
@@ -2135,7 +2221,7 @@ async def create_gate_entry(
             supplier_name = (po_record.supplier_name if po_record else request.supplier_name or "ASN Supplier").strip()
         request.supplier_name = supplier_name
     if asn and request.total_quantity is None:
-        request.total_quantity = sum(float(line.shipped_quantity or 0) for line in asn.lines)
+        request.total_quantity = sum(float(line.get("shipped_quantity", line.get("quantity", 0)) or 0) for line in vehicle_materials)
     if not (request.supplier_name and request.supplier_name.strip()):
         raise DomainRuleViolationException("Supplier name is mandatory.")
     if request.total_quantity is None or request.total_quantity <= 0:
@@ -2152,12 +2238,12 @@ async def create_gate_entry(
         ocr_res = OcrResult(
             po_number=po_num,
             supplier_name=request.supplier_name or "",
-            material_description=", ".join(line.material_name or line.item_code for line in asn.lines),
-            total_quantity=sum(float(line.shipped_quantity or 0) for line in asn.lines),
+            material_description=", ".join(str(line.get("material_name") or line.get("item_code") or "") for line in vehicle_materials),
+            total_quantity=sum(float(line.get("shipped_quantity", line.get("quantity", 0)) or 0) for line in vehicle_materials),
             po_date=po_record.po_date if po_record else "",
             delivery_date=po_record.delivery_date if po_record else "",
             confidence=1.0,
-            line_items=tuple({"material_code": line.item_code, "material_description": line.material_name, "quantity": float(line.shipped_quantity), "uom": line.uom} for line in asn.lines),
+            line_items=tuple({"material_code": line.get("item_code"), "material_description": line.get("material_name"), "quantity": float(line.get("shipped_quantity", line.get("quantity", 0)) or 0), "uom": line.get("uom")} for line in vehicle_materials),
         )
     elif po_record:
         ocr_res = OcrResult(
@@ -2191,7 +2277,10 @@ async def create_gate_entry(
         vehicle_plate=plate,
         created_by=user.username,
         driver_name=driver_name,
-        po_number=po_record.po_number if po_record else po_num,
+        # Older local SQLite databases still enforce NOT NULL on this legacy
+        # column. ASN-only entries have no PO, so persist an empty value for
+        # that compatibility case instead of rejecting the gate pass.
+        po_number=(po_record.po_number if po_record else po_num) or "",
         po_id=str(asn.po_id) if asn and asn.po_id else (str(po_record.po_id) if po_record and po_record.po_id else None),
         asn_id=str(asn.id) if asn else None,
         asn_number=asn.asn_number if asn else None,
@@ -2269,14 +2358,18 @@ async def create_gate_entry(
 
     try:
         from app.modules.dock.application.service import DockAllocationService
-        await DockAllocationService.auto_create_allocation_request(
-            session=uow.session,
-            gate_pass_id=entry.gate_entry_number or str(entry.id),
-            vehicle_number=plate,
-            vendor_reference=request.supplier_name or (ocr_res.supplier_name if ocr_res else None),
-            material_description=request.material_description or (ocr_res.material_description if ocr_res else None),
-            quantity=Decimal(str(request.total_quantity)) if request.total_quantity else (Decimal(str(ocr_res.total_quantity)) if (ocr_res and ocr_res.total_quantity) else Decimal("100.0")),
-        )
+        # Allocation is a follow-up workflow. Keep its schema or capacity
+        # failures inside a savepoint so they cannot poison the transaction
+        # that persists the gate entry and causes the gate pass request to 500.
+        async with uow.session.begin_nested():
+            await DockAllocationService.auto_create_allocation_request(
+                session=uow.session,
+                gate_pass_id=entry.gate_entry_number or str(entry.id),
+                vehicle_number=plate,
+                vendor_reference=request.supplier_name or (ocr_res.supplier_name if ocr_res else None),
+                material_description=request.material_description or (ocr_res.material_description if ocr_res else None),
+                quantity=Decimal(str(request.total_quantity)) if request.total_quantity else (Decimal(str(ocr_res.total_quantity)) if (ocr_res and ocr_res.total_quantity) else Decimal("100.0")),
+            )
     except Exception as exc:
         logger.warning(f"Auto-creation of dock allocation request skipped/failed: {exc}")
 
@@ -2373,13 +2466,23 @@ async def list_inbound_arrivals(
         if allocation.existing_gate_pass_id
     }
     arrivals = []
+    seen_gate_entry_ids: set[str] = set()
     for gate_entry, asn, po, assignment in result.all():
+        # Some older gate records have no ASN foreign key on the gate row;
+        # the dock assignment still carries the authoritative ASN link.
+        if asn is None and assignment and assignment.asn_id:
+            asn_result = await uow.session.execute(
+                select(AsnModel)
+                .options(selectinload(AsnModel.lines))
+                .where(AsnModel.id == assignment.asn_id)
+                .limit(1)
+            )
+            asn = asn_result.scalars().first()
         allocation = allocations_by_gate_pass.get(gate_entry.gate_entry_number)
-        asn_key = str(asn.id) if asn else (asn.asn_number if asn else None)
-        if asn_key and asn_key in seen_asn_keys:
+        gate_entry_key = str(gate_entry.id)
+        if gate_entry_key in seen_gate_entry_ids:
             continue
-        if asn_key:
-            seen_asn_keys.add(asn_key)
+        seen_gate_entry_ids.add(gate_entry_key)
         if warehouse_scoped:
             if not assignment or not assignment.assigned_warehouse_ref_id:
                 continue
@@ -2392,6 +2495,16 @@ async def list_inbound_arrivals(
                 select(ReceivingLineModel).where(ReceivingLineModel.dock_assignment_id == assignment.id)
             )
             received_by_code = {line.item_code: line for line in received_result.scalars().all()}
+        vehicle_manifest = _assigned_materials_for_vehicle(asn, gate_entry.vehicle_number) if asn else None
+        expected_material_rows = vehicle_manifest if vehicle_manifest is not None else [
+            {
+                "item_code": line.item_code,
+                "material_name": line.material_name,
+                "shipped_quantity": float(line.shipped_quantity),
+                "uom": line.uom,
+            }
+            for line in (asn.lines if asn else [])
+        ]
         arrivals.append({
             "id": str(gate_entry.id),
             "gate_entry_number": gate_entry.gate_entry_number,
@@ -2423,6 +2536,7 @@ async def list_inbound_arrivals(
                 else gate_entry.status
             ),
             "assigned_dock_id": gate_entry.assigned_dock_id,
+            "dock_number": assignment.dock_number if assignment else gate_entry.assigned_dock_id,
             "assigned_warehouse_ref_id": str(assignment.assigned_warehouse_ref_id) if assignment and assignment.assigned_warehouse_ref_id else None,
             "assigned_warehouse_code": assignment.assigned_warehouse_code if assignment else None,
             "assigned_warehouse_name": assignment.assigned_warehouse_name if assignment else None,
@@ -2460,50 +2574,50 @@ async def list_inbound_arrivals(
             },
             "expected_materials": [
                 {
-                    "item_code": line.item_code,
-                    "material_name": line.material_name,
-                    "quantity": float(line.shipped_quantity),
+                    "item_code": line.get("item_code"),
+                    "material_name": line.get("material_name"),
+                    "quantity": float(line.get("shipped_quantity", line.get("quantity", 0)) or 0),
                     "po_quantity": (
                         next(
                             (
                                 float(item.quantity)
                                 for item in (po.items if po else [])
                                 if (
-                                    getattr(item, "material_code", None) == line.item_code
-                                    or getattr(item, "item_code", None) == line.item_code
-                                    or getattr(item, "material_name", None) == line.material_name
-                                    or getattr(item, "material_description", None) == line.material_name
+                                    getattr(item, "material_code", None) == line.get("item_code")
+                                    or getattr(item, "item_code", None) == line.get("item_code")
+                                    or getattr(item, "material_name", None) == line.get("material_name")
+                                    or getattr(item, "material_description", None) == line.get("material_name")
                                 )
                             ),
                             None,
                         )
-                        or float(line.shipped_quantity)
+                        or float(line.get("shipped_quantity", line.get("quantity", 0)) or 0)
                     ),
-                    "uom": line.uom,
-                    "received_quantity": float(received_by_code[line.item_code].received_quantity) if line.item_code in received_by_code else None,
-                    "variance_to_po": float(received_by_code[line.item_code].received_quantity - received_by_code[line.item_code].ordered_quantity) if line.item_code in received_by_code else None,
-                    "variance_to_shipped": float(received_by_code[line.item_code].received_quantity - received_by_code[line.item_code].shipped_quantity) if line.item_code in received_by_code else None,
-                    "recorded_by": received_by_code[line.item_code].recorded_by if line.item_code in received_by_code else None,
-                    "recorded_at": received_by_code[line.item_code].recorded_at.isoformat() if line.item_code in received_by_code else None,
-                    "verification_status": received_by_code[line.item_code].verification_status if line.item_code in received_by_code else None,
-                    "exception_quantity": float(received_by_code[line.item_code].exception_quantity) if line.item_code in received_by_code else None,
-                    "good_quantity": float(received_by_code[line.item_code].good_quantity) if line.item_code in received_by_code and received_by_code[line.item_code].good_quantity is not None else None,
-                    "damaged_quantity": float(received_by_code[line.item_code].damaged_quantity) if line.item_code in received_by_code and received_by_code[line.item_code].damaged_quantity is not None else None,
-                    "rejected_quantity": float(received_by_code[line.item_code].rejected_quantity) if line.item_code in received_by_code and received_by_code[line.item_code].rejected_quantity is not None else None,
-                    "condition_result": received_by_code[line.item_code].condition_result if line.item_code in received_by_code else None,
-                    "inspection_required": received_by_code[line.item_code].inspection_required if line.item_code in received_by_code else False,
-                    "physical_condition_ok": received_by_code[line.item_code].physical_condition_ok if line.item_code in received_by_code else None,
-                    "packaging_ok": received_by_code[line.item_code].packaging_ok if line.item_code in received_by_code else None,
-                    "specifications_ok": received_by_code[line.item_code].specifications_ok if line.item_code in received_by_code else None,
-                    "serial_batch_number": received_by_code[line.item_code].serial_batch_number if line.item_code in received_by_code else None,
-                    "serial_batch_verified": received_by_code[line.item_code].serial_batch_verified if line.item_code in received_by_code else False,
-                    "disposition_status": received_by_code[line.item_code].disposition_status if line.item_code in received_by_code else None,
-                    "quarantine_location": received_by_code[line.item_code].quarantine_location if line.item_code in received_by_code else None,
-                    "quarantined_by": received_by_code[line.item_code].quarantined_by if line.item_code in received_by_code else None,
-                    "quarantined_at": received_by_code[line.item_code].quarantined_at.isoformat() if line.item_code in received_by_code and received_by_code[line.item_code].quarantined_at else None,
-                    "condition_notes": received_by_code[line.item_code].condition_notes if line.item_code in received_by_code else None,
+                    "uom": line.get("uom"),
+                    "received_quantity": float(received_by_code[line.get("item_code")].received_quantity) if line.get("item_code") in received_by_code else None,
+                    "variance_to_po": float(received_by_code[line.get("item_code")].received_quantity - received_by_code[line.get("item_code")].ordered_quantity) if line.get("item_code") in received_by_code else None,
+                    "variance_to_shipped": float(received_by_code[line.get("item_code")].received_quantity - received_by_code[line.get("item_code")].shipped_quantity) if line.get("item_code") in received_by_code else None,
+                    "recorded_by": received_by_code[line.get("item_code")].recorded_by if line.get("item_code") in received_by_code else None,
+                    "recorded_at": received_by_code[line.get("item_code")].recorded_at.isoformat() if line.get("item_code") in received_by_code else None,
+                    "verification_status": received_by_code[line.get("item_code")].verification_status if line.get("item_code") in received_by_code else None,
+                    "exception_quantity": float(received_by_code[line.get("item_code")].exception_quantity) if line.get("item_code") in received_by_code else None,
+                    "good_quantity": float(received_by_code[line.get("item_code")].good_quantity) if line.get("item_code") in received_by_code and received_by_code[line.get("item_code")].good_quantity is not None else None,
+                    "damaged_quantity": float(received_by_code[line.get("item_code")].damaged_quantity) if line.get("item_code") in received_by_code and received_by_code[line.get("item_code")].damaged_quantity is not None else None,
+                    "rejected_quantity": float(received_by_code[line.get("item_code")].rejected_quantity) if line.get("item_code") in received_by_code and received_by_code[line.get("item_code")].rejected_quantity is not None else None,
+                    "condition_result": received_by_code[line.get("item_code")].condition_result if line.get("item_code") in received_by_code else None,
+                    "inspection_required": received_by_code[line.get("item_code")].inspection_required if line.get("item_code") in received_by_code else False,
+                    "physical_condition_ok": received_by_code[line.get("item_code")].physical_condition_ok if line.get("item_code") in received_by_code else None,
+                    "packaging_ok": received_by_code[line.get("item_code")].packaging_ok if line.get("item_code") in received_by_code else None,
+                    "specifications_ok": received_by_code[line.get("item_code")].specifications_ok if line.get("item_code") in received_by_code else None,
+                    "serial_batch_number": received_by_code[line.get("item_code")].serial_batch_number if line.get("item_code") in received_by_code else None,
+                    "serial_batch_verified": received_by_code[line.get("item_code")].serial_batch_verified if line.get("item_code") in received_by_code else False,
+                    "disposition_status": received_by_code[line.get("item_code")].disposition_status if line.get("item_code") in received_by_code else None,
+                    "quarantine_location": received_by_code[line.get("item_code")].quarantine_location if line.get("item_code") in received_by_code else None,
+                    "quarantined_by": received_by_code[line.get("item_code")].quarantined_by if line.get("item_code") in received_by_code else None,
+                    "quarantined_at": received_by_code[line.get("item_code")].quarantined_at.isoformat() if line.get("item_code") in received_by_code and received_by_code[line.get("item_code")].quarantined_at else None,
+                    "condition_notes": received_by_code[line.get("item_code")].condition_notes if line.get("item_code") in received_by_code else None,
                 }
-                for line in (asn.lines if asn else [])
+                for line in expected_material_rows
             ],
         })
     return arrivals
@@ -3077,8 +3191,32 @@ async def record_receiving_quantities(
             raise HTTPException(status_code=409, detail="Purchase order details were not found")
     if asn is None:
         raise HTTPException(status_code=409, detail="ASN details were not found")
-    asn_lines = {line.item_code: line for line in asn.lines}
-    po_quantities = {item.material_code: item.quantity for item in po.items} if po else {}
+    vehicle_manifest = _assigned_materials_for_vehicle(asn, model.vehicle_number)
+    asn_lines = {
+        line.item_code: {
+            "item_code": line.item_code,
+            "material_name": line.material_name,
+            "uom": line.uom,
+            "shipped_quantity": line.shipped_quantity,
+        }
+        for line in asn.lines
+    }
+    if vehicle_manifest is not None:
+        asn_lines = {
+            str(line.get("item_code") or ""): {
+                "item_code": str(line.get("item_code") or ""),
+                "material_name": str(line.get("material_name") or ""),
+                "uom": str(line.get("uom") or "PCS"),
+                "shipped_quantity": Decimal(str(line.get("shipped_quantity", line.get("quantity", 0)) or 0)),
+            }
+            for line in vehicle_manifest
+            if line.get("item_code")
+        }
+    po_quantities = (
+        {item.material_code: item.quantity for item in po.items}
+        if po and vehicle_manifest is None
+        else {}
+    )
     submitted_codes = [item.item_code for item in request.items]
     if len(submitted_codes) != len(set(submitted_codes)):
         raise HTTPException(status_code=422, detail="Each material may only be submitted once")
@@ -3090,23 +3228,23 @@ async def record_receiving_quantities(
     response_items = []
     for submitted in request.items:
         asn_line = asn_lines[submitted.item_code]
-        ordered = po_quantities.get(submitted.item_code, asn_lines[submitted.item_code].shipped_quantity)
+        ordered = po_quantities.get(submitted.item_code, asn_line["shipped_quantity"])
         received = submitted.received_quantity
         verification_status, exception_quantity = _quantity_result(float(ordered), received)
         line = ReceivingLineModel(
             dock_assignment_id=assignment.id, item_code=submitted.item_code,
-            material_name=asn_line.material_name, uom=asn_line.uom,
-            ordered_quantity=ordered, shipped_quantity=asn_line.shipped_quantity,
+            material_name=asn_line["material_name"], uom=asn_line["uom"],
+            ordered_quantity=ordered, shipped_quantity=asn_line["shipped_quantity"],
             received_quantity=received, recorded_by=user.username, recorded_at=recorded_at,
             verification_status=verification_status, exception_quantity=exception_quantity,
         )
         uow.session.add(line)
         response_items.append({
             "item_code": submitted.item_code, "ordered_quantity": float(ordered),
-            "shipped_quantity": float(asn_line.shipped_quantity), "received_quantity": received,
+            "shipped_quantity": float(asn_line["shipped_quantity"]), "received_quantity": received,
             "variance_to_po": received - float(ordered),
-            "variance_to_asn": received - float(asn_lines[submitted.item_code].shipped_quantity),
-            "variance_to_shipped": received - float(asn_line.shipped_quantity),
+            "variance_to_asn": received - float(asn_line["shipped_quantity"]),
+            "variance_to_shipped": received - float(asn_line["shipped_quantity"]),
             "verification_status": verification_status, "exception_quantity": exception_quantity,
         })
     await uow.session.flush()

@@ -846,15 +846,26 @@ async def create_assembly_product(
             if not clean_code or clean_code == "AUTO":
                 clean_code = f"FG-{prefix}-{uuid.uuid4().hex[:4].upper()}"
 
-        existing = await uow.session.execute(
-            select(BillOfMaterialsModel).where(
-                or_(
-                    BillOfMaterialsModel.product_code == clean_code,
-                    func.lower(func.trim(func.regexp_replace(BillOfMaterialsModel.product_name, r"\s+", " ", "g"))) == clean_name.lower(),
-                )
+        # Keep this duplicate check portable. ``regexp_replace`` is available in
+        # PostgreSQL but not SQLite, which is also a supported local database.
+        # Product names are normalized in Python so repeated whitespace and case
+        # differences are handled consistently by both database engines.
+        existing_code = await uow.session.scalar(
+            select(BillOfMaterialsModel.id).where(
+                BillOfMaterialsModel.product_code == clean_code
             )
         )
-        if existing.scalars().first():
+        product_names = ()
+        if existing_code is None:
+            product_names = (
+                await uow.session.scalars(select(BillOfMaterialsModel.product_name))
+            ).all()
+        normalized_name = clean_name.casefold()
+        existing_name = any(
+            " ".join((name or "").split()).casefold() == normalized_name
+            for name in product_names
+        )
+        if existing_code is not None or existing_name:
             raise HTTPException(
                 status_code=400,
                 detail=f"A product with code '{clean_code}' or name '{clean_name}' already exists."
@@ -1542,11 +1553,15 @@ async def list_assembly_picking_tasks(
             first_item = task_items[0] if task_items else {}
             enriched_items = []
             for item in task_items:
+                requested_quantity = Decimal(str(item.get("requested_quantity") or item.get("quantity") or 0))
+                picked_quantity = Decimal(str(item.get("picked_quantity") or item.get("issued_quantity") or 0))
+                item_completed = requested_quantity > 0 and picked_quantity >= requested_quantity
                 location = await uow.session.scalar(
                     select(StorageLocationModel.location_code)
                     .join(InventoryLocationBalanceModel, InventoryLocationBalanceModel.storage_location_id == StorageLocationModel.id)
                     .where(InventoryLocationBalanceModel.warehouse_id == task.warehouse_id)
                     .where(func.lower(InventoryLocationBalanceModel.material_code) == str(item.get("material_code", "")).lower())
+                    .where(InventoryLocationBalanceModel.available_quantity > 0)
                     .order_by(InventoryLocationBalanceModel.available_quantity.desc())
                     .limit(1)
                 )
@@ -1555,6 +1570,7 @@ async def list_assembly_picking_tasks(
                         select(StorageLocationModel.location_code)
                         .join(InventoryLocationBalanceModel, InventoryLocationBalanceModel.storage_location_id == StorageLocationModel.id)
                         .where(func.lower(InventoryLocationBalanceModel.material_code) == str(item.get("material_code", "")).lower())
+                        .where(InventoryLocationBalanceModel.available_quantity > 0)
                         .order_by(InventoryLocationBalanceModel.available_quantity.desc())
                         .limit(1)
                     )
@@ -1589,8 +1605,20 @@ async def list_assembly_picking_tasks(
                     candidates = [lot for lot in balances if balances[lot] > 0]
                     if candidates:
                         batch_number = min(candidates, key=lambda lot: (first_seen[lot], lot.casefold()))
-                enriched_items.append({**item, "pick_location": location or item.get("pick_location"),
-                                       **({"batch_number": batch_number, "material_qr": f"QR-BATCH-{batch_number}"} if batch_number else {})})
+                enriched_items.append({
+                    **item,
+                    "pick_location": location or item.get("pick_location"),
+                    "status": "COMPLETED" if item_completed else ("IN_PROGRESS" if picked_quantity > 0 else "PENDING"),
+                    "confirmation": {
+                        "confirmed": item_completed,
+                        "confirmed_by": item.get("picked_by") if item_completed else None,
+                        "confirmed_at": item.get("picked_at") if item_completed else None,
+                        "material_qr": item.get("material_scan"),
+                        "rack_qr": item.get("zone_scan"),
+                        "batch_number": item.get("batch_number") or item.get("batch_lot_number"),
+                    },
+                    **({"batch_number": batch_number, "material_qr": f"QR-BATCH-{batch_number}"} if batch_number else {}),
+                })
             issue_record = await uow.session.scalar(
                 select(MaterialIssueModel).where(MaterialIssueModel.request_id == task.request_id).order_by(MaterialIssueModel.issued_at.desc()).limit(1)
             ) if task.request_id else None
@@ -1635,9 +1663,8 @@ async def complete_assembly_picking_task(
         if task.completed_at or task.status == "COMPLETED":
             raise HTTPException(status_code=409, detail="Assembly picking task is already completed.")
         items = list(task.items or [])
-        requested = sum(Decimal(str(item.get("requested_quantity") or item.get("quantity") or 0)) for item in items)
-        if not items or payload.quantity > requested:
-            raise HTTPException(status_code=422, detail=f"Picked quantity cannot exceed requested quantity ({requested}).")
+        if not items:
+            raise HTTPException(status_code=422, detail="Assembly picking task has no materials to pick.")
         material_scan = payload.material_scan.strip()
         # Completed-GRN QR labels contain a human-readable multi-line payload
         # ("Material Code: ..."), while older labels use QR-/JSON formats.
@@ -1675,6 +1702,16 @@ async def complete_assembly_picking_task(
             raise HTTPException(status_code=422, detail="Material QR does not match this Assembly picking task.")
         matched_item = matched_items[0]
         material_code = str(matched_item.get("material_code") or "").strip()
+        requested = Decimal(str(matched_item.get("requested_quantity") or matched_item.get("quantity") or 0))
+        already_picked = Decimal(str(matched_item.get("picked_quantity") or matched_item.get("issued_quantity") or 0))
+        remaining_to_pick = max(Decimal("0"), requested - already_picked)
+        if remaining_to_pick <= 0:
+            raise HTTPException(status_code=409, detail=f"Pickup for {material_code} is already completed.")
+        if payload.quantity > remaining_to_pick:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Picked quantity cannot exceed remaining quantity for {material_code} ({remaining_to_pick}).",
+            )
         now = datetime.utcnow()
 
         # Completing the physical warehouse pick is the inventory issue event.
@@ -1686,7 +1723,6 @@ async def complete_assembly_picking_task(
         zone_scan = payload.zone_scan.strip()
         location_filters = [
             func.lower(InventoryLocationBalanceModel.material_code) == material_code.lower(),
-            InventoryLocationBalanceModel.available_quantity >= payload.quantity,
         ]
         if zone_scan:
             # BIN QR values are normally the persisted location code. Accept
@@ -1716,8 +1752,17 @@ async def complete_assembly_picking_task(
         )
         location_pair = location_res.first()
         if not location_pair:
-            raise HTTPException(status_code=409, detail=f"Insufficient inventory for {material_code}.")
+            raise HTTPException(status_code=422, detail=f"Scanned BIN does not contain available inventory for {material_code}.")
         location_balance, picked_location = location_pair
+        if location_balance.available_quantity < payload.quantity:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Only {location_balance.available_quantity} {location_balance.uom} of {material_code} "
+                    f"is available in scanned BIN {picked_location.location_code}. "
+                    "Confirm that quantity, then scan the next BIN for the remainder."
+                ),
+            )
 
         # Enforce FIFO against the actual batch movement ledger. Replaying
         # movements keeps the rule compatible with existing putaway records.
@@ -1814,8 +1859,16 @@ async def complete_assembly_picking_task(
         updated_items = []
         for item in items:
             item_copy = dict(item)
-            if str(item_copy.get("material_code") or "").upper() in material_scan_upper:
-                item_copy.update(picked_quantity=float(payload.quantity), material_scan=material_scan, zone_scan=payload.zone_scan.strip(), batch_number=scanned_batch_number or (capped_batches[0][0] if capped_batches else None))
+            if str(item_copy.get("material_code") or "").strip().casefold() == material_code.casefold():
+                new_picked_quantity = already_picked + payload.quantity
+                item_copy.update(
+                    picked_quantity=float(new_picked_quantity),
+                    material_scan=material_scan,
+                    zone_scan=payload.zone_scan.strip(),
+                    batch_number=scanned_batch_number or (capped_batches[0][0] if capped_batches else None),
+                    picked_by=current_user.username if current_user and current_user.username else "Warehouse Operator",
+                    picked_at=now.isoformat() if new_picked_quantity >= requested else None,
+                )
             updated_items.append(item_copy)
         picked_batch = scanned_batch_number or (capped_batches[0][0] if capped_batches else None)
         if picked_batch:
@@ -1844,12 +1897,20 @@ async def complete_assembly_picking_task(
         # PickTaskModel.completed_at is stored as TIMESTAMP WITHOUT TIME ZONE.
         # Use a naive UTC application timestamp to match the existing schema.
         task.items = updated_items
-        task.status = "COMPLETED"
-        task.completed_at = now
-        task.completed_by = current_user.username if current_user and current_user.username else "Warehouse Operator"
+        all_items_picked = all(
+            Decimal(str(item.get("picked_quantity") or item.get("issued_quantity") or 0))
+            >= Decimal(str(item.get("requested_quantity") or item.get("quantity") or 0))
+            for item in updated_items
+            if Decimal(str(item.get("requested_quantity") or item.get("quantity") or 0)) > 0
+        )
+        task.status = "COMPLETED" if all_items_picked else "IN_PROGRESS"
+        task.completed_at = now if all_items_picked else None
+        task.completed_by = (
+            current_user.username if current_user and current_user.username else "Warehouse Operator"
+        ) if all_items_picked else None
         # A completed physical pick is the warehouse issue event for an
         # Assembly request. Keep the request/order dashboards in sync.
-        if task.request_id:
+        if task.request_id and all_items_picked:
             req = await uow.session.get(MaterialRequestModel, task.request_id, with_for_update=True)
             if req and req.status not in ("ISSUED", "RECEIVED"):
                 req.status = "ISSUED"
@@ -1894,7 +1955,12 @@ async def complete_assembly_picking_task(
                 order.pick_task_id = task.id
                 order.status = "MATERIAL_ISSUED"
         await uow.commit()
-        return {"id": str(task.id), "task_number": task.task_number, "status": task.status, "completed_at": now.isoformat()}
+        return {
+            "id": str(task.id),
+            "task_number": task.task_number,
+            "status": task.status,
+            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        }
 
 
 @router.get("/material-requests/{request_id}")
@@ -4169,7 +4235,7 @@ async def fg_loading(current_user: CurrentUser = Depends(get_current_user), uow:
         await require_section_schema(uow.session)
         rows = (await uow.session.execute(select(FinishedGoodsPickupGateVisitModel, FinishedGoodsRequestModel).join(
             FinishedGoodsRequestModel, FinishedGoodsPickupGateVisitModel.request_id == FinishedGoodsRequestModel.id).where(
-            FinishedGoodsRequestModel.section_fg_id.is_not(None), FinishedGoodsPickupGateVisitModel.status.in_(["INSIDE_FACILITY", "READY_FOR_GATE_EXIT"])))).all()
+            FinishedGoodsRequestModel.section_fg_id.is_not(None), FinishedGoodsPickupGateVisitModel.status == "INSIDE_FACILITY"))).all()
         if not rows:
             return []
         result = []
@@ -4201,4 +4267,10 @@ async def confirm_fg_loading(gate_pass: str, payload: SectionScans, current_user
             raise HTTPException(409, "Legacy pickup uses existing loading workflow")
         await transition_sections(uow.session, request.section_fg_id, visit.id, payload.qr_identities, current_user.username)
         visit.status = "READY_FOR_GATE_EXIT"
+        uow.session.add(NotificationModel(
+            user_role="GATE_SECURITY",
+            title="Finished-goods vehicle ready for Gate Exit",
+            message=f"Gate pass {visit.gate_pass_number} for vehicle {visit.vehicle_number} has completed loading and is ready for exit verification.",
+            link="/gate/finished-goods-pickup-exit",
+        ))
         return {"status": visit.status}

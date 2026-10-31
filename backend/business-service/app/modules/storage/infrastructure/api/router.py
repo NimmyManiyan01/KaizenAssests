@@ -2,6 +2,7 @@ import datetime
 import hashlib
 import json
 import logging
+import re
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -860,6 +861,9 @@ async def list_putaway_tasks(
     # posting paths created extra task rows, only batches whose cumulative
     # quantity fits within the saved QC-approved quantity are eligible.
     canonical_batches: dict[tuple[uuid.UUID, str], set[str]] = {}
+    canonical_grn_materials: set[tuple[uuid.UUID, str]] = set()
+    reconciled_grn_ids: set[uuid.UUID] = set()
+    reconciled_grn_numbers: dict[uuid.UUID, str] = {}
     grn_ids = {task.grn_id for task in raw_tasks if task.grn_id}
     if grn_ids:
         grn_result = await uow.session.execute(
@@ -869,8 +873,18 @@ async def list_putaway_tasks(
         )
         grns_for_reconciliation = list(grn_result.scalars().all())
         for grn in grns_for_reconciliation:
+            reconciled_grn_ids.add(grn.id)
+            if grn.grn_number:
+                reconciled_grn_numbers[grn.id] = grn.grn_number.strip().upper()
             for line in grn.lines:
+                item_key = (grn.id, line.item_code.strip().upper())
                 approved = line.quality_approved_quantity or line.good_quantity or Decimal("0")
+                # Zero-quantity ASN balance lines remain visible in the GRN
+                # audit, but they were not received and must never enter the
+                # warehouse putaway queue.
+                if approved <= Decimal("0"):
+                    continue
+                canonical_grn_materials.add(item_key)
                 remaining = approved
                 allowed: set[str] = set()
                 for batch in sorted(line.batches, key=lambda item: item.created_at):
@@ -883,7 +897,7 @@ async def list_putaway_tasks(
                     allowed.add(batch_number)
                     remaining -= min(quantity, remaining)
                 if allowed:
-                    canonical_batches[(grn.id, line.item_code.upper())] = allowed
+                    canonical_batches[item_key] = allowed
 
     # Reconcile legacy duplicate active tasks against the canonical batch set.
     # Keep the records for auditability, but make only approved batch tasks
@@ -926,7 +940,19 @@ async def list_putaway_tasks(
     for task in raw_tasks:
         if task.status in {"CANCELLED", "VOID"}:
             continue
-        item_key = (task.grn_id, task.item_code.upper())
+        item_key = (task.grn_id, task.item_code.strip().upper())
+        canonical_grn_number = reconciled_grn_numbers.get(task.grn_id)
+        task_grn_number = str(task.grn_number or "").strip().upper()
+        # Never render a legacy task beneath a different GRN number than the
+        # receipt linked by its foreign key. This was the source of STEEL from
+        # GRN-004 appearing in the GRN-005 details modal.
+        if canonical_grn_number and task_grn_number and task_grn_number != canonical_grn_number:
+            continue
+        # The GRN is the source of truth for material ownership. Legacy rows
+        # occasionally retained the right GRN number with an item copied from
+        # another receipt; never expose those rows under this GRN.
+        if task.grn_id in reconciled_grn_ids and item_key not in canonical_grn_materials:
+            continue
         batch = str(task.batch_number or "").strip().upper()
         allowed_batches = canonical_batches.get(item_key)
         if allowed_batches and batch not in allowed_batches:
@@ -2271,6 +2297,27 @@ async def resolve_grn_qr(
             key, separator, value = payload_line.partition(":")
             if separator:
                 text_fields[key.strip().lower().replace(" ", "_")] = value.strip()
+        # A QR scanner writing into a single-line HTML input removes CR/LF
+        # characters from the readable label payload. Recover fields using
+        # the known labels as boundaries (for example
+        # "GRN Number: ...Supplier: ...Material Code: ...").
+        if len(text_fields) <= 1:
+            labels = (
+                "GRN Number", "GRN No", "Supplier", "Warehouse", "Dock", "Vehicle",
+                "Driver", "Material Code", "Item Code", "Material Name",
+                "Material Category", "Material Variant Code", "Batch Number", "Batch",
+                "Size", "Color", "Grade", "UOM", "QA Status", "Inspection Status",
+                "Batch Quantity",
+            )
+            label_pattern = "|".join(re.escape(label) for label in labels)
+            for match in re.finditer(
+                rf"({label_pattern})\s*:\s*(.*?)(?=(?:{label_pattern})\s*:|$)",
+                raw_code,
+                flags=re.IGNORECASE | re.DOTALL,
+            ):
+                text_fields[match.group(1).strip().lower().replace(" ", "_")] = (
+                    match.group(2).strip()
+                )
         item_code = item_code or text_fields.get("material_code") or text_fields.get("item_code")
         grn_number = grn_number or text_fields.get("grn_number") or text_fields.get("grn_no")
         batch_number = batch_number or text_fields.get("batch") or text_fields.get("batch_number")
@@ -3118,6 +3165,24 @@ async def execute_putaway(
             task.status = "PARTIALLY_COMPLETED"
             task.started_by = task.started_by or user.username
             task.started_at = task.started_at or completed_at
+            if target_bin.occupied_quantity >= target_bin.capacity:
+                # The assigned bin became full during a partial confirmation.
+                # Release the unplaced remainder so it can be assigned to a
+                # different rack instead of leaving it attached to a full bin.
+                assignment_rows = await uow.session.execute(
+                    select(PutawayLocationAssignmentModel).where(
+                        PutawayLocationAssignmentModel.putaway_task_id == task.id,
+                        PutawayLocationAssignmentModel.destination_bin_id == target_bin.id,
+                    )
+                )
+                for assignment in assignment_rows.scalars().all():
+                    await uow.session.delete(assignment)
+                task.destination_zone_id = None
+                task.destination_zone = None
+                task.destination_bin_id = None
+                task.destination_bin = None
+                task.destination_bin_code = None
+                task.destination_location_id = None
 
     # Step 7: Update HandlingUnitModel if present
     if grn_info.get("handling_unit_id"):

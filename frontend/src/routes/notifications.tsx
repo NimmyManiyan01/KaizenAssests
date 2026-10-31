@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   PackageCheck,
   History,
+  Bell,
 } from "lucide-react";
 import { AppShell, DockAllocationNotificationCard } from "@/components/wms/app-shell";
 import { Card } from "@/components/ui/card";
@@ -589,7 +590,14 @@ function Notifications() {
 
   return (
     <AppShell
-      title="Notification centre"
+      title={
+        <span className="notification-centre-title inline-flex items-center gap-3">
+          <span className="notification-centre-title-icon inline-flex size-11 shrink-0 items-center justify-center rounded-xl">
+            <Bell className="size-5" aria-hidden="true" />
+          </span>
+          <span>Notification centre</span>
+        </span>
+      }
       subtitle="Stay updated with procurement and supply chain alerts"
       actions={
         <div className="flex flex-wrap items-center gap-2">
@@ -666,8 +674,17 @@ function Notifications() {
               <Card
                 key={`${n.type || n.notification_type || "workflow"}-${n.id || "notification"}-${index}`}
                 onClick={() => handleOpenNotificationDetails(n)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    handleOpenNotificationDetails(n);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+                aria-label={`Open notification: ${n.title || "Notification"}`}
                 className={cn(
-                  "notification-centre-card relative overflow-hidden border-border/50 p-5 transition-all space-y-4",
+                  "notification-centre-card relative cursor-pointer overflow-hidden border-border/50 p-5 transition-all space-y-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
                   !n.is_read && "bg-primary-soft/5 border-primary/20",
                   isDamage && "border-rose-500/30 bg-rose-500/5 hover:border-rose-500/60",
                 )}

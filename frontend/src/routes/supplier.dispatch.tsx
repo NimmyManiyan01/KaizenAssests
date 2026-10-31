@@ -64,10 +64,33 @@ function SupplierDispatchPage() {
   const [goods, setGoods] = React.useState([{ name: "", quantity: "", custom: false }]);
   const [dispatchHistory, setDispatchHistory] = React.useState<any[]>([]);
   const [historyPage, setHistoryPage] = React.useState(1);
-  const historyPageCount = Math.max(1, Math.ceil(dispatchHistory.length / 10));
+  const newestFirstDispatchHistory = React.useMemo(
+    () =>
+      [...dispatchHistory].sort((left, right) => {
+        const leftTimestamp = new Date(
+          left.created_at ||
+            left.requested_at ||
+            left.requested_date ||
+            left.submitted_at ||
+            left.expected_pickup_date ||
+            0,
+        ).getTime();
+        const rightTimestamp = new Date(
+          right.created_at ||
+            right.requested_at ||
+            right.requested_date ||
+            right.submitted_at ||
+            right.expected_pickup_date ||
+            0,
+        ).getTime();
+        return rightTimestamp - leftTimestamp;
+      }),
+    [dispatchHistory],
+  );
+  const historyPageCount = Math.max(1, Math.ceil(newestFirstDispatchHistory.length / 10));
   const currentHistoryPage = Math.min(historyPage, historyPageCount);
   const historyStart = (currentHistoryPage - 1) * 10;
-  const pagedDispatches = dispatchHistory.slice(historyStart, historyStart + 10);
+  const pagedDispatches = newestFirstDispatchHistory.slice(historyStart, historyStart + 10);
   React.useEffect(() => { setHistoryPage(page => Math.min(page, historyPageCount)); }, [historyPageCount]);
   const [historyLoading, setHistoryLoading] = React.useState(true);
   const [historyError, setHistoryError] = React.useState<string>();
@@ -129,18 +152,42 @@ function SupplierDispatchPage() {
 
   const submitDispatch = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const names = goods
-      .map((item) => requiredText(item.name))
-      .filter((value): value is string => Boolean(value));
-    const firstQuantity = parsePositiveNumber(goods[0]?.quantity);
     const validTransportEntries = transportEntries.map((entry) => ({
       vehicle_number: normalizeAsnVehicleNumber(entry.vehicleNumber),
       driver_name: entry.driverName.trim().replace(/\s+/g, " "),
       driver_contact: entry.driverContact.trim(),
     }));
     const firstTransport = validTransportEntries[0];
-    if (!names.length || firstQuantity === null || !firstTransport) {
-      toast.error("Enter a finished good, positive quantity, vehicle, driver, and contact");
+    if (!firstTransport) {
+      toast.error("Enter a vehicle, driver, and contact");
+      return;
+    }
+    const requestedGoods = goods.map((item) => {
+      const name = requiredText(item.name);
+      const selected = finishedGoods.find(
+        (good) => good.name === name || good.code === name,
+      );
+      return { item, selected, quantity: parsePositiveNumber(item.quantity) };
+    });
+    if (requestedGoods.some(({ selected }) => !selected)) {
+      toast.error("Select a QC-approved finished product for every row");
+      return;
+    }
+    if (new Set(requestedGoods.map(({ selected }) => selected!.id)).size !== requestedGoods.length) {
+      toast.error("Select each finished good only once");
+      return;
+    }
+    if (requestedGoods.some(({ quantity }) => quantity === null || !Number.isInteger(quantity))) {
+      toast.error("Enter a whole number of sections for every finished good");
+      return;
+    }
+    const overLimit = requestedGoods.find(
+      ({ selected, quantity }) => quantity! > selected!.quantity,
+    );
+    if (overLimit) {
+      toast.error(
+        `${overLimit.selected!.name} has only ${overLimit.selected!.quantity} transport sections available`,
+      );
       return;
     }
     if (
@@ -165,13 +212,9 @@ function SupplierDispatchPage() {
       document.getElementById("pickup-date")?.focus();
       return;
     }
-    const selectedGood = finishedGoods.find(
-      (good) => good.name === names[0] || good.code === names[0],
-    );
-    if (!selectedGood) { toast.error("Select a QC-approved finished product"); return; }
-    if (!selectedGood.eligible) { toast.error(selectedGood.reason || "This FG is not ready for section dispatch"); return; }
-    if (selectedGood && firstQuantity > selectedGood.quantity) {
-      toast.error("Quantity exceeds available finished goods stock");
+    const ineligible = requestedGoods.find(({ selected }) => !selected!.eligible);
+    if (ineligible) {
+      toast.error(ineligible.selected!.reason || `${ineligible.selected!.name} is not ready for section dispatch`);
       return;
     }
     const vehicle = firstTransport.vehicle_number;
@@ -179,57 +222,47 @@ function SupplierDispatchPage() {
     const contact = firstTransport.driver_contact;
     setSubmitting(true);
     try {
-      const createdDispatch = await api.createSupplierFinishedGoodsDispatchRequest({
-        finished_goods_id: selectedGood?.id,
-        product_code: selectedGood?.code || names[0] || "FINISHED-GOOD",
-        product_name: names[0] || "Finished Good",
-        quantity: firstQuantity,
-        vehicle_number: vehicle,
-        driver_name: driver,
-        driver_contact: contact,
-        transport_entries: validTransportEntries,
-        expected_pickup_date: expectedPickupDate,
-        /* request metadata is persisted by the supplier request endpoint */
-        /* legacy dispatch fields below are intentionally ignored */
-        order_number: `SUP-DISPATCH-${Date.now()}`,
-        customer_name: "Warehouse",
-        dispatch_type: "Finished Goods",
-        warehouse_id: "WH-01",
-        contact_person: driver,
-        contact_phone: contact,
-        transporter: vehicle,
-        notes: validTransportEntries
-          .map(
-            (entry) =>
-              `Vehicle: ${entry.vehicle_number}\nDriver: ${entry.driver_name}\nDriver contact: ${entry.driver_contact}`,
-          )
-          .join("\n\n"),
-        items: goods.map((item) => ({
-          material_code: item.name.trim().toUpperCase().replace(/\s+/g, "-") || "FINISHED-GOOD",
-          material_name: item.name.trim(),
-          quantity_ordered: parsePositiveNumber(item.quantity) ?? 0,
-          quantity_available: parsePositiveNumber(item.quantity) ?? 0,
-          quantity_pending: parsePositiveNumber(item.quantity) ?? 0,
-          uom: "PCS",
-        })),
-      } as any);
-      const dispatchKey = String(
-        createdDispatch?.dispatch_number ||
-          createdDispatch?.order_number ||
-          createdDispatch?.id ||
-          "",
-      );
-      if (dispatchKey) {
-        const savedDetails = JSON.parse(window.localStorage.getItem(dispatchDetailsKey) || "{}");
-        savedDetails[dispatchKey] = {
+      const createdDispatches: any[] = [];
+      // Create in sequence because the API allocates the next human-readable
+      // request number transactionally for each Finished Good.
+      for (const { selected, quantity } of requestedGoods) {
+        createdDispatches.push(
+          await api.createSupplierFinishedGoodsDispatchRequest({
+            finished_goods_id: selected!.id,
+            product_code: selected!.code,
+            product_name: selected!.name,
+            quantity: quantity!,
+            uom: selected!.uom || "PCS",
+            vehicle_number: vehicle,
+            driver_name: driver,
+            driver_contact: contact,
+            transport_entries: validTransportEntries,
+            expected_pickup_date: expectedPickupDate,
+          }),
+        );
+      }
+      const savedDetails = JSON.parse(window.localStorage.getItem(dispatchDetailsKey) || "{}");
+      for (const createdDispatch of createdDispatches) {
+        const dispatchKey = String(
+          createdDispatch?.dispatch_number ||
+            createdDispatch?.request_number ||
+            createdDispatch?.order_number ||
+            createdDispatch?.id ||
+            "",
+        );
+        if (dispatchKey) savedDetails[dispatchKey] = {
           vehicle_number: vehicle,
           driver_name: driver,
           driver_contact: contact,
           transport_entries: validTransportEntries,
         };
-        window.localStorage.setItem(dispatchDetailsKey, JSON.stringify(savedDetails));
       }
-      toast.success("Dispatch created successfully");
+      window.localStorage.setItem(dispatchDetailsKey, JSON.stringify(savedDetails));
+      toast.success(
+        createdDispatches.length === 1
+          ? "Dispatch request created successfully"
+          : `${createdDispatches.length} finished-goods dispatch requests created successfully`,
+      );
       setOpen(false);
       setTransportEntries([createTransportEntry()]);
       setGoods([{ name: "", quantity: "", custom: false }]);
@@ -246,24 +279,44 @@ function SupplierDispatchPage() {
 
   return (
     <AppShell
-      title="Supplier Dispatch"
-      subtitle="Prepare and submit advance shipment notifications for warehouse arrival."
+      title={
+        <span className="supplier-page-title inline-flex items-center gap-3">
+          <span className="supplier-page-title-icon inline-flex size-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-primary">
+            <PackageCheck className="size-5" aria-hidden="true" />
+          </span>
+          FG Dispatch Requests
+        </span>
+      }
+      subtitle="Request finished goods pickup and track each dispatch through loading and gate exit."
       actions={
-        <Button
-          type="button"
-          className="h-10 rounded-lg"
-          onClick={() => {
-            void loadAssemblyFinishedGoods();
-            setPickupDateTouched(false);
-            setTransportEntries([createTransportEntry()]);
-            setOpen(true);
-          }}
-        >
-          <Plus className="mr-2 size-4" /> Create Dispatch
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            data-refresh-control="true"
+            aria-label="Refresh finished goods dispatch requests"
+            title="Refresh finished goods dispatch requests"
+            disabled={historyLoading || finishedGoodsLoading}
+            onClick={() => void Promise.all([loadDispatchHistory(), loadAssemblyFinishedGoods()])}
+          >
+            {historyLoading || finishedGoodsLoading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+          </Button>
+          <Button
+            type="button"
+            className="h-10 rounded-lg"
+            onClick={() => {
+              void loadAssemblyFinishedGoods();
+              setPickupDateTouched(false);
+              setTransportEntries([createTransportEntry()]);
+              setOpen(true);
+            }}
+          >
+            <Plus className="mr-2 size-4" /> Create Dispatch
+          </Button>
+        </div>
       }
     >
-      <Card className="overflow-hidden rounded-xl border-border bg-card shadow-sm">
+      <Card className="supplier-module-page overflow-hidden rounded-xl border-border bg-card shadow-sm">
         <CardHeader className="flex flex-col gap-4 space-y-0 border-b px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <CardTitle className="text-lg">Dispatch history</CardTitle>
@@ -272,24 +325,11 @@ function SupplierDispatchPage() {
               {!historyLoading && !historyError && (
                 <>
                   {" "}
-                  {dispatchHistory.length} dispatch{dispatchHistory.length === 1 ? "" : "es"}.
+                  {newestFirstDispatchHistory.length} dispatch{newestFirstDispatchHistory.length === 1 ? "" : "es"}.
                 </>
               )}
             </CardDescription>
           </div>
-          <Button data-refresh-control="true" size="icon" aria-label="Refresh dispatch history" title="Refresh dispatch history"
-            type="button"
-            variant="outline"
-            className="h-10 rounded-lg"
-            disabled={historyLoading}
-            onClick={() => void loadDispatchHistory()}
-          >
-            {historyLoading ? (
-              <Loader2 className="mr-2 size-4 animate-spin" />
-            ) : (
-              <RefreshCw className="size-4" />
-            )}
-          </Button>
         </CardHeader>
         <CardContent className="p-0">
           {historyLoading ? (
@@ -312,14 +352,14 @@ function SupplierDispatchPage() {
                 Try again
               </Button>
             </div>
-          ) : dispatchHistory.length === 0 ? (
+          ) : newestFirstDispatchHistory.length === 0 ? (
             <div className="flex min-h-64 flex-col items-center justify-center px-6 py-12 text-center">
               <span className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-blue-50 text-primary">
                 <PackageCheck className="size-7" aria-hidden="true" />
               </span>
               <h3 className="text-base font-semibold">No dispatch requests yet</h3>
               <p className="mt-2 max-w-md text-sm text-muted-foreground">
-                Finished goods dispatch requests you create will appear here with their vehicle, driver, and status details.
+                Your newest pickup requests will appear here with their vehicle, driver, and progress.
               </p>
               <Button type="button" className="mt-5 h-10 rounded-lg" onClick={() => { void loadAssemblyFinishedGoods(); setPickupDateTouched(false); setOpen(true); }}>
                 <Plus className="mr-2 size-4" /> Create Dispatch
@@ -384,9 +424,9 @@ function SupplierDispatchPage() {
               </table>
             </div>
           )}
-          {!historyLoading && !historyError && dispatchHistory.length > 0 && (
+          {!historyLoading && !historyError && newestFirstDispatchHistory.length > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm">
-              <p className="text-muted-foreground">Showing {historyStart + 1}–{Math.min(historyStart + 10, dispatchHistory.length)} of {dispatchHistory.length} dispatches</p>
+              <p className="text-muted-foreground">Showing {historyStart + 1}–{Math.min(historyStart + 10, newestFirstDispatchHistory.length)} of {newestFirstDispatchHistory.length} dispatches</p>
               <nav aria-label="Dispatch history pagination" className="flex items-center gap-3">
                 <Button size="sm" variant="outline" disabled={currentHistoryPage === 1} onClick={() => setHistoryPage(currentHistoryPage - 1)}>Previous</Button>
                 <span aria-live="polite">{currentHistoryPage} / {historyPageCount}</span>
@@ -509,7 +549,7 @@ function SupplierDispatchPage() {
                             role="alert"
                             className="text-xs text-rose-600"
                           >
-                            Enter a valid registration, such as KA01AB1234 or 22BH1234AA.
+                Enter an Indian registration from any state, such as KA01AB1234, MH12A1234, or 22BH1234AA.
                           </p>
                         )}
                       </div>
@@ -625,7 +665,7 @@ function SupplierDispatchPage() {
               <div>
                 <h3 className="font-semibold">Finished goods</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  All finished goods are listed. Products awaiting QC or transport sections are shown but cannot be dispatched yet. Assembly selects the sections for loading.
+                  Select an eligible finished good and request up to its remaining transport sections. Assembly assigns and scans the specific section QR codes for loading.
                 </p>
               </div>
               {finishedGoodsError && (
@@ -653,9 +693,30 @@ function SupplierDispatchPage() {
                   No finished goods records are currently available in Assembly.
                 </p>
               )}
-              <p className="text-sm">{(() => { const selected = finishedGoods.find(g => g.name === goods[0]?.name || g.code === goods[0]?.name); return selected ? `FG ID: ${selected.mainId} - Remaining sections: ${selected.quantity}` : "Select a finished product to see its FG ID and remaining sections."; })()}</p>
+              {(() => {
+                const selected = finishedGoods.find(
+                  (good) => good.name === goods[0]?.name || good.code === goods[0]?.name,
+                );
+                return (
+                  <div className="rounded-lg border border-[#DFE7F0] bg-[#F6F9FC] px-3 py-2.5 text-sm text-[#52647D]">
+                    {selected ? (
+                      <>
+                        <span className="font-medium text-[#172B4D]">FG ID: {selected.mainId}</span>
+                        <span className="mx-2 text-[#9BAABD]" aria-hidden="true">•</span>
+                        <span>
+                          {selected.quantity} {selected.uom || "PCS"} transport sections available
+                        </span>
+                        {!selected.eligible && selected.reason && (
+                          <span className="mt-1 block text-rose-700">{selected.reason}</span>
+                        )}
+                      </>
+                    ) : (
+                      "Choose a finished good to view its FG ID and available sections."
+                    )}
+                  </div>
+                );
+              })()}
               {goods.map((item, index) => (
-
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto]" key={index}>
                   <div className="space-y-1.5">
                     <Label htmlFor={`finished-good-${index}`}>Finished good *</Label>
@@ -666,7 +727,14 @@ function SupplierDispatchPage() {
                       onValueChange={(value) =>
                         setGoods((rows) =>
                           rows.map((row, i) =>
-                            i === index ? { ...row, name: value === "__clear_selection__" ? "" : value, custom: false } : row,
+                            i === index
+                              ? {
+                                  ...row,
+                                  name: value === "__clear_selection__" ? "" : value,
+                                  quantity: "",
+                                  custom: false,
+                                }
+                              : row,
                           ),
                         )
                       }
@@ -683,13 +751,47 @@ function SupplierDispatchPage() {
                       <SelectContent className="supplier-dispatch-goods-menu">
                       <SelectItem value="__clear_selection__">Select a finished good</SelectItem>
                       {finishedGoods.map((good) => (
-                        <SelectItem key={good.code} value={good.name}>
+                        <SelectItem
+                          key={good.id}
+                          value={good.name}
+                          disabled={goods.some(
+                            (row, rowIndex) => rowIndex !== index && row.name === good.name,
+                          )}
+                        >
                           {good.name} ({good.quantity}
                           {good.uom ? ` ${good.uom}` : ""})
                         </SelectItem>
                       ))}
                       </SelectContent>
                     </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`finished-good-quantity-${index}`}>Sections requested *</Label>
+                    <Input
+                      id={`finished-good-quantity-${index}`}
+                      aria-label={`Sections requested for finished good ${index + 1}`}
+                      required
+                      className="h-11 rounded-[10px] text-right"
+                      min="1"
+                      max={
+                        finishedGoods.find(
+                          (good) => good.name === item.name || good.code === item.name,
+                        )?.quantity || undefined
+                      }
+                      step="1"
+                      type="number"
+                      inputMode="numeric"
+                      placeholder="Sections"
+                      value={item.quantity}
+                      disabled={!item.name || finishedGoodsLoading}
+                      onChange={(event) =>
+                        setGoods((rows) =>
+                          rows.map((row, rowIndex) =>
+                            rowIndex === index ? { ...row, quantity: event.target.value } : row,
+                          ),
+                        )
+                      }
+                    />
                   </div>
                   {goods.length > 1 && (
                     <Button
@@ -705,6 +807,22 @@ function SupplierDispatchPage() {
                   )}
                 </div>
               ))}
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg"
+                disabled={
+                  finishedGoodsLoading ||
+                  finishedGoods.length === 0 ||
+                  goods.length >= finishedGoods.length
+                }
+                onClick={() =>
+                  setGoods((rows) => [...rows, { name: "", quantity: "", custom: false }])
+                }
+              >
+                <Plus className="mr-1.5 size-4" />
+                Add Finished Good
+              </Button>
             </div>
             <div className="flex flex-col-reverse justify-end gap-2 sm:flex-row">
               <Button

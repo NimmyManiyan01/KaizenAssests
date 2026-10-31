@@ -922,12 +922,14 @@ class DockAllocationService:
             # allocation. Reconcile only with completion evidence for this
             # exact gate entry, vehicle and dock.
             from app.modules.gate.infrastructure.persistence.models import DockAssignmentModel, GateEntryModel
+            from app.modules.receiving.infrastructure.persistence.models import GrnModel
 
             gate_refs = [GateEntryModel.gate_entry_number == req.existing_gate_pass_id]
             try:
                 gate_refs.append(GateEntryModel.id == uuid.UUID(req.existing_gate_pass_id))
             except (ValueError, TypeError, AttributeError):
                 pass
+            normalized_vehicle = req.vehicle_number.replace("-", "").replace(" ", "").upper()
             completed_assignment = (await session.execute(
                 select(DockAssignmentModel)
                 .join(GateEntryModel, GateEntryModel.id == DockAssignmentModel.gate_entry_id)
@@ -936,13 +938,79 @@ class DockAllocationService:
                     or_(*gate_refs),
                     DockMasterModel.id == req.assigned_dock_id,
                     DockMasterModel.status == DockStatus.OCCUPIED.value,
-                    DockAssignmentModel.vehicle_number == req.vehicle_number,
+                    func.upper(
+                        func.replace(func.replace(DockAssignmentModel.vehicle_number, "-", ""), " ", "")
+                    ) == normalized_vehicle,
                     DockAssignmentModel.prepared_grn_id.is_not(None),
                     DockAssignmentModel.receiving_completed_at.is_not(None),
                     DockAssignmentModel.dock_released_at.is_(None),
                 ).with_for_update()
             )).scalar_one_or_none()
-        if req.status not in {"OCCUPIED", "AT_DOCK"} and completed_assignment is None:
+
+            if completed_assignment is None:
+                # A formerly broad ASN match may have attached the GRN to a
+                # sibling vehicle.  The completed GRN itself is authoritative
+                # evidence, so repair the exact gate/vehicle/dock assignment
+                # before advancing the allocation.
+                exact_assignment = (await session.execute(
+                    select(DockAssignmentModel)
+                    .join(GateEntryModel, GateEntryModel.id == DockAssignmentModel.gate_entry_id)
+                    .join(DockMasterModel, DockMasterModel.dock_code == DockAssignmentModel.dock_number)
+                    .where(
+                        or_(*gate_refs),
+                        DockMasterModel.id == req.assigned_dock_id,
+                        DockMasterModel.status == DockStatus.OCCUPIED.value,
+                        func.upper(
+                            func.replace(func.replace(DockAssignmentModel.vehicle_number, "-", ""), " ", "")
+                        ) == normalized_vehicle,
+                        DockAssignmentModel.dock_released_at.is_(None),
+                    )
+                    .with_for_update()
+                )).scalar_one_or_none()
+                completed_grn = None
+                if exact_assignment is not None:
+                    completed_grn = (await session.execute(
+                        select(GrnModel).where(
+                            GrnModel.status.in_(["COMPLETED", "POSTED", "RECEIVING_COMPLETE"]),
+                            or_(
+                                GrnModel.gate_entry_id == exact_assignment.gate_entry_id,
+                                func.upper(GrnModel.gate_entry_number)
+                                == req.existing_gate_pass_id.strip().upper(),
+                            ),
+                            func.upper(
+                                func.replace(func.replace(GrnModel.vehicle_number, "-", ""), " ", "")
+                            ) == normalized_vehicle,
+                            func.upper(GrnModel.dock_number)
+                            == exact_assignment.dock_number.strip().upper(),
+                        ).with_for_update()
+                    )).scalar_one_or_none()
+                if exact_assignment is not None and completed_grn is not None:
+                    conflicting_assignment = (await session.execute(
+                        select(DockAssignmentModel).where(
+                            DockAssignmentModel.prepared_grn_id == completed_grn.id,
+                            DockAssignmentModel.id != exact_assignment.id,
+                        ).with_for_update()
+                    )).scalar_one_or_none()
+                    if conflicting_assignment is not None:
+                        conflicting_assignment.prepared_grn_id = None
+                    exact_assignment.prepared_grn_id = completed_grn.id
+                    exact_assignment.receiving_completed_at = completed_grn.posted_at or datetime.now(timezone.utc)
+                    exact_assignment.receiving_completed_by = completed_grn.posted_by or performed_by
+                    completed_assignment = exact_assignment
+        if req.status == AllocationStatus.COMPLETED.value:
+            return req
+
+        valid_complete_statuses = {
+            "OCCUPIED",
+            "AT_DOCK",
+            "DOCK_ASSIGNED",
+            "DOCK_ALLOCATED",
+            "ASSIGNED",
+            "IN_PROGRESS",
+            "IN_RECEIVING",
+            "RECEIVING",
+        }
+        if req.status not in valid_complete_statuses and completed_assignment is None:
             raise HTTPException(status_code=409, detail=f"Receiving cannot complete while allocation is {req.status}")
 
         previous_status = req.status
@@ -985,7 +1053,20 @@ class DockAllocationService:
             raise HTTPException(status_code=404, detail="Allocation request or dock not found")
 
         if req.status != AllocationStatus.COMPLETED.value:
-            raise HTTPException(status_code=409, detail="Receiving must be completed before the dock can be released")
+            if req.status in {
+                "OCCUPIED",
+                "AT_DOCK",
+                "DOCK_ASSIGNED",
+                "DOCK_ALLOCATED",
+                "ASSIGNED",
+                "IN_PROGRESS",
+                "IN_RECEIVING",
+                "RECEIVING",
+            }:
+                req.status = AllocationStatus.COMPLETED.value
+                req.completed_at = datetime.now(timezone.utc)
+            else:
+                raise HTTPException(status_code=409, detail="Receiving must be completed before the dock can be released")
 
         if not req.assigned_dock_id:
             raise HTTPException(status_code=409, detail="Allocation has no dock to release")

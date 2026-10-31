@@ -1078,6 +1078,7 @@ function AssemblyMaterialRequestsPage() {
                           <th className="p-2 pl-3">Raw Material</th>
                           <th className="p-2 text-right">Qty per Product</th>
                           <th className="p-2 text-right font-semibold">Total Required Qty</th>
+                          <th className="p-2 text-right font-semibold">Available in WH</th>
                           <th className="p-2 text-right pr-3">UOM</th><th className="p-2 text-right">Action</th>
                         </tr>
                       </thead>
@@ -1097,6 +1098,9 @@ function AssemblyMaterialRequestsPage() {
                               <td className="p-2 text-right">{item.quantity_per_unit}</td>
                               <td className="p-2 text-right font-bold text-foreground">
                                 {Number(formData.target_quantity) > 0 ? item.required_quantity : "Enter quantity"}
+                              </td>
+                              <td className={`p-2 text-right font-bold ${Number(item.available_quantity ?? 0) >= Number(item.required_quantity) ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                                {item.available_quantity ?? 0}
                               </td>
                               <td className="p-2 text-right pr-3 font-medium">{item.uom}</td>
                               <td className="p-2 text-right"><Button type="button" variant="outline" size="sm" disabled={savingBomMaterial} onClick={() => {

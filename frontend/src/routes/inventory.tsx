@@ -166,7 +166,7 @@ function SimpleWarehouseModule() {
   const [materialQrVerified, setMaterialQrVerified] = useState(false);
   const [binQrVerified, setBinQrVerified] = useState(false);
   const [qrScanError, setQrScanError] = useState("");
-  const [cameraField, setCameraField] = useState<"material" | "bin" | null>(null);
+  const [cameraField, setCameraField] = useState<"material" | "bin" | "pickup-material" | "pickup-bin" | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
   const cameraCanvasRef = useRef<HTMLCanvasElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
@@ -180,6 +180,9 @@ function SimpleWarehouseModule() {
     quantity: "",
   });
   const [pickupQrImages, setPickupQrImages] = useState({ material: "", rack: "" });
+  const [pickupQrVerified, setPickupQrVerified] = useState({ material: false, rack: false });
+  const [pickupQrError, setPickupQrError] = useState("");
+  const [availablePickupBin, setAvailablePickupBin] = useState<any>(null);
   const pickupMaterialFileInput = useRef<HTMLInputElement>(null);
   const pickupRackFileInput = useRef<HTMLInputElement>(null);
   const [selectedLocationId, setSelectedLocationId] = useState("");
@@ -242,10 +245,19 @@ function SimpleWarehouseModule() {
       const image = context.getImageData(0, 0, canvas.width, canvas.height);
       const result = jsQR(image.data, image.width, image.height);
       if (result?.data) {
-        setPutawayScan((current) => ({
-          ...current,
-          [cameraField === "material" ? "materialQr" : "binQr"]: result.data,
-        }));
+        if (cameraField === "pickup-material" || cameraField === "pickup-bin") {
+          const pickupField = cameraField === "pickup-material" ? "material" : "rack";
+          setPickupConfirmation((current) => ({
+            ...current,
+            [pickupField === "material" ? "material_scan" : "zone_scan"]: result.data,
+          }));
+          void verifyPickupQr(pickupField, result.data);
+        } else {
+          setPutawayScan((current) => ({
+            ...current,
+            [cameraField === "material" ? "materialQr" : "binQr"]: result.data,
+          }));
+        }
         setCameraField(null);
       }
     }, 250);
@@ -317,16 +329,32 @@ function SimpleWarehouseModule() {
       // historical records.
       const grnKeys = Array.from(
         new Set(
-          normalizedPutawayTasks.map((task: any) => task.grn_id).filter((value: any) => value),
+          normalizedPutawayTasks
+            .map((task: any) => task.grn_number || task.grnNumber || task.grn_id)
+            .filter((value: any) => value),
         ),
       );
       const canonicalByGrnMaterial = new Map<string, Set<string>>();
+      const canonicalMaterialsByGrn = new Map<string, Set<string>>();
       await Promise.all(
         grnKeys.map(async (grnKey) => {
           try {
             const detail = await api.getGrnDetail(String(grnKey));
+            if (!detail || !Array.isArray(detail.lines)) return;
+            const canonicalMaterials = new Set<string>();
+            const identityKeys = Array.from(new Set([
+              String(grnKey),
+              String(detail?.grn_id || ""),
+              String(detail?.grn_number || ""),
+            ].filter(Boolean)));
             for (const line of Array.isArray(detail?.lines) ? detail.lines : []) {
+              const itemCode = String(line.item_code || line.material_code || "")
+                .trim()
+                .toUpperCase();
+              if (!itemCode) continue;
               const approved = Number(line.quality_approved_quantity ?? line.good_quantity ?? 0);
+              if (!(approved > 0)) continue;
+              canonicalMaterials.add(itemCode);
               let remaining = approved;
               const allowed = new Set<string>();
               for (const batch of [...(Array.isArray(line.batches) ? line.batches : [])].sort(
@@ -343,11 +371,13 @@ function SimpleWarehouseModule() {
                 remaining -= Math.min(quantity, remaining);
               }
               if (allowed.size > 0) {
-                canonicalByGrnMaterial.set(
-                  `${grnKey}:${String(line.item_code || "").toUpperCase()}`,
-                  allowed,
-                );
+                for (const identityKey of identityKeys) {
+                  canonicalByGrnMaterial.set(`${identityKey}:${itemCode}`, allowed);
+                }
               }
+            }
+            for (const identityKey of identityKeys) {
+              canonicalMaterialsByGrn.set(identityKey, canonicalMaterials);
             }
           } catch {
             // The task endpoint remains the source if a legacy GRN cannot be read.
@@ -355,12 +385,18 @@ function SimpleWarehouseModule() {
         }),
       );
       normalizedPutawayTasks = normalizedPutawayTasks.filter((task: any) => {
+        const grnKey = String(task.grn_number || task.grnNumber || task.grn_id || "");
+        const itemCode = String(task.item_code || task.material_code || "")
+          .trim()
+          .toUpperCase();
+        const canonicalMaterials = canonicalMaterialsByGrn.get(grnKey);
+        if (canonicalMaterials && !canonicalMaterials.has(itemCode)) return false;
         const batch = String(task.batch_number || task.batchNumber || "")
           .trim()
           .toUpperCase();
         if (!batch || !task.grn_id) return true;
         const allowed = canonicalByGrnMaterial.get(
-          `${task.grn_id}:${String(task.item_code || task.material_code || "").toUpperCase()}`,
+          `${grnKey}:${itemCode}`,
         );
         return !allowed || allowed.has(batch);
       });
@@ -401,7 +437,19 @@ function SimpleWarehouseModule() {
           location: "-",
           is_catalog_item: true,
         }));
-      const rowsToRefresh = [...stockRows, ...catalogRows];
+      // The warehouse summary is location/batch based, so one material can be
+      // returned once for every stored balance. This screen is a material-level
+      // overview and its detail endpoint already supplies all locations and
+      // batches; keep one row per material code before enriching it.
+      const rowsByMaterialCode = new Map<string, any>();
+      for (const row of [...stockRows, ...catalogRows]) {
+        const materialKey = String(row.material_code || row.code || "")
+          .trim()
+          .toUpperCase();
+        const key = materialKey || `ROW:${row.id || rowsByMaterialCode.size}`;
+        if (!rowsByMaterialCode.has(key)) rowsByMaterialCode.set(key, row);
+      }
+      const rowsToRefresh = Array.from(rowsByMaterialCode.values());
       const refreshedStockRows = await Promise.all(
         rowsToRefresh.map(async (row: any) => {
           const code = row.material_code || row.code;
@@ -460,8 +508,8 @@ function SimpleWarehouseModule() {
             item.batch_number || item.batch_lot_number || task.confirmation?.batch_number,
           uom: item.uom,
           pick_location: item.pick_location || task.pick_location || task.destination,
-          confirmation: task.confirmation,
-          status: task.status,
+          confirmation: item.confirmation || task.confirmation,
+          status: item.status || task.status,
           assembly_pick_task_id: task.id,
         })),
       );
@@ -528,6 +576,19 @@ function SimpleWarehouseModule() {
     }
     return list;
   }, [bins]);
+  const scanAssignedBin = scanPutawayTask
+    ? allFlattenedBins.find(
+        (bin) =>
+          bin.id === scanPutawayTask.destination_bin_id ||
+          bin.bin_code === scanPutawayTask.destination_bin_code,
+      )
+    : undefined;
+  const scanAvailableCapacity = Number(
+    scanAssignedBin?.rack_capacity?.available_capacity ?? Number.POSITIVE_INFINITY,
+  );
+  const scanMaximumQuantity = scanPutawayTask
+    ? Math.min(Number(scanPutawayTask.quantity || 0), scanAvailableCapacity)
+    : 0;
 
   // Action: Assign Storage Location to Putaway Task
   const handleConfirmAssignPutaway = async () => {
@@ -582,7 +643,17 @@ function SimpleWarehouseModule() {
   const openPutawayScan = (task: any) => {
     setSelectedPutawayGroup(null);
     setScanPutawayTask(task);
-    setPutawayScan({ materialQr: "", binQr: "", quantity: String(task.quantity ?? "") });
+    const assignedBin = allFlattenedBins.find(
+      (bin) => bin.id === task.destination_bin_id || bin.bin_code === task.destination_bin_code,
+    );
+    const availableCapacity = Number(
+      assignedBin?.rack_capacity?.available_capacity ?? Number.POSITIVE_INFINITY,
+    );
+    setPutawayScan({
+      materialQr: "",
+      binQr: "",
+      quantity: String(Math.min(Number(task.quantity || 0), availableCapacity)),
+    });
     setPutawayScanValid(false);
     setMaterialQrVerified(false);
     setBinQrVerified(false);
@@ -600,6 +671,68 @@ function SimpleWarehouseModule() {
     pickupToConfirm?.confirmation?.rack_qr ||
     pickupToConfirm?.rack_qr ||
     "";
+
+  useEffect(() => {
+    let active = true;
+    setAvailablePickupBin(null);
+    if (!pickupToConfirm?.material_code || pickupToConfirm?.status === "COMPLETED") return;
+    void api.getInventoryLocationBalances(pickupToConfirm.material_code)
+      .then(async (rows: any[]) => {
+        const balance = (Array.isArray(rows) ? rows : [])
+          .filter((row: any) => Number(row.available_quantity || 0) > 0)
+          .sort((a: any, b: any) => Number(b.available_quantity || 0) - Number(a.available_quantity || 0))[0];
+        if (!balance) return;
+        const resolved = await api.resolveBinQr(balance.location_code);
+        if (active) setAvailablePickupBin({
+          ...balance,
+          ...resolved,
+          qr_value: resolved.qr_identifier || resolved.qr_code || balance.location_code,
+        });
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [pickupToConfirm?.id, pickupToConfirm?.material_code, pickupToConfirm?.picked_quantity, pickupToConfirm?.status]);
+
+  const verifyPickupQr = async (field: "material" | "rack", rawValue?: string) => {
+    const value = (rawValue ?? (field === "material" ? pickupConfirmation.material_scan : pickupConfirmation.zone_scan)).trim();
+    if (!pickupToConfirm || !value) {
+      setPickupQrError(`Scan or enter the ${field === "material" ? "material" : "BIN"} QR first.`);
+      return false;
+    }
+    try {
+      if (field === "material") {
+        const expectedCode = String(pickupToConfirm.material_code || "").trim().toUpperCase();
+        const expectedBatch = String(pickupToConfirm.batch_number || "").trim().toUpperCase();
+        const normalizedValue = value.toUpperCase();
+        if (!normalizedValue.includes(expectedCode) && (!expectedBatch || !normalizedValue.includes(expectedBatch))) {
+          throw new Error(`Material QR does not match ${expectedCode}.`);
+        }
+      } else {
+        const rack = await api.resolveBinQr(value);
+        const expectedLocation = String(pickupToConfirm.pick_location || "").trim().toUpperCase();
+        const actualLocation = String(rack.location_code || "").trim().toUpperCase();
+        const actualBin = String(rack.bin_code || "").trim().toUpperCase();
+        const balances = await api.getInventoryLocationBalances(pickupToConfirm.material_code);
+        const matchingBalance = balances.find((balance: any) => {
+          const balanceLocation = String(balance.location_code || "").trim().toUpperCase();
+          return balanceLocation === actualLocation || balanceLocation.includes(actualBin);
+        });
+        if (!matchingBalance || Number(matchingBalance.available_quantity || 0) <= 0)
+          throw new Error(`BIN QR does not contain available ${pickupToConfirm.material_code}.`);
+        if (expectedLocation && actualLocation !== expectedLocation && !expectedLocation.includes(actualBin)) {
+          toast.info(`Verified alternate BIN with ${matchingBalance.available_quantity} ${matchingBalance.uom || ""} available.`);
+        }
+      }
+      setPickupQrVerified((current) => ({ ...current, [field]: true }));
+      setPickupQrError("");
+      toast.success(`${field === "material" ? "Material" : "BIN"} QR verified.`);
+      return true;
+    } catch (error: any) {
+      setPickupQrVerified((current) => ({ ...current, [field]: false }));
+      setPickupQrError(error?.message || `${field === "material" ? "Material" : "BIN"} QR could not be verified.`);
+      return false;
+    }
+  };
 
   const decodeQrUpload = (file: File, field: "material" | "bin") => {
     if (!/image\/(png|jpeg|jpg)/i.test(file.type)) {
@@ -659,6 +792,7 @@ function SimpleWarehouseModule() {
           ...current,
           [field === "material" ? "material_scan" : "zone_scan"]: decoded.data,
         }));
+        void verifyPickupQr(field, decoded.data);
       };
       image.onerror = () => toast.error("Could not load the uploaded QR image.");
       image.src = String(reader.result);
@@ -734,7 +868,8 @@ function SimpleWarehouseModule() {
       !(putawayScan.binQr || "").trim() ||
       !Number.isFinite(quantity) ||
       quantity <= 0 ||
-      quantity > Number(scanPutawayTask.quantity || 0)
+      quantity > Number(scanPutawayTask.quantity || 0) ||
+      quantity > scanMaximumQuantity
     )
       return;
     void Promise.allSettled([
@@ -793,7 +928,7 @@ function SimpleWarehouseModule() {
     return () => {
       active = false;
     };
-  }, [scanPutawayTask, putawayScan.materialQr, putawayScan.binQr, putawayScan.quantity]);
+  }, [scanPutawayTask, putawayScan.materialQr, putawayScan.binQr, putawayScan.quantity, scanMaximumQuantity]);
 
   useEffect(() => {
     if (!scanPutawayTask) {
@@ -813,10 +948,10 @@ function SimpleWarehouseModule() {
       scanPutawayTask.barcode_value ||
       "";
     const previewRackQr =
-      (putawayScan.binQr || "").trim() ||
       assignedBin?.qr_identifier ||
       scanPutawayTask.destination_bin_code ||
       scanPutawayTask.destination_bin ||
+      (putawayScan.binQr || "").trim() ||
       "";
     void Promise.all([
       previewMaterialQr
@@ -849,6 +984,10 @@ function SimpleWarehouseModule() {
       toast.error("Scan the material QR and BIN QR, then enter a valid quantity.");
       return;
     }
+    if (quantity > scanMaximumQuantity) {
+      toast.error(`This rack can currently store only ${scanMaximumQuantity} ${scanPutawayTask.uom || "PCS"}.`);
+      return;
+    }
     setIsSubmitting(true);
     try {
       const resolved = await api.resolveGrnQr(putawayScan.materialQr.trim());
@@ -878,6 +1017,7 @@ function SimpleWarehouseModule() {
         grn_qr_code: putawayScan.materialQr.trim(),
         bin_qr_code: (putawayScan.binQr || "").trim(),
         quantity,
+        batch_number: scanPutawayTask.batch_number || undefined,
       });
       toast.success("Putaway confirmed and inventory updated.");
       setScanPutawayTask(null);
@@ -1190,6 +1330,7 @@ function SimpleWarehouseModule() {
       const key =
         task.grn_number ||
         task.grnNumber ||
+        (task.grn_id ? `grn:${task.grn_id}` : undefined) ||
         task.order_number ||
         task.asn_number ||
         task.asnNumber ||
@@ -2100,6 +2241,13 @@ function SimpleWarehouseModule() {
               pickupTasks={pickupTasks}
               onConfirmPick={(task) => {
                 setPickupFifoAlert("");
+                setPickupQrVerified({ material: false, rack: false });
+                setPickupQrError("");
+                setPickupConfirmation({
+                  material_scan: "",
+                  zone_scan: "",
+                  quantity: String(Math.max(0, Number(task.requested_quantity || 0) - Number(task.picked_quantity || 0))),
+                });
                 setPickupToConfirm(task);
               }}
               onUpdated={() => fetchData(true)}
@@ -2135,7 +2283,7 @@ function SimpleWarehouseModule() {
                           <button
                             type="button"
                             className="underline underline-offset-2"
-                            onClick={() => { setPickupFifoAlert(""); setPickupToConfirm(p); }}
+                            onClick={() => { setPickupFifoAlert(""); setPickupQrVerified({ material: false, rack: false }); setPickupQrError(""); setPickupConfirmation({ material_scan: "", zone_scan: "", quantity: String(Math.max(0, Number(p.requested_quantity || 0) - Number(p.picked_quantity || 0))) }); setPickupToConfirm(p); }}
                           >
                             {p.task_number || p.id}
                           </button>
@@ -2170,7 +2318,7 @@ function SimpleWarehouseModule() {
                           {p.status !== "COMPLETED" && (
                             <Button
                               size="sm"
-                              onClick={() => { setPickupFifoAlert(""); setPickupToConfirm(p); }}
+                              onClick={() => { setPickupFifoAlert(""); setPickupQrVerified({ material: false, rack: false }); setPickupQrError(""); setPickupConfirmation({ material_scan: "", zone_scan: "", quantity: String(Math.max(0, Number(p.requested_quantity || 0) - Number(p.picked_quantity || 0))) }); setPickupToConfirm(p); }}
                               className="h-7 text-xs bg-indigo-600 hover:bg-indigo-700 text-white"
                             >
                               Confirm Pick
@@ -2409,6 +2557,8 @@ function SimpleWarehouseModule() {
           if (!open && !isSubmitting) {
             setPickupToConfirm(null);
             setPickupFifoAlert("");
+            setPickupQrVerified({ material: false, rack: false });
+            setPickupQrError("");
             setPickupConfirmation({ material_scan: "", zone_scan: "", quantity: "" });
           }
         }}
@@ -2483,13 +2633,17 @@ function SimpleWarehouseModule() {
                       value={pickupConfirmation.material_scan}
                       onChange={(event) => {
                         setPickupFifoAlert("");
+                        setPickupQrVerified((current) => ({ ...current, material: false }));
                         setPickupConfirmation((current) => ({
                           ...current,
                           material_scan: event.target.value,
                         }));
                       }}
                     />
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
+                      <Button type="button" variant="outline" size="sm" className="w-full gap-1" onClick={() => setCameraField("pickup-material")}>
+                        <Camera className="size-4" /> Scan &amp; Verify
+                      </Button>
                       <Button type="button" variant="outline" size="sm" className="w-full gap-2" onClick={() => pickupMaterialFileInput.current?.click()}>
                         <Upload className="size-4" /> Upload QR
                       </Button>
@@ -2512,6 +2666,7 @@ function SimpleWarehouseModule() {
                       aria-label="Upload material QR image"
                       onChange={(event) => event.target.files?.[0] && decodePickupQrUpload(event.target.files[0], "material")}
                     />
+                    {pickupQrVerified.material && <p className="text-xs font-semibold text-emerald-700">✓ Material QR verified</p>}
                   </div>
                   <div className="space-y-2.5 rounded-xl border border-border/80 p-3">
                     <span className="inline-flex items-center"><label className="text-xs font-semibold" htmlFor="pickup-zone-scan">
@@ -2521,14 +2676,18 @@ function SimpleWarehouseModule() {
                       id="pickup-zone-scan"
                       required
                       value={pickupConfirmation.zone_scan}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        setPickupQrVerified((current) => ({ ...current, rack: false }));
                         setPickupConfirmation((current) => ({
                           ...current,
                           zone_scan: event.target.value,
-                        }))
-                      }
+                        }));
+                      }}
                     />
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
+                      <Button type="button" variant="outline" size="sm" className="w-full gap-1" onClick={() => setCameraField("pickup-bin")}>
+                        <Camera className="size-4" /> Scan &amp; Verify
+                      </Button>
                       <Button type="button" variant="outline" size="sm" className="w-full gap-2" onClick={() => pickupRackFileInput.current?.click()}>
                         <Upload className="size-4" /> Upload QR
                       </Button>
@@ -2551,7 +2710,25 @@ function SimpleWarehouseModule() {
                       aria-label="Upload bin or location QR image"
                       onChange={(event) => event.target.files?.[0] && decodePickupQrUpload(event.target.files[0], "rack")}
                     />
+                    {pickupQrVerified.rack && <p className="text-xs font-semibold text-emerald-700">✓ BIN QR verified</p>}
+                    {availablePickupBin && (
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 p-2.5 text-xs text-blue-900">
+                        <p className="font-semibold">Remaining stock location</p>
+                        <p className="mt-1">{availablePickupBin.location_code} · {availablePickupBin.available_quantity} {availablePickupBin.uom || ""} available</p>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <Button type="button" size="sm" variant="outline" onClick={() => {
+                            const value = String(availablePickupBin.qr_value || availablePickupBin.location_code || "");
+                            setPickupConfirmation((current) => ({ ...current, zone_scan: value }));
+                            void verifyPickupQr("rack", value);
+                          }}>Use &amp; Verify BIN</Button>
+                          <Button type="button" size="sm" variant="outline" onClick={() => void downloadQrValue(String(availablePickupBin.qr_value || availablePickupBin.location_code || ""), `${availablePickupBin.bin_code || "Available BIN"} QR`)}>
+                            <Download className="mr-1 size-4" /> Download BIN QR
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
+                  {pickupQrError && <p role="alert" className="text-xs font-medium text-rose-600">{pickupQrError}</p>}
                   <div className="space-y-2">
                     <span className="inline-flex items-center"><label className="text-xs font-semibold" htmlFor="pickup-quantity">
                       Quantity picked {pickupToConfirm.uom ? `(${pickupToConfirm.uom})` : ""}
@@ -2578,10 +2755,12 @@ function SimpleWarehouseModule() {
                           0,
                           Number(pickupToConfirm.requested_quantity) -
                             Number(
-                              pickupToConfirm.picked_quantity ||
+                              pickupToConfirm.picked_quantity ??
                                 (pickupToConfirm.status === "COMPLETED"
                                   ? pickupToConfirm.requested_quantity
-                                  : 0),
+                                  : pickupToConfirm.status === "IN_PROGRESS"
+                                    ? pickupToConfirm.quantity
+                                    : 0),
                             ),
                         )}{" "}
                         {pickupToConfirm.uom || ""}
@@ -2617,6 +2796,8 @@ function SimpleWarehouseModule() {
                       !pickupConfirmation.material_scan.trim() ||
                       !pickupConfirmation.zone_scan.trim() ||
                       Number(pickupConfirmation.quantity) <= 0
+                      || !pickupQrVerified.material
+                      || !pickupQrVerified.rack
                     }
                   >
                     {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirm pick"}
@@ -2866,7 +3047,10 @@ function SimpleWarehouseModule() {
                   disabled={!putawayQrImages.bin}
                   onClick={() =>
                     putawayQrImages.bin &&
-                    setQrPreview({ title: "BIN QR", image: putawayQrImages.bin })
+                    setQrPreview({
+                      title: `Assigned BIN QR — ${scanPutawayTask.destination_bin_code || scanPutawayTask.destination_bin || "Bin"}`,
+                      image: putawayQrImages.bin,
+                    })
                   }
                 >
                   View QR
@@ -2883,10 +3067,17 @@ function SimpleWarehouseModule() {
                   type="number"
                   min="0.0001"
                   step="0.0001"
-                  max={scanPutawayTask.quantity}
+                  max={scanMaximumQuantity}
                   value={putawayScan.quantity}
                   onChange={(e) => setPutawayScan((s) => ({ ...s, quantity: e.target.value }))}
                 />
+                {Number.isFinite(scanAvailableCapacity) && (
+                  <p className="text-xs text-muted-foreground">
+                    Rack space available: <span className="font-semibold text-foreground">{Math.max(0, scanAvailableCapacity)} {scanPutawayTask.uom || "PCS"}</span>.
+                    {scanAvailableCapacity < Number(scanPutawayTask.quantity || 0) &&
+                      " Confirm this partial quantity, then assign the remainder to another rack."}
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -2910,7 +3101,7 @@ function SimpleWarehouseModule() {
       <Dialog open={!!cameraField} onOpenChange={(open) => !open && setCameraField(null)}>
         <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
           <DialogHeader>
-            <DialogTitle>Scan {cameraField === "material" ? "Material" : "BIN"} QR</DialogTitle>
+            <DialogTitle>Scan {cameraField?.includes("material") ? "Material" : "BIN"} QR</DialogTitle>
             <DialogDescription>
               Allow camera access and hold the QR label inside the frame.
             </DialogDescription>

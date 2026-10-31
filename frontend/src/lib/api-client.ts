@@ -178,6 +178,27 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   return normalizeQuantityValues(JSON.parse(responseText)) as T;
 }
 
+async function requestWithTimeout<T>(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number,
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await request<T>(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(
+        `The login server did not respond within ${Math.round(timeoutMs / 1000)} seconds. Check that the business service is running, then try again.`,
+      );
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
+}
+
 export const api = {
   // Authentication Use Cases
   async login(
@@ -196,13 +217,14 @@ export const api = {
       throw new Error("Invalid username or password");
     }
     if (username.startsWith("supplier_") || username === "supplier") {
-      const response = await request<any>(
+      const response = await requestWithTimeout<any>(
         `${BUSINESS_API_URL}/api/v1/auth/supplier-login`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ username, password }),
         },
+        15_000,
       );
       const supplierUser = {
         token: response.token,
@@ -214,11 +236,15 @@ export const api = {
       storeAuthSession(supplierUser, rememberMe);
       return supplierUser;
     }
-    const response = await request<any>(`${BUSINESS_API_URL}/api/v1/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
+    const response = await requestWithTimeout<any>(
+      `${BUSINESS_API_URL}/api/v1/auth/login`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      },
+      15_000,
+    );
     if (!response.token || !response.username || !Array.isArray(response.roles)) {
       clearAuthSession();
       throw new Error("The login response is incomplete");
@@ -2616,6 +2642,7 @@ export const api = {
     grn_qr_code: string;
     bin_qr_code: string;
     quantity: number;
+    batch_number?: string;
   }): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/storage/putaway-tasks/execute-putaway`, {
       method: "POST",

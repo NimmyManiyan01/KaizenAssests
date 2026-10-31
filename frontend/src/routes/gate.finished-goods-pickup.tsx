@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Loader2, LogOut, Plus, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, LogOut, Plus, QrCode, RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/gate/finished-goods-pickup")({
   component: FinishedGoodsPickupGatePage,
@@ -188,14 +188,14 @@ function FinishedGoodsPickupGatePage() {
       toast.error("Every assigned vehicle already has a gate pass for this dispatch.");
     }
   };
-  const lookupRequest = () => {
-    const requestNumber = query.trim().toLowerCase();
+  const lookupRequest = (value = query, showNotFound = true) => {
+    const requestNumber = value.trim().toLowerCase();
     if (!requestNumber) return;
     const match = requests.find(
       (request) => String(request.request_number || "").toLowerCase() === requestNumber,
     );
     if (match) chooseRequest(match);
-    else if (requestNumber.includes("-") || requestNumber.length > 5)
+    else if (showNotFound && (requestNumber.includes("-") || requestNumber.length > 5))
       toast.error("Dispatch request not found", {
         description: "Enter an existing dispatch request number.",
       });
@@ -244,10 +244,17 @@ function FinishedGoodsPickupGatePage() {
 
   return (
     <AppShell
-      title="Finished Goods Pickup Entry & Exit"
+      title={
+        <span className="gate-entry-title inline-flex items-center gap-3">
+          <span className="gate-entry-title-icon inline-flex size-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-primary">
+            <QrCode className="size-5" aria-hidden="true" />
+          </span>
+          <span>Finished Goods Pickup Entry &amp; Exit</span>
+        </span>
+      }
       subtitle="Create pickup gate entries, generate gate passes, and securely manage finished-goods vehicle exits."
       actions={
-        <div className="flex items-center gap-2">
+        <div className="gate-entry-actions flex flex-wrap items-center justify-end gap-2">
           <Button onClick={() => setEntryOpen(true)}>
             <Plus className="mr-2 size-4" /> FG Entry
           </Button>
@@ -323,6 +330,15 @@ function FinishedGoodsPickupGatePage() {
                       onChange={(e) => {
                         const value = e.target.value;
                         setQuery(value);
+                        const exactMatch = requests.find(
+                          (request) =>
+                            String(request.request_number || "").toLowerCase() ===
+                            value.trim().toLowerCase(),
+                        );
+                        if (exactMatch) {
+                          chooseRequest(exactMatch);
+                          return;
+                        }
                         if (
                           selected &&
                           value.trim().toLowerCase() !==
@@ -335,7 +351,7 @@ function FinishedGoodsPickupGatePage() {
                           setDriverContact("");
                         }
                       }}
-                      onBlur={lookupRequest}
+                      onBlur={() => lookupRequest()}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault();
@@ -345,7 +361,7 @@ function FinishedGoodsPickupGatePage() {
                       placeholder="Enter dispatch request number"
                     />
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Enter the request number and press Enter to auto-fill the details.
+                      Enter the complete dispatch number to auto-fill the details.
                     </p>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                         <div>

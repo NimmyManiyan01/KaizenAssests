@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
-import { Eye, History, Loader2, RefreshCw } from "lucide-react";
+import { Eye, History, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,12 @@ import { isValidVehicleNumber } from "@/lib/input-validation";
 
 export const Route = createFileRoute("/damage-claims")({ component: Page });
 const actionButtonClass = "h-10 rounded-lg";
+// Keep the UI choices aligned with the backend damage-claim contract.
+// Accepted claims currently support replacement as the resolution action.
+const resolutions = [
+  { value: "REPLACEMENT", label: "Send replacement" },
+] as const;
+
 function Page() {
   const navigate = useNavigate();
   const [claims, setClaims] = useState<any[]>([]),
@@ -34,7 +40,7 @@ function Page() {
       const data = await api.getDamageClaims();
       setClaims(Array.isArray(data) ? data : []);
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Unable to load damage returns";
+      const message = e instanceof Error ? e.message : "Unable to load damage claims";
       setError(message);
       toast.error("Unable to load damage claims", { description: message });
     } finally {
@@ -80,44 +86,52 @@ function Page() {
     : showHistory ? historyClaims : claims;
   return (
     <AppShell
-      title="Damage Returns"
-      subtitle="Review damaged or rejected goods sent from GRN, respond to the supplier claim, and track returns"
+      title={
+        <span className="supplier-page-title inline-flex items-center gap-3">
+          <span className="supplier-page-title-icon inline-flex size-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-primary">
+            <ShieldAlert className="size-5" aria-hidden="true" />
+          </span>
+          Damage Claims
+        </span>
+      }
+      subtitle="Review damaged or rejected goods, respond to claims, and track replacement history."
       actions={
-        <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="default" className="h-10 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setShowHistory(value => !value)}>
-          <History className="size-4" />{showHistory ? "Back to claims" : `History (${historyClaims.length})`}
-        </Button>
-        <Button data-refresh-control="true" size="icon" aria-label="Refresh" title="Refresh"
-          type="button"
-          variant="outline"
-          className="h-10 rounded-lg"
-          onClick={() => void load()}
-        >
-          <RefreshCw className="size-4" /></Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="default" className="h-10 gap-2 rounded-lg bg-primary px-4 text-primary-foreground hover:bg-primary/90" onClick={() => setShowHistory(value => !value)}>
+            <History className="size-4" />{showHistory ? "Back to claims" : `History (${historyClaims.length})`}
+          </Button>
+          <Button data-refresh-control="true" size="icon" aria-label="Refresh damage claims" title="Refresh damage claims"
+            type="button"
+            variant="outline"
+            className="h-10 w-10 rounded-lg"
+            onClick={() => void load()}
+          >
+            <RefreshCw className="size-4" />
+          </Button>
         </div>
       }
     >
       {loading ? (
         <div
-          className="grid h-48 place-items-center rounded-xl border border-border bg-card text-sm text-muted-foreground"
+          className="supplier-module-page grid h-48 place-items-center rounded-xl border border-border bg-card text-sm text-muted-foreground"
           role="status"
         >
           <span className="inline-flex items-center gap-2">
             <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-            Loading damage returns…
+            Loading damage claims…
           </span>
         </div>
       ) : error ? (
-        <Card className="rounded-xl border-border bg-card p-6 text-center shadow-sm sm:p-8">
-          <p className="font-medium text-destructive">Damage returns could not be loaded.</p>
+        <Card className="supplier-module-page rounded-xl border-border bg-card p-6 text-center shadow-sm sm:p-8">
+          <p className="font-medium text-destructive">Damage claims could not be loaded.</p>
           <p className="mt-2 text-sm text-muted-foreground">{error}</p>
           <Button type="button" className="mt-4 h-10 rounded-lg" onClick={() => void load()}>
             Try again
           </Button>
         </Card>
       ) : visibleClaims.length === 0 ? (
-        <Card className="rounded-xl border-border bg-card p-6 text-center shadow-sm sm:p-10">
-          <h3 className="text-base font-semibold">{showHistory ? "No response history yet" : "No pending damage returns"}</h3>
+        <Card className="supplier-module-page rounded-xl border-border bg-card p-6 text-center shadow-sm sm:p-10">
+          <h3 className="text-base font-semibold">{showHistory ? "No response history yet" : "No pending damage claims"}</h3>
           <p className="mt-2 text-sm text-muted-foreground">
             {showHistory ? "Claims appear here after a replacement is sent." : "Claims remain here until you send a replacement."}
           </p>
@@ -129,7 +143,7 @@ function Page() {
             const f = forms[c.id] || {};
             const s = c.shipment;
             const details = (
-              <Card key={c.id} className="rounded-xl border-border bg-card p-3 shadow-sm sm:p-4">
+              <Card key={c.id} className="supplier-module-page rounded-xl border-border bg-card p-3 shadow-sm sm:p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h3 className="font-mono text-base font-semibold text-foreground">

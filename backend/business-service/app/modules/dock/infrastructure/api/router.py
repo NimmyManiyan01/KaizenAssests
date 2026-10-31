@@ -789,17 +789,43 @@ async def start_receiving(
 
 @router.post("/dock-allocations/{id}/complete", response_model=AllocationRequestResponse)
 async def complete_receiving(
-    id: uuid.UUID,
+    id: str,
     user: CurrentUser = Depends(require_permission("gate:write")),
     uow: UnitOfWork = Depends(get_uow),
 ):
-    req = await DockAllocationService.complete_receiving(uow.session, id, user.username)
+    parsed_uuid = None
+    try:
+        parsed_uuid = uuid.UUID(str(id).strip())
+    except (ValueError, TypeError):
+        parsed_uuid = None
+
+    target_id = parsed_uuid
+    if not target_id:
+        clean_code = str(id).strip().replace("Dock ", "").replace("dock ", "").strip()
+        dock_match = (await uow.session.execute(
+            select(DockMasterModel).where(
+                (DockMasterModel.dock_code.ilike(clean_code)) |
+                (DockMasterModel.dock_name.ilike(clean_code))
+            )
+        )).scalars().first()
+        if dock_match:
+            alloc = (await uow.session.execute(
+                select(DockAllocationRequestModel)
+                .where(DockAllocationRequestModel.assigned_dock_id == dock_match.id)
+                .order_by(desc(DockAllocationRequestModel.created_at))
+            )).scalars().first()
+            if alloc:
+                target_id = alloc.id
+    if not target_id:
+        target_id = parsed_uuid or uuid.uuid4()
+
+    req = await DockAllocationService.complete_receiving(uow.session, target_id, user.username)
     return await _build_allocation_response(uow.session, req)
 
 
 @router.post("/dock-allocations/{id}/release", response_model=AllocationRequestResponse)
 async def release_dock(
-    id: uuid.UUID,
+    id: str,
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
     uow: UnitOfWork = Depends(get_uow),
@@ -842,24 +868,66 @@ async def release_dock(
         )
 
     # 5. Look up allocation request & dock
-    req_res = await uow.session.execute(
-        select(DockAllocationRequestModel)
-        .where(
-            (DockAllocationRequestModel.id == id) |
-            (DockAllocationRequestModel.assigned_dock_id == id)
+    parsed_uuid = None
+    try:
+        parsed_uuid = uuid.UUID(str(id).strip())
+    except (ValueError, TypeError):
+        parsed_uuid = None
+
+    req = None
+    if parsed_uuid:
+        req_res = await uow.session.execute(
+            select(DockAllocationRequestModel)
+            .where(
+                (DockAllocationRequestModel.id == parsed_uuid) |
+                (DockAllocationRequestModel.assigned_dock_id == parsed_uuid)
+            )
+            .order_by(desc(DockAllocationRequestModel.created_at))
+            .with_for_update()
         )
-        .order_by(desc(DockAllocationRequestModel.created_at))
-        .with_for_update()
-    )
-    req = req_res.scalars().first()
+        req = req_res.scalars().first()
+
+    if not req:
+        clean_str = str(id).strip()
+        clean_code = clean_str.replace("Dock ", "").replace("dock ", "").strip()
+        dock_match = (await uow.session.execute(
+            select(DockMasterModel).where(
+                (DockMasterModel.dock_code.ilike(clean_code)) |
+                (DockMasterModel.dock_name.ilike(clean_code))
+            )
+        )).scalars().first()
+        if dock_match:
+            req_res = await uow.session.execute(
+                select(DockAllocationRequestModel)
+                .where(DockAllocationRequestModel.assigned_dock_id == dock_match.id)
+                .order_by(desc(DockAllocationRequestModel.created_at))
+                .with_for_update()
+            )
+            req = req_res.scalars().first()
+
+    if not req:
+        clean_str = str(id).strip()
+        req_res = await uow.session.execute(
+            select(DockAllocationRequestModel)
+            .where(
+                (DockAllocationRequestModel.existing_gate_pass_id.ilike(clean_str)) |
+                (DockAllocationRequestModel.vehicle_number.ilike(clean_str))
+            )
+            .order_by(desc(DockAllocationRequestModel.created_at))
+            .with_for_update()
+        )
+        req = req_res.scalars().first()
+
     if not req:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Allocation request or dock not found")
 
-    target_dock_id = req.assigned_dock_id or id
-    dock_res = await uow.session.execute(
-        select(DockMasterModel).where(DockMasterModel.id == target_dock_id).with_for_update()
-    )
-    dock = dock_res.scalar_one_or_none()
+    target_dock_id = req.assigned_dock_id or (parsed_uuid if parsed_uuid else None)
+    dock = None
+    if target_dock_id:
+        dock_res = await uow.session.execute(
+            select(DockMasterModel).where(DockMasterModel.id == target_dock_id).with_for_update()
+        )
+        dock = dock_res.scalar_one_or_none()
 
     # 6. Determine the warehouse associated with this dock / dock allocation
     dock_warehouse_ref_ids: Set[uuid.UUID] = set()
@@ -957,6 +1025,9 @@ async def release_dock(
         )
 
     # 8. Release the dock
+    if req.status != "COMPLETED":
+        req.status = "COMPLETED"
+        await uow.session.flush()
     released = await DockAllocationService.release_dock(uow.session, req.id, user.username)
     return await _build_allocation_response(uow.session, released)
 

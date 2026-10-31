@@ -96,6 +96,9 @@ const normalizePlate = (value: unknown) =>
     .replace(/[\s-]/g, "")
     .toUpperCase();
 
+const displaySupplierName = (value?: string | null) =>
+  String(value || "").replace(/\s*\(EMP-[^)]+\)/gi, "").trim();
+
 function getAsnTransportEntries(asn: any): Omit<AsnTransportEntry, "has_active_gate_pass">[] {
   const assignment = Array.isArray(asn?.logistics)
     ? asn.logistics.find((item: any) => item?.type === "transport_assignment")
@@ -130,6 +133,8 @@ function getAsnTransportEntries(asn: any): Omit<AsnTransportEntry, "has_active_g
 function InboundArrivals() {
   const search = useSearch({ strict: false }) as any;
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
+  const arrivalsRef = useRef<Arrival[]>(arrivals);
+  arrivalsRef.current = arrivals;
   const [docks, setDocks] = useState<Dock[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedArrival, setSelectedArrival] = useState<Arrival | null>(null);
@@ -263,10 +268,46 @@ function InboundArrivals() {
   }, []);
 
   const applyAsnDetails = useCallback((asn: any) => {
-    if (!asn) return;
+    if (!asn) {
+      setSelectedSupplier("");
+      setAutoExpectedDate("");
+      setAsnMaterials([]);
+      setAsnTransportEntries([]);
+      setSelectedTransportIndex(-1);
+      setVehicleNumberInput("");
+      setDriverNameInput("");
+      setDriverMobileInput("");
+      setVehiclePhotoBlob(null);
+      setVehiclePhotoPreview(null);
+      setUploadedVehiclePhoto(null);
+      return;
+    }
+
     setSelectedSupplier(asn.supplier_name || asn.supplier_company_name || "");
     setAutoExpectedDate(asn.expected_arrival_at?.split("T")[0] || asn.delivery_date || "");
     setAsnMaterials(asn.lines || asn.expected_materials || []);
+
+    const transports = getAsnTransportEntries(asn).map((transport) => ({
+      ...transport,
+      has_active_gate_pass: arrivalsRef.current.some(
+        (arrival) =>
+          normalizePlate(arrival.vehicle_number) === normalizePlate(transport.vehicle_number) &&
+          !["REJECTED", "DENIED_ENTRY", "GATE_EXIT_COMPLETED", "VEHICLE_EXITED", "CHECKED_OUT"].includes(
+            String(arrival.status || "").toUpperCase(),
+          ),
+      ),
+    }));
+    setAsnTransportEntries(transports);
+
+    const nextIndex = transports.findIndex((transport) => !transport.has_active_gate_pass);
+    setSelectedTransportIndex(nextIndex);
+    const selectedTransport = nextIndex >= 0 ? transports[nextIndex] : null;
+    setVehicleNumberInput(selectedTransport?.vehicle_number || "");
+    setDriverNameInput(selectedTransport?.driver_name || "");
+    setDriverMobileInput(selectedTransport?.driver_contact || "");
+    setVehiclePhotoBlob(null);
+    setVehiclePhotoPreview(null);
+    setUploadedVehiclePhoto(null);
   }, []);
 
   const openVehicleCamera = async () => {
@@ -539,14 +580,21 @@ function InboundArrivals() {
 
   return (
     <AppShell
-      title="Vehicle Entry & Exit Management"
+      title={
+        <span className="gate-entry-title inline-flex items-center gap-3">
+          <span className="gate-entry-title-icon inline-flex size-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-primary">
+            <Truck className="size-5" aria-hidden="true" />
+          </span>
+          <span>Vehicle Entry &amp; Exit Management</span>
+        </span>
+      }
       subtitle="Create gate entries, generate gate passes, and securely manage vehicle exits."
       onSearchChange={(value) => {
         setSearchQuery(value);
         setArrivalPage(1);
       }}
       actions={
-        <div className="flex flex-wrap justify-end gap-2">
+        <div className="gate-entry-actions flex flex-wrap justify-end gap-2">
           <Button
             className="rounded-xl font-bold shadow-sm"
             onClick={() => setIsNewRegistrationModalOpen(true)}
@@ -602,29 +650,29 @@ function InboundArrivals() {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto bg-card">
-            <table aria-label="Vehicle entries and exits" className="w-full min-w-[1280px] table-fixed text-left text-sm [&_th]:align-middle [&_td]:align-middle [&_td]:break-words">
+          <div className="overflow-hidden bg-card">
+            <table aria-label="Vehicle entries and exits" className="w-full min-w-0 table-fixed text-left text-sm [&_th]:align-middle [&_td]:align-middle">
               <colgroup>
+                <col className="w-[11%]" />
+                <col className="w-[10%]" />
+                <col className="w-[12%]" />
+                <col className="w-[16%]" />
                 <col className="w-[12%]" />
                 <col className="w-[10%]" />
-                <col className="w-[9%]" />
                 <col className="w-[13%]" />
-                <col className="w-[12%]" />
-                <col className="w-[12%]" />
-                <col className="w-[14%]" />
-                <col className="w-[18%]" />
+                <col className="w-[16%]" />
               </colgroup>
-              <thead className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground [&_th]:whitespace-nowrap [&_th]:font-semibold">
+              <thead className="border-b bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground [&_th]:font-semibold">
                 <tr>
-                  <th className="px-4 py-3">ASN Number</th>
-                  <th className="px-4 py-3">Gate Pass No.</th>
-                  <th className="px-4 py-3">Supplier</th>
-                  <th className="px-4 py-3">Vehicle / Driver</th>
-                  <th className="px-4 py-3">Expected Arrival</th>
-                  <th className="px-4 py-3">Actual Arrival</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">
-                    <span className="ml-auto block w-46 text-center">Actions</span>
+                  <th className="px-2 py-3 sm:px-3">ASN Number</th>
+                  <th className="px-2 py-3 sm:px-3">Gate Pass No.</th>
+                  <th className="px-2 py-3 sm:px-3">Supplier</th>
+                  <th className="px-2 py-3 sm:px-3">Vehicle / Driver</th>
+                  <th className="px-2 py-3 sm:px-3">Expected Arrival</th>
+                  <th className="px-2 py-3 sm:px-3">Actual Arrival</th>
+                  <th className="px-2 py-3 sm:px-3">Status</th>
+                  <th className="px-2 py-3 sm:px-3">
+                    <span className="block w-full text-center">Actions</span>
                   </th>
                 </tr>
               </thead>
@@ -779,6 +827,12 @@ function InboundArrivals() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              if (asnTransportEntries.length > 0 && selectedTransportIndex < 0) {
+                toast.error("No supplier-assigned vehicle is available", {
+                  description: "Every vehicle on this ASN already has an active gate pass. Record its exit before creating another entry.",
+                });
+                return;
+              }
               if (!asnDocumentFile) {
                 toast.error("ASN Document Photo is required", {
                   description: "Capture the ASN document photo before generating the gate pass.",
@@ -845,6 +899,16 @@ function InboundArrivals() {
                 })
                 .catch((error) => {
                   setSubmittingWebEntry(false);
+                  if (String(error instanceof Error ? error.message : "").includes("already has active Gate Pass")) {
+                    void api.getInboundArrivals(true).then((rows) => {
+                      arrivalsRef.current = rows;
+                      setArrivals(rows);
+                      const selectedRecord = asnRecords.find(
+                        (record) => String(record.asn_number || "").toLowerCase() === selectedAsn.toLowerCase(),
+                      );
+                      if (selectedRecord) applyAsnDetails(selectedRecord);
+                    });
+                  }
                   toast.error("Unable to register gate entry", {
                     description: error instanceof Error ? error.message : "Please try again.",
                   });
@@ -973,34 +1037,6 @@ function InboundArrivals() {
                     <option value="Return Delivery">Return Delivery</option>
                     <option value="Other Authorized Inbound">Other Authorized Inbound</option>
                   </select>
-                </div>
-              </div>
-
-              {/* Material Summary Auto-Filled Table */}
-              <div>
-                <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
-                  Material Summary
-                </label>
-                <div className="rounded-xl border bg-background overflow-hidden p-2 text-xs">
-                  {asnMaterials.length ? (
-                    asnMaterials.map((material, index) => (
-                      <div
-                        key={material.item_code || material.code || index}
-                        className="flex justify-between gap-3 font-bold text-primary border-b pb-1 last:border-b-0 last:pb-0"
-                      >
-                        <span>{material.item_code || material.code || "—"}</span>
-                        <span className="flex-1">
-                          {material.material_name || material.name || "—"}
-                        </span>
-                        <span className="text-emerald-600">
-                          {material.shipped_quantity ?? material.quantity ?? 0}{" "}
-                          {material.uom || "PCS"}
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="min-h-8" aria-hidden="true" />
-                  )}
                 </div>
               </div>
 
@@ -1395,7 +1431,7 @@ function InboundArrivals() {
               </Button>
               <Button
                 type="submit"
-                disabled={submittingWebEntry}
+                disabled={submittingWebEntry || (asnTransportEntries.length > 0 && selectedTransportIndex < 0)}
                 className="rounded-xl font-bold shadow-sm"
               >
                 {submittingWebEntry ? (
@@ -1505,7 +1541,7 @@ function ArrivalRows({
   return (
     <>
       <tr className="hover:bg-muted/20">
-        <td className="px-4 py-4">
+        <td className="whitespace-nowrap px-2 py-3 sm:px-3">
           <button
             type="button"
             onClick={(event) => {
@@ -1519,15 +1555,15 @@ function ArrivalRows({
             {arrival.asn_number}
           </button>
         </td>
-        <td className="px-4 py-4 font-mono font-semibold text-primary">
+        <td className="whitespace-nowrap px-2 py-3 font-mono text-xs font-semibold text-primary sm:px-3">
           {arrival.gate_entry_number || "—"}
         </td>
-        <td className="px-4 py-4 font-medium">{arrival.supplier_name || "—"}</td>
-        <td className="px-4 py-4">
-          <p className="font-mono font-semibold">{arrival.vehicle_number}</p>
+        <td className="break-words px-2 py-3 font-medium leading-5 sm:px-3">{displaySupplierName(arrival.supplier_name) || "—"}</td>
+        <td className="px-2 py-3 sm:px-3">
+          <p className="break-words font-mono text-xs font-semibold">{arrival.vehicle_number}</p>
           <p className="mt-1 text-xs text-muted-foreground">{arrival.driver_name || "—"}</p>
         </td>
-        <td className="px-4 py-4">
+        <td className="whitespace-nowrap px-2 py-3 text-xs tabular-nums sm:px-3">
           {arrival.expected_arrival_at
             ? new Date(arrival.expected_arrival_at).toLocaleDateString([], {
                 day: "2-digit",
@@ -1536,17 +1572,17 @@ function ArrivalRows({
               })
             : "—"}
         </td>
-        <td className="px-4 py-4">
+        <td className="whitespace-nowrap px-2 py-3 text-xs tabular-nums sm:px-3">
           {new Date(arrival.arrival_time).toLocaleTimeString([], {
             hour: "2-digit",
             minute: "2-digit",
           })}
         </td>
-        <td className="px-4 py-4">
+        <td className="px-2 py-3 sm:px-3">
           <StatusBadge status={isExited ? "EXITED" : arrival.status} />
         </td>
-        <td className="px-4 py-4">
-          <div className="grid grid-cols-[repeat(2,5.5rem)] items-center justify-end gap-2 [&_button]:h-9 [&_button]:w-full [&_button]:justify-center [&_button]:text-xs [&_button]:font-semibold">
+        <td className="whitespace-nowrap px-2 py-3 sm:px-3">
+          <div className="flex flex-nowrap items-center justify-end gap-1.5 [&_button]:h-8 [&_button]:justify-center [&_button]:px-2 [&_button]:text-[11px] [&_button]:font-semibold">
             <Button size="sm" variant="outline" className="rounded-lg whitespace-nowrap" onClick={onToggle} aria-label={`View details for ${arrival.gate_entry_number || arrival.asn_number}`}>
               <Eye className="size-3.5" /> Details
             </Button>
@@ -1635,7 +1671,7 @@ function ArrivalDetails({
           <h4 className="mb-4 text-sm font-semibold">Shipment details</h4>
         <dl className="grid gap-x-4 gap-y-4 text-sm sm:grid-cols-2">
           <Detail label="ASN number" value={arrival.asn_number} mono />
-          <Detail label="Supplier" value={arrival.supplier_name} />
+          <Detail label="Supplier" value={displaySupplierName(arrival.supplier_name)} />
           <Detail label="Current status" value={arrival.status.replaceAll("_", " ")} />
           <Detail label="Arrival time" value={new Date(arrival.arrival_time).toLocaleString()} />
         </dl>

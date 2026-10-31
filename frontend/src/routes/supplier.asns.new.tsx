@@ -1,5 +1,5 @@
 import { InformationTooltip } from "@/components/ui/information-tooltip";
-import { createFileRoute, useSearch } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { toast } from "sonner";
 import {
@@ -15,6 +15,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Truck,
   Trash2,
   XCircle,
 } from "lucide-react";
@@ -63,12 +64,22 @@ import {
 } from "@/lib/input-validation";
 
 export const Route = createFileRoute("/supplier/asns/new")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    open: search.open === "create" ? "create" as const : undefined,
+  }),
   beforeLoad: () => {},
   component: NewAsnPage,
 });
 
 const inputClass = "mt-1.5 h-10 rounded-xl border-border/80 bg-background text-xs font-semibold";
 const formInputClass = "mt-1.5 h-10 w-full rounded-lg border-border bg-background text-sm";
+const createAsnRequestId = () => {
+  try {
+    return window.crypto?.randomUUID?.() || `asn-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  } catch {
+    return `asn-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+};
 const todayDate = () => {
   const today = new Date();
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
@@ -210,10 +221,24 @@ interface TransportTouched {
 
 const INITIAL_ASNS: AsnRecord[] = [];
 
+const getAsnPreviewFromRecords = (records: AsnRecord[]) => {
+  const year = new Date().getFullYear();
+  const prefix = `ASN-${year}-`;
+  const highest = records.reduce((max, record) => {
+    const match = record.asn_number.match(new RegExp(`^ASN-${year}-(\\d+)$`, "i"));
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  return `${prefix}${String(highest + 1).padStart(3, "0")}`;
+};
+
 function NewAsnPage() {
-  const search = useSearch({ strict: false }) as any;
+  const search = Route.useSearch();
 
   const [asnList, setAsnList] = useState<AsnRecord[]>(INITIAL_ASNS);
+  const asnListRef = useRef<AsnRecord[]>(INITIAL_ASNS);
+  useEffect(() => {
+    asnListRef.current = asnList;
+  }, [asnList]);
   const [searchQuery, setSearchQuery] = useState("");
   const [deliveryPage, setDeliveryPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -395,8 +420,10 @@ function NewAsnPage() {
           lines: Array.isArray(a.lines) ? a.lines : [],
         };
       });
+      asnListRef.current = mapped;
       setAsnList(mapped);
     } catch {
+      asnListRef.current = [];
       setAsnList([]);
       setLoadError("Unable to load ASN records.");
     } finally {
@@ -405,9 +432,10 @@ function NewAsnPage() {
   };
 
   const handleOpenCreateModal = useCallback(async () => {
-    // Reset state synchronously BEFORE opening dialog to prevent race condition
-    requestIdRef.current = window.crypto.randomUUID();
-    setAsnNumber("");
+    // Open immediately so a failed optional ASN preview cannot make the button appear inert.
+    setIsAssignmentOpen(true);
+    requestIdRef.current = createAsnRequestId();
+    setAsnNumber(getAsnPreviewFromRecords(asnListRef.current));
     setAsnFormErrors({});
     setSubmissionError("");
     setExpectedArrivalDate(todayDate());
@@ -429,22 +457,15 @@ function NewAsnPage() {
     setManualVehicle(false);
     setManualDriver(false);
     setLines([
-      { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" },
+      { material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "", carrying_vehicle_id: initialEntryId },
     ]);
-    setIsAssignmentOpen(true);
-
     try {
       const next = await api.getNextAsnNumber();
       if (next?.asnNumber) setAsnNumber(next.asnNumber);
-    } catch (error) {
-      toast.error("ASN number preview is unavailable", {
-        description:
-          error instanceof Error
-            ? error.message
-            : "The ASN number will be assigned when submitted.",
-      });
+    } catch {
+      // Keep the generated preview visible if the optional preview endpoint fails.
     }
-  }, [supplierCompanyName, supplierFullName, supplierUsername]);
+  }, []);
 
   const handleAddTransportEntry = () => {
     const newId =
@@ -580,6 +601,7 @@ function NewAsnPage() {
         material_name: selectedMaterial.name,
         shipped_quantity: "1",
         uom: selectedMaterial.uom,
+        carrying_vehicle_id: transportEntries[0]?.id || "",
       };
       setLines((prev) => {
         const targetIndex =
@@ -631,17 +653,26 @@ function NewAsnPage() {
     if (!lines.length) {
       errors["material-0"] = "Add at least one material from Material Master.";
     }
-    const selectedMaterialIds = new Set<string>();
+    transportEntries.forEach((entry, index) => {
+      if (!lines.some((line) => line.carrying_vehicle_id === entry.id && line.material_id)) {
+        errors[`vehicle-material-${index}`] = "Assign at least one shipped material to this vehicle.";
+      }
+    });
+    const selectedVehicleMaterials = new Set<string>();
     lines.forEach((line, index) => {
       const material = materialCatalog.find(
         (entry) => String(entry.id) === String(line.material_id),
       );
+      if (!transportEntries.some((entry) => entry.id === line.carrying_vehicle_id)) {
+        errors[`vehicle-${index}`] = "Select the vehicle carrying this material.";
+      }
+      const assignmentKey = `${material?.id || line.material_id}:${line.carrying_vehicle_id || ""}`;
       if (!material || (material.status && String(material.status).toUpperCase() !== "ACTIVE")) {
         errors[`material-${index}`] = "Select an active material from Material Master.";
-      } else if (selectedMaterialIds.has(String(material.id))) {
-        errors[`material-${index}`] = "This material is already selected.";
+      } else if (selectedVehicleMaterials.has(assignmentKey)) {
+        errors[`material-${index}`] = "This material is already assigned to this vehicle.";
       } else {
-        selectedMaterialIds.add(String(material.id));
+        selectedVehicleMaterials.add(assignmentKey);
       }
       if (!isValidAsnQuantity(line.shipped_quantity, line.uom || material?.uom || "")) {
         errors[`quantity-${index}`] = material
@@ -687,7 +718,7 @@ function NewAsnPage() {
 
       const payload = {
         client_request_id:
-          requestIdRef.current || (requestIdRef.current = window.crypto.randomUUID()),
+          requestIdRef.current || (requestIdRef.current = createAsnRequestId()),
         supplier_name: supplierName.trim(),
         expected_arrival_at: expectedArrivalDate,
         vehicle_number: primaryVehicle,
@@ -697,9 +728,19 @@ function NewAsnPage() {
           {
             type: "transport_assignment",
             vehicles: transportEntries.map((e) => ({
+              id: e.id,
               vehicle_number: normalizeAsnVehicleNumber(e.vehicleNumber),
               driver_name: e.driverName.trim().replace(/ +/g, " "),
               driver_contact: e.driverMobile.trim(),
+              materials: lines
+                .filter((line) => line.carrying_vehicle_id === e.id)
+                .map((line) => ({
+                  material_id: line.material_id,
+                  item_code: line.item_code,
+                  material_name: line.material_name,
+                  shipped_quantity: String(line.shipped_quantity).trim(),
+                  uom: line.uom,
+                })),
             })),
           },
         ],
@@ -709,6 +750,7 @@ function NewAsnPage() {
           material_name: l.material_name,
           shipped_quantity: String(l.shipped_quantity).trim(),
           uom: l.uom,
+          carrying_vehicle_id: l.carrying_vehicle_id,
         })),
         status: "SUBMITTED",
       };
@@ -853,8 +895,11 @@ function NewAsnPage() {
     setDriverMobile(parsedEntries[0]?.driverMobile || "");
     setLines(
       asn.lines?.length
-        ? asn.lines
-        : [{ material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "" }],
+        ? asn.lines.map((line: any) => ({
+            ...line,
+            carrying_vehicle_id: line.carrying_vehicle_id || parsedEntries[0]?.id || "",
+          }))
+        : [{ material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "", carrying_vehicle_id: parsedEntries[0]?.id || "" }],
     );
     setIsAssignmentOpen(true);
   };
@@ -908,10 +953,30 @@ function NewAsnPage() {
   return (
     <TooltipProvider delayDuration={150}>
       <AppShell
-        title={<span className="inline-flex items-center gap-2">Advance Shipment Notices</span>}
+        title={
+          <span className="supplier-page-title inline-flex items-center gap-3">
+            <span className="supplier-page-title-icon inline-flex size-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-primary">
+              <Truck className="size-5" aria-hidden="true" />
+            </span>
+            Advance Shipment Notices
+          </span>
+        }
         subtitle="Create, track and download shipment notices"
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            data-refresh-control="true"
+            aria-label="Refresh advance shipment notices"
+            title="Refresh advance shipment notices"
+            disabled={loading}
+            onClick={() => void loadAsnData()}
+          >
+            {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+          </Button>
+        }
       >
-        <div className="w-full space-y-5 pb-10">
+        <div className="supplier-module-page w-full space-y-5 pb-10">
           {/* Search & ASN Table Card */}
           <Card className="rounded-xl border-border bg-card shadow-sm">
             <CardHeader className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
@@ -973,14 +1038,14 @@ function NewAsnPage() {
                   Clear Filters
                 </Button>
 
-                <TapTooltip text="Create a new delivery notice with vehicle, driver, arrival date, and material details.">
-                  <Button
-                    onClick={handleOpenCreateModal}
-                    className="h-10 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow-none hover:bg-primary/90"
-                  >
-                    <Plus className="size-4" /> Create ASN
-                  </Button>
-                </TapTooltip>
+                <Button
+                  type="button"
+                  onClick={() => void handleOpenCreateModal()}
+                  title="Create a new delivery notice with vehicle, driver, arrival date, and material details."
+                  className="h-10 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow-none hover:bg-primary/90"
+                >
+                  <Plus className="size-4" /> Create ASN
+                </Button>
               </div>
             </CardHeader>
 
@@ -1001,14 +1066,12 @@ function NewAsnPage() {
                   </Button>
                 </div>
               )}
-              <div className="w-full min-w-0">
-                <table className="w-full table-fixed text-left text-sm [&_th]:break-words [&_td]:break-words [&_th]:!whitespace-normal [&_td]:!whitespace-normal [&_th]:!px-2 [&_td]:!px-2 xl:[&_th]:!px-4 xl:[&_td]:!px-4">
+              <div className="w-full min-w-0 overflow-x-auto">
+                <table className="w-full min-w-[760px] table-fixed text-left text-sm [&_th]:break-words [&_td]:break-words [&_th]:!whitespace-normal [&_td]:!whitespace-normal [&_th]:!px-2 [&_td]:!px-2 xl:[&_th]:!px-4 xl:[&_td]:!px-4">
                   <colgroup>
-                    <col className="w-[13%]" /><col className="w-[10%]" />
-                    <col className="w-[12%]" /><col className="w-[12%]" />
-                    <col className="w-[12%]" /><col className="w-[13%]" />
-                    <col className="w-[10%]" /><col className="w-[12%]" />
-                    <col className="w-[6%]" />
+                    <col className="w-[18%]" /><col className="w-[18%]" />
+                    <col className="w-[20%]" /><col className="w-[14%]" />
+                    <col className="w-[20%]" /><col className="w-[10%]" />
                   </colgroup>
                   <thead className="border-b border-border bg-muted/60 text-xs font-medium text-muted-foreground">
                     <tr>
@@ -1017,17 +1080,6 @@ function NewAsnPage() {
                       </th>
                       <th scope="col" className="px-4 py-3">
                         Supplier name
-                      </th>
-                      <th scope="col" className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1.5">Vehicle Number</span>
-                      </th>
-                      <th scope="col" className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1.5">
-                          Driver Name
-                        </span>
-                      </th>
-                      <th scope="col" className="px-4 py-3 whitespace-nowrap">
-                        Driver Number
                       </th>
                       <th scope="col" className="px-4 py-3">
                         <span className="inline-flex items-center gap-1.5">
@@ -1057,7 +1109,7 @@ function NewAsnPage() {
                     {loading ? (
                       <tr>
                         <td
-                          colSpan={9}
+                          colSpan={6}
                           className="px-4 py-10 text-center text-sm text-muted-foreground"
                         >
                           <span className="inline-flex items-center gap-2" role="status">
@@ -1069,7 +1121,7 @@ function NewAsnPage() {
                     ) : loadError ? (
                       <tr>
                         <td
-                          colSpan={9}
+                          colSpan={6}
                           className="px-4 py-10 text-center text-sm text-muted-foreground"
                         >
                           Delivery notices could not be loaded. Use Try again above to retry.
@@ -1078,7 +1130,7 @@ function NewAsnPage() {
                     ) : !filteredList.length ? (
                       <tr>
                         <td
-                          colSpan={9}
+                          colSpan={6}
                           className="px-4 py-10 text-center text-sm text-muted-foreground"
                         >
                           {asnList.length
@@ -1094,16 +1146,6 @@ function NewAsnPage() {
                           </td>
                           <td className="px-4 py-3 text-foreground">
                             {asn.supplier_name || "â€”"}
-                          </td>
-                          <td className="px-4 py-3 text-foreground">{asn.supplier_name || "—"}</td>
-                          <td className="px-4 py-3 align-middle whitespace-nowrap font-mono text-foreground">
-                            {asn.vehicle_number || "—"}
-                          </td>
-                          <td className="px-4 py-3 align-middle break-words text-foreground">
-                            {asn.driver_name || "?"}
-                          </td>
-                          <td className="px-4 py-3 align-middle whitespace-nowrap font-mono tabular-nums text-foreground">
-                            {asn.driver_contact || "?"}
                           </td>
                           <td className="px-4 py-3 text-muted-foreground">
                             {displayFilterDate(
@@ -1386,7 +1428,7 @@ function NewAsnPage() {
                                 id={`assignment-vehicle-${index}-error`}
                                 className="mt-1 text-xs text-rose-600"
                               >
-                                Enter a valid registration, such as KA01AB1234 or 22BH1234AA.
+                                Enter an Indian registration from any state, such as KA01AB1234, MH12A1234, or 22BH1234AA.
                               </p>
                             )}
                           </div>
@@ -1551,7 +1593,7 @@ function NewAsnPage() {
               if (!open) setAsnSubmitted(false);
             }}
           >
-            <DialogContent id="supplier-create-asn-dialog" className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-2xl overflow-y-auto rounded-xl bg-card p-4 shadow-lg sm:p-6">
+            <DialogContent id="supplier-create-asn-dialog" className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-2xl overflow-x-hidden overflow-y-auto rounded-xl bg-card p-4 shadow-lg sm:p-6">
               <DialogHeader>
                 <DialogTitle className="font-black text-lg text-primary uppercase border-b pb-2">
                   CREATE ADVANCE SHIPPING NOTICE (ASN)
@@ -1569,7 +1611,7 @@ function NewAsnPage() {
                       <Input
                         id="asn-number"
                         readOnly
-                        value={asnNumber || "Assigned when submitted"}
+                        value={asnNumber}
                         className="h-10 cursor-default rounded-lg border-border bg-muted/50 font-mono text-sm caret-transparent"
                       />
                     </div>
@@ -1679,6 +1721,28 @@ function NewAsnPage() {
                             </p>
                           </div>
                         </div>
+                        <div className="border-t border-border/70 pt-2">
+                          <p className="text-xs font-semibold text-muted-foreground">Shipped materials on this vehicle</p>
+                          {lines.some((line) => line.carrying_vehicle_id === entry.id && line.material_id) ? (
+                            <ul className="mt-1 space-y-1">
+                              {lines
+                                .filter((line) => line.carrying_vehicle_id === entry.id && line.material_id)
+                                .map((line, lineIndex) => (
+                                  <li key={`${entry.id}-${line.material_id}-${lineIndex}`} className="flex items-center justify-between gap-3 text-sm">
+                                    <span className="min-w-0 truncate"><span className="font-mono font-semibold text-primary">{line.item_code}</span> · {line.material_name}</span>
+                                    <span className="shrink-0 font-semibold tabular-nums">{line.shipped_quantity || "0"} {line.uom}</span>
+                                  </li>
+                                ))}
+                            </ul>
+                          ) : (
+                            <p className="mt-1 text-xs text-muted-foreground">No materials assigned yet.</p>
+                          )}
+                          {asnFormErrors[`vehicle-material-${index}`] && (
+                            <p className="mt-1 text-xs text-destructive" role="alert">
+                              {asnFormErrors[`vehicle-material-${index}`]}
+                            </p>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1711,6 +1775,10 @@ function NewAsnPage() {
                             material_name: "",
                             shipped_quantity: "",
                             uom: "",
+                            carrying_vehicle_id:
+                              transportEntries.find(
+                                (entry) => !rows.some((row) => row.carrying_vehicle_id === entry.id),
+                              )?.id || "",
                           },
                         ]);
                       }}
@@ -1747,7 +1815,7 @@ function NewAsnPage() {
                         key={
                           line.material_id ? `${line.material_id}-${idx}` : `material-row-${idx}`
                         }
-                        className="grid gap-3 rounded-lg border border-border p-3 sm:grid-cols-[minmax(0,1fr)_minmax(8rem,0.45fr)_5rem_auto] sm:items-start"
+                        className="grid min-w-0 grid-cols-1 gap-3 rounded-lg border border-border bg-muted/10 p-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(5.5rem,0.65fr)_minmax(6rem,0.8fr)_2rem] sm:items-end"
                       >
                         <div className="min-w-0 space-y-1.5">
                           <Label htmlFor={`material-${idx}`}>Material *</Label>
@@ -1764,10 +1832,11 @@ function NewAsnPage() {
                                 lines.some(
                                   (item, index) =>
                                     index !== idx &&
-                                    String(item.material_id) === String(material.id),
+                                    String(item.material_id) === String(material.id) &&
+                                    item.carrying_vehicle_id === line.carrying_vehicle_id,
                                 )
                               ) {
-                                toast.error("This material is already selected in the ASN.");
+                                toast.error("This material is already assigned to this vehicle.");
                                 return;
                               }
                               setLines((current) =>
@@ -1788,6 +1857,7 @@ function NewAsnPage() {
                                 ...errors,
                                 [`material-${idx}`]: "",
                                 [`quantity-${idx}`]: "",
+                                [`vehicle-material-${transportEntries.findIndex((entry) => entry.id === line.carrying_vehicle_id)}`]: "",
                               }));
                               setSubmissionError("");
                             }}
@@ -1806,7 +1876,7 @@ function NewAsnPage() {
                             aria-describedby={
                               asnFormErrors[`material-${idx}`] ? `material-${idx}-error` : undefined
                             }
-                            className="h-11 w-full min-w-0 rounded-[10px] border-[#DFE7F0] bg-white px-3 text-sm text-[#172B4D] shadow-none disabled:cursor-not-allowed disabled:opacity-60"
+                            className="h-11 w-full min-w-0 overflow-hidden rounded-[10px] border-[#DFE7F0] bg-white px-3 text-sm text-[#172B4D] shadow-none disabled:cursor-not-allowed disabled:opacity-60"
                           >
                               <SelectValue placeholder={materialLoading ? "Loading materials…" : "Select material"} />
                             </SelectTrigger>
@@ -1829,7 +1899,56 @@ function NewAsnPage() {
                             </p>
                           )}
                         </div>
-                        <div className="space-y-1.5">
+                        <div className="min-w-0 space-y-1.5">
+                          <Label htmlFor={`vehicle-${idx}`}>Carried by vehicle *</Label>
+                          <Select
+                            required
+                            value={line.carrying_vehicle_id || ""}
+                            onValueChange={(vehicleId) => {
+                              if (
+                                lines.some(
+                                  (item, index) =>
+                                    index !== idx && item.carrying_vehicle_id === vehicleId,
+                                )
+                              ) {
+                                toast.error("This vehicle is already assigned to another material.");
+                                return;
+                              }
+                              setLines((current) =>
+                                current.map((item, index) =>
+                                  index === idx ? { ...item, carrying_vehicle_id: vehicleId } : item,
+                                ),
+                              );
+                              setAsnFormErrors((errors) => ({
+                                ...errors,
+                                [`vehicle-${idx}`]: "",
+                                [`vehicle-material-${transportEntries.findIndex((entry) => entry.id === vehicleId)}`]: "",
+                                [`vehicle-material-${transportEntries.findIndex((entry) => entry.id === line.carrying_vehicle_id)}`]: "",
+                              }));
+                              setSubmissionError("");
+                            }}
+                          >
+                            <SelectTrigger id={`vehicle-${idx}`} className="h-11 w-full min-w-0 overflow-hidden rounded-[10px] border-[#DFE7F0] bg-white px-3 text-sm text-[#172B4D] shadow-none" aria-invalid={Boolean(asnFormErrors[`vehicle-${idx}`])}>
+                              <SelectValue className="truncate" placeholder="Select vehicle" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {transportEntries.map((entry, entryIndex) => (
+                                <SelectItem
+                                  key={entry.id}
+                                  value={entry.id}
+                                  disabled={lines.some(
+                                    (item, index) =>
+                                      index !== idx && item.carrying_vehicle_id === entry.id,
+                                  )}
+                                >
+                                  #{entryIndex + 1} · {normalizeAsnVehicleNumber(entry.vehicleNumber) || "Vehicle not entered"}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {asnFormErrors[`vehicle-${idx}`] && <p className="text-xs text-destructive" role="alert">{asnFormErrors[`vehicle-${idx}`]}</p>}
+                        </div>
+                        <div className="min-w-0 space-y-1.5">
                           <Label htmlFor={`quantity-${idx}`}>Quantity *</Label>
                           <Input
                             id={`quantity-${idx}`}
@@ -1899,7 +2018,7 @@ function NewAsnPage() {
                             aria-describedby={
                               asnFormErrors[`quantity-${idx}`] ? `quantity-${idx}-error` : undefined
                             }
-                            className="h-10 rounded-lg border-border bg-background text-right text-sm"
+                            className="h-11 w-full min-w-0 rounded-[10px] border-border bg-background text-right text-sm"
                           />
                           {asnFormErrors[`quantity-${idx}`] && (
                             <p
@@ -1911,17 +2030,17 @@ function NewAsnPage() {
                             </p>
                           )}
                         </div>
-                        <div className="space-y-1.5">
+                        <div className="min-w-0 space-y-1.5">
                           <Label htmlFor={`uom-${idx}`}>UOM</Label>
                           <Input
                             id={`uom-${idx}`}
                             readOnly
-                            value={line.uom || "â€”"}
+                            value={line.uom || "—"}
                             aria-label={`Unit of measure for material ${idx + 1}`}
-                            className="h-10 rounded-lg border-border bg-muted/50 text-sm"
+                            className="h-11 w-full min-w-0 rounded-[10px] border-border bg-muted/50 text-sm"
                           />
                         </div>
-                        <div className="flex justify-end pt-6">
+                        <div className="flex items-end justify-end">
                           <Button
                             type="button"
                             variant="ghost"

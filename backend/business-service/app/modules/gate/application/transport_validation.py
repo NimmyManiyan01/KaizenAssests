@@ -15,8 +15,8 @@ def normalize_vehicle(value: str) -> str:
 def valid_vehicle(value: str) -> bool:
     value = normalize_vehicle(value)
     return bool(
-        re.fullmatch(r"[A-Z]{2}[0-9]{1,2}[A-Z]{1,3}[0-9]{4}", value)
-        or re.fullmatch(r"(?:2[1-9]|[3-9][0-9])BH[0-9]{4}[A-HJ-NP-Z]{2}", value)
+        re.fullmatch(r"[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{1,4}", value)
+        or re.fullmatch(r"[0-9]{2}BH[0-9]{4}[A-Z]{2}", value)
     )
 
 
@@ -25,7 +25,7 @@ def validate_transport(vehicle, driver, contact) -> tuple[str, str, str]:
         if not isinstance(value, str) or not value.strip():
             raise HTTPException(422, f"{field} is required and must be text")
     if not valid_vehicle(vehicle):
-        raise HTTPException(422, "vehicle_number must be a valid Indian registration, such as KA02AH2755 or 22BH1234AA")
+        raise HTTPException(422, "Enter a valid Indian vehicle registration from any state, such as KA02AH2755, MH12A1234, or 22BH1234AA")
     driver = driver.strip()
     if not (2 <= len(driver) <= 100 and re.fullmatch(r"[A-Za-z .,'’\-]+", driver)
             and len(re.findall(r"[A-Za-z]", driver)) >= 2):

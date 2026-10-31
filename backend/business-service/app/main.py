@@ -71,11 +71,25 @@ async def lifespan(app: FastAPI):
         from app.database.base import Base
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-            if settings.environment.lower() in ("local", "test", "development"):
-                from app.database.schema_compatibility import ensure_local_qc_audit_columns
-                added = await conn.run_sync(ensure_local_qc_audit_columns)
-                if added:
-                    logger.info("Added local SQLite QC audit columns: %s", ", ".join(added))
+            # These compatibility adjustments only target SQLite and are
+            # required for existing local databases, even when the app uses
+            # a custom environment label (for example, "dev"). Production
+            # databases continue to use Alembic migrations.
+            if conn.dialect.name == "sqlite":
+                from app.database.schema_compatibility import (
+                    ensure_local_assembly_traceability_column,
+                    ensure_local_fg_section_columns,
+                    ensure_local_qc_audit_columns,
+                )
+                assembly_added = await conn.run_sync(ensure_local_assembly_traceability_column)
+                qc_added = await conn.run_sync(ensure_local_qc_audit_columns)
+                fg_added = await conn.run_sync(ensure_local_fg_section_columns)
+                if assembly_added:
+                    logger.info("Added local SQLite assembly columns: %s", ", ".join(assembly_added))
+                if qc_added:
+                    logger.info("Added local SQLite QC audit columns: %s", ", ".join(qc_added))
+                if fg_added:
+                    logger.info("Added local SQLite FG section columns: %s", ", ".join(fg_added))
     except Exception as exc:
         logger.debug(f"Schema create_all note: {exc}")
 

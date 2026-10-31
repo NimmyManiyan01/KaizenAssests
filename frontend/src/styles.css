@@ -437,8 +437,8 @@ table thead, table thead tr, table thead th {
   animation: none;
 }
 
-/* Supplier Dashboard presentation only. No shared component or workflow changes. */
-body:has(.supplier-visual-content) {
+/* Supplier module presentation: shared visual system across supplier routes. */
+body:has(.supplier-visual-content, .supplier-module-page) {
   --background: #F4F7FB;
   --foreground: #172B4D;
   --muted-foreground: #55585B;
@@ -454,22 +454,44 @@ body:has(.supplier-visual-content) {
   --sidebar-border: rgba(255, 255, 255, 0.1);
 }
 /* Respect the existing collapsed/expanded classes and hover handlers. */
-body:has(.supplier-visual-content) aside[class*="w-[264px]"] { width: 260px; }
-body:has(.supplier-visual-content) aside nav a {
+body:has(.supplier-visual-content, .supplier-module-page) aside[class*="w-[264px]"] { width: 260px; }
+body:has(.supplier-visual-content, .supplier-module-page) aside nav a {
   min-height: 46px;
   border-radius: 12px;
   margin-bottom: 4px;
   box-shadow: none;
   color: var(--sidebar-foreground);
 }
-body:has(.supplier-visual-content) aside nav a svg {
+body:has(.supplier-visual-content, .supplier-module-page) aside nav a svg {
   color: currentColor;
 }
-body:has(.supplier-visual-content) aside nav a[class*="bg-sidebar-primary"] svg,
-body:has(.supplier-visual-content) aside nav a:hover svg {
+body:has(.supplier-visual-content, .supplier-module-page) aside nav a[class*="bg-sidebar-primary"] svg,
+body:has(.supplier-visual-content, .supplier-module-page) aside nav a:hover svg {
   color: #FFFFFF !important;
 }
-body:has(.supplier-visual-content) main { background: #F4F7FB; }
+body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4F7FB; }
+.supplier-module-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 112px;
+  gap: 20px;
+  padding: 18px 22px;
+  border: 1px solid rgb(223 231 240 / 88%);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 62%);
+  box-shadow: 0 3px 12px rgb(6 75 135 / 0.035);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+.supplier-module-header > div:first-child { flex: 1 1 auto; min-width: 0; margin-right: auto; text-align: left; }
+.supplier-module-header h1 { color: #172B4D; font-size: clamp(26px, 2vw, 34px); font-weight: 700; line-height: 1.2; }
+.supplier-module-header > div:first-child > p { max-width: 760px; margin-top: 7px; color: #55585B; line-height: 1.5; }
+.supplier-page-title { justify-content: flex-start; text-align: left; }
+.supplier-page-title-icon { color: #0866B1; }
+.supplier-module-header > fieldset { min-width: max-content; margin-left: auto; }
+.supplier-module-header > div:last-child > div { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: 10px; }
+.supplier-module-header button { min-height: 42px; border-radius: 11px; }
 .supplier-heading-image {
   position: relative;
   isolation: isolate;
@@ -530,6 +552,16 @@ body:has(.supplier-visual-content) main { background: #F4F7FB; }
   border: 1px solid #DFE7F0;
   padding-inline: 14px;
 }
+.supplier-heading-image > div:last-child button.supplier-guide-button {
+  background: #FFFFFF;
+  border-color: #FFFFFF;
+  color: #0866B1;
+}
+.supplier-heading-image > div:last-child button.supplier-guide-button:hover {
+  background: #F4F8FD;
+  border-color: #DFE7F0;
+  color: #075A9C;
+}
 .supplier-visual-content { color: #172B4D; }
 .supplier-visual-content > div:first-child { gap: 16px; }
 .supplier-visual-kpi {
@@ -583,6 +615,32 @@ body:has(.supplier-visual-content) main { background: #F4F7FB; }
 .supplier-visual-content .supplier-status-submitted { background: #EAF0F8; color: #4B6488; }
 .supplier-visual-content .supplier-status-rejected { background: #FDE8EB; color: #BC2034; }
 .supplier-visual-content .supplier-status-complete { background: #E6F4E5; color: #2F7031; }
+.supplier-module-page { color: #172B4D; }
+.supplier-module-page .border-border.bg-card,
+.supplier-module-page.border-border.bg-card {
+  border-color: #DFE7F0;
+  border-radius: 18px;
+  background: #FFFFFF;
+  box-shadow: 0 3px 12px rgb(6 75 135 / 0.035);
+}
+.supplier-module-page table { color: #172B4D; }
+.supplier-module-page table thead,
+.supplier-module-page table thead tr,
+.supplier-module-page table thead th { background: #EAF1F8; color: #172B4D; }
+.supplier-module-page table th { font-weight: 600; }
+.supplier-module-page table td { border-color: #DFE7F0; vertical-align: middle; }
+.supplier-module-page table tbody tr:hover { background: #F6FAFE; }
+.supplier-module-page input,
+.supplier-module-page [role="combobox"] { border-color: #DFE7F0; border-radius: 10px; }
+.supplier-module-page input:focus-visible,
+.supplier-module-page [role="combobox"]:focus-visible { outline: 2px solid rgb(8 102 177 / 0.16); outline-offset: 1px; }
+@media (max-width: 767px) {
+  .supplier-module-header { flex-direction: column; align-items: stretch; min-height: 0; gap: 14px; padding: 16px; }
+  .supplier-module-header > div:first-child,
+  .supplier-module-header > fieldset { width: 100%; min-width: 0; margin: 0; }
+  .supplier-module-header > div:last-child > div,
+  .supplier-module-header > fieldset { justify-content: flex-start; }
+}
 @media (min-width: 1024px) and (max-width: 1280px) {
   .supplier-visual-kpi { grid-template-columns: 44px minmax(0, 1fr) 48px; gap: 10px; padding: 16px; }
   .supplier-visual-kpi .supplier-kpi-icon { width: 44px; height: 44px; }
@@ -1870,6 +1928,23 @@ body.app-typography .dock-management-header h1 { font-size: clamp(26px, 2vw, 32p
 .dock-management-header > div:last-child { flex-shrink: 0; }
 .dock-management-header button { height: 40px; border-radius: 12px; }
 .dock-management-header button[aria-label="Refresh dock management"] { width: 44px; height: 44px; padding: 0; }
+.gate-entry-header { min-height: 104px; padding: 18px 20px; align-items: center; border: 1px solid #DFE7F0; border-radius: 16px; background: transparent; box-shadow: 0 2px 8px rgb(23 43 77 / .025); }
+.gate-entry-header > div:first-child { min-width: 0; }
+.gate-entry-header h1 { color: #172B4D; font-size: clamp(26px, 2vw, 32px); font-weight: 700; line-height: 1.2; }
+.gate-entry-header .gate-entry-title { min-width: 0; }
+.gate-entry-header .gate-entry-title > span:last-child { min-width: 0; }
+.gate-entry-header .gate-entry-title-icon { border: 1px solid #DFEAF5; background: #F0F6FC; color: #0866B1; }
+.gate-entry-actions { flex-shrink: 0; }
+.gate-entry-actions button { min-height: 40px; border-radius: 12px; }
+.gate-entry-actions button[data-refresh-control="true"] { width: 44px; height: 44px; min-height: 44px; padding: 0; }
+.notifications-header { min-height: 104px; padding: 18px 20px; align-items: center; border: 1px solid #DFE7F0; border-radius: 16px; background: transparent; box-shadow: 0 2px 8px rgb(23 43 77 / .025); }
+.notifications-header > div:first-child { min-width: 0; }
+.notifications-header h1 { color: #172B4D; font-size: clamp(26px, 2vw, 32px); font-weight: 700; line-height: 1.2; }
+.notifications-header .notification-centre-title { min-width: 0; }
+.notifications-header .notification-centre-title > span:last-child { min-width: 0; }
+.notifications-header .notification-centre-title-icon { border: 1px solid #DFEAF5; background: #F0F6FC; color: #0866B1; }
+.notifications-header > fieldset { flex-shrink: 0; }
+.notifications-header button { min-height: 40px; border-radius: 12px; }
 .warehouse-visual-workspace main .dock-management-receiving { padding-block: 0; gap: 0; border-radius: 16px; border-color: #DFE7F0; box-shadow: 0 3px 12px rgb(6 75 135 / .025); }
 .dock-management-receiving .min-w-\[280px\] { min-width: 0; gap: 16px; border: 1px solid #DFE7F0; border-radius: 12px; }
 .dock-management-receiving p.font-mono { overflow-wrap: anywhere; }
@@ -1877,7 +1952,12 @@ body.app-typography .dock-management-header h1 { font-size: clamp(26px, 2vw, 32p
 .dock-management-waiting > div:first-child { align-items: center; }
 .dock-management-waiting [data-slot="card"] { box-shadow: none; border-radius: 12px; }
 @media (max-width: 639px) {
-  .dock-management-header, .dock-management-waiting { padding: 16px; }
+  .dock-management-header, .dock-management-waiting, .gate-entry-header, .notifications-header { padding: 16px; }
+  .gate-entry-header { align-items: flex-start; }
+  .gate-entry-header .gate-entry-title-icon { width: 40px; height: 40px; }
+  .gate-entry-actions { width: 100%; justify-content: flex-start; }
+  .notifications-header { align-items: flex-start; }
+  .notifications-header > fieldset { width: 100%; }
 }
 
 /* A quieter requisition workspace with fewer nested boxes. */

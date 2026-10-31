@@ -35,7 +35,7 @@ async def _resolve_current_user(
     # The browser also sends role/name headers; those must not replace the
     # token's supplier UUID with the display username used by the FG filter.
     if (credentials is not None
-            and settings.environment.lower() in ("local", "test", "development")
+            and settings.environment.lower() in ("local", "dev", "test", "development")
             and credentials.credentials.startswith("supplier-mock-token-")):
         token_payload = credentials.credentials.removeprefix("supplier-mock-token-")
         user_id = token_payload[:36]
@@ -94,7 +94,7 @@ async def _resolve_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
 
     token = credentials.credentials
-    if settings.environment.lower() in ("local", "test", "development"):
+    if settings.environment.lower() in ("local", "dev", "test", "development"):
         if token == "mock-jwt-manager-token":
             return CurrentUser(
                 subject="manager",
@@ -384,7 +384,7 @@ async def _resolve_current_user(
             permissions=claims.get("permissions", []),
             raw_claims=claims,
         )
-        if roles_hdr and settings.environment.lower() in {"local", "test", "development"}:
+        if roles_hdr and settings.environment.lower() in {"local", "dev", "test", "development"}:
             roles = [r.strip() for r in roles_hdr.split(",") if r.strip()]
             user_name = request.headers.get("X-User-Name") or request.headers.get("x-user-name") or request.headers.get("X-User-Username") or request.headers.get("x-user-username") or user.username
             user_id = request.headers.get("X-User-Id") or request.headers.get("x-user-id") or request.headers.get("X-User-Subject") or request.headers.get("x-user-subject") or user.subject
@@ -419,7 +419,7 @@ async def _resolve_current_user(
             )
         return user
     except Exception as exc:
-        if settings.environment.lower() in ("local", "test", "development"):
+        if settings.environment.lower() in ("local", "dev", "test", "development"):
             return CurrentUser(
                 subject="local_security_officer",
                 username="local_security_officer",

@@ -10,6 +10,7 @@ import {
   Eye,
   FileText,
   Loader2,
+  RefreshCw,
   Search,
   Trash2,
   Truck,
@@ -497,11 +498,22 @@ function SupplierDashboard() {
         subtitle="Manage delivery notices and track incoming shipments."
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              data-refresh-control="true"
+              aria-label="Refresh supplier dashboard"
+              title="Refresh supplier dashboard"
+              disabled={asnsLoading}
+              onClick={() => void loadAsns()}
+            >
+              {asnsLoading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+            </Button>
             <button
               ref={deliveryHelpTriggerRef}
               type="button"
               onClick={() => setIsDeliveryHelpOpen(true)}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-primary transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="supplier-guide-button inline-flex min-h-10 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-primary transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               aria-haspopup="dialog"
               aria-expanded={isDeliveryHelpOpen}
               aria-controls="supplier-asn-help-dialog"
@@ -509,30 +521,18 @@ function SupplierDashboard() {
               <CircleHelp className="size-4 shrink-0" aria-hidden="true" />
               <span>Supplier Guide</span>
             </button>
-            <Tooltip delayDuration={150}>
-              <TooltipTrigger asChild>
-                <Link
-                  to="/supplier/asns/new"
-                  search={{ open: "create" }}
-                  className="inline-flex h-10 shrink-0 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                >
-                  <Truck className="mr-2 size-4" />
-                  Create ASN
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent
-                side="bottom"
-                align="end"
-                className="max-w-xs border border-border bg-popover text-xs text-popover-foreground shadow-soft"
-              >
-                Create a new Advance Shipping Notice to inform warehouse receiving of incoming goods
-                before truck arrival.
-              </TooltipContent>
-            </Tooltip>
+            <Link
+              to="/supplier/asns/new"
+              search={{ open: "create" }}
+              className="inline-flex h-10 shrink-0 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <Truck className="mr-2 size-4" />
+              Create ASN
+            </Link>
           </div>
         }
       >
-        <div className="supplier-visual-content space-y-5">
+        <div className="supplier-module-page supplier-visual-content space-y-5">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {metrics.map(({ title, value, icon: Icon, tooltip }, metricIndex) => (
               <div
