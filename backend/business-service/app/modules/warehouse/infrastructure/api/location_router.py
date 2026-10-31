@@ -219,19 +219,6 @@ def _bin_response(bin_model: WarehouseBinModel) -> dict:
     }
 
 
-@warehouse_router.get("")
-async def list_warehouses(
-    status_filter: str | None = Query(default="ACTIVE", alias="status"),
-    _user: CurrentUser = Depends(get_current_user),
-    uow: UnitOfWork = Depends(get_uow),
-) -> list[dict]:
-    query = select(WarehouseModel).order_by(WarehouseModel.warehouse_code.asc())
-    if status_filter and status_filter.upper() != "ALL":
-        query = query.where(func.upper(WarehouseModel.status) == status_filter.upper())
-    result = await uow.session.execute(query)
-    return [_warehouse_response(warehouse) for warehouse in result.scalars().all()]
-
-
 @warehouse_router.get("/{id_or_code}/zones")
 async def list_warehouse_zones(
     id_or_code: str,

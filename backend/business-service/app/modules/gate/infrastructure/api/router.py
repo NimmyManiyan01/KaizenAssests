@@ -4671,7 +4671,8 @@ async def get_gate_entry_by_qr(
     model = result.scalars().first()
     if model is None:
         raise NotFoundException(f"Gate pass '{gate_entry_number}' was not found")
-    return _to_gate_entry_response(_gate_entry_from_model(model))
+    response = _to_gate_entry_response(_gate_entry_from_model(model))
+    return response.model_copy(update={"driver_phone": model.driver_phone})
 
 
 @router.post("/qr/{gate_entry_number}/approve", response_model=GateEntryResponse)
@@ -4719,58 +4720,6 @@ async def approve_gate_entry_by_qr(
         )
     else:
         raise HTTPException(status_code=422, detail="Gate entry must have a vehicle number before approval")
-
-    return _to_gate_entry_response(entry)
-
-
-@router.get("/qr/{gate_entry_number}", response_model=GateEntryResponse)
-async def get_gate_entry_by_qr(
-    gate_entry_number: str,
-    _user: CurrentUser = Depends(require_permission("gate:read")),
-    uow: UnitOfWork = Depends(get_uow),
-) -> GateEntryResponse:
-    """Resolve the gate pass number encoded by the frontend QR code."""
-    result = await uow.session.execute(
-        select(GateEntryModel).where(
-            func.upper(GateEntryModel.gate_entry_number) == gate_entry_number.strip().upper()
-        )
-    )
-    model = result.scalars().first()
-    if model is None:
-        raise NotFoundException(f"Gate pass '{gate_entry_number}' was not found")
-    response = _to_gate_entry_response(_gate_entry_from_model(model))
-    return response.model_copy(update={"driver_phone": model.driver_phone})
-
-
-@router.post("/qr/{gate_entry_number}/approve", response_model=GateEntryResponse)
-async def approve_gate_entry_by_qr(
-    gate_entry_number: str,
-    user: CurrentUser = Depends(require_permission("gate:verify")),
-    uow: UnitOfWork = Depends(get_uow),
-) -> GateEntryResponse:
-    """Approve a scanned pass, returning an already-approved pass unchanged."""
-    result = await uow.session.execute(
-        select(GateEntryModel).where(
-            func.upper(GateEntryModel.gate_entry_number) == gate_entry_number.strip().upper()
-        )
-    )
-    model = result.scalars().first()
-    if model is None:
-        raise NotFoundException(f"Gate pass '{gate_entry_number}' was not found")
-
-    entry = _gate_entry_from_model(model)
-    approved_states = {
-        GateEntryStatus.GATE_ENTRY_APPROVED,
-        GateEntryStatus.AWAITING_DOCK,
-        GateEntryStatus.DOCK_ASSIGNED,
-        GateEntryStatus.MOVING_TO_DOCK,
-        GateEntryStatus.AT_DOCK,
-        GateEntryStatus.UNLOADING_IN_PROGRESS,
-    }
-    if entry.status not in approved_states:
-        entry.approve_gate_entry(user.username)
-        entry.queue_for_dock_allocation()
-        await _save_gate_entry(uow.session, entry)
 
     response = _to_gate_entry_response(entry)
     return response.model_copy(update={"driver_phone": model.driver_phone})

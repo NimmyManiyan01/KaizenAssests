@@ -10,12 +10,15 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from app.config.settings import get_settings
 from app.kafka.producer import start_producer, stop_producer
 from app.logging.logger import configure_logging, get_logger
 from app.middleware.error_handler import register_exception_handlers
 from app.middleware.request_context import RequestContextMiddleware
+from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.modules.dock.infrastructure.api.router import router as dock_router
 from app.modules.gate.infrastructure.api.router import (
     preview_router as gate_preview_router,
@@ -65,38 +68,6 @@ async def lifespan(app: FastAPI):
         tables = await connection.run_sync(lambda conn: inspect(conn).get_table_names())
         if "store" in tables:
             raise RuntimeError("Run scripts/migrate_single_warehouse.py before starting this version of the service")
-
-    try:
-        from app.database.session import engine
-        from app.database.base import Base
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            # These compatibility adjustments only target SQLite and are
-            # required for existing local databases, even when the app uses
-            # a custom environment label (for example, "dev"). Production
-            # databases continue to use Alembic migrations.
-            if conn.dialect.name == "sqlite":
-                from app.database.schema_compatibility import (
-                    ensure_local_assembly_traceability_column,
-                    ensure_local_fg_section_columns,
-                    ensure_local_qc_audit_columns,
-                )
-                assembly_added = await conn.run_sync(ensure_local_assembly_traceability_column)
-                qc_added = await conn.run_sync(ensure_local_qc_audit_columns)
-                fg_added = await conn.run_sync(ensure_local_fg_section_columns)
-                if assembly_added:
-                    logger.info("Added local SQLite assembly columns: %s", ", ".join(assembly_added))
-                if qc_added:
-                    logger.info("Added local SQLite QC audit columns: %s", ", ".join(qc_added))
-                if fg_added:
-                    logger.info("Added local SQLite FG section columns: %s", ", ".join(fg_added))
-    except Exception as exc:
-        logger.debug(f"Schema create_all note: {exc}")
-
-    # Capacity enforcement is mandatory even when legacy schema compatibility is disabled.
-    from app.modules.storage.application.rack_capacity import install_rack_capacity
-    async with engine.begin() as connection:
-        await connection.run_sync(install_rack_capacity)
 
     if not settings.startup_schema_compatibility:
         async def start_kafka_background() -> None:
@@ -1784,6 +1755,9 @@ def create_app() -> FastAPI:
         description="Python business backend: inventory, warehouse, receiving, returns, gate entry, and related domains.",
         version="1.0.0",
         lifespan=lifespan,
+        docs_url="/docs" if settings.enable_api_docs else None,
+        redoc_url="/redoc" if settings.enable_api_docs else None,
+        openapi_url="/openapi.json" if settings.enable_api_docs else None,
     )
 
     # --- CORS Configuration -----------------------------------------------
@@ -1798,25 +1772,26 @@ def create_app() -> FastAPI:
     else:
         origins = list(raw_origins)
 
-    for o in [
-        "http://localhost:8080",
-        "http://127.0.0.1:8080",
-        "http://localhost:8081",
-        "http://127.0.0.1:8081",
-        "http://localhost:8082",
-        "http://127.0.0.1:8082",
-        "http://localhost:3000",
-        "http://localhost:5173",
-    ]:
-        if o not in origins:
-            origins.append(o)
+    is_local = settings.environment.lower() in {"local", "dev", "development", "test"}
+    if is_local:
+        for o in [
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+            "http://localhost:5173",
+        ]:
+            if o not in origins:
+                origins.append(o)
 
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
+    if settings.force_https:
+        app.add_middleware(HTTPSRedirectMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(AuditLogMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
-        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|.*\.loca\.lt)(:\d+)?",
+        allow_origin_regex=(r"https?://(localhost|127\.0\.0\.1)(:\d+)?" if is_local else None),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -1847,9 +1822,10 @@ def create_app() -> FastAPI:
     app.include_router(warehouse_location_router)
     app.include_router(zone_location_router)
 
-    @app.get("/api/debug-assembly")
-    async def debug_assembly():
-        return {"status": "ok"}
+    if is_local:
+        @app.get("/api/debug-assembly", include_in_schema=False)
+        async def debug_assembly():
+            return {"status": "ok"}
     app.include_router(assembly_requisition_router)
     app.include_router(inventory_router)
     app.include_router(storage_req_router)

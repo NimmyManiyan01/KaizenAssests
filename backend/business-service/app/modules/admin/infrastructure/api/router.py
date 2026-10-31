@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import re
 import uuid
 from datetime import datetime, timezone
@@ -16,6 +15,7 @@ from app.modules.gate.infrastructure.persistence.models import GateEntryModel, S
 from app.modules.receiving.infrastructure.persistence.models import GrnModel
 from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel, WarehouseModel
 from app.security.dependencies import CurrentUser, get_current_user
+from app.security.passwords import hash_password
 from app.modules.admin.infrastructure.persistence.models import SystemAuditLogModel
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
@@ -493,7 +493,7 @@ async def create_user(
         username=payload.username.strip(),
         full_name=payload.full_name.strip(),
         email=payload.email.strip().lower(),
-        password_hash=hashlib.sha256(payload.password.encode()).hexdigest(),
+        password_hash=hash_password(payload.password),
         role=role,
         shift_name=(payload.shift_name or "").strip() or None,
         assembly_unit_code=(payload.assembly_unit_code or "").strip().upper() or None,
@@ -606,7 +606,7 @@ async def update_user(
             if supplier is not None:
                 supplier.status = "Active" if next_status == "ACTIVE" else "Inactive"
     if payload.password is not None:
-        account.password_hash = hashlib.sha256(payload.password.encode()).hexdigest()
+        account.password_hash = hash_password(payload.password)
         account.auth_token_hash = None
         if supplier_user is not None:
             supplier_user.password_hash = account.password_hash

@@ -24,7 +24,6 @@ function normalizeRole(role: string): string {
 
 function getActiveStorage(): Storage | null {
   if (typeof window === "undefined") return null;
-  if (localStorage.getItem(AUTH_TOKEN_KEY)) return localStorage;
   if (sessionStorage.getItem(AUTH_TOKEN_KEY)) return sessionStorage;
   return null;
 }
@@ -36,7 +35,10 @@ export function getAuthToken(): string | null {
 export function storeAuthSession(user: UserInfo, rememberMe: boolean): void {
   if (typeof window === "undefined") return;
   clearAuthSession();
-  const storage = rememberMe ? localStorage : sessionStorage;
+  // Bearer tokens are intentionally tab-scoped. `rememberMe` is retained in
+  // the API for UI compatibility but never persists credentials to disk.
+  void rememberMe;
+  const storage = sessionStorage;
   storage.setItem(AUTH_TOKEN_KEY, user.token);
   storage.setItem(USER_INFO_KEY, JSON.stringify(user));
 }

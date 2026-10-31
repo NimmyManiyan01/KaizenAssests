@@ -1,10 +1,11 @@
 """
 FastAPI dependency-injection helpers for authentication and RBAC authorization.
-Supports local dev mock user fallback when running in environment=local.
+Supports explicit test-only mock identities and persisted local sessions.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hashlib
 
 from fastapi import Depends, HTTPException, Request, status
@@ -30,20 +31,6 @@ async def _resolve_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ) -> CurrentUser:
     settings = get_settings()
-
-    # Local supplier login tokens carry the supplier's persisted identity.
-    # The browser also sends role/name headers; those must not replace the
-    # token's supplier UUID with the display username used by the FG filter.
-    if (credentials is not None
-            and settings.environment.lower() in ("local", "dev", "test", "development")
-            and credentials.credentials.startswith("supplier-mock-token-")):
-        token_payload = credentials.credentials.removeprefix("supplier-mock-token-")
-        user_id = token_payload[:36]
-        supplier_id = token_payload[37:] if len(token_payload) > 37 else None
-        if supplier_id == "None":
-            supplier_id = None
-        return CurrentUser(subject=user_id or "supplier", username="supplier", roles=["SUPPLIER"],
-            permissions=[], raw_claims={"supplier_id": supplier_id} if supplier_id else {})
 
     # 1. Check custom proxy/test headers (X-User-Roles, X-User-Role, X-User-Name, X-User-Id)
     roles_hdr = (
@@ -94,8 +81,34 @@ async def _resolve_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
 
     token = credentials.credentials
+    if token.startswith("supplier-db-token-"):
+        from sqlalchemy import select
+        from app.common.persistence.models import SupplierUserModel
+        from app.database.session import AsyncSessionFactory
+
+        session_token = token.removeprefix("supplier-db-token-")
+        token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+        async with AsyncSessionFactory() as session:
+            supplier_account = (
+                await session.execute(
+                    select(SupplierUserModel).where(
+                        SupplierUserModel.auth_token_hash == token_hash,
+                        SupplierUserModel.auth_token_expires_at > datetime.now(timezone.utc),
+                    )
+                )
+            ).scalar_one_or_none()
+        if supplier_account is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or invalid")
+        return CurrentUser(
+            subject=str(supplier_account.id),
+            username=supplier_account.username,
+            roles=["SUPPLIER"],
+            permissions=[],
+            raw_claims={"supplier_id": str(supplier_account.supplier_id)},
+        )
+
     if settings.environment.lower() in ("local", "dev", "test", "development"):
-        if token == "mock-jwt-manager-token":
+        if token == "mock-jwt-manager-token" and settings.environment.lower() == "test":
             return CurrentUser(
                 subject="manager",
                 username="manager",
@@ -117,6 +130,7 @@ async def _resolve_current_user(
                     .where(
                         UserAccountModel.auth_token_hash == hashlib.sha256(session_token.encode()).hexdigest(),
                         UserAccountModel.status == "ACTIVE",
+                        UserAccountModel.auth_token_expires_at > datetime.now(timezone.utc),
                     )
                 )
                 account = result.scalar_one_or_none()
@@ -159,7 +173,7 @@ async def _resolve_current_user(
                     raw_claims=claims,
                 )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or invalid")
-        if token == "mock-jwt-supplier-token":
+        if token == "mock-jwt-supplier-token" and settings.environment.lower() == "test":
             return CurrentUser(
                 subject="supplier",
                 username="supplier_partner",
@@ -384,7 +398,7 @@ async def _resolve_current_user(
             permissions=claims.get("permissions", []),
             raw_claims=claims,
         )
-        if roles_hdr and settings.environment.lower() in {"local", "dev", "test", "development"}:
+        if roles_hdr and settings.environment.lower() == "test":
             roles = [r.strip() for r in roles_hdr.split(",") if r.strip()]
             user_name = request.headers.get("X-User-Name") or request.headers.get("x-user-name") or request.headers.get("X-User-Username") or request.headers.get("x-user-username") or user.username
             user_id = request.headers.get("X-User-Id") or request.headers.get("x-user-id") or request.headers.get("X-User-Subject") or request.headers.get("x-user-subject") or user.subject
@@ -419,17 +433,12 @@ async def _resolve_current_user(
             )
         return user
     except Exception as exc:
-        if settings.environment.lower() in ("local", "dev", "test", "development"):
-            return CurrentUser(
-                subject="local_security_officer",
-                username="local_security_officer",
-                roles=["WAREHOUSE"],
-                permissions=["gate:entry:create", "gate:entry:read", "gate:entry:verify", "gate:write", "warehouse:write", "dispatch:read", "dispatch:write", "dispatch:execute"],
-                raw_claims={},
-            )
         if isinstance(exc, TokenValidationError):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
-        raise
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired or invalid",
+        ) from exc
 
 
 async def get_current_user(

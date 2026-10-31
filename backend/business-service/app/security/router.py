@@ -12,7 +12,7 @@ import json
 import secrets
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -26,6 +26,7 @@ from app.database.session import UnitOfWork, get_uow
 from app.logging.logger import get_logger
 from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel
 from app.security.dependencies import CurrentUser, get_current_user
+from app.security.passwords import hash_password, verify_with_legacy
 
 logger = get_logger(__name__)
 
@@ -37,12 +38,12 @@ _SHORT_CODE_CACHE: Dict[str, Dict[str, Any]] = {}
 
 # --- Request / Response Schemas ---
 
-class DevLoginRequest(BaseModel):
+class DevLoginRequest(BaseModel, extra="forbid"):
     username: str
     password: str
 
 
-class SupplierLoginRequest(BaseModel):
+class SupplierLoginRequest(BaseModel, extra="forbid"):
     username: str
     password: str
 
@@ -54,7 +55,7 @@ class SupplierLoginResponse(BaseModel):
     username: str
 
 
-class ChangePasswordRequest(BaseModel):
+class ChangePasswordRequest(BaseModel, extra="forbid"):
     username: str
     old_password: str
     new_password: str
@@ -229,17 +230,36 @@ async def dev_login(
                 detail="Account is inactive",
             )
 
-        expected_hash = hashlib.sha256(req_password.encode()).hexdigest()
-        is_password_valid = account.password_hash == expected_hash
+        now = datetime.now(timezone.utc)
+        locked_until = account.locked_until
+        if locked_until and locked_until.tzinfo is None:
+            locked_until = locked_until.replace(tzinfo=timezone.utc)
+        if locked_until and locked_until > now:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid username or password",
+            )
+
+        is_password_valid, needs_rehash = verify_with_legacy(req_password, account.password_hash)
         if not is_password_valid:
+            account.failed_login_attempts = int(account.failed_login_attempts or 0) + 1
+            if account.failed_login_attempts >= settings.login_max_failures:
+                account.locked_until = now + timedelta(minutes=settings.login_lockout_minutes)
+                account.failed_login_attempts = 0
+            await uow.commit()
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid username or password",
             )
 
         session_token = secrets.token_urlsafe(48)
+        if needs_rehash:
+            account.password_hash = hash_password(req_password)
         account.auth_token_hash = hashlib.sha256(session_token.encode()).hexdigest()
-        account.last_login = datetime.now(timezone.utc)
+        account.auth_token_expires_at = now + timedelta(minutes=settings.local_session_lifetime_minutes)
+        account.failed_login_attempts = 0
+        account.locked_until = None
+        account.last_login = now
         await uow.commit()
 
         role_key = (account.role or "WAREHOUSE_OPERATOR").strip().upper().replace(" ", "_")
@@ -264,6 +284,7 @@ async def dev_login(
             "warehouse_name": account.warehouse.warehouse_name if account.warehouse else None,
             "applications": account.applications or [],
             "page_permissions": account.page_permissions or {},
+            "expires_in": settings.local_session_lifetime_minutes * 60,
         }
 
     raise HTTPException(
@@ -279,36 +300,36 @@ async def supplier_login(
     uow: UnitOfWork = Depends(get_uow),
 ) -> SupplierLoginResponse:
     http_request.state.audit_actor = (request.username or "").strip() or "Unknown"
-    password_hash = hashlib.sha256(request.password.encode()).hexdigest()
-    stmt = select(SupplierUserModel).where(
-        SupplierUserModel.username == request.username,
-        SupplierUserModel.password_hash == password_hash,
-    )
+    stmt = select(SupplierUserModel).where(SupplierUserModel.username == request.username)
     result = await uow.session.execute(stmt)
     user = result.scalars().first()
 
-    if not user:
-        settings = get_settings()
-        if request.username == getattr(settings, "supplier_username", "supplier") and settings.supplier_password and request.password == settings.supplier_password:
-            http_request.state.audit_actor = request.username
-            http_request.state.audit_roles = "SUPPLIER"
-            return SupplierLoginResponse(
-                token="mock-jwt-supplier-token",
-                supplier_id="default-supplier-id",
-                must_change_password=False,
-                username=request.username,
-            )
+    password_valid, needs_rehash = verify_with_legacy(
+        request.password, user.password_hash if user else ""
+    )
+    if not user or not password_valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid supplier username or password",
         )
+
+    if needs_rehash:
+        user.password_hash = hash_password(request.password)
+
+    settings = get_settings()
+    session_token = secrets.token_urlsafe(48)
+    user.auth_token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+    user.auth_token_expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.local_session_lifetime_minutes
+    )
+    await uow.commit()
 
     http_request.state.audit_actor = user.username
     http_request.state.audit_employee_id = str(user.id)
     http_request.state.audit_roles = "SUPPLIER"
 
     return SupplierLoginResponse(
-        token=f"supplier-mock-token-{user.id}-{user.supplier_id}",
+        token=f"supplier-db-token-{session_token}",
         supplier_id=str(user.supplier_id),
         must_change_password=user.must_change_password,
         username=user.username,
@@ -320,21 +341,19 @@ async def change_password(
     request: ChangePasswordRequest,
     uow: UnitOfWork = Depends(get_uow),
 ) -> dict:
-    old_hash = hashlib.sha256(request.old_password.encode()).hexdigest()
-    stmt = select(SupplierUserModel).where(
-        SupplierUserModel.username == request.username,
-        SupplierUserModel.password_hash == old_hash,
-    )
+    stmt = select(SupplierUserModel).where(SupplierUserModel.username == request.username)
     result = await uow.session.execute(stmt)
     user = result.scalars().first()
-    if not user:
+    password_valid, _ = verify_with_legacy(
+        request.old_password, user.password_hash if user else ""
+    )
+    if not user or not password_valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid old password",
         )
 
-    new_hash = hashlib.sha256(request.new_password.encode()).hexdigest()
-    user.password_hash = new_hash
+    user.password_hash = hash_password(request.new_password)
     user.must_change_password = False
     await uow.session.flush()
     await uow.commit()
@@ -385,7 +404,7 @@ async def magic_login(
                 id=uuid.uuid4(),
                 supplier_id=sup_uuid,
                 username=username or f"sup_{supplier_id_str[:8]}",
-                password_hash=hashlib.sha256(secrets.token_hex(16).encode()).hexdigest(),
+                password_hash=hash_password(secrets.token_hex(16)),
                 must_change_password=False,
             )
             uow.session.add(user)
@@ -406,8 +425,18 @@ async def magic_login(
     now = int(time.time())
     expires_in_hours = max(round((exp - now) / 3600, 1), 0.0)
 
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to establish a supplier session",
+        )
+    session_token = secrets.token_urlsafe(48)
+    user.auth_token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+    user.auth_token_expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
+    await uow.commit()
+
     return MagicLoginResponse(
-        token=f"supplier-mock-token-{user_id_str}-{effective_supplier_id}",
+        token=f"supplier-db-token-{session_token}",
         supplier_id=effective_supplier_id,
         supplierId=effective_supplier_id,
         username=effective_username,
@@ -422,8 +451,37 @@ async def magic_login(
 
 
 @router.post("/logout")
-async def logout(user: CurrentUser = Depends(get_current_user)) -> dict:
-    """Record logout activity; client sessions are cleared after this request."""
+async def logout(
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> dict:
+    """Revoke the persisted local session before the client clears its copy."""
+    account = (
+        await uow.session.execute(
+            select(UserAccountModel).where(UserAccountModel.employee_id == user.subject)
+        )
+    ).scalar_one_or_none()
+    if account:
+        account.auth_token_hash = None
+        account.auth_token_expires_at = None
+        await uow.commit()
+        return {"success": True, "username": user.username}
+
+    if "SUPPLIER" in {role.upper() for role in user.roles}:
+        try:
+            supplier_user_id = uuid.UUID(user.subject)
+        except ValueError:
+            supplier_user_id = None
+        if supplier_user_id:
+            supplier_account = (
+                await uow.session.execute(
+                    select(SupplierUserModel).where(SupplierUserModel.id == supplier_user_id)
+                )
+            ).scalar_one_or_none()
+            if supplier_account:
+                supplier_account.auth_token_hash = None
+                supplier_account.auth_token_expires_at = None
+                await uow.commit()
     return {"success": True, "username": user.username}
 
 
