@@ -127,7 +127,7 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { value: "READY", label: "BAY STATUS" },
     ],
     telemetry: [
-      { label: "WAREHOUSE_OPERATOR MGR", value: "Rajesh V." },
+      { label: "STORE MGR", value: "Rajesh V." },
       { label: "BAY NUMBER", value: "D-04" },
       { label: "ROUTE SIGNAL", value: "SENT TO GATE" },
     ],
@@ -293,18 +293,18 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "REQUIRED ITEM", value: "Electric Motor 15HP" },
       { label: "REQUIRED QTY", value: "50 UNITS" },
     ],
-    cameraPosition: [-6.5, 5.0, -152.0],
+    cameraPosition: [-13.0, 8.5, -146.0],
     cameraTarget: [-0.8, 1.8, -165.0],
   },
   {
     id: "warehouse-issue",
     number: "11",
-    chapter: "WAREHOUSE_OPERATOR ISSUE",
+    chapter: "STORE ISSUE",
     title: "WAREHOUSE MATERIAL ISSUE",
     headline: "Warehouse operator picks & delivers requested components.",
     description:
       "Warehouse keeper picks required components from storage racks, scans QR code for verification, and delivers to assembly staging area.",
-    department: "Warehouse Issue",
+    department: "Store Issue",
     document: "Pick Slip & Material Issue Voucher",
     nextProcess: "Step 12: Production Starts",
     route: "/inventory",
@@ -318,10 +318,10 @@ export const JOURNEY_STAGES: JourneyStage[] = [
     telemetry: [
       { label: "PICK LOCATION", value: "BIN-MEC-Z01" },
       { label: "KEEPER", value: "Venkatesh K." },
-      { label: "TRANSFER", value: "WAREHOUSE_OPERATOR TO ASSEMBLY" },
+      { label: "TRANSFER", value: "STORE TO ASSEMBLY" },
     ],
-    cameraPosition: [-4.0, 4.5, -125.0],
-    cameraTarget: [0.0, 1.8, -145.0],
+    cameraPosition: [-12.0, 8.0, -150.0],
+    cameraTarget: [0.0, 1.8, -165.0],
   },
   {
     id: "production-start",
@@ -347,7 +347,7 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "CONVEYOR", value: "SPEED 1.2 m/s" },
       { label: "INLINE QC", value: "PASS" },
     ],
-    cameraPosition: [-5.5, 3.8, -158.0],
+    cameraPosition: [-11.0, 7.5, -153.0],
     cameraTarget: [0.35, 1.5, -165.0],
   },
   {
@@ -374,7 +374,7 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "QUALITY CERT", value: "PASSED 100%" },
       { label: "SERIALIZATION", value: "COMPLETED" },
     ],
-    cameraPosition: [-1.5, 3.2, -162.0],
+    cameraPosition: [-12.0, 7.0, -154.0],
     cameraTarget: [3.5, 1.5, -168.0],
   },
   {
@@ -401,7 +401,7 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "DESTINATION", value: "Pune Distribution Hub" },
       { label: "DISPATCH PLAN", value: "EXPRESS SHIPMENT" },
     ],
-    cameraPosition: [-1.0, 4.0, -168.0],
+    cameraPosition: [-11.0, 7.0, -160.0],
     cameraTarget: [3.5, 1.8, -175.0],
   },
   {
@@ -428,8 +428,8 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "SEAL NO", value: "SL-99318" },
       { label: "LOAD TIME", value: "18 MINUTES" },
     ],
-    cameraPosition: [1.5, 4.5, -198.0],
-    cameraTarget: [-8.5, 1.8, -208.0],
+    cameraPosition: [8.0, 6.0, -190.0],
+    cameraTarget: [-6.0, 2.0, -207.0],
   },
   {
     id: "gate-exit",
@@ -455,7 +455,7 @@ export const JOURNEY_STAGES: JourneyStage[] = [
       { label: "AUTHORIZATION", value: "SECURITY VERIFIED" },
       { label: "TRIP STATUS", value: "COMPLETED" },
     ],
-    cameraPosition: [-7.0, 4.5, -238.0],
-    cameraTarget: [0.8, 1.8, -255.0],
+    cameraPosition: [10.0, 7.0, -230.0],
+    cameraTarget: [0.8, 2.0, -252.0],
   },
 ];
