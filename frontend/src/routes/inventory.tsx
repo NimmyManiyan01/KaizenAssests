@@ -77,6 +77,13 @@ export const Route = createFileRoute("/inventory")({
 
 type TabType = "dashboard" | "putaway" | "inventory" | "requests" | "picking" | "locations";
 
+const formatApiDateTime = (value?: string | null) => {
+  if (!value) return "—";
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  return new Date(hasTimezone ? normalized : `${normalized}Z`).toLocaleString();
+};
+
 function SimpleWarehouseModule() {
   const navigate = useNavigate();
   const searchParams: any = useSearch({ from: "/inventory" });
@@ -2270,14 +2277,14 @@ function SimpleWarehouseModule() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {pickupTasks.length === 0 ? (
+                  {pickupTasks.filter((task) => !["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())).length === 0 ? (
                     <tr>
                       <td colSpan={7} className="text-center py-6 text-slate-500">
                         No pick tasks in queue. Approve a Material Request to generate pick tasks.
                       </td>
                     </tr>
                   ) : (
-                    pickupTasks.map((p) => (
+                    pickupTasks.filter((task) => !["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())).map((p) => (
                       <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
                         <td className="py-3 px-3 font-semibold text-indigo-600">
                           <button
@@ -2351,7 +2358,7 @@ function SimpleWarehouseModule() {
                           <td className="px-3 font-mono text-xs">{task.pick_location || "—"}</td>
                           <td className="px-3 font-semibold">{task.picked_quantity ?? task.quantity ?? "—"} {task.uom || ""}</td>
                           <td className="px-3">{task.confirmation?.confirmed_by || "—"}</td>
-                          <td className="px-3 text-xs text-muted-foreground">{task.confirmation?.confirmed_at ? new Date(task.confirmation.confirmed_at).toLocaleString() : "—"}</td>
+                          <td className="px-3 text-xs text-muted-foreground">{formatApiDateTime(task.confirmation?.confirmed_at)}</td>
                         </tr>
                       ))}
                     </tbody>

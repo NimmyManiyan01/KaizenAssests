@@ -146,7 +146,7 @@ function AdminOperationsPage() {
 
   return (
     <AppShell
-      title="Operational Monitoring"
+      title={<span className="inline-flex items-center gap-3"><span className="inline-flex size-10 items-center justify-center rounded-xl bg-blue-50 text-blue-700 ring-1 ring-blue-100"><Activity className="size-5" aria-hidden="true" /></span><span>Operational Monitoring</span></span>}
       subtitle="Cross-module activity, performance, and shortcuts for daily operations."
       actions={<Button variant="outline" className="h-10 w-10 bg-white px-0" aria-label="Reload operational data" title="Reload operational data" onClick={() => void load()} disabled={loading}><RefreshCw className={loading ? "animate-spin" : ""} /></Button>}
     >

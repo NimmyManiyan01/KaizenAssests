@@ -96,6 +96,13 @@ const normalizePlate = (value: unknown) =>
     .replace(/[\s-]/g, "")
     .toUpperCase();
 
+const formatApiDateTime = (value?: string | null) => {
+  if (!value) return "—";
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  return new Date(hasTimezone ? normalized : `${normalized}Z`).toLocaleString();
+};
+
 const displaySupplierName = (value?: string | null) =>
   String(value || "").replace(/\s*\(EMP-[^)]+\)/gi, "").trim();
 
@@ -291,6 +298,7 @@ function InboundArrivals() {
       ...transport,
       has_active_gate_pass: arrivalsRef.current.some(
         (arrival) =>
+          String(arrival.asn_id || "") === String(asn.id || asn.asn_id || "") &&
           normalizePlate(arrival.vehicle_number) === normalizePlate(transport.vehicle_number) &&
           !["REJECTED", "DENIED_ENTRY", "GATE_EXIT_COMPLETED", "VEHICLE_EXITED", "CHECKED_OUT"].includes(
             String(arrival.status || "").toUpperCase(),
@@ -1673,7 +1681,7 @@ function ArrivalDetails({
           <Detail label="ASN number" value={arrival.asn_number} mono />
           <Detail label="Supplier" value={displaySupplierName(arrival.supplier_name)} />
           <Detail label="Current status" value={arrival.status.replaceAll("_", " ")} />
-          <Detail label="Arrival time" value={new Date(arrival.arrival_time).toLocaleString()} />
+          <Detail label="Arrival time" value={formatApiDateTime(arrival.arrival_time)} />
         </dl>
         </section>
         <section className="min-w-0 rounded-lg border bg-muted/10 p-4">
@@ -1731,13 +1739,13 @@ function ArrivalDetails({
             <dt className="text-muted-foreground">Entry time</dt>
             <dd>
               {arrival.facility_entry_at || arrival.arrival_time
-                ? new Date(arrival.facility_entry_at || arrival.arrival_time!).toLocaleString()
+                ? formatApiDateTime(arrival.facility_entry_at || arrival.arrival_time)
                 : "Not entered"}
             </dd>
             <dt className="text-muted-foreground">Allocated dock</dt>
             <dd className="font-semibold">{arrival.assigned_dock_id || "—"}</dd>
             <dt className="text-muted-foreground">Dock assigned</dt>
-            <dd>{arrival.assigned_at ? new Date(arrival.assigned_at).toLocaleString() : "—"}</dd>
+            <dd>{formatApiDateTime(arrival.assigned_at)}</dd>
             <dt className="text-muted-foreground">Assigned by</dt>
             <dd>{arrival.assigned_by || "—"}</dd>
             <dt className="text-muted-foreground">Dock check-in</dt>

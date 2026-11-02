@@ -210,6 +210,21 @@ function formatCardDate(dateVal?: string | null): string {
   }
 }
 
+const formatApiDateTime = (value?: string | null) => {
+  if (!value) return "—";
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  return new Date(hasTimezone ? normalized : `${normalized}Z`).toLocaleString();
+};
+
+const normalizeVehicleKey = (value: unknown) =>
+  String(value || "").replace(/[\s-]/g, "").toUpperCase();
+
+const isCompletedGrnStatus = (value: unknown) =>
+  ["COMPLETED", "POSTED", "RECEIVING_COMPLETE", "RECEIVING_COMPLETED", "APPROVED", "ACCEPTED"].includes(
+    String(value || "").trim().toUpperCase(),
+  );
+
 function isUuidString(val?: string | null): boolean {
   if (!val) return false;
   return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
@@ -1051,6 +1066,17 @@ function GrnPageWorkflow() {
       (item) => String(item.id || item.gate_entry_number) === arrivalId,
     );
     if (!arrival) return;
+    const completedForArrival = grnRecords.some(
+      (record) =>
+        normalizeVehicleKey(record.vehicle_number) === normalizeVehicleKey(arrival.vehicle_number) &&
+        String(record.asn_number || record.asnNumber || "").trim().toUpperCase() ===
+          String(header.asn_number || "").trim().toUpperCase() &&
+        isCompletedGrnStatus(record.status),
+    );
+    if (completedForArrival) {
+      toast.error("This vehicle is already linked to a completed GRN for this ASN.");
+      return;
+    }
     completedGrnConflictRef.current = false;
     const requestId = ++vehicleDraftRequest.current;
     setGrnId(null);
@@ -5027,14 +5053,22 @@ function GrnPageWorkflow() {
                       >
                         {asnVehicleArrivals.length === 0 ? (
                           <option value="">No arrived vehicles found for this ASN</option>
-                        ) : asnVehicleArrivals.map((arrival) => (
-                            <option
+                        ) : asnVehicleArrivals.map((arrival) => {
+                            const completedForArrival = grnRecords.some(
+                              (record) =>
+                                normalizeVehicleKey(record.vehicle_number) === normalizeVehicleKey(arrival.vehicle_number) &&
+                                String(record.asn_number || record.asnNumber || "").trim().toUpperCase() ===
+                                  String(header.asn_number || "").trim().toUpperCase() &&
+                                isCompletedGrnStatus(record.status),
+                            );
+                            return <option
                               key={arrival.id || arrival.gate_entry_number}
                               value={String(arrival.id || arrival.gate_entry_number)}
+                              disabled={completedForArrival}
                             >
-                              {arrival.vehicle_number || "Vehicle"}
-                            </option>
-                          ))}
+                              {arrival.vehicle_number || "Vehicle"}{completedForArrival ? " · GRN completed" : ""}
+                            </option>;
+                          })}
                       </select>
                     ) : (
                       <Input

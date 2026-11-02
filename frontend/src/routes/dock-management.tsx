@@ -109,6 +109,16 @@ type Dock = {
   current_allocation?: AllocationRequest | null;
 };
 
+// SQLite/legacy API responses can omit the UTC suffix even though the service
+// writes these values with datetime.now(timezone.utc). Treat those timestamps
+// as UTC before converting them to the user's local timezone.
+const formatApiDateTime = (value?: string | null) => {
+  if (!value) return "—";
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  return new Date(hasTimezone ? normalized : `${normalized}Z`).toLocaleString();
+};
+
 type WarehouseManager = {
   id: string;
   employee_id: string;
@@ -754,7 +764,7 @@ function DockManagement() {
       {loading ? (
         <div className="flex h-64 items-center justify-center gap-2 text-muted-foreground"><Loader2 className="size-6 animate-spin text-primary" /><p className="text-sm">Loading dock status...</p></div>
       ) : activeTab === "HISTORY" ? (
-        <Card className="overflow-hidden rounded-2xl p-0 shadow-soft"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b bg-muted/50 text-[11px] uppercase tracking-wide text-muted-foreground font-semibold"><tr><th className="px-4 py-3">Timestamp</th><th className="px-4 py-3">Gate Pass</th><th className="px-4 py-3">Vehicle</th><th className="px-4 py-3">Action</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Performed By</th></tr></thead><tbody className="divide-y divide-border/60">{history.length ? history.map((item) => <tr key={item.id}><td className="px-4 py-3 text-xs">{new Date(item.performed_at).toLocaleString()}</td><td className="px-4 py-3 font-mono font-semibold text-emerald-700 dark:text-emerald-400">{item.existing_gate_pass_id || "—"}</td><td className="px-4 py-3 font-mono">{item.vehicle_number || "—"}</td><td className="px-4 py-3">{item.action}</td><td className="px-4 py-3"><div className="flex flex-wrap items-center gap-2">
+        <Card className="overflow-hidden rounded-2xl p-0 shadow-soft"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b bg-muted/50 text-[11px] uppercase tracking-wide text-muted-foreground font-semibold"><tr><th className="px-4 py-3">Timestamp</th><th className="px-4 py-3">Gate Pass</th><th className="px-4 py-3">Vehicle</th><th className="px-4 py-3">Action</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Performed By</th></tr></thead><tbody className="divide-y divide-border/60">{history.length ? history.map((item) => <tr key={item.id}><td className="px-4 py-3 text-xs">{formatApiDateTime(item.performed_at)}</td><td className="px-4 py-3 font-mono font-semibold text-emerald-700 dark:text-emerald-400">{item.existing_gate_pass_id || "—"}</td><td className="px-4 py-3 font-mono">{item.vehicle_number || "—"}</td><td className="px-4 py-3">{item.action}</td><td className="px-4 py-3"><div className="flex flex-wrap items-center gap-2">
           {item.previous_status && <StatusBadge status={item.previous_status} />}
           {item.previous_status && <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" aria-label="changed to" />}
           <StatusBadge status={item.new_status} />
@@ -784,7 +794,7 @@ function DockManagement() {
           </Card>
           ))}
           <section className="dock-management-waiting space-y-3"><div className="flex items-end justify-between gap-3"><div><h3 className="text-lg font-bold">Approved vehicles waiting</h3><p className="text-sm text-muted-foreground">Allocate the available dock to an approved gate entry.</p></div><span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold">{pendingRequests.length} waiting</span></div>
-            {pendingRequests.length === 0 ? <Card className="rounded-2xl border-dashed p-8 text-center text-sm text-muted-foreground">No approved vehicles are waiting for dock allocation.</Card> : <div className="space-y-3">{pendingRequests.map((req) => <Card key={req.id} className="rounded-2xl p-4 shadow-2xs"><div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div className="grid flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Gate pass</p><p className="mt-1 font-mono font-bold text-primary">{req.existing_gate_pass_id}</p></div><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Vehicle</p><p className="mt-1 font-mono font-bold">{req.vehicle_number}</p></div><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Vendor / material</p><p className="mt-1 text-sm font-semibold">{req.vendor_reference || req.material_reference || req.material_description || "—"}</p></div><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Approved</p><p className="mt-1 text-sm">{req.security_approved_at ? new Date(req.security_approved_at).toLocaleString() : "—"}</p></div></div><Button disabled={actionBusy || !docks.some((dock) => dock.is_active && dock.status === "AVAILABLE" && isDockCompatible(req, dock))} onClick={() => { setSelectedDockIdToAllocate(""); setAllocateModalPendingReq(req); }} className="shrink-0 rounded-xl"><ArrowRight className="mr-2 size-4" />{docks.some((dock) => dock.is_active && dock.status === "AVAILABLE" && isDockCompatible(req, dock)) ? "Allocate dock" : "Dock unavailable"}</Button></div></Card>)}</div>}
+            {pendingRequests.length === 0 ? <Card className="rounded-2xl border-dashed p-8 text-center text-sm text-muted-foreground">No approved vehicles are waiting for dock allocation.</Card> : <div className="space-y-3">{pendingRequests.map((req) => <Card key={req.id} className="rounded-2xl p-4 shadow-2xs"><div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div className="grid flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Gate pass</p><p className="mt-1 font-mono font-bold text-primary">{req.existing_gate_pass_id}</p></div><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Vehicle</p><p className="mt-1 font-mono font-bold">{req.vehicle_number}</p></div><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Vendor / material</p><p className="mt-1 text-sm font-semibold">{req.vendor_reference || req.material_reference || req.material_description || "—"}</p></div><div><p className="text-[11px] font-bold uppercase text-muted-foreground">Approved</p><p className="mt-1 text-sm">{formatApiDateTime(req.security_approved_at)}</p></div></div><Button disabled={actionBusy || !docks.some((dock) => dock.is_active && dock.status === "AVAILABLE" && isDockCompatible(req, dock))} onClick={() => { setSelectedDockIdToAllocate(""); setAllocateModalPendingReq(req); }} className="shrink-0 rounded-xl"><ArrowRight className="mr-2 size-4" />{docks.some((dock) => dock.is_active && dock.status === "AVAILABLE" && isDockCompatible(req, dock)) ? "Allocate dock" : "Dock unavailable"}</Button></div></Card>)}</div>}
           </section>
         </div>
       )}
@@ -959,9 +969,7 @@ function DockManagement() {
                         <span className="text-muted-foreground block text-[11px]">Approved At</span>
                         <span className="font-mono text-muted-foreground">
                           {selectedDetailsDock.current_allocation?.security_approved_at
-                            ? new Date(
-                              selectedDetailsDock.current_allocation.security_approved_at,
-                            ).toLocaleString()
+                            ? formatApiDateTime(selectedDetailsDock.current_allocation.security_approved_at)
                             : "—"}
                         </span>
                       </div>

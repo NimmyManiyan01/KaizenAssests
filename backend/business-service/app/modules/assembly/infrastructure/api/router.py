@@ -194,6 +194,13 @@ async def create_supplier_finished_goods_dispatch_request(
         )
         uow.session.add(row)
         uow.session.add(NotificationModel(user_role="ASSEMBLY_MANAGER", title="Supplier FG dispatch request", message=f"{request_number} requests {payload.quantity:g} {payload.uom} of {payload.product_name}.", link="/assembly/dispatch"))
+        if row.status == "READY_FOR_PICKUP":
+            uow.session.add(NotificationModel(
+                user_role="GATE_SECURITY",
+                title="Finished-goods pickup request ready",
+                message=f"{request_number} is ready for pickup. Register the assigned supplier vehicle at Gate Entry.",
+                link="/gate/finished-goods-pickup",
+            ))
         await uow.commit()
         return {"request_number": request_number, "status": row.status, "supplier_id": str(supplier_id)}
 

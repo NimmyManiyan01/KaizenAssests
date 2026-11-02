@@ -48,9 +48,16 @@ async def validate_gate_duplicates(session, vehicle: str, asn_id: uuid.UUID | No
         # Obtain SQLite's writer reservation before checking for duplicates.
         await session.execute(text("UPDATE gate_entry SET status = status WHERE 0"))
     normalized_column = func.replace(func.replace(func.upper(GateEntryModel.vehicle_number), "-", ""), " ", "")
-    existing = await session.scalar(select(GateEntryModel.gate_entry_number).where(
+    duplicate_filters = [
         normalized_column == normalize_vehicle(vehicle),
         GateEntryModel.status.notin_(["REJECTED", "DENIED_ENTRY", "VEHICLE_EXITED", "GATE_EXIT_COMPLETED", "CHECKED_OUT"]),
-    ).limit(1))
+    ]
+    if asn_id is not None:
+        duplicate_filters.append(GateEntryModel.asn_id == asn_id)
+    existing = await session.scalar(
+        select(GateEntryModel.gate_entry_number)
+        .where(*duplicate_filters)
+        .limit(1)
+    )
     if existing:
         raise HTTPException(409, f"Vehicle {normalize_vehicle(vehicle)} already has active Gate Pass {existing}. Record its exit before creating another entry.")
