@@ -161,7 +161,7 @@ function LoginPage() {
             ))}
           </div>
         </div>
-        <div className="absolute bottom-0 left-0 hidden h-[24%] w-[31%] pt-[4.8vw] pl-[4.3vw] text-[.69vw] leading-[1.9] font-bold tracking-[.28vw] text-[#b5d5ff] min-[1000px]:block before:absolute before:inset-0 before:-z-10 before:bg-[linear-gradient(115deg,#1970ee,#3289ff)] before:content-[''] before:[clip-path:polygon(0_0,86%_48%,93%_59%,96%_73%,100%_100%,0_100%)]">
+        <div className="absolute bottom-0 left-0 hidden h-[24%] w-[31%] pt-[4.8vw] pl-[4.3vw] text-[.69vw] leading-[1.9] font-bold tracking-[.28vw] text-black min-[1000px]:block before:absolute before:inset-0 before:-z-10 before:bg-[linear-gradient(115deg,#1970ee,#3289ff)] before:content-[''] before:[clip-path:polygon(0_0,86%_48%,93%_59%,96%_73%,100%_100%,0_100%)]">
           BUILDING
           <br />A MORE EFFICIENT
           <br />
@@ -170,7 +170,7 @@ function LoginPage() {
       </section>
       <section className="relative z-10 mx-auto block w-full max-w-[580px] min-[1000px]:absolute min-[1000px]:top-[10.15%] min-[1000px]:right-[3%] min-[1000px]:m-0 min-[1000px]:w-[38%] min-[1000px]:max-w-none">
         <div className="mb-3 flex flex-wrap items-center justify-end gap-x-4 gap-y-2 min-[1000px]:absolute min-[1000px]:right-0 min-[1000px]:bottom-full min-[1000px]:w-full">
-          <div className="hidden items-center gap-[.8vw] text-[.67vw] font-semibold tracking-[.07vw] whitespace-nowrap text-[#607391] min-[1000px]:flex">
+          <div className="hidden items-center gap-[.8vw] text-[.67vw] font-semibold tracking-[.07vw] whitespace-nowrap text-black min-[1000px]:flex">
             PEOPLE&nbsp; | &nbsp;PROCESS&nbsp; | &nbsp;PRODUCTIVITY{" "}
             <span className="h-0.5 w-[2.4vw] bg-[#0d214d]" />
           </div>
