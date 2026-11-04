@@ -82,6 +82,8 @@ async def lifespan(app: FastAPI):
             _consumer_task = asyncio.create_task(start_notification_consumer())
         except Exception as exc:
             logger.debug(f"Notification consumer task failed to start: {exc}")
+        from app.bootstrap import bootstrap_system_data
+        await bootstrap_system_data()
         logger.info("business-service started", extra={"extra_fields": {"environment": settings.environment, "startup_schema_compatibility": False}})
         yield
         scheduler.shutdown(wait=False)
@@ -1733,6 +1735,8 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.debug(f"Notification consumer task failed to start: {exc}")
 
+    from app.bootstrap import bootstrap_system_data
+    await bootstrap_system_data()
     logger.info("business-service started", extra={"extra_fields": {"environment": settings.environment}})
 
     yield

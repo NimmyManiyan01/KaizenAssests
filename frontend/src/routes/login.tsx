@@ -210,11 +210,11 @@ function LoginPage() {
               <div className="border-[#c9ddff]! shadow-[0_0_3px_1px_#c9ddff]! mt-2 flex h-[50px] items-center rounded-[10px] border border-[#dae4f3] bg-[#e8f1ff] px-3 shadow-[0_1px_2px_#123b7220] min-[1000px]:mt-[.4vw] min-[1000px]:h-[2.9vw] min-[1000px]:rounded-[.7vw] min-[1000px]:px-[.85vw] [&_svg]:size-[21px] [&_svg]:shrink-0 min-[1000px]:[&_svg]:size-[1.25vw]">
                 <UserRound size={22} />
                 <input
-                  className="ml-3 h-full min-w-0 w-full bg-transparent text-base font-normal outline-none placeholder:text-[#101725] placeholder:opacity-100 min-[1000px]:text-[.98vw]"
+                  className="ml-3 h-full min-w-0 w-full bg-transparent text-base font-normal outline-none placeholder:text-[#7f90a8] min-[1000px]:text-[.98vw]"
                   value={employeeId}
                   maxLength={100}
                   onChange={(e) => setEmployeeId(e.target.value)}
-                  placeholder="supplier"
+                  placeholder="Enter username"
                   required
                 />
               </div>
@@ -235,12 +235,12 @@ function LoginPage() {
               <div className="mt-2 flex h-[50px] items-center rounded-[10px] border border-[#dae4f3] bg-[#e8f1ff] px-3 shadow-[0_1px_2px_#123b7220] min-[1000px]:mt-[.4vw] min-[1000px]:h-[2.9vw] min-[1000px]:rounded-[.7vw] min-[1000px]:px-[.85vw] [&_svg]:size-[21px] [&_svg]:shrink-0 min-[1000px]:[&_svg]:size-[1.25vw]">
                 <LockKeyhole size={22} />
                 <input
-                  className="ml-3 h-full min-w-0 w-full bg-transparent text-base font-normal outline-none placeholder:text-[#101725] placeholder:opacity-100 min-[1000px]:text-[.98vw]"
+                  className="ml-3 h-full min-w-0 w-full bg-transparent text-base font-normal outline-none placeholder:text-[#7f90a8] min-[1000px]:text-[.98vw]"
                   type={showPassword ? "text" : "password"}
                   value={password}
                   maxLength={128}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
+                  placeholder="Enter password"
                   required
                 />
                 <button

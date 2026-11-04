@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     prometheus_enabled: bool = Field(default=True)
 
     # --- Role Credentials ---------------------------------------------------------
+    admin_username: str = Field(default="admin")
+    admin_password: str = Field(default="admin123")
+    admin_email: str = Field(default="admin@kaizen.local")
+    admin_full_name: str = Field(default="System Administrator")
+    auto_bootstrap_admin: bool = Field(default=True, description="Automatically ensure default admin account and warehouse exist on startup.")
     warehouse_username: str = Field(default="warehouse")
     warehouse_password: str = Field(default="")
     manager_username: str = Field(default="manager")
