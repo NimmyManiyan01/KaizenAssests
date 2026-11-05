@@ -45,3 +45,4 @@ test.describe('Module 01: Landing Page & Three.js Canvas Experience', () => {
     expect(new URL(page.url()).pathname).toBe('/');
   });
 });
+

@@ -61,3 +61,4 @@ test.describe('Module 08: Assembly & Manufacturing Operations', () => {
     await expect(title.first()).toBeVisible({ timeout: 10000 });
   });
 });
+

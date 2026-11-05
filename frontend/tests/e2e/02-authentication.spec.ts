@@ -109,3 +109,4 @@ test.describe('Module 02: Authentication & Security', () => {
     expect(storageCheck.hasLocalToken).toBe(false);
   });
 });
+

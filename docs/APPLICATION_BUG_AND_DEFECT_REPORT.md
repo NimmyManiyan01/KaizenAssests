@@ -113,3 +113,4 @@
 1. **Automated Preflight Integration**: Incorporate an automated CORS preflight integration test into CI/CD pipelines before container deployments.
 2. **Schema Verification Gate**: Implement `alembic check` in container startup scripts to ensure database migrations match SQLAlchemy models before opening port 8000.
 3. **Route Guard Linter**: Add an ESLint rule requiring every TanStack route file to define a `beforeLoad` authentication check unless explicitly marked as a public route.
+

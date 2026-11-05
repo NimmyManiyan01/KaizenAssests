@@ -122,3 +122,4 @@ Measured from client requests to Central India Azure Datacenter:
 1. **Auto-Scaling Rules**: Currently, Container Apps are configured with minimum replica 1. Recommend setting scale rules based on HTTP request concurrency (e.g. 50 concurrent requests per replica).
 2. **Log Analytics Workspace**: All container stdout/stderr streams are piped to Azure Monitor. Recommend setting alert rules for HTTP 5xx error spikes (> 1% over 5 minutes).
 3. **Database Automated Backups**: Ensure Azure PostgreSQL point-in-time restore (PITR) is active with a 7-day or 14-day retention window.
+

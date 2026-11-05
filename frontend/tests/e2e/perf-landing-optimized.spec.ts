@@ -68,3 +68,4 @@ test('Measure Landing Page Performance Audit', async ({ page }) => {
   expect(metricMap['JSHeapUsedSize']).toBeLessThan(150 * 1024 * 1024); // Under 150MB
   expect(Number(vitals.fcp)).toBeLessThan(5000); // FCP under 5s
 });
+

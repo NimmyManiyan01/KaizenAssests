@@ -129,3 +129,4 @@ Measurements captured using Chrome DevTools Protocol (CDP) `Performance.getMetri
 1. **Pixel Ratio Clamping**: The canvas utilizes `dpr={[1, 1.5]}` ensuring that high-density Retina and 4K mobile displays do not attempt to render Three.js at 3x/4x native pixel density, preventing thermal throttling.
 2. **Context Loss Recovery**: Implemented graceful WebGL context loss listeners (`webglcontextlost` and `webglcontextrestored`) to prevent browser tab crashes when users switch tabs or wake mobile devices from sleep.
 3. **Power Preference**: Configured `powerPreference: "high-performance"` with fallback to standard integrated GPU modes.
+
