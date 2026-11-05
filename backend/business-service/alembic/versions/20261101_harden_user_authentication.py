@@ -15,7 +15,14 @@ depends_on = None
 
 
 def upgrade() -> None:
-    columns = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("user_account")}
+    conn = op.get_bind()
+    tables = sa.inspect(conn).get_table_names()
+    if "store" in tables:
+        from app.database.single_warehouse_migration import migrate
+        migrate(conn)
+        from app.modules.storage.application.rack_capacity import install_rack_capacity
+        install_rack_capacity(conn)
+    columns = {column["name"] for column in sa.inspect(conn).get_columns("user_account")}
     if "auth_token_expires_at" not in columns:
         op.add_column("user_account", sa.Column("auth_token_expires_at", sa.DateTime(timezone=True)))
     if "failed_login_attempts" not in columns:

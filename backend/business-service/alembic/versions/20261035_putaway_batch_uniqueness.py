@@ -12,6 +12,9 @@ def upgrade():
     bind = op.get_bind()
     if bind.dialect.name != "postgresql":
         raise RuntimeError("This migration is supported only on PostgreSQL")
+    columns = {col["name"] for col in sa.inspect(bind).get_columns("putaway_task")}
+    if "batch_number" not in columns:
+        op.add_column("putaway_task", sa.Column("batch_number", sa.String(128), nullable=True))
     constraints = sa.inspect(bind).get_unique_constraints("putaway_task")
     if not any(c["column_names"] == ["grn_id", "item_code", "batch_number"] for c in constraints):
         op.create_unique_constraint("uq_putaway_task_grn_item_batch", "putaway_task",

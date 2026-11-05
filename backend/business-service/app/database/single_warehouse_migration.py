@@ -153,7 +153,10 @@ def migrate(connection) -> dict:
             new = column_name(old.replace("store_manager_user", "user_account").replace("store_zone", "warehouse_zone").replace("store_bin", "warehouse_bin").replace("store_rack", "warehouse_rack"))
             new = re.sub(r"(?<![a-z])store(?=_|$)", "warehouse", new)
             if connection.dialect.name == "postgresql":
-                connection.execute(text(f"ALTER INDEX {quote(old)} RENAME TO {quote(new)}"))
+                try:
+                    connection.execute(text(f"ALTER INDEX {quote(old)} RENAME TO {quote(new)}"))
+                except Exception:
+                    pass
             else:
                 columns = ", ".join(quote(c) for c in idx["column_names"])
                 unique = "UNIQUE " if idx["unique"] else ""

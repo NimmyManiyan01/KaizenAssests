@@ -15,6 +15,39 @@ from app.modules.storage.infrastructure.persistence.models import StorageLocatio
 
 def install_rack_capacity(connection):
     """Idempotent schema initialization, shared by Alembic and local startup."""
+    from sqlalchemy import inspect, text
+    tables = inspect(connection).get_table_names()
+    if "warehouse_zone" not in tables and "store_zone" in tables:
+        if "store_rack" not in tables:
+            connection.execute(text("""
+                CREATE TABLE IF NOT EXISTS store_rack (
+                    id UUID NOT NULL,
+                    zone_id UUID NOT NULL,
+                    rack_code VARCHAR(64) NOT NULL,
+                    maximum_capacity INTEGER NOT NULL,
+                    occupied_quantity NUMERIC(18, 4) DEFAULT '0' NOT NULL,
+                    CONSTRAINT pk_store_rack PRIMARY KEY (id),
+                    CONSTRAINT uq_store_rack_zone_code UNIQUE (zone_id, rack_code),
+                    CONSTRAINT ck_store_rack_rack_positive_capacity CHECK (maximum_capacity > 0 AND maximum_capacity = CAST(maximum_capacity AS INTEGER)),
+                    CONSTRAINT ck_store_rack_rack_occupancy_bounds CHECK (occupied_quantity >= 0 AND occupied_quantity <= maximum_capacity),
+                    CONSTRAINT fk_store_rack_zone_id_store_zone FOREIGN KEY(zone_id) REFERENCES store_zone (id) ON DELETE RESTRICT
+                )
+            """))
+        if "rack_occupancy_event" not in tables:
+            connection.execute(text("""
+                CREATE TABLE IF NOT EXISTS rack_occupancy_event (
+                    id UUID NOT NULL,
+                    rack_id UUID NOT NULL,
+                    balance_id VARCHAR(64) NOT NULL,
+                    quantity_delta NUMERIC(18, 4) NOT NULL,
+                    reason VARCHAR(128) NOT NULL,
+                    actor VARCHAR(128) NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+                    CONSTRAINT pk_rack_occupancy_event PRIMARY KEY (id)
+                )
+            """))
+        return
+
     from app.modules.warehouse.infrastructure.persistence.models import RackOccupancyEventModel
     WarehouseRackModel.__table__.create(connection, checkfirst=True)
     RackOccupancyEventModel.__table__.create(connection, checkfirst=True)

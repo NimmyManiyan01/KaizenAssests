@@ -16,7 +16,8 @@ RUN npm ci
 COPY . .
 
 # Build Vite SPA with production bundle minification
-RUN npm run build
+RUN npm run build && \
+    if [ -d ".output/public" ] && [ ! -d "dist" ]; then cp -r .output/public dist; fi
 
 # ------------------------------------------------------------------------------
 # Stage 2: NGINX Unprivileged Production Web Server

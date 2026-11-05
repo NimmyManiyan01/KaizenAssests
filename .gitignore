@@ -81,3 +81,5 @@ backend/business-service/final-backend-selection.txt
 # Android & Gradle cache
 .gradle/
 **/.gradle/
+
+.azure/
