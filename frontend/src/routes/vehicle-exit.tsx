@@ -105,6 +105,23 @@ export interface OutboundGateExitException {
 }
 
 export interface OutboundDispatch {
+  gate_exit_vehicle_verified?: boolean;
+  gate_exit_driver_verified?: boolean;
+  gate_exit_loaded_goods_verified?: boolean;
+  gate_exit_remarks?: string | null;
+  gate_exit_security_officer?: string | null;
+  gate_exit_completed_at?: string | null;
+  loaded_goods?: Array<{
+    product?: string;
+    product_name?: string;
+    material_code?: string;
+    quantity: number;
+    uom?: string;
+    package_count?: number | null;
+    package_number?: string | null;
+    [key: string]: any;
+  }>;
+  loading_record_reference?: string | null;
   id: string;
   dispatch_number: string;
   customer_name: string;

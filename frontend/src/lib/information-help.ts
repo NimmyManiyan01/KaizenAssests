@@ -79,6 +79,7 @@ export const pageHelp: Record<string, HelpId> = {
   "/admin_/audit": "qc",
   "/admin_/users": "warehouse",
   "/admin_/suppliers": "supplier",
+  "/admin_/operations": "warehouse",
 };
 export const inventoryHelp: Record<string, HelpId> = {
   dashboard: "warehouse", putaway: "putaway", inventory: "inventory", requests: "requisitions",

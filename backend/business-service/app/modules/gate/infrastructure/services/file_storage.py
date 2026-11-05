@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from typing import Any, Callable
 
 from app.modules.gate.application.exceptions import InvalidFileException
 
@@ -16,6 +17,21 @@ ALLOWED_MIME_TYPES = {
 }
 
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+async def _run_in_thread(func: Callable[..., Any], *args: Any) -> Any:
+    """Run synchronous blocking I/O in worker thread to prevent event-loop starvation."""
+    try:
+        import anyio
+        return await anyio.to_thread.run_sync(func, *args)
+    except Exception:
+        pass
+    try:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, func, *args)
+    except Exception:
+        return func(*args)
 
 
 class FileStorageService:
@@ -48,7 +64,9 @@ class FileStorageService:
         unique_name = f"{uuid.uuid4()}{ext}"
         file_path = os.path.join(folder_path, unique_name)
 
-        with open(file_path, "wb") as f:
-            f.write(content)
+        def _write_disk() -> None:
+            with open(file_path, "wb") as f:
+                f.write(content)
 
+        await _run_in_thread(_write_disk)
         return file_path.replace("\\", "/")

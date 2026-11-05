@@ -1,0 +1,131 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "title": "Azure Application Insights & Monitor Alert Rules for Kaizen WMS Business Service",
+    "description": "Production observability alert rules for HTTP 5xx spikes, database latency, and connection pool saturation (CHG-AZ-004)."
+  },
+  "parameters": {
+    "appInsightsName": {
+      "type": "string",
+      "defaultValue": "appi-kaizen-wms-prod",
+      "metadata": {
+        "description": "Name of the Azure Application Insights resource"
+      }
+    },
+    "actionGroupId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Resource ID of the Azure Action Group for pager and email notifications"
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Insights/metricAlerts",
+      "apiVersion": "2018-03-01",
+      "name": "alert-kaizen-wms-http-5xx-spike",
+      "location": "global",
+      "properties": {
+        "description": "Fires when HTTP 5xx server error rate exceeds 1% over 5 minutes (CHG-AZ-004)",
+        "severity": 1,
+        "enabled": true,
+        "scopes": [
+          "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]"
+        ],
+        "evaluationFrequency": "PT1M",
+        "windowSize": "PT5M",
+        "criteria": {
+          "odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria",
+          "allOf": [
+            {
+              "name": "FailedRequestsRate",
+              "metricName": "requests/failed",
+              "operator": "GreaterThan",
+              "threshold": 1,
+              "timeAggregation": "Total",
+              "criterionType": "StaticThresholdCriterion"
+            }
+          ]
+        },
+        "actions": [
+          {
+            "actionGroupId": "[parameters('actionGroupId')]"
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Insights/metricAlerts",
+      "apiVersion": "2018-03-01",
+      "name": "alert-kaizen-wms-slow-database-queries",
+      "location": "global",
+      "properties": {
+        "description": "Fires when dependency call duration (SQL queries, Redis, external APIs) exceeds 1000ms p95 over 5 minutes (CHG-AZ-004)",
+        "severity": 2,
+        "enabled": true,
+        "scopes": [
+          "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]"
+        ],
+        "evaluationFrequency": "PT1M",
+        "windowSize": "PT5M",
+        "criteria": {
+          "odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria",
+          "allOf": [
+            {
+              "name": "DependencyDurationP95",
+              "metricName": "dependencies/duration",
+              "operator": "GreaterThan",
+              "threshold": 1000,
+              "timeAggregation": "Average",
+              "criterionType": "StaticThresholdCriterion"
+            }
+          ]
+        },
+        "actions": [
+          {
+            "actionGroupId": "[parameters('actionGroupId')]"
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Insights/scheduledQueryRules",
+      "apiVersion": "2021-08-01",
+      "name": "alert-kaizen-wms-pool-saturation",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "displayName": "Database Connection Pool Saturation (>80%)",
+        "description": "Alerts when readiness probe reports connection pool usage exceeding 80% capacity over 3 minutes",
+        "severity": 2,
+        "enabled": true,
+        "scopes": [
+          "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]"
+        ],
+        "evaluationFrequency": "PT1M",
+        "windowSize": "PT5M",
+        "criteria": {
+          "allOf": [
+            {
+              "query": "traces | where message contains 'checks' and message contains 'pool' | extend parsed = parse_json(message) | where toint(parsed.checks.database.pool.checked_out) * 100 / toint(parsed.checks.database.pool.size) > 80",
+              "timeAggregation": "Count",
+              "operator": "GreaterThan",
+              "threshold": 3,
+              "failingPeriods": {
+                "numberOfEvaluationPeriods": 5,
+                "minFailingPeriodsToAlert": 3
+              }
+            }
+          ]
+        },
+        "actions": {
+          "actionGroups": [
+            "[parameters('actionGroupId')]"
+          ]
+        }
+      }
+    }
+  ]
+}
+

@@ -171,16 +171,16 @@ function AdminUsersPage() {
     const username = form.username.trim();
     const fullName = form.full_name.trim();
     const email = form.email.trim().toLowerCase();
-    if (fullName.length < 2 || fullName.length > 128) return toast.error("Full name must be 2–128 characters");
-    if (username.length < 3 || username.length > 64) return toast.error("Username must be 3–64 characters");
-    if (email.length < 3 || email.length > 128 || !isValidEmail(email)) return toast.error("Enter a valid email address (up to 128 characters)");
-    if (form.password.trim().length === 0 || form.password.length < 8 || form.password.length > 128) return toast.error("Password must be 8–128 characters and cannot be blank");
-    if (!roles.some((role) => role.value === form.role)) return toast.error("Select a valid role");
-    if (form.shift_name.trim().length > 64) return toast.error("Work shift must be 64 characters or fewer");
-    if (form.assembly_unit_code.length > 64) return toast.error("Assembly unit code must be 64 characters or fewer");
-    if (form.role === "ASSEMBLY_MANAGER" && !activeAssemblyUnits.some((unit) => unit.code === form.assembly_unit_code)) return toast.error("Select an active assembly unit for this role");
-    if (users.some((user) => user.username.toLowerCase() === username.toLowerCase() || user.email.toLowerCase() === email)) return toast.error("That username or email is already in use");
-    if (!hasValidPageAccess(form.role, form.page_permissions)) return toast.error("Choose valid page access for at least one page");
+    if (fullName.length < 2 || fullName.length > 128) { toast.error("Full name must be 2–128 characters"); return; }
+    if (username.length < 3 || username.length > 64) { toast.error("Username must be 3–64 characters"); return; }
+    if (email.length < 3 || email.length > 128 || !isValidEmail(email)) { toast.error("Enter a valid email address (up to 128 characters)"); return; }
+    if (form.password.trim().length === 0 || form.password.length < 8 || form.password.length > 128) { toast.error("Password must be 8–128 characters and cannot be blank"); return; }
+    if (!roles.some((role) => role.value === form.role)) { toast.error("Select a valid role"); return; }
+    if (form.shift_name.trim().length > 64) { toast.error("Work shift must be 64 characters or fewer"); return; }
+    if (form.assembly_unit_code.length > 64) { toast.error("Assembly unit code must be 64 characters or fewer"); return; }
+    if (form.role === "ASSEMBLY_MANAGER" && !activeAssemblyUnits.some((unit) => unit.code === form.assembly_unit_code)) { toast.error("Select an active assembly unit for this role"); return; }
+    if (users.some((user) => user.username.toLowerCase() === username.toLowerCase() || user.email.toLowerCase() === email)) { toast.error("That username or email is already in use"); return; }
+    if (!hasValidPageAccess(form.role, form.page_permissions)) { toast.error("Choose valid page access for at least one page"); return; }
     setSaving(true);
     try {
       const created = await api.createAdminUser({
@@ -206,8 +206,8 @@ function AdminUsersPage() {
     event.preventDefault();
     const unitName = unitForm.unit_name.trim();
     const description = unitForm.description.trim();
-    if (unitName.length < 2 || unitName.length > 128) return toast.error("Unit name must be 2–128 characters");
-    if (description.length > 255) return toast.error("Unit description must be 255 characters or fewer");
+    if (unitName.length < 2 || unitName.length > 128) { toast.error("Unit name must be 2–128 characters"); return; }
+    if (description.length > 255) { toast.error("Unit description must be 255 characters or fewer"); return; }
     setSaving(true);
     try {
       const created = await api.createAdminAssemblyUnit({ unit_name: unitName, description });
@@ -247,8 +247,8 @@ function AdminUsersPage() {
     if (!editUnit) return;
     const name = editUnit.name.trim();
     const description = editUnit.description.trim();
-    if (name.length < 2 || name.length > 128) return toast.error("Unit name must be 2–128 characters");
-    if (description.length > 255) return toast.error("Unit description must be 255 characters or fewer");
+    if (name.length < 2 || name.length > 128) { toast.error("Unit name must be 2–128 characters"); return; }
+    if (description.length > 255) { toast.error("Unit description must be 255 characters or fewer"); return; }
     await updateAssemblyUnit(editUnit.unit, {
       unit_name: name,
       description,
@@ -296,16 +296,16 @@ function AdminUsersPage() {
     const username = editForm.username.trim();
     const fullName = editForm.full_name.trim();
     const email = editForm.email.trim().toLowerCase();
-    if (fullName.length < 2 || fullName.length > 128) return toast.error("Full name must be 2–128 characters");
-    if (username.length < 3 || username.length > 64) return toast.error("Username must be 3–64 characters");
-    if (email.length < 3 || email.length > 128 || !isValidEmail(email)) return toast.error("Enter a valid email address (up to 128 characters)");
-    if (editForm.password && (editForm.password.trim().length === 0 || editForm.password.length < 8 || editForm.password.length > 128)) return toast.error("New password must be 8–128 characters and cannot be blank");
-    if (!roles.some((role) => role.value === editForm.role)) return toast.error("Select a valid role");
-    if (editForm.shift_name.trim().length > 64) return toast.error("Work shift must be 64 characters or fewer");
-    if (editForm.assembly_unit_code.length > 64) return toast.error("Assembly unit code must be 64 characters or fewer");
-    if (editForm.role === "ASSEMBLY_MANAGER" && !assemblyUnits.some((unit) => unit.code === editForm.assembly_unit_code)) return toast.error("Select an existing assembly unit for this role");
-    if (users.some((user) => user.id !== editForm.user.id && (user.username.toLowerCase() === username.toLowerCase() || user.email.toLowerCase() === email))) return toast.error("That username or email is already in use");
-    if (!hasValidPageAccess(editForm.role, editForm.page_permissions)) return toast.error("Choose valid page access for at least one page");
+    if (fullName.length < 2 || fullName.length > 128) { toast.error("Full name must be 2–128 characters"); return; }
+    if (username.length < 3 || username.length > 64) { toast.error("Username must be 3–64 characters"); return; }
+    if (email.length < 3 || email.length > 128 || !isValidEmail(email)) { toast.error("Enter a valid email address (up to 128 characters)"); return; }
+    if (editForm.password && (editForm.password.trim().length === 0 || editForm.password.length < 8 || editForm.password.length > 128)) { toast.error("New password must be 8–128 characters and cannot be blank"); return; }
+    if (!roles.some((role) => role.value === editForm.role)) { toast.error("Select a valid role"); return; }
+    if (editForm.shift_name.trim().length > 64) { toast.error("Work shift must be 64 characters or fewer"); return; }
+    if (editForm.assembly_unit_code.length > 64) { toast.error("Assembly unit code must be 64 characters or fewer"); return; }
+    if (editForm.role === "ASSEMBLY_MANAGER" && !assemblyUnits.some((unit) => unit.code === editForm.assembly_unit_code)) { toast.error("Select an existing assembly unit for this role"); return; }
+    if (users.some((user) => user.id !== editForm.user.id && (user.username.toLowerCase() === username.toLowerCase() || user.email.toLowerCase() === email))) { toast.error("That username or email is already in use"); return; }
+    if (!hasValidPageAccess(editForm.role, editForm.page_permissions)) { toast.error("Choose valid page access for at least one page"); return; }
     setSaving(true);
     try {
       const payload: Record<string, unknown> = {

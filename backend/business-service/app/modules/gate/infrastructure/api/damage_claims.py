@@ -14,7 +14,7 @@ from app.security.dependencies import CurrentUser, get_current_user
 
 router = APIRouter(prefix="/api/damage-claims", tags=["damage-claims"])
 RESPONSES = {"ACCEPT", "REJECT", "PARTIALLY_ACCEPT", "REQUEST_MORE_INFORMATION", "REPLACEMENT_OFFERED", "RETURN_ACCEPTED", "DISPUTE", "DISPUTE_RAISED"}
-RESOLUTIONS = {"REPLACEMENT"}
+RESOLUTIONS = {"REPLACEMENT", "CREDIT_NOTE", "RETURN"}
 now = lambda: datetime.datetime.now(datetime.timezone.utc)
 
 async def supplier_id_for_user(user: CurrentUser, uow: UnitOfWork):
@@ -205,6 +205,10 @@ async def list_claims(user: CurrentUser = Depends(get_current_user), uow: UnitOf
         return []
     for claim, report, line, gate_entry, asn, source_grn, source_line in rows:
         if source_line is not None:
+            if source_grn is not None:
+                gate_entry = await uow.session.get(GateEntryModel, source_grn.gate_entry_id) if source_grn.gate_entry_id else None
+                asn_id = source_grn.asn_id or (gate_entry.asn_id if gate_entry else None)
+                asn = await uow.session.get(AsnModel, asn_id) if asn_id else None
             evidence = (await uow.session.execute(select(GrnDamageEvidenceModel).where(GrnDamageEvidenceModel.grn_line_id == source_line.id))).scalars().all()
             shipment = (await uow.session.execute(select(ReplacementShipmentModel).where(ReplacementShipmentModel.claim_id == claim.id))).scalar_one_or_none()
             returned = (await uow.session.execute(select(SupplierReturnModel).where(SupplierReturnModel.claim_id == claim.id))).scalar_one_or_none()
@@ -217,8 +221,15 @@ async def list_claims(user: CurrentUser = Depends(get_current_user), uow: UnitOf
               "batch_number": None, "received_quantity": float(source_line.received_quantity or 0),
               "accepted_quantity": float(source_line.accepted_quantity or 0), "damaged_quantity": float(source_line.damaged_quantity or 0),
               "rejected_quantity": float(source_line.rejected_quantity or 0), "uom": source_line.uom,
-              "asn_number": source_grn.asn_number if source_grn else None, "vehicle_number": source_grn.vehicle_number if source_grn else None,
-              "driver_name": source_grn.driver_name if source_grn else None, "driver_contact": None,
+              "asn_number": (source_grn.asn_number if source_grn else None) or (asn.asn_number if asn else None),
+              "asn_id": str(asn.id) if asn else (str(source_grn.asn_id) if source_grn and source_grn.asn_id else None),
+              "vehicle_number": (source_grn.vehicle_number if source_grn else None) or (gate_entry.vehicle_number if gate_entry else None) or (asn.vehicle_number if asn else None),
+              "gate_entry_number": (source_grn.gate_entry_number if source_grn else None) or (gate_entry.gate_entry_number if gate_entry else None),
+              "inbound_exited_at": gate_entry.exited_at.isoformat() if gate_entry and gate_entry.exited_at else None,
+              "driver_name": (source_grn.driver_name if source_grn else None) or (gate_entry.driver_name if gate_entry else None) or (asn.driver_name if asn else None),
+              "driver_contact": asn.driver_contact if asn else None,
+              "asn_status": asn.status if asn else None,
+              "asn_shipment_date": asn.shipment_date.isoformat() if asn and asn.shipment_date else None,
               "damage_reason": next((e.reason for e in evidence if e.reason), None), "remarks": next((e.remarks for e in evidence if e.remarks), None),
               "photos": [{"filename": e.file_name, "content_type": "image/*", "file_path": e.file_path} for e in evidence],
               "replacement_asn": None if not shipment else {"id": str(shipment.id), "asn_number": shipment.shipment_number, "status": shipment.status, "claim_id": str(claim.id), "supplier_id": str(claim.supplier_id), "expected_quantity": float(shipment.expected_quantity)},
@@ -430,3 +441,10 @@ async def close_claim(claim_id:str,user:CurrentUser=Depends(get_current_user),uo
     claim.status="CLOSED";claim.closed_by=user.username;claim.closed_at=now()
     if report is not None: report.status="CLOSED"
     await uow.session.flush();return {"claim_number":claim.claim_number,"status":"CLOSED"}
+
+
+@router.get("/return-reasons")
+async def list_return_reasons():
+    """Unified return and damage claim rejection reasons (CHG-MOD-002)."""
+    from app.modules.returns.domain.return_reason import ReturnReason
+    return [{"code": r.value, "label": r.name.replace("_", " ").title()} for r in ReturnReason]

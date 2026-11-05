@@ -504,9 +504,9 @@ function Notifications() {
     ["Vehicle number", asnDispatch[3]],
     ["Driver", asnDispatch[4]],
     ["Driver contact", asnDispatch[5]],
-    ["Expected arrival", Number.isNaN(new Date(asnDispatch[6]).getTime())
+    ["Expected arrival", !asnDispatch[6] || Number.isNaN(new Date(asnDispatch[6]).getTime())
       ? asnDispatch[6]
-      : new Date(asnDispatch[6]).toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" })],
+      : new Date(asnDispatch[6] || "").toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" })],
     ["Materials", asnDispatch[7]],
   ] : [];
 

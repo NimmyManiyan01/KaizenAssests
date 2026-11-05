@@ -164,7 +164,7 @@ export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefre
                       {request.issue_transaction.issued_at
                         ? ` on ${new Date(request.issue_transaction.issued_at).toLocaleString()}`
                         : ""}
-                      . Reserved quantity is 0 because the reservation was consumed by issue.
+                      .
                     </p>
                   )}
                   {(request.items || []).length > 0 &&
@@ -182,13 +182,12 @@ export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefre
                     )}
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[650px] table-fixed text-left text-sm">
-                      <colgroup><col className="w-[40%]" /><col className="w-[16%]" /><col className="w-[16%]" /><col className="w-[16%]" /><col className="w-[12%]" /></colgroup>
+                      <colgroup><col className="w-[48%]" /><col className="w-[20%]" /><col className="w-[20%]" /><col className="w-[12%]" /></colgroup>
                       <thead>
                         <tr className="border-b bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800/70 dark:text-slate-300">
                           <th className="px-3 py-2">Material</th>
                           <th className="px-3 py-2">Requested</th>
                           <th className="px-3 py-2">Available<InformationTooltip help="inventory" /></th>
-                          <th className="px-3 py-2">Reserved<InformationTooltip help="reserved" /></th>
                           <th className="px-3 py-2">Unit</th>
                         </tr>
                       </thead>
@@ -204,7 +203,6 @@ export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefre
                             </td>
                             <td className="px-3 py-2.5 tabular-nums">{item.requested_quantity}</td>
                             <td className="px-3 py-2.5 tabular-nums">{item.available_quantity}</td>
-                            <td className="px-3 py-2.5 tabular-nums font-medium text-blue-800 dark:text-blue-300">{item.reserved_quantity}</td>
                             <td className="px-3 py-2.5 text-slate-500">{item.uom || ""}</td>
                           </tr>
                         ))}
@@ -287,7 +285,8 @@ export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefre
                             <span className="mx-2 text-muted-foreground">·</span>
                             <span>{task.material_name || task.material_code}</span>
                             <span className="mx-2 text-muted-foreground">·</span>
-                            <span>{task.quantity ?? "—"} {task.uom || ""}</span>
+                            <span>{task.requested_quantity ?? task.quantity ?? "—"} {task.uom || ""}</span>
+                            {Number(task.picked_quantity || 0) > 0 && <span className="ml-2 text-muted-foreground">Picked: {task.picked_quantity} {task.uom || ""}</span>}
                             <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-700 dark:bg-slate-800 dark:text-slate-200">{task.status || "PENDING"}</span>
                           </div>
                           {String(task.status || "").toUpperCase() === "COMPLETED" ? (

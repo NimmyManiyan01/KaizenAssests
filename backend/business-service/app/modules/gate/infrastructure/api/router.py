@@ -377,8 +377,12 @@ _custom_materials_warehouse: list[dict] = []
 
 @preview_router.get("/materials")
 async def get_material_components(
+    response: Response = None,
     status_filter: str = Query(default="ACTIVE", alias="status"),
     available_only: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow)
 ) -> list[dict]:
     materials: list[dict] = []
@@ -421,18 +425,21 @@ async def get_material_components(
                     "created_by": m.created_by,
                     "updated_by": m.updated_by,
                 })
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to query materials master list: %s", exc)
 
     filtered = materials if status_filter.upper() == "ALL" else [material for material in materials if str(material.get("status") or "ACTIVE").upper() == status_filter.upper()]
     if available_only:
         filtered = [m for m in filtered if (m.get("available_quantity") or 0) > 0]
-    return filtered
+    if response:
+        response.headers["X-Total-Count"] = str(len(filtered))
+    return filtered[offset : offset + limit]
 
 
 @preview_router.post("/materials")
 async def add_material_component(
     payload: dict = Body(...),
+    user: CurrentUser = Depends(require_permission("material:write")),
     uow: UnitOfWork = Depends(get_uow)
 ) -> dict:
     mat_name = str(payload.get("name") or payload.get("material_name") or "").strip()
@@ -457,6 +464,7 @@ async def add_material_component(
         description=str(payload.get("description") or "").strip() or None,
         base_uom=uom,
         status=str(payload.get("status") or "Active").title(),
+        created_by=user.username,
     )
     uow.session.add(material)
     await uow.session.commit()
@@ -464,7 +472,12 @@ async def add_material_component(
 
 
 @preview_router.put("/materials/{material_id}")
-async def update_material_component(material_id: uuid.UUID, payload: dict = Body(...), uow: UnitOfWork = Depends(get_uow)) -> dict:
+async def update_material_component(
+    material_id: uuid.UUID,
+    payload: dict = Body(...),
+    user: CurrentUser = Depends(require_permission("material:write")),
+    uow: UnitOfWork = Depends(get_uow)
+) -> dict:
     material = await uow.session.get(MaterialModel, material_id)
     if material is None:
         raise HTTPException(status_code=404, detail="Material not found")
@@ -482,7 +495,12 @@ async def update_material_component(material_id: uuid.UUID, payload: dict = Body
 
 
 @preview_router.patch("/materials/{material_id}/status")
-async def update_material_component_status(material_id: uuid.UUID, payload: dict = Body(...), uow: UnitOfWork = Depends(get_uow)) -> dict:
+async def update_material_component_status(
+    material_id: uuid.UUID,
+    payload: dict = Body(...),
+    user: CurrentUser = Depends(require_permission("material:write")),
+    uow: UnitOfWork = Depends(get_uow)
+) -> dict:
     material = await uow.session.get(MaterialModel, material_id)
     if material is None:
         raise HTTPException(status_code=404, detail="Material not found")
@@ -496,7 +514,11 @@ async def update_material_component_status(material_id: uuid.UUID, payload: dict
 
 
 @preview_router.delete("/materials/{material_id}")
-async def delete_material_component(material_id: uuid.UUID, uow: UnitOfWork = Depends(get_uow)) -> dict:
+async def delete_material_component(
+    material_id: uuid.UUID,
+    user: CurrentUser = Depends(require_permission("material:write")),
+    uow: UnitOfWork = Depends(get_uow)
+) -> dict:
     material = await uow.session.get(MaterialModel, material_id)
     if material is None:
         raise HTTPException(status_code=404, detail="Material not found")

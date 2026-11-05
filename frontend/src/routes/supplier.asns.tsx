@@ -5,7 +5,7 @@ export const Route = createFileRoute("/supplier/asns")({
   beforeLoad: ({ location }) => {
     requireRole(["SUPPLIER", "ADMIN", "SUPERUSER"]);
     if (location.pathname === "/supplier/asns" || location.pathname === "/supplier/asns/") {
-      throw redirect({ to: "/supplier/asns/new" });
+      throw redirect({ to: "/supplier/asns/new", search: { open: undefined } });
     }
   },
   component: Outlet,

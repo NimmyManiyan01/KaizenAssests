@@ -165,10 +165,11 @@ function AssemblyMaterialRequestsPage() {
 
   const [requiredDateError, setRequiredDateError] = useState<string | null>(null);
   const openCreateRequest = () => {
+    const defaultProduct = products[0]?.product_code || "";
     setFormData({
-      product_code: "",
-      target_quantity: "",
-      required_date: "",
+      product_code: defaultProduct,
+      target_quantity: "10",
+      required_date: localDateInput(),
       remarks: "",
     });
     setRequiredDateError(null);
@@ -176,6 +177,17 @@ function AssemblyMaterialRequestsPage() {
     setBomPreviewError(null);
     setIsCreateOpen(true);
   };
+
+  useEffect(() => {
+    if (isCreateOpen && products.length > 0 && !formData.product_code) {
+      setFormData((prev) => ({
+        ...prev,
+        product_code: prev.product_code || products[0]?.product_code || "",
+        target_quantity: prev.target_quantity || "10",
+        required_date: prev.required_date || localDateInput(),
+      }));
+    }
+  }, [isCreateOpen, products, formData.product_code]);
 
 
   // Quick Add Product State
@@ -978,7 +990,7 @@ function AssemblyMaterialRequestsPage() {
                       aria-describedby="production-target-help"
                       value={formData.target_quantity}
                       onChange={(e) =>
-                        setFormData({ ...formData, target_quantity: e.target.value === "" ? "" : Number(e.target.value) })
+                        setFormData({ ...formData, target_quantity: e.target.value })
                       }
                       required
                       placeholder="Enter quantity"
@@ -1006,6 +1018,10 @@ function AssemblyMaterialRequestsPage() {
                     onChange={(e) => {
                       setFormData({ ...formData, required_date: e.target.value });
                       setRequiredDateError(completionDateError(e.target.value));
+                    }}
+                    onInput={(e) => {
+                      const val = (e.target as HTMLInputElement).value;
+                      setRequiredDateError(completionDateError(val));
                     }}
                     onBlur={(e) => setRequiredDateError(completionDateError(e.target.value))}
                     onInvalid={(e) => {
@@ -1644,7 +1660,7 @@ function AssemblyMaterialRequestsPage() {
                                 onChange={(e) => {
                                   const val = Number(e.target.value);
                                   const updated = [...receiptItems];
-                                  updated[idx].received_quantity = val;
+                                  if (updated[idx]) updated[idx].received_quantity = val;
                                   setReceiptItems(updated);
                                 }}
                                 className="h-7 text-right font-bold text-foreground text-xs rounded-lg"

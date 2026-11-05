@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import uuid
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Index, Boolean, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, GUID
@@ -30,6 +30,9 @@ class DockMasterModel(Base):
 
 class DockAllocationRequestModel(Base):
     __tablename__ = "dock_allocation_requests"
+    __table_args__ = (
+        Index("ix_dock_alloc_dock_status", "assigned_dock_id", "status"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     existing_gate_pass_id: Mapped[str] = mapped_column(String(128), index=True, nullable=False)

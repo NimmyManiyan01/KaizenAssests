@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Table, Text, UniqueConstraint
+from sqlalchemy import Index, BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Table, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship, synonym
 
 from app.database.base import Base, GUID
@@ -291,6 +291,9 @@ class QuotationLineModel(Base):
 
 class AsnModel(Base):
     __tablename__ = "asn"
+    __table_args__ = (
+        Index("ix_asn_supplier_status", "supplier_id", "status"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     supplier_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("supplier.id"), nullable=True)

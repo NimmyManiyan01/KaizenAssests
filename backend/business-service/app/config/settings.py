@@ -5,7 +5,7 @@ All values are overridable via environment variables (12-factor style).
 See .env.example at the service root for the full list.
 """
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -77,6 +77,30 @@ class Settings(BaseSettings):
     otel_exporter_otlp_endpoint: str = Field(default="http://otel-collector:4317")
     otel_enabled: bool = Field(default=False)
     prometheus_enabled: bool = Field(default=True)
+    applicationinsights_connection_string: str = Field(
+        default="",
+        description="Azure Application Insights connection string for OpenTelemetry exporter",
+    )
+    applicationinsights_sampling_ratio: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Sampling ratio for telemetry (0.5 = 50% for standard requests, 1.0 = 100% for errors)",
+    )
+
+    # --- Azure Cloud Services ---------------------------------------------------
+    azure_key_vault_url: Optional[str] = Field(
+        default=None,
+        description="Azure Key Vault URI for managed secret resolution (CHG-AZ-001)",
+    )
+    azure_storage_connection_string: Optional[str] = Field(
+        default=None,
+        description="Azure Blob Storage connection string (CHG-AZ-002)",
+    )
+    azure_storage_container_name: str = Field(
+        default="kaizen-wms-media",
+        description="Azure Blob Storage container name for media and document uploads",
+    )
 
     # --- Role Credentials ---------------------------------------------------------
     admin_username: str = Field(default="admin")
@@ -99,6 +123,10 @@ class Settings(BaseSettings):
     grn_username: str = Field(default="grn")
     grn_password: str = Field(default="")
     magic_link_secret: str = Field(default="")
+    webhook_secret: str = Field(
+        default="",
+        description="Shared secret for validating incoming external webhooks via HMAC-SHA256.",
+    )
 
     # --- Email SMTP Settings ----------------------------------------------------
     email_host: str = Field(default="smtp.gmail.com")
@@ -107,6 +135,31 @@ class Settings(BaseSettings):
     email_host_user: str = Field(default="")
     email_host_password: str = Field(default="")
     email_from_name: str = Field(default="KaizenAssests")
+
+    @property
+    def is_production_like(self) -> bool:
+        return self.environment.lower() in {"prod", "production", "staging"}
+
+    def resolve_key_vault_secret(self, secret_name: str, default: Optional[str] = None) -> Optional[str]:
+        """
+        Dynamically resolve a secret from Azure Key Vault using DefaultAzureCredential (CHG-AZ-001).
+        Falls back to local environment variables if Key Vault is not configured or offline.
+        """
+        import os
+        if self.azure_key_vault_url:
+            try:
+                from azure.identity import DefaultAzureCredential  # type: ignore
+                from azure.keyvault.secrets import SecretClient  # type: ignore
+
+                credential = DefaultAzureCredential()
+                client = SecretClient(vault_url=self.azure_key_vault_url, credential=credential)
+                kv_secret_name = secret_name.replace("_", "-")
+                secret = client.get_secret(kv_secret_name)
+                return secret.value
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("Azure Key Vault lookup failed for %s: %s", secret_name, exc)
+        return os.getenv(secret_name, default)
 
     @model_validator(mode="after")
     def validate_production_security(self) -> "Settings":

@@ -241,8 +241,13 @@ function DockManagement() {
 
   // Filter & tab controls
   const [searchTerm, setSearchTerm] = useState("");
-  const moduleSearchParams = useSearch({ strict: false }) as { search?: string };
+  const moduleSearchParams = useSearch({ strict: false }) as { search?: string; history?: string };
   useEffect(() => { if (typeof moduleSearchParams.search === "string") setSearchTerm(moduleSearchParams.search); }, [moduleSearchParams.search]);
+  useEffect(() => {
+    if (moduleSearchParams.history === "1") setActiveTab("HISTORY");
+    else if (moduleSearchParams.history === "0") setActiveTab("ALL");
+  }, [moduleSearchParams.history]);
+
   const [activeTab, setActiveTab] = useState<
     "ALL" | "AVAILABLE" | "RESERVED" | "OCCUPIED" | "MAINTENANCE" | "PENDING" | "HISTORY"
   >("ALL");
@@ -466,7 +471,7 @@ function DockManagement() {
         dock_code: String(data.get("dock_code") || createDockCode),
         dock_name: String(data.get("dock_name") || createDockName),
         dock_type: effectiveDockType,
-        direction: String(data.get("direction") || createDockDirection),
+        direction: String(data.get("direction") || createDockDirection) as "OUTBOUND" | "INBOUND" | "BOTH",
         location: "",
         description: "",
         status: "AVAILABLE",
@@ -624,7 +629,10 @@ function DockManagement() {
     if (!dock) return false;
     const material = `${req.material_reference || ""} ${req.material_description || ""}`.toLowerCase();
     const type = (dock.dock_type || "").toUpperCase();
-    const chemical = /chemical|hazard|solvent|flammable|fuel|paint|corrosive/.test(material);
+    // Equipment names describe the component, not a shipment of its contents.
+    // Explicit hazards (including fuel mentioned separately) still require a chemical dock.
+    const cargoDescription = material.replace(/\bfuel[\s-]+(?:tanks?|pipes?|pumps?|filters?|lines?|hoses?|injectors?)\b/g, "");
+    const chemical = /chemical|hazard|solvent|flammable|fuel|paint|corrosive/.test(cargoDescription);
     if (chemical) return ["CHEMICAL_HAZARDOUS", "CHEMICAL", "HAZARDOUS_ITEMS"].includes(type);
     if (["CHEMICAL_HAZARDOUS", "CHEMICAL", "HAZARDOUS_ITEMS"].includes(type)) return false;
     return ["RAW_MATERIAL", "GENERAL", "MAIN_RECEIVING", "ELECTRICAL", "ELECTRONICS", "FINISHED_GOODS"].includes(type);
@@ -657,6 +665,9 @@ function DockManagement() {
   }
 
   // Filtered Docks
+  const filteredHistory = history.filter((item) =>
+    !searchTerm.trim() || [item.existing_gate_pass_id, item.vehicle_number, item.action, item.new_status, item.performed_by]
+      .some((value) => String(value || "").toLowerCase().includes(searchTerm.trim().toLowerCase())));
   const filteredDocks = docks.filter((dock) => {
     let matchesTab = true;
     if (activeTab === "AVAILABLE") {
@@ -764,7 +775,7 @@ function DockManagement() {
       {loading ? (
         <div className="flex h-64 items-center justify-center gap-2 text-muted-foreground"><Loader2 className="size-6 animate-spin text-primary" /><p className="text-sm">Loading dock status...</p></div>
       ) : activeTab === "HISTORY" ? (
-        <Card className="overflow-hidden rounded-2xl p-0 shadow-soft"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b bg-muted/50 text-[11px] uppercase tracking-wide text-muted-foreground font-semibold"><tr><th className="px-4 py-3">Timestamp</th><th className="px-4 py-3">Gate Pass</th><th className="px-4 py-3">Vehicle</th><th className="px-4 py-3">Action</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Performed By</th></tr></thead><tbody className="divide-y divide-border/60">{history.length ? history.map((item) => <tr key={item.id}><td className="px-4 py-3 text-xs">{formatApiDateTime(item.performed_at)}</td><td className="px-4 py-3 font-mono font-semibold text-emerald-700 dark:text-emerald-400">{item.existing_gate_pass_id || "—"}</td><td className="px-4 py-3 font-mono">{item.vehicle_number || "—"}</td><td className="px-4 py-3">{item.action}</td><td className="px-4 py-3"><div className="flex flex-wrap items-center gap-2">
+        <Card className="overflow-hidden rounded-2xl p-0 shadow-soft"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b bg-muted/50 text-[11px] uppercase tracking-wide text-muted-foreground font-semibold"><tr><th className="px-4 py-3">Timestamp</th><th className="px-4 py-3">Gate Pass</th><th className="px-4 py-3">Vehicle</th><th className="px-4 py-3">Action</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Performed By</th></tr></thead><tbody className="divide-y divide-border/60">{filteredHistory.length ? filteredHistory.map((item) => <tr key={item.id}><td className="px-4 py-3 text-xs">{formatApiDateTime(item.performed_at)}</td><td className="px-4 py-3 font-mono font-semibold text-emerald-700 dark:text-emerald-400">{item.existing_gate_pass_id || "—"}</td><td className="px-4 py-3 font-mono">{item.vehicle_number || "—"}</td><td className="px-4 py-3">{item.action}</td><td className="px-4 py-3"><div className="flex flex-wrap items-center gap-2">
           {item.previous_status && <StatusBadge status={item.previous_status} />}
           {item.previous_status && <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" aria-label="changed to" />}
           <StatusBadge status={item.new_status} />

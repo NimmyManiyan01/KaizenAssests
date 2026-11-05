@@ -505,11 +505,12 @@ function SimpleWarehouseModule() {
           material_name: item.material_name,
           material_qr: item.material_qr,
           quantity:
-            item.picked_quantity ??
-            item.issued_quantity ??
+            item.requested_quantity ??
             item.required_quantity ??
-            item.requested_quantity,
-          requested_quantity: item.requested_quantity ?? item.required_quantity,
+            item.quantity ??
+            item.picked_quantity ??
+            item.issued_quantity ?? 0,
+          requested_quantity: item.requested_quantity ?? item.required_quantity ?? item.quantity,
           picked_quantity: item.picked_quantity ?? item.issued_quantity ?? 0,
           batch_number:
             item.batch_number || item.batch_lot_number || task.confirmation?.batch_number,
@@ -789,12 +790,11 @@ function SimpleWarehouseModule() {
         canvas.width = image.naturalWidth;
         canvas.height = image.naturalHeight;
         const context = canvas.getContext("2d", { willReadFrequently: true });
-        if (!context) return toast.error("Could not read the uploaded QR image.");
+        if (!context) { toast.error("Could not read the uploaded QR image."); return; }
         context.drawImage(image, 0, 0);
         const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
         const decoded = jsQR(pixels.data, pixels.width, pixels.height);
-        if (!decoded?.data)
-          return toast.error(`No readable ${field === "material" ? "material" : "rack"} QR found.`);
+        if (!decoded?.data) { toast.error(`No readable ${field === "material" ? "material" : "rack"} QR found.`); return; }
         setPickupConfirmation((current) => ({
           ...current,
           [field === "material" ? "material_scan" : "zone_scan"]: decoded.data,
@@ -1303,9 +1303,6 @@ function SimpleWarehouseModule() {
     "—";
 
   // Dashboard Aggregates (Real backend numbers)
-  const pendingPutawayCount = putawayTasks.filter(
-    (t) => t.status === "PENDING" || t.status === "CREATED",
-  ).length;
   const pendingRequestsCount = materialRequests.filter(
     (r) => ["PENDING", "SUBMITTED", "PENDING_WAREHOUSE_APPROVAL"].includes(String(r.status || "").toUpperCase()),
   ).length;
@@ -1403,6 +1400,8 @@ function SimpleWarehouseModule() {
     counts[putawayStage(task.status)] += 1;
     return counts;
   }, { PENDING: 0, IN_PROGRESS: 0, COMPLETED: 0 } as Record<string, number>);
+  // Count receipt groups, including assigned work until every batch is stored.
+  const pendingPutawayCount = putawayStageCounts.PENDING + putawayStageCounts.IN_PROGRESS;
   const filteredPutawayTasks = groupedPutawayTasks.filter((task) => {
     const query = putawaySearch.trim().toLowerCase();
     const searchable = [task.grn_number, task.key, ...(task.material_names || []),
@@ -1531,7 +1530,7 @@ function SimpleWarehouseModule() {
             </p>
             <h1 className="mt-2 flex items-center gap-2.5 text-[25px] font-semibold tracking-tight md:text-[28px]">
               <PageHeaderIcon className="h-6 w-6 text-[#71b5ff]" />
-              <span className="inline-flex items-center">{pageHeader[activeTab].title}<InformationTooltip help={inventoryHelp[activeTab]} placement="title" className="text-blue-100 hover:text-white" /></span>
+              <span className="inline-flex items-center">{pageHeader[activeTab].title}<InformationTooltip help={inventoryHelp[activeTab] ?? "inventory"} placement="title" className="text-blue-100 hover:text-white" /></span>
             </h1>
             <p className="mt-1.5 text-sm text-blue-50/85">
               {pageHeader[activeTab].description}

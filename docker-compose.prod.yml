@@ -1,0 +1,82 @@
+# ==============================================================================
+# Production Docker Compose for Kaizen WMS Cloud Architecture (CHG-AZ-005)
+# Local production validation and staging environment orchestration.
+# ==============================================================================
+version: "3.9"
+
+services:
+  # ----------------------------------------------------------------------------
+  # PostgreSQL Database Service
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: kaizen-postgres-prod
+    environment:
+      POSTGRES_USER: ams_business
+      POSTGRES_PASSWORD: ams_business_secure_password
+      POSTGRES_DB: ams_business
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ams_business -d ams_business"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kaizen-net
+
+  # ----------------------------------------------------------------------------
+  # Backend Business Service
+  # ----------------------------------------------------------------------------
+  business-service:
+    build:
+      context: ./backend/business-service
+      dockerfile: Dockerfile
+    container_name: kaizen-backend-prod
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+asyncpg://ams_business:ams_business_secure_password@postgres:5432/ams_business?ssl=verify-full
+      DATABASE_POOL_SIZE: 15
+      DATABASE_MAX_OVERFLOW: 20
+      FORCE_HTTPS: "true"
+      ENABLE_API_DOCS: "false"
+      STARTUP_SCHEMA_COMPATIBILITY: "false"
+      CORS_ALLOW_ORIGINS: '["https://wms.kaizen.com","https://api.kaizen.com"]'
+      TRUSTED_HOSTS: '["wms.kaizen.com","api.kaizen.com","business-service"]'
+      LOG_JSON: "true"
+      LOG_LEVEL: "INFO"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - kaizen-net
+    restart: always
+
+  # ----------------------------------------------------------------------------
+  # Frontend Web Client
+  # ----------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: kaizen-frontend-prod
+    ports:
+      - "8080:8080"
+    depends_on:
+      - business-service
+    networks:
+      - kaizen-net
+    restart: always
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  kaizen-net:
+    driver: bridge
+

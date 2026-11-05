@@ -14,16 +14,20 @@ import uuid
 from datetime import datetime
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, Query, Request
+import hashlib
+import hmac
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import desc, func, or_, select, update
 
 from app.common.persistence.models import NotificationModel
+from app.config.settings import get_settings
 from app.database.session import UnitOfWork, get_uow
 from app.modules.notification.application.use_cases import RecordIncomingEventUseCase
 from app.modules.notification.infrastructure.persistence.repository_impl import (
     SqlAlchemyNotificationLogRepository,
 )
+from app.security.dependencies import CurrentUser, get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +36,42 @@ router = APIRouter(tags=["notification"])
 
 @router.post("/webhooks/events", status_code=200)
 async def receive(request: Request, uow: UnitOfWork = Depends(get_uow)) -> None:
-    raw_payload = (await request.body()).decode("utf-8")
+    settings = get_settings()
+    signature_header = (
+        request.headers.get("X-Webhook-Signature")
+        or request.headers.get("x-webhook-signature")
+    )
+    if not signature_header:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing X-Webhook-Signature header",
+        )
+
+    secret = getattr(settings, "webhook_secret", "") or ""
+    if not secret:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Webhook secret not configured on server",
+        )
+
+    body_bytes = await request.body()
+    expected_sig = hmac.new(
+        secret.encode("utf-8"),
+        body_bytes,
+        hashlib.sha256,
+    ).hexdigest()
+
+    sig_to_verify = signature_header.strip()
+    if sig_to_verify.lower().startswith("sha256="):
+        sig_to_verify = sig_to_verify[7:]
+
+    if not hmac.compare_digest(sig_to_verify.lower(), expected_sig.lower()):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid webhook signature",
+        )
+
+    raw_payload = body_bytes.decode("utf-8")
     repo = SqlAlchemyNotificationLogRepository(uow.session)
     use_case = RecordIncomingEventUseCase(repo)
     await use_case.handle(raw_payload)
@@ -102,6 +141,7 @@ async def get_notifications(
     warehouse_code: Optional[str] = Query(None),
     warehouse_ref_id: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
+    user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ) -> List[dict[str, Any]]:
     try:
@@ -136,6 +176,7 @@ class CreateNotificationPayload(BaseModel):
 @router.post("/api/v1/notifications", status_code=201)
 async def create_notification(
     payload: CreateNotificationPayload,
+    user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ) -> dict[str, Any]:
     n = NotificationModel(
@@ -163,6 +204,7 @@ async def create_notification(
 @router.put("/api/v1/notifications/{notification_id}/read")
 async def mark_notification_read(
     notification_id: str,
+    user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ) -> dict[str, Any]:
     try:
@@ -181,6 +223,7 @@ async def mark_notification_read(
 async def mark_all_notifications_read(
     role: Optional[str] = Query(None),
     warehouse_code: Optional[str] = Query(None),
+    user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ) -> dict[str, Any]:
     try:

@@ -27,6 +27,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as PutawayTasksRouteImport } from './routes/putaway-tasks'
 import { Route as ReceivingRouteImport } from './routes/receiving'
+import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as SupplierDashboardRouteImport } from './routes/supplier-dashboard'
 import { Route as SupplierMaterialsRouteImport } from './routes/supplier-materials'
 import { Route as VehicleExitRouteImport } from './routes/vehicle-exit'
@@ -140,6 +141,11 @@ const PutawayTasksRoute = PutawayTasksRouteImport.update({
 const ReceivingRoute = ReceivingRouteImport.update({
   id: '/receiving',
   path: '/receiving',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsRoute = ReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SupplierDashboardRoute = SupplierDashboardRouteImport.update({
@@ -287,6 +293,7 @@ export interface FileRoutesByFullPath {
   '/notifications': typeof NotificationsRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
+  '/reports': typeof ReportsRoute
   '/supplier-dashboard': typeof SupplierDashboardRoute
   '/supplier-materials': typeof SupplierMaterialsRoute
   '/vehicle-exit': typeof VehicleExitRoute
@@ -331,6 +338,7 @@ export interface FileRoutesByTo {
   '/notifications': typeof NotificationsRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
+  '/reports': typeof ReportsRoute
   '/supplier-dashboard': typeof SupplierDashboardRoute
   '/supplier-materials': typeof SupplierMaterialsRoute
   '/vehicle-exit': typeof VehicleExitRoute
@@ -376,6 +384,7 @@ export interface FileRoutesById {
   '/notifications': typeof NotificationsRoute
   '/putaway-tasks': typeof PutawayTasksRoute
   '/receiving': typeof ReceivingRoute
+  '/reports': typeof ReportsRoute
   '/supplier-dashboard': typeof SupplierDashboardRoute
   '/supplier-materials': typeof SupplierMaterialsRoute
   '/vehicle-exit': typeof VehicleExitRoute
@@ -422,6 +431,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/putaway-tasks'
     | '/receiving'
+    | '/reports'
     | '/supplier-dashboard'
     | '/supplier-materials'
     | '/vehicle-exit'
@@ -466,6 +476,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/putaway-tasks'
     | '/receiving'
+    | '/reports'
     | '/supplier-dashboard'
     | '/supplier-materials'
     | '/vehicle-exit'
@@ -510,6 +521,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/putaway-tasks'
     | '/receiving'
+    | '/reports'
     | '/supplier-dashboard'
     | '/supplier-materials'
     | '/vehicle-exit'
@@ -555,6 +567,7 @@ export interface RootRouteChildren {
   NotificationsRoute: typeof NotificationsRoute
   PutawayTasksRoute: typeof PutawayTasksRoute
   ReceivingRoute: typeof ReceivingRoute
+  ReportsRoute: typeof ReportsRoute
   SupplierDashboardRoute: typeof SupplierDashboardRoute
   SupplierMaterialsRoute: typeof SupplierMaterialsRoute
   VehicleExitRoute: typeof VehicleExitRoute
@@ -706,6 +719,13 @@ declare module '@tanstack/react-router' {
       path: '/receiving'
       fullPath: '/receiving'
       preLoaderRoute: typeof ReceivingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports': {
+      id: '/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof ReportsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/supplier-dashboard': {
@@ -910,6 +930,7 @@ const rootRouteChildren: RootRouteChildren = {
   NotificationsRoute: NotificationsRoute,
   PutawayTasksRoute: PutawayTasksRoute,
   ReceivingRoute: ReceivingRoute,
+  ReportsRoute: ReportsRoute,
   SupplierDashboardRoute: SupplierDashboardRoute,
   SupplierMaterialsRoute: SupplierMaterialsRoute,
   VehicleExitRoute: VehicleExitRoute,

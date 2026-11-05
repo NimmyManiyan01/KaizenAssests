@@ -224,8 +224,8 @@ class DockAllocationService:
                 ge.status = new_status
                 if dock_code:
                     ge.assigned_dock_id = dock_code
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"Failed to sync gate entry status to {new_status} for {gate_pass_id}: {exc}")
 
     @staticmethod
     async def _sync_warehouse_dock_status(
@@ -247,8 +247,8 @@ class DockAllocationService:
             if wh_dock:
                 wh_dock.status = new_status
                 wh_dock.updated_at = datetime.now(timezone.utc)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"Failed to sync warehouse dock {dock_code} status to {new_status}: {exc}")
 
     @staticmethod
     async def allocate_dock(

@@ -1,5 +1,5 @@
 import { InformationTooltip } from "@/components/ui/information-tooltip";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { toast } from "sonner";
 import {
@@ -66,8 +66,9 @@ import {
 export const Route = createFileRoute("/supplier/asns/new")({
   validateSearch: (search: Record<string, unknown>) => ({
     open: search.open === "create" ? "create" as const : undefined,
+    search: typeof search.search === "string" ? search.search : undefined,
   }),
-  beforeLoad: () => {},
+  beforeLoad: () => { },
   component: NewAsnPage,
 });
 
@@ -160,9 +161,8 @@ function StatusTooltip({ status }: { status: string }) {
   const description = statusDescriptions[normalizedStatus];
   const badge = (
     <span
-      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${
-        statusStyles[normalizedStatus] || "border-border bg-muted text-muted-foreground"
-      }`}
+      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusStyles[normalizedStatus] || "border-border bg-muted text-muted-foreground"
+        }`}
     >
       {normalizedStatus.replaceAll("_", " ")}
     </span>
@@ -232,7 +232,7 @@ const getAsnPreviewFromRecords = (records: AsnRecord[]) => {
 };
 
 function NewAsnPage() {
-  const search = Route.useSearch();
+  const search = Route.useSearch?.() ?? useSearch({ strict: false });
 
   const [asnList, setAsnList] = useState<AsnRecord[]>(INITIAL_ASNS);
   const asnListRef = useRef<AsnRecord[]>(INITIAL_ASNS);
@@ -240,6 +240,10 @@ function NewAsnPage() {
     asnListRef.current = asnList;
   }, [asnList]);
   const [searchQuery, setSearchQuery] = useState("");
+  useEffect(() => {
+    if (typeof search.search === "string") setSearchQuery(search.search);
+  }, [search.search]);
+
   const [deliveryPage, setDeliveryPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [arrivalFrom, setArrivalFrom] = useState("");
@@ -333,11 +337,11 @@ function NewAsnPage() {
           : result?.items || result?.suppliers || [];
         const supplier = supplierRows.length
           ? supplierRows.find(
-              (item: any) =>
-                String(item.id) === String(supplierId) ||
-                String(item.username || item.supplier_name || "").toLowerCase() ===
-                  String(supplierUsername || "").toLowerCase(),
-            )
+            (item: any) =>
+              String(item.id) === String(supplierId) ||
+              String(item.username || item.supplier_name || "").toLowerCase() ===
+              String(supplierUsername || "").toLowerCase(),
+          )
           : result;
         const companyName =
           supplier?.registered_company_name ||
@@ -440,7 +444,7 @@ function NewAsnPage() {
     setSubmissionError("");
     setExpectedArrivalDate(todayDate());
     setSupplierName("MTU");
-    setSelectedPo(null);
+
     const initialEntryId =
       typeof window !== "undefined" && window.crypto?.randomUUID
         ? window.crypto.randomUUID()
@@ -860,9 +864,9 @@ function NewAsnPage() {
     setSupplierName("MTU");
     setExpectedArrivalDate(
       asn.delivery_date ||
-        asn.expected_arrival_date ||
-        asn.expected_arrival_at?.split("T")[0] ||
-        "",
+      asn.expected_arrival_date ||
+      asn.expected_arrival_at?.split("T")[0] ||
+      "",
     );
     const vList = (asn.vehicle_number || "")
       .split(",")
@@ -896,9 +900,9 @@ function NewAsnPage() {
     setLines(
       asn.lines?.length
         ? asn.lines.map((line: any) => ({
-            ...line,
-            carrying_vehicle_id: line.carrying_vehicle_id || parsedEntries[0]?.id || "",
-          }))
+          ...line,
+          carrying_vehicle_id: line.carrying_vehicle_id || parsedEntries[0]?.id || "",
+        }))
         : [{ material_id: "", item_code: "", material_name: "", shipped_quantity: "", uom: "", carrying_vehicle_id: parsedEntries[0]?.id || "" }],
     );
     setIsAssignmentOpen(true);
@@ -937,9 +941,9 @@ function NewAsnPage() {
   const arrivalRange: DateRange | undefined =
     arrivalFrom || arrivalTo
       ? {
-          from: arrivalFrom ? new Date(`${arrivalFrom}T00:00:00`) : undefined,
-          to: arrivalTo ? new Date(`${arrivalTo}T00:00:00`) : undefined,
-        }
+        from: arrivalFrom ? new Date(`${arrivalFrom}T00:00:00`) : undefined,
+        to: arrivalTo ? new Date(`${arrivalTo}T00:00:00`) : undefined,
+      }
       : undefined;
   const arrivalRangeLabel =
     arrivalFrom && arrivalTo
@@ -1150,9 +1154,9 @@ function NewAsnPage() {
                           <td className="px-4 py-3 text-muted-foreground">
                             {displayFilterDate(
                               asn.delivery_date ||
-                                asn.expected_arrival_date ||
-                                asn.expected_arrival_at?.split("T")[0] ||
-                                "",
+                              asn.expected_arrival_date ||
+                              asn.expected_arrival_at?.split("T")[0] ||
+                              "",
                             ) || "â€”"}
                           </td>
                           <td className="whitespace-nowrap px-4 py-3">
@@ -1843,13 +1847,13 @@ function NewAsnPage() {
                                 current.map((item, index) =>
                                   index === idx
                                     ? {
-                                        ...item,
-                                        material_id: material?.id || "",
-                                        item_code: material?.code || "",
-                                        material_name: material?.name || "",
-                                        shipped_quantity: item.shipped_quantity,
-                                        uom: material?.uom || "",
-                                      }
+                                      ...item,
+                                      material_id: material?.id || "",
+                                      item_code: material?.code || "",
+                                      material_name: material?.name || "",
+                                      shipped_quantity: item.shipped_quantity,
+                                      uom: material?.uom || "",
+                                    }
                                     : item,
                                 ),
                               );
@@ -1863,30 +1867,30 @@ function NewAsnPage() {
                             }}
                           >
                             <SelectTrigger
-                            id={`material-${idx}`}
-                            onBlur={() => {
-                              if (!line.material_id) {
-                                setAsnFormErrors((errors) => ({
-                                  ...errors,
-                                  [`material-${idx}`]: "Select a material from Material Master.",
-                                }));
+                              id={`material-${idx}`}
+                              onBlur={() => {
+                                if (!line.material_id) {
+                                  setAsnFormErrors((errors) => ({
+                                    ...errors,
+                                    [`material-${idx}`]: "Select a material from Material Master.",
+                                  }));
+                                }
+                              }}
+                              aria-invalid={Boolean(asnFormErrors[`material-${idx}`])}
+                              aria-describedby={
+                                asnFormErrors[`material-${idx}`] ? `material-${idx}-error` : undefined
                               }
-                            }}
-                            aria-invalid={Boolean(asnFormErrors[`material-${idx}`])}
-                            aria-describedby={
-                              asnFormErrors[`material-${idx}`] ? `material-${idx}-error` : undefined
-                            }
-                            className="h-11 w-full min-w-0 overflow-hidden rounded-[10px] border-[#DFE7F0] bg-white px-3 text-sm text-[#172B4D] shadow-none disabled:cursor-not-allowed disabled:opacity-60"
-                          >
+                              className="h-11 w-full min-w-0 overflow-hidden rounded-[10px] border-[#DFE7F0] bg-white px-3 text-sm text-[#172B4D] shadow-none disabled:cursor-not-allowed disabled:opacity-60"
+                            >
                               <SelectValue placeholder={materialLoading ? "Loading materials…" : "Select material"} />
                             </SelectTrigger>
                             <SelectContent className="supplier-asn-material-menu">
-                            <SelectItem value="__clear_selection__">Select material</SelectItem>
-                            {materialCatalog.map((material) => (
-                              <SelectItem key={material.id} value={String(material.id)}>
-                                {material.name} ({material.code})
-                              </SelectItem>
-                            ))}
+                              <SelectItem value="__clear_selection__">Select material</SelectItem>
+                              {materialCatalog.map((material) => (
+                                <SelectItem key={material.id} value={String(material.id)}>
+                                  {material.name} ({material.code})
+                                </SelectItem>
+                              ))}
                             </SelectContent>
                           </Select>
                           {asnFormErrors[`material-${idx}`] && (

@@ -486,8 +486,8 @@ async def enrich_putaway_tasks(tasks: list[PutawayTaskModel], session) -> list[d
             try:
                 grn_res = await session.execute(select(GrnModel).where(GrnModel.id.in_(grn_ids)))
                 grns = {g.id: g for g in grn_res.scalars().all()}
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to batch load GRNs for inventory summary: %s", exc)
 
         hus: dict[uuid.UUID, HandlingUnitModel] = {}
         if hu_ids:
@@ -3193,8 +3193,8 @@ async def execute_putaway(
                 if is_completed:
                     hu.status = "STORED"
                 hu.updated_at = completed_at
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to update HandlingUnitModel during putaway: %s", exc)
 
     # Step 8: Log PutawayMovementModel & InventoryMovementHistoryModel
     material_scan_record = request.grn_qr_code[:64]

@@ -25,7 +25,6 @@ import {
   Eye,
   Factory,
   Layers3,
-  LockKeyhole,
   PackageCheck,
   Printer,
   QrCode,
@@ -331,11 +330,12 @@ function AssemblyFinishedGoodsPage() {
         fg.order_number?.toLowerCase().includes(q) ||
         fg.product_name?.toLowerCase().includes(q) ||
         fg.product_code?.toLowerCase().includes(q) ||
+        fg.main_fg_id?.toLowerCase().includes(q) ||
         fg.serial_number?.toLowerCase().includes(q) ||
         fg.batch_number?.toLowerCase().includes(q) ||
         fg.location_code?.toLowerCase().includes(q) ||
         fg.batches?.some((batch: any) =>
-          [batch.batch_number, batch.order_number, batch.serial_number, batch.location_code].some(
+          [batch.main_fg_id, batch.batch_number, batch.order_number, batch.serial_number, batch.location_code].some(
             (value) => value?.toLowerCase().includes(q),
           ),
         ),
@@ -398,11 +398,10 @@ function AssemblyFinishedGoodsPage() {
       }
     >
       <div className="min-w-0 space-y-6">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <StatCard compact label="Products" value={items.length.toLocaleString()} delta="Finished-good SKUs" icon={Layers3} tone="primary" />
           <StatCard compact label="Produced" value={items.reduce((sum, item) => sum + Number((item as any).produced_quantity ?? item.quantity ?? 0), 0).toLocaleString()} delta="Total manufactured quantity" icon={Factory} tone="teal" />
           <StatCard compact label="Available" value={items.reduce((sum, item) => sum + Number((item as any).available_quantity ?? item.quantity ?? 0), 0).toLocaleString()} delta="Ready for customer dispatch" icon={PackageCheck} tone="success" />
-          <StatCard compact label="Reserved" value={items.reduce((sum, item) => sum + Number((item as any).reserved_quantity ?? 0), 0).toLocaleString()} delta="Allocated finished-goods stock" icon={LockKeyhole} tone="warning" />
         </div>
         <FgLoading />
         {/* Main Work Center Table Card */}
@@ -475,7 +474,7 @@ function AssemblyFinishedGoodsPage() {
           ) : (
             <div className="overflow-x-auto rounded-xl border border-border/70">
               <table className="w-full min-w-[980px] table-fixed text-left text-sm [&_th]:align-middle [&_td]:align-middle [&_td]:tabular-nums">
-                <colgroup><col className="w-[23%]" /><col className="w-[11%]" /><col className="w-[11%]" /><col className="w-[11%]" /><col className="w-[11%]" /><col className="w-[20%]" /><col className="w-[13%]" /></colgroup>
+                <colgroup><col className="w-[26%]" /><col className="w-[13%]" /><col className="w-[13%]" /><col className="w-[13%]" /><col className="w-[20%]" /><col className="w-[15%]" /></colgroup>
                 <thead className="bg-muted/50">
                   <tr className="border-b border-border/70 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     <th scope="col" className="py-3 px-4">
@@ -486,9 +485,6 @@ function AssemblyFinishedGoodsPage() {
                     </th>
                     <th scope="col" className="py-3 px-4 text-right">
                       Available
-                    </th>
-                    <th scope="col" className="py-3 px-4 text-right">
-                      Reserved
                     </th>
                     <th scope="col" className="py-3 px-4 text-right">
                       Dispatched
@@ -507,7 +503,14 @@ function AssemblyFinishedGoodsPage() {
                     const available = Number(fg.available_quantity ?? fg.quantity ?? 0);
                     const reserved = Number(fg.reserved_quantity ?? 0);
                     const dispatched = Number(fg.dispatched_quantity ?? 0);
-                    const productStatus = available > 0 ? "AVAILABLE" : reserved > 0 ? "RESERVED" : "OUT OF STOCK";
+                    const productStatus =
+                      fg.status === "OUT_OF_STOCK"
+                        ? "OUT OF STOCK"
+                        : fg.status === "AVAILABLE"
+                        ? "AVAILABLE"
+                        : available > 0
+                        ? "AVAILABLE"
+                        : "OUT OF STOCK";
                     return (
                     <tr key={fg.id} className="group hover:bg-muted/40 transition-colors">
                       {/* Product */}
@@ -516,14 +519,13 @@ function AssemblyFinishedGoodsPage() {
                           {fg.product_name}
                         </div>
                         <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
-                          {fg.product_code}
+                          Product code: {fg.product_code}
                         </div>
                       </td>
 
                       {[
                         (fg as any).produced_quantity ?? fg.quantity,
                         (fg as any).available_quantity ?? fg.quantity,
-                        (fg as any).reserved_quantity ?? 0,
                         (fg as any).dispatched_quantity ?? 0,
                       ].map((quantity, index) => (
                         <td
@@ -551,7 +553,7 @@ function AssemblyFinishedGoodsPage() {
                         >
                           {productStatus}
                         </span>
-                        {((fg.batches || [fg]) as any[]).filter(b => b.main_fg_id).map(b => <p key={b.id} className="mt-1 text-[11px]">{b.main_fg_id}: {b.dispatch_status} ({b.dispatched_sections}/8)</p>)}
+                        {((fg.batches || [fg]) as any[]).filter(b => b.main_fg_id).map(b => <p key={b.id} className="mt-1 text-[11px]">FG ID: {b.main_fg_id} ? {b.dispatch_status} ({b.dispatched_sections}/8)</p>)}
                       </td>
 
                       {/* Label Actions */}
@@ -593,13 +595,12 @@ function AssemblyFinishedGoodsPage() {
             <DialogHeader className="shrink-0 border-b border-border/60 bg-gradient-to-r from-primary/5 via-background to-background p-6 pr-12">
               <DialogTitle className="flex items-center gap-2 text-xl"><PackageCheck className="size-5 text-primary" />Finished Goods Details</DialogTitle>
               <DialogDescription className="text-xs">
-                {detailsFg?.product_name} ({detailsFg?.product_code})
+                {detailsFg?.product_name} ? Product code: {detailsFg?.product_code}
               </DialogDescription>
-              <dl className="grid grid-cols-1 gap-3 pt-4 text-left text-xs sm:grid-cols-3">
+              <dl className="grid grid-cols-1 gap-3 pt-4 text-left text-xs sm:grid-cols-2">
                 {[
                   ["Produced", (detailsFg as any)?.produced_quantity ?? detailsFg?.quantity],
                   ["Available", (detailsFg as any)?.available_quantity],
-                  ["Reserved", (detailsFg as any)?.reserved_quantity],
                 ].map(([label, value]) => (
                   <div key={String(label)} className="rounded-xl border border-border/60 bg-background/90 p-4 shadow-sm">
                     <dt className="font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
@@ -617,14 +618,13 @@ function AssemblyFinishedGoodsPage() {
                 stock cannot be newly allocated.
               </p>
               <div className="overflow-x-auto rounded-xl border border-border/70"><table className="w-full min-w-[980px] table-fixed text-left text-xs">
-                <colgroup><col className="w-[21%]" /><col className="w-[14%]" /><col className="w-[12%]" /><col className="w-[12%]" /><col className="w-[16%]" /><col className="w-[25%]" /></colgroup>
+                <colgroup><col className="w-[25%]" /><col className="w-[16%]" /><col className="w-[14%]" /><col className="w-[18%]" /><col className="w-[27%]" /></colgroup>
                 <thead className="sticky top-0 z-10 bg-muted text-[11px] uppercase text-muted-foreground">
                   <tr>
                     {[
                       "Batch ID",
                       "Manufacturing Date",
                       "Available Qty",
-                      "Reserved Qty",
                       "Status",
                       "QR Label",
                     ].map((label) => (
@@ -672,9 +672,6 @@ function AssemblyFinishedGoodsPage() {
                           </td>
                           <td className="px-3 py-3 whitespace-nowrap tabular-nums font-semibold">
                             {available.toLocaleString()} {batch.uom}
-                          </td>
-                          <td className="px-3 py-3 whitespace-nowrap tabular-nums font-semibold text-blue-700">
-                            {reserved.toLocaleString()} {batch.uom}
                           </td>
                           <td className="px-3 py-3">
                             <span
@@ -730,7 +727,7 @@ function AssemblyFinishedGoodsPage() {
                         </tr>
                         {expanded && (
                           <tr id={`batch-details-${batch.id}`} className="bg-muted/20">
-                            <td colSpan={6} className="p-4">
+                            <td colSpan={5} className="p-4">
                               <FgSections sections={(batch as any).sections} />
                               <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
                                 {[
@@ -757,7 +754,6 @@ function AssemblyFinishedGoodsPage() {
                                     "Produced",
                                     `${batch.produced_quantity ?? batch.quantity} ${batch.uom}`,
                                   ],
-                                  ["Reserved", `${batch.reserved_quantity ?? 0} ${batch.uom}`],
                                   ["Dispatched", `${batch.dispatched_quantity ?? 0} ${batch.uom}`],
                                 ].map(([label, value]) => (
                                   <div key={label} className="min-w-0 space-y-1">

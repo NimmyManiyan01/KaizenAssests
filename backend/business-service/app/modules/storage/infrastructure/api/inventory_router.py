@@ -16,7 +16,7 @@ import json
 from typing import Any, Dict, List, Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
@@ -828,6 +828,7 @@ async def get_material_inventory_detail(
 
 @inventory_router.get("/warehouse-summary")
 async def get_warehouse_inventory_summary(
+    response: Response = None,
     material_code: Optional[str] = None,
     warehouse_ref_id: Optional[str] = None,
     zone_id: Optional[str] = None,
@@ -843,6 +844,8 @@ async def get_warehouse_inventory_summary(
     availability: Optional[str] = None,
     status_filter: Optional[str] = None,
     search: Optional[str] = None,
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ) -> List[Dict[str, Any]]:
@@ -1231,7 +1234,9 @@ async def get_warehouse_inventory_summary(
             or s_lower in (r["grn"] or "").lower()
         ]
 
-    return filtered_output
+    if response:
+        response.headers["X-Total-Count"] = str(len(filtered_output))
+    return filtered_output[offset : offset + limit]
 
 
 

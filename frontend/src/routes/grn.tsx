@@ -1241,10 +1241,10 @@ function GrnPageWorkflow() {
       if (String(asnNum).toUpperCase().startsWith("ASN-")) {
         try {
           const arrivalResponse = await api.getInboundArrivals();
-          const allArrivals = Array.isArray(arrivalResponse)
+          const allArrivals: any[] = Array.isArray(arrivalResponse)
             ? arrivalResponse
-            : Array.isArray(arrivalResponse?.items)
-              ? arrivalResponse.items
+            : Array.isArray((arrivalResponse as any)?.items)
+              ? (arrivalResponse as any).items
               : [];
           const normalizedAsn = String(asnNum).trim().toUpperCase();
           const asnId = String(
@@ -2661,7 +2661,7 @@ function GrnPageWorkflow() {
 
       for (const [idx, m] of batchMaterials.entries()) {
         const rowKey = grnMaterialKey(m, idx);
-        const batchesForLine = materialBatches[rowKey] || materialBatches[grnMaterialKey(materials[idx], idx)] || materialBatches[m.item_code];
+        const batchesForLine = materialBatches[rowKey] || materialBatches[materials[idx] ? grnMaterialKey(materials[idx]!, idx) : ""] || materialBatches[m.item_code];
         if (Number(m.good_quantity || 0) > 0 && (!batchesForLine?.length || batchesForLine.reduce((sum, batch) => sum + Number(batch.batch_quantity || 0), 0) !== Number(m.good_quantity))) {
           throw new Error(`Save batches totaling the approved quantity for ${m.material_name || m.item_code} before continuing.`);
         }
@@ -4283,16 +4283,16 @@ function GrnPageWorkflow() {
           {activeTab === "dashboard" && (
             <>
               <Button
-                variant={activeTab === "records" ? "default" : "outline"}
+                variant="outline"
                 className="rounded-xl"
                 onClick={() => {
-                  const nextTab = activeTab === "records" ? "dashboard" : "records";
+                  const nextTab = "records";
                   setActiveTab(nextTab);
                   navigate({ to: "/grn", search: { tab: nextTab, page: 1 } });
                 }}
               >
                 <ClipboardList className="size-4" />{" "}
-                {activeTab === "records" ? "Dashboard View" : "All GRN Records"}
+                "All GRN Records"
               </Button>
               <Button
                 className="rounded-xl shadow-glow bg-primary text-primary-foreground font-bold"

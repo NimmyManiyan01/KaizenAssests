@@ -56,7 +56,8 @@ function LoginPage() {
         else {
           try {
             const [u, p] = atob(magicToken).split(":");
-            data = await api.login(u, p);
+            if (u && p) data = await api.login(u, p);
+            else data = await api.magicLogin(magicToken);
           } catch {
             data = await api.magicLogin(magicToken);
           }
@@ -81,10 +82,10 @@ function LoginPage() {
     e.preventDefault();
     const normalizedEmployeeId = employeeId.trim();
     if (!normalizedEmployeeId || !password.trim()) {
-      return toast.error("Please enter both Employee ID and password");
+      toast.error("Please enter both Employee ID and password"); return;
     }
     if (normalizedEmployeeId.length > 100 || password.length > 128) {
-      return toast.error("Employee ID or password exceeds the allowed length");
+      { toast.error("Employee ID or password exceeds the allowed length"); return; }
     }
     setIsLoading(true);
     try {

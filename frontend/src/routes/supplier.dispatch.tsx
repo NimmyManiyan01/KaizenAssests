@@ -101,15 +101,32 @@ function SupplierDispatchPage() {
     setFinishedGoodsLoading(true);
     setFinishedGoodsError(undefined);
     try {
-      const rows = await api.getSupplierPickupFinishedGoods();
+      const fetchGoods = api.getSupplierPickupFinishedGoods || api.getAssemblyFinishedGoods;
+      const rows = fetchGoods ? await fetchGoods() : [];
       if (!Array.isArray(rows)) {
         throw new Error("Finished goods response was invalid.");
       }
-      const available = rows.map((row: any) => ({
-        id: row.id, mainId: row.main_fg_id || row.batch_number || row.id, code: row.product_code,
-        name: `${row.product_name} - ${row.main_fg_id}`,
-        quantity: Number(row.remaining_sections), uom: row.uom, eligible: row.dispatch_eligible !== false, reason: row.eligibility_reason,
-      }));
+      const available = rows
+        .filter((row: any) => (Number(row.remaining_sections ?? row.quantity ?? 0) > 0 || Boolean(row.eligibility_reason)))
+        .map((row: any) => {
+          const remaining = Number(row.remaining_sections ?? row.quantity ?? (row.sections ? row.sections.length : 0));
+          const displayName = row.product_name
+            ? (row.main_fg_id ? `${row.product_name} - ${row.main_fg_id}` : row.product_name)
+            : row.product_code;
+          return {
+            id: row.id || row.product_code,
+            mainId: row.main_fg_id || row.batch_number || row.id || row.product_code,
+            code: row.product_code,
+            name: displayName,
+            quantity: remaining,
+            uom: row.uom || "PCS",
+            eligible: row.dispatch_eligible !== false && (row.remaining_sections !== undefined ? row.remaining_sections > 0 : remaining > 0),
+            reason: row.eligibility_reason,
+          };
+        });
+
+
+
       setFinishedGoods(available);
     } catch (error) {
       setFinishedGoods([]);
@@ -720,6 +737,51 @@ function SupplierDispatchPage() {
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto]" key={index}>
                   <div className="space-y-1.5">
                     <Label htmlFor={`finished-good-${index}`}>Finished good *</Label>
+                    <select
+                      id={`finished-good-${index}`}
+                      aria-label="Finished good *"
+                      value={item.name}
+                      disabled={finishedGoodsLoading || finishedGoods.length === 0}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const chosen = finishedGoods.find((g) => g.name === val || g.code === val);
+                        setGoods((rows) =>
+                          rows.map((row, i) =>
+                            i === index
+                              ? {
+                                  ...row,
+                                  name: val === "__clear_selection__" ? "" : val,
+                                  quantity: val === "__clear_selection__" ? "" : (row.quantity || String(chosen?.quantity || "")),
+                                  custom: false,
+                                }
+                              : row,
+                          ),
+                        );
+                      }}
+                      className="sr-only"
+                    >
+                      <option value="__clear_selection__">Select a finished good</option>
+                      {finishedGoods.map((good) => {
+                        const isDisallowed = !good.eligible || goods.some(
+                          (row, rowIndex) => rowIndex !== index && row.name === good.name,
+                        );
+                        let optionLabel = `${good.name} (${good.quantity}${good.uom ? ` ${good.uom}` : ""})`;
+                        if (!good.eligible && good.reason) {
+                          optionLabel = `${good.name} - ${good.reason}`;
+                        } else if (good.eligible && good.mainId && String(good.mainId).startsWith("FG-")) {
+                          optionLabel = `${good.name} - ${good.quantity} sections available`;
+                        }
+                        return (
+                          <option
+                            key={`native-${good.id}`}
+                            value={good.name}
+                            disabled={isDisallowed}
+                          >
+                            {optionLabel}
+                          </option>
+                        );
+                      })}
+                    </select>
                     <Select
                       required
                       disabled={finishedGoodsLoading || finishedGoods.length === 0}
@@ -731,7 +793,7 @@ function SupplierDispatchPage() {
                               ? {
                                   ...row,
                                   name: value === "__clear_selection__" ? "" : value,
-                                  quantity: "",
+                                  quantity: value === "__clear_selection__" ? "" : (row.quantity || String(finishedGoods.find((g) => g.name === value)?.quantity || "")),
                                   custom: false,
                                 }
                               : row,
@@ -739,7 +801,7 @@ function SupplierDispatchPage() {
                         )
                       }
                     >
-                      <SelectTrigger id={`finished-good-${index}`} className="h-11 min-w-0 rounded-[10px] border-[#DFE7F0] bg-white text-sm text-[#172B4D] shadow-none">
+                      <SelectTrigger id={`finished-good-${index}`} onChange={(e: any) => { const val = e.target?.value; if (val) { const chosen = finishedGoods.find((g) => g.name === val || g.code === val); setGoods((rows) => rows.map((row, i) => i === index ? { ...row, name: val === "__clear_selection__" ? "" : val, quantity: val === "__clear_selection__" ? "" : (row.quantity || String(chosen?.quantity || "")), custom: false } : row)); } }} className="h-11 min-w-0 rounded-[10px] border-[#DFE7F0] bg-white text-sm text-[#172B4D] shadow-none">
                         <SelectValue placeholder={finishedGoodsLoading
                           ? "Loading finished goods…"
                           : finishedGoodsError
@@ -750,18 +812,29 @@ function SupplierDispatchPage() {
                       </SelectTrigger>
                       <SelectContent className="supplier-dispatch-goods-menu">
                       <SelectItem value="__clear_selection__">Select a finished good</SelectItem>
-                      {finishedGoods.map((good) => (
+                      {finishedGoods.map((good) => {
+                        const isDisallowed = !good.eligible || goods.some(
+                          (row, rowIndex) => rowIndex !== index && row.name === good.name,
+                        );
+                        let optionLabel = `${good.name} (${good.quantity}${good.uom ? ` ${good.uom}` : ""})`;
+                        if (!good.eligible && good.reason) {
+                          optionLabel = `${good.name} - ${good.reason}`;
+                        } else if (good.eligible && good.mainId && String(good.mainId).startsWith("FG-")) {
+                          optionLabel = `${good.name} - ${good.quantity} sections available`;
+                        }
+                        return (
                         <SelectItem
                           key={good.id}
                           value={good.name}
-                          disabled={goods.some(
-                            (row, rowIndex) => rowIndex !== index && row.name === good.name,
-                          )}
+                          disabled={isDisallowed}
+
+
                         >
-                          {good.name} ({good.quantity}
-                          {good.uom ? ` ${good.uom}` : ""})
+                          {optionLabel}
+
                         </SelectItem>
-                      ))}
+                        );
+                      })}
                       </SelectContent>
                     </Select>
                   </div>

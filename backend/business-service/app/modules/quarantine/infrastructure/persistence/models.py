@@ -1,3 +1,17 @@
+"""
+Quarantine & Quality Hold Models (CHG-MOD-001 / VAL-MOD-002).
+
+Architectural Documentation & System Design:
+In the Kaizen Warehouse Management System, Quarantine is designed as an integrated 
+submodule of Storage Inventory and Inbound Damage Claims rather than an isolated silo:
+1. Damaged or rejected materials flagged during Inbound Receiving (GRN) or Quality Check
+   are persisted as QuarantineRecordModel entries linked directly to the GRN and Gate Entry.
+2. Quarantined stock is physically isolated and tracked in Storage Inventory balances with
+   restricted statuses (e.g., 'QUARANTINE', 'QC_HOLD'), preventing reservation for Picking
+   or Production issue until officially dispositioned.
+3. Supplier returns for quarantined materials are orchestrated through the canonical
+   Damage Claims and Returns workflows (/api/v1/damage-claims and /api/returns).
+"""
 from __future__ import annotations
 
 import datetime

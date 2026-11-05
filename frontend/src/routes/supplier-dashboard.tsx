@@ -564,10 +564,14 @@ function SupplierDashboard() {
                 <div className="supplier-kpi-icon flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
                   <Icon className="size-4" aria-hidden="true" />
                 </div>
-                <div className="supplier-kpi-spark" role="img" aria-label={`${title}, last seven days: ${kpiCharts[metricIndex].join(", ")}`}>
-                  {kpiCharts[metricIndex].map((count, day) => (
-                    <span key={day} style={{ height: `${count > 0 ? Math.max(12, count / Math.max(1, ...kpiCharts[metricIndex]) * 100) : 3}%`, opacity: count > 0 ? 0.35 + day * 0.09 : 0.12 }} />
-                  ))}
+                <div className="supplier-kpi-spark" role="img" aria-label={`${title}, last seven days: ${(kpiCharts[metricIndex] || []).join(", ")}`}>
+                  {(kpiCharts[metricIndex] || []).map((count, day) => {
+                    const sparkData = kpiCharts[metricIndex] || [];
+                    const maxVal = Math.max(1, ...(sparkData.length ? sparkData : [1]));
+                    return (
+                      <span key={day} style={{ height: `${count > 0 ? Math.max(12, (count / maxVal) * 100) : 3}%`, opacity: count > 0 ? 0.35 + day * 0.09 : 0.12 }} />
+                    );
+                  })}
                 </div>
               </div>
             ))}

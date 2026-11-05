@@ -9,7 +9,7 @@ from decimal import Decimal
 import uuid
 from typing import Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, LargeBinary, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, JSON, LargeBinary, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -241,6 +241,9 @@ class QuantityVerificationPolicyModel(Base):
 
 class GateEntryModel(Base):
     __tablename__ = "gate_entry"
+    __table_args__ = (
+        Index("ix_gate_entry_status_created", "status", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     gate_entry_number: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)

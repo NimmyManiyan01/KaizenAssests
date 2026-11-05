@@ -131,17 +131,17 @@ function AdminSuppliersPage() {
     const supplierName = form.supplier_name.trim();
     const username = form.username.trim();
     const email = form.email.trim().toLowerCase();
-    if (supplierName.length < 2 || supplierName.length > 128) return toast.error("Supplier name must be 2–128 characters");
-    if (username.length < 3 || username.length > 64) return toast.error("Username must be 3–64 characters");
-    if (email.length < 3 || email.length > 128 || !isValidEmail(email)) return toast.error("Enter a valid email address (up to 128 characters)");
-    if (form.password.trim().length === 0 || form.password.length < 8 || form.password.length > 128) return toast.error("Password must be 8–128 characters and cannot be blank");
-    if (managedAccounts.some((account) => account.username.toLowerCase() === username.toLowerCase() || account.email.toLowerCase() === email)) return toast.error("That username or email is already in use");
+    if (supplierName.length < 2 || supplierName.length > 128) { toast.error("Supplier name must be 2–128 characters"); return; }
+    if (username.length < 3 || username.length > 64) { toast.error("Username must be 3–64 characters"); return; }
+    if (email.length < 3 || email.length > 128 || !isValidEmail(email)) { toast.error("Enter a valid email address (up to 128 characters)"); return; }
+    if (form.password.trim().length === 0 || form.password.length < 8 || form.password.length > 128) { toast.error("Password must be 8–128 characters and cannot be blank"); return; }
+    if (managedAccounts.some((account) => account.username.toLowerCase() === username.toLowerCase() || account.email.toLowerCase() === email)) { toast.error("That username or email is already in use"); return; }
     setSaving(true);
     try {
       await api.createAdminUser({
         username, full_name: supplierName, email, password: form.password,
         role: "SUPPLIER", shift_name: null,
-        page_permissions: Object.fromEntries(ROLE_PAGES.SUPPLIER.map((page) => [page.key, "WRITE"])),
+        page_permissions: Object.fromEntries((ROLE_PAGES.SUPPLIER ?? []).map((page) => [page.key, "WRITE"])),
       });
       toast.success("Supplier account created");
       setShowCreate(false);
@@ -163,10 +163,10 @@ function AdminSuppliersPage() {
     const supplierName = editForm.supplier_name.trim();
     const username = editForm.username.trim();
     const email = editForm.email.trim().toLowerCase();
-    if (supplierName.length < 2 || supplierName.length > 128) return toast.error("Supplier name must be 2–128 characters");
-    if (username.length < 3 || username.length > 64) return toast.error("Username must be 3–64 characters");
-    if (email.length < 3 || email.length > 128 || !isValidEmail(email)) return toast.error("Enter a valid email address (up to 128 characters)");
-    if (managedAccounts.some((account) => account.id !== editTarget.user_id && (account.username.toLowerCase() === username.toLowerCase() || account.email.toLowerCase() === email))) return toast.error("That username or email is already in use");
+    if (supplierName.length < 2 || supplierName.length > 128) { toast.error("Supplier name must be 2–128 characters"); return; }
+    if (username.length < 3 || username.length > 64) { toast.error("Username must be 3–64 characters"); return; }
+    if (email.length < 3 || email.length > 128 || !isValidEmail(email)) { toast.error("Enter a valid email address (up to 128 characters)"); return; }
+    if (managedAccounts.some((account) => account.id !== editTarget.user_id && (account.username.toLowerCase() === username.toLowerCase() || account.email.toLowerCase() === email))) { toast.error("That username or email is already in use"); return; }
     setSaving(true);
     try {
       await api.updateAdminUser(editTarget.user_id, { full_name: supplierName, username, email });
@@ -182,7 +182,7 @@ function AdminSuppliersPage() {
   const resetPassword = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!passwordTarget?.user_id) return;
-    if (newPassword.trim().length === 0 || newPassword.length < 8 || newPassword.length > 128) return toast.error("Password must be 8–128 characters and cannot be blank");
+    if (newPassword.trim().length === 0 || newPassword.length < 8 || newPassword.length > 128) { toast.error("Password must be 8–128 characters and cannot be blank"); return; }
     setSaving(true);
     try {
       await api.updateAdminUser(passwordTarget.user_id, { password: newPassword });
@@ -241,7 +241,7 @@ function AdminSuppliersPage() {
                 <section className="rounded-xl border bg-white p-4"><h3 className="mb-3 text-sm font-bold">Quick actions</h3><div className="grid grid-cols-2 gap-2"><Button size="sm" variant="outline" onClick={() => beginEdit(selected)} disabled={!selected.user_id}><Pencil className="size-3.5" /> Edit supplier</Button><Button size="sm" variant="outline" onClick={() => setPasswordTarget(selected)} disabled={!selected.user_id}><RotateCcw className="size-3.5" /> Reset password</Button><Button size="sm" variant="outline" className={selected.user_status?.toUpperCase() === "INACTIVE" ? "text-emerald-700" : "text-destructive"} onClick={() => void toggleStatus(selected)} disabled={!selected.user_id}>{selected.user_status?.toUpperCase() === "INACTIVE" ? <Check className="size-3.5" /> : <X className="size-3.5" />}{selected.user_status?.toUpperCase() === "INACTIVE" ? "Reactivate" : "Deactivate"}</Button></div></section>
               </TabsContent>
               <TabsContent value="activities" className="m-0 flex-1 overflow-y-auto p-4"><div className="space-y-3">{activities.length ? activities.map((activity) => <div key={activity.id} className="rounded-lg border bg-white p-3"><div className="flex items-center justify-between gap-2"><p className="text-sm font-semibold">{activity.action === "LOGIN" ? "Login" : activity.action === "LOGOUT" ? "Logout" : `${activity.action} · ${activity.module}`}</p><Badge variant="outline" className={activity.result === "SUCCESS" ? "text-emerald-700" : "text-red-700"}>{activity.result}</Badge></div><p className="mt-1 break-all text-xs text-muted-foreground">{activity.request_path}</p><p className="mt-2 text-[11px] text-muted-foreground">{displayDate(activity.occurred_at)}</p></div>) : <div className="py-16 text-center text-sm text-muted-foreground"><Activity className="mx-auto mb-2 size-7 opacity-50" />No recorded activity for this supplier account.</div>}</div></TabsContent>
-              <TabsContent value="access" className="m-0 flex-1 space-y-3 overflow-y-auto p-4"><section className="rounded-xl border bg-white p-4"><h3 className="mb-3 text-sm font-bold">Supplier account</h3><dl className="space-y-3 text-sm">{[["Username", selected.username], ["Email", selected.email], ["Role", "Supplier"], ["Status", selected.user_status || selected.status]].map(([label, value]) => <div key={label} className="flex justify-between gap-4"><dt className="text-muted-foreground">{label}</dt><dd className="text-right font-medium">{value || "—"}</dd></div>)}</dl></section><section className="rounded-xl border bg-white p-4"><div className="mb-3 flex items-center gap-2"><Shield className="size-4 text-primary" /><h3 className="text-sm font-bold">Page permissions</h3></div><div className="space-y-2">{ROLE_PAGES.SUPPLIER.map((page) => <div key={page.key} className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-xs"><span>{page.label}</span><Badge variant="outline">{selected.page_permissions?.[page.key] || "Not set"}</Badge></div>)}</div></section></TabsContent>
+              <TabsContent value="access" className="m-0 flex-1 space-y-3 overflow-y-auto p-4"><section className="rounded-xl border bg-white p-4"><h3 className="mb-3 text-sm font-bold">Supplier account</h3><dl className="space-y-3 text-sm">{[["Username", selected.username], ["Email", selected.email], ["Role", "Supplier"], ["Status", selected.user_status || selected.status]].map(([label, value]) => <div key={label} className="flex justify-between gap-4"><dt className="text-muted-foreground">{label}</dt><dd className="text-right font-medium">{value || "—"}</dd></div>)}</dl></section><section className="rounded-xl border bg-white p-4"><div className="mb-3 flex items-center gap-2"><Shield className="size-4 text-primary" /><h3 className="text-sm font-bold">Page permissions</h3></div><div className="space-y-2">{(ROLE_PAGES.SUPPLIER ?? []).map((page) => <div key={page.key} className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-xs"><span>{page.label}</span><Badge variant="outline">{selected.page_permissions?.[page.key] || "Not set"}</Badge></div>)}</div></section></TabsContent>
             </Tabs>
           </>}
         </SheetContent>

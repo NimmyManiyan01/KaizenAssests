@@ -223,6 +223,7 @@ function AssemblyRequestsPage() {
     }
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
+      if (!it) continue;
       if (!it.uom?.trim()) {
         toast.error(`Select a unit of measure for row ${i + 1}`);
         return;

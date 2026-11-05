@@ -6,8 +6,6 @@ import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api, resolveMediaUrl } from "@/lib/api-client";
 import { getUserInfo } from "@/lib/auth-utils";
@@ -15,12 +13,6 @@ import { isValidVehicleNumber } from "@/lib/input-validation";
 
 export const Route = createFileRoute("/damage-claims")({ component: Page });
 const actionButtonClass = "h-10 rounded-lg";
-// Keep the UI choices aligned with the backend damage-claim contract.
-// Accepted claims currently support replacement as the resolution action.
-const resolutions = [
-  { value: "REPLACEMENT", label: "Send replacement" },
-] as const;
-
 function Page() {
   const navigate = useNavigate();
   const [claims, setClaims] = useState<any[]>([]),
@@ -64,20 +56,6 @@ function Page() {
       setBusy(undefined);
     }
   };
-  const submitResponse = (claim: any, form: any) => {
-    if (!form.response) {
-      patch(claim.id, { validation: "Select a response before submitting this claim." });
-      return;
-    }
-    patch(claim.id, { validation: "" });
-    const response = {
-      ...form,
-      resolution: ["ACCEPT", "PARTIALLY_ACCEPT", "REPLACEMENT_OFFERED", "RETURN_ACCEPTED"].includes(form.response)
-        ? "REPLACEMENT"
-        : undefined,
-    };
-    void run(claim.id, () => api.respondToDamageClaim(claim.id, response), "Claim response submitted");
-  };
   const patch = (id: string, data: any) =>
     setForms((all) => ({ ...all, [id]: { ...all[id], ...data } }));
   const historyClaims = claims.filter(claim => Boolean(claim.shipment));
@@ -94,7 +72,7 @@ function Page() {
           Damage Claims
         </span>
       }
-      subtitle="Review damaged or rejected goods, respond to claims, and track replacement history."
+      subtitle={roles.includes("SUPPLIER") ? "Review damaged or rejected goods, inbound shipment details, and replacement history." : "Review damaged or rejected goods and track claim and replacement history."}
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" variant="default" className="h-10 gap-2 rounded-lg bg-primary px-4 text-primary-foreground hover:bg-primary/90" onClick={() => setShowHistory(value => !value)}>
@@ -131,7 +109,7 @@ function Page() {
         </Card>
       ) : visibleClaims.length === 0 ? (
         <Card className="supplier-module-page rounded-xl border-border bg-card p-6 text-center shadow-sm sm:p-10">
-          <h3 className="text-base font-semibold">{showHistory ? "No response history yet" : "No pending damage claims"}</h3>
+          <h3 className="text-base font-semibold">{showHistory ? "No replacement history yet" : "No pending damage claims"}</h3>
           <p className="mt-2 text-sm text-muted-foreground">
             {showHistory ? "Claims appear here after a replacement is sent." : "Claims remain here until you send a replacement."}
           </p>
@@ -197,6 +175,25 @@ function Page() {
                     <p className="font-medium">{c.grn_number || "—"}</p>
                   </div>
                   <div>
+                    <span className="text-muted-foreground">Original ASN</span>
+                    <p className="font-medium">{c.asn_number || "Not recorded"}</p>
+                    {c.asn_status && <p className="text-xs text-muted-foreground">{c.asn_status.replaceAll("_", " ")}{c.asn_shipment_date ? ` ? Shipped ${c.asn_shipment_date}` : ""}</p>}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Inbound vehicle</span>
+                    <p className="font-mono font-medium">{c.vehicle_number || "Not recorded"}</p>
+                    {c.inbound_exited_at && <p className="text-xs text-muted-foreground">Gate exit recorded {new Date(c.inbound_exited_at).toLocaleString()}</p>}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Inbound gate pass</span>
+                    <p className="font-medium">{c.gate_entry_number || "Not recorded"}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Inbound driver</span>
+                    <p className="font-medium">{c.driver_name || "Not recorded"}{c.driver_contact ? ` ? ${c.driver_contact}` : ""}</p>
+                  </div>
+                  {!roles.includes("SUPPLIER") && <>
+                  <div>
                     <span className="text-muted-foreground">Response</span>
                     <p className="font-medium">
                       {c.response?.replaceAll("_", " ") || "No response yet"}
@@ -210,88 +207,13 @@ function Page() {
                     <span className="text-muted-foreground">Quarantine</span>
                     <p className="font-medium text-warning-foreground">Original goods retained</p>
                   </div>
+                  </>}
                 </div>
-                {showHistory && c.response && <div className="mt-3 rounded-lg bg-muted/30 p-3 text-sm">
+                {!roles.includes("SUPPLIER") && showHistory && c.response && <div className="mt-3 rounded-lg bg-muted/30 p-3 text-sm">
                   {c.responded_at && <p><span className="text-muted-foreground">Responded: </span>{new Date(c.responded_at).toLocaleString()}</p>}
                   <p><span className="text-muted-foreground">Supplier remarks: </span>{c.supplier_remarks || "No remarks"}</p>
                   <p className="mt-1"><span className="text-muted-foreground">Return required: </span>{c.return_required ? "Yes" : "No"}</p>
                 </div>}
-                {has("SUPPLIER") && !c.response && (
-                  <div className="mt-3 grid gap-3 rounded-lg border border-border bg-muted/20 p-3 md:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label htmlFor={`claim-${c.id}-response`}>Your response *</Label>
-                      <Select
-                        value={f.response || "unselected"}
-                        onValueChange={(value) => patch(c.id, { response: value === "unselected" ? "" : value, validation: "" })}
-                      >
-                        <SelectTrigger id={`claim-${c.id}-response`} className="damage-return-select-trigger h-11 rounded-[10px] border-[#DFE7F0] bg-white text-sm text-[#172B4D] shadow-none">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="damage-return-select-menu">
-                          <SelectItem value="unselected">Select response</SelectItem>
-                          <SelectItem value="ACCEPT">Accept</SelectItem>
-                          <SelectItem value="REJECT">Reject</SelectItem>
-                          <SelectItem value="PARTIALLY_ACCEPT">Partially Accept</SelectItem>
-                          <SelectItem value="REQUEST_MORE_INFORMATION">Request More Information</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor={`claim-${c.id}-resolution`}>Resolution</Label>
-                      <Select
-                        value={f.resolution || "unselected"}
-                        onValueChange={(value) =>
-                          patch(c.id, { resolution: value === "unselected" ? "" : value, validation: "" })
-                        }
-                      >
-                        <SelectTrigger id={`claim-${c.id}-resolution`} className="damage-return-select-trigger h-11 rounded-[10px] border-[#DFE7F0] bg-white text-sm text-[#172B4D] shadow-none">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="damage-return-select-menu">
-                          <SelectItem value="unselected">Select resolution</SelectItem>
-                          {resolutions.map((r) => (
-                            <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor={`claim-${c.id}-remarks`}>Supplier remarks</Label>
-                      <Input
-                        id={`claim-${c.id}-remarks`}
-                        className="h-10 rounded-lg text-sm"
-                        placeholder="Add a note (optional)"
-                        value={f.remarks || ""}
-                        onChange={(e) => patch(c.id, { remarks: e.target.value })}
-                      />
-                    </div>
-                    <label className="flex min-h-10 items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={!!f.return_required}
-                        onChange={(e) => patch(c.id, { return_required: e.target.checked })}
-                      />
-                      Original damaged goods must be returned
-                    </label>
-                    {f.validation && (
-                      <p
-                        className="text-sm font-medium text-destructive md:col-span-2"
-                        role="alert"
-                      >
-                        {f.validation}
-                      </p>
-                    )}
-                    <Button
-                      type="button"
-                      className="h-10 rounded-lg"
-                      disabled={busy === c.id}
-                      onClick={() => submitResponse(c, f)}
-                    >
-                      {busy === c.id && <Loader2 className="size-4 animate-spin" />}
-                      Submit Response
-                    </Button>
-                  </div>
-                )}
                 {has("SUPPLIER") &&
                   ["REPLACEMENT", "RETURN_REPLACEMENT"].includes(c.resolution) &&
                   !s && (
@@ -418,6 +340,10 @@ function Page() {
                 )}
                 {c.return_required && has("WAREHOUSE") && !c.return && (
                   <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                    {c.vehicle_number && <div className="flex flex-wrap items-center gap-2 text-sm sm:col-span-2">
+                      <span>Inbound vehicle: <strong>{c.vehicle_number}</strong>. {c.inbound_exited_at ? "Its inbound gate exit is already recorded; confirm availability before reusing it." : "Confirm the vehicle is still on site before using it for the return."}</span>
+                      <Button type="button" variant="outline" size="sm" onClick={() => patch(c.id, { returnVehicle: c.vehicle_number, validation: "" })}>Use inbound vehicle</Button>
+                    </div>}
                     <Input
                       aria-label="Return vehicle number"
                       className="h-10 rounded-lg"

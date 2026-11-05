@@ -44,12 +44,17 @@ async def _get_warehouse_user_context(user: CurrentUser, uow: UnitOfWork):
 
 
 @router.get("/dock-types", response_model=List[str])
-async def list_dock_types() -> List[str]:
+async def list_dock_types(
+    user: CurrentUser = Depends(get_current_user),
+) -> List[str]:
     return [dock_type.value for dock_type in DockType]
 
 
 @router.get("/docks/availability", response_model=DockOverviewMetrics)
-async def get_dock_availability(uow: UnitOfWork = Depends(get_uow)):
+async def get_dock_availability(
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+):
     metrics = await DockAllocationService.get_overview_metrics(uow.session)
     return metrics
 
@@ -444,6 +449,7 @@ async def update_dock_status(
 async def list_allocation_requests(
     status_filter: Optional[str] = None,
     status: Optional[str] = None,
+    user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ):
     actual_status = status_filter if status_filter is not None else status
@@ -515,7 +521,10 @@ async def list_allocation_requests(
 
 
 @router.get("/dock-allocation-requests/pending", response_model=List[AllocationRequestResponse])
-async def list_pending_allocation_requests(uow: UnitOfWork = Depends(get_uow)):
+async def list_pending_allocation_requests(
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+):
     await DockAllocationService.sync_pending_gate_entries(uow.session)
     query = (
         select(DockAllocationRequestModel)
@@ -712,6 +721,7 @@ async def _build_allocation_response(
 @router.post("/dock-allocation-requests/auto", response_model=AllocationRequestResponse, status_code=status.HTTP_201_CREATED)
 async def auto_create_allocation_request(
     req: AutoCreateAllocationRequest,
+    user: CurrentUser = Depends(require_permission("gate:write")),
     uow: UnitOfWork = Depends(get_uow),
 ):
     created = await DockAllocationService.auto_create_allocation_request(
@@ -1043,7 +1053,10 @@ async def cancel_request(
 
 
 @router.get("/dock-history", response_model=List[DockAllocationHistoryResponse])
-async def list_dock_history(uow: UnitOfWork = Depends(get_uow)):
+async def list_dock_history(
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+):
     result = await uow.session.execute(
         select(DockAllocationHistoryModel)
         .order_by(desc(DockAllocationHistoryModel.performed_at))

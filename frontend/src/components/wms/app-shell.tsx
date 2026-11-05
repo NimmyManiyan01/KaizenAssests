@@ -505,43 +505,43 @@ export function AppShell({
       "/arrival-success",
     ].some((route) => path.startsWith(route)) ||
     (isGateSecurityUser && (isSharedOperationsRoute || isNotificationsRoute));
-  const resolvedNav = isAdmin
+  const resolvedNav = path === "/reports" ? getStrictRoleNav(user) : isAdmin
     ? adminNav
     : isSupplierRoute
-    ? supplierNav
-    : path.startsWith("/admin")
-      ? adminNav
-      : isAssemblyUser || isAssemblyRoute
-        ? assemblyNav
-        : isWarehouseUser
-          ? warehouseManagerNav
-          : isGrnUser || isGrnRoute
-            ? grnNav
-            : isSupplierRoute
-              ? supplierNav
-              : isGateSecurityRoute
-                ? gateSecurityNav
-                : isWarehouseRoute
-                  ? warehouseNav
-                  : mounted && user?.roles?.includes("DISPATCH")
-                    ? dispatchNav
-                    : mounted && user?.roles?.includes("ASSEMBLY")
-                      ? assemblyNav
-                      : mounted && user?.roles?.includes("SUPPLIER")
-                        ? supplierNav
-                        : isGateSecurityUser
-                          ? gateSecurityNav
-                          : warehouseNav;
+      ? supplierNav
+      : path.startsWith("/admin")
+        ? adminNav
+        : isAssemblyUser || isAssemblyRoute
+          ? assemblyNav
+          : isWarehouseUser
+            ? warehouseManagerNav
+            : isGrnUser || isGrnRoute
+              ? grnNav
+              : isSupplierRoute
+                ? supplierNav
+                : isGateSecurityRoute
+                  ? gateSecurityNav
+                  : isWarehouseRoute
+                    ? warehouseNav
+                    : mounted && user?.roles?.includes("DISPATCH")
+                      ? dispatchNav
+                      : mounted && user?.roles?.includes("ASSEMBLY")
+                        ? assemblyNav
+                        : mounted && user?.roles?.includes("SUPPLIER")
+                          ? supplierNav
+                          : isGateSecurityUser
+                            ? gateSecurityNav
+                            : warehouseNav;
   const navigationPending = !mounted && isSharedOperationsRoute;
   const nav = navigationPending
     ? []
-    : resolvedNav.filter((item) => {
-        const [itemPath, itemSearch = ""] = item.to.split("?");
-        if (hasUserRole(user, "SUPPLIER") && itemPath === "/damage-claims") return true;
-        return getPageAccess(user?.page_permissions, itemPath, itemSearch) !== null;
-      });
+    : [...resolvedNav, { label: "Reports & Analytics", to: "/reports", icon: BarChart3 } as NavItem].filter((item) => {
+      const [itemPath, itemSearch = ""] = item.to.split("?");
+      if (hasUserRole(user, "SUPPLIER") && itemPath === "/damage-claims") return true;
+      return getPageAccess(user?.page_permissions, itemPath, itemSearch) !== null;
+    });
   const currentPageAccess = getPageAccess(user?.page_permissions, path, searchStr);
-  const isReadOnlyPage = currentPageAccess === "READ";
+  const isReadOnlyPage = path !== "/reports" && currentPageAccess === "READ";
   useEffect(() => {
     setMobileSidebarOpen(false);
   }, [fullHref]);
@@ -663,25 +663,25 @@ export function AppShell({
                       </p>
                     )}
                     <Link
-                    to={itemPath as any}
-                    search={itemSearch as any}
-                    onClick={() => {
-                      setMobileSidebarOpen(false);
-                    }}
+                      to={itemPath as any}
+                      search={itemSearch as any}
+                      onClick={() => {
+                        setMobileSidebarOpen(false);
+                      }}
 
-                    className={cn(
-                      "group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-sidebar-foreground transition-all",
-                      "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                      active && "bg-sidebar-primary text-sidebar-primary-foreground",
-                    )}
-                  >
-                    <item.icon className={cn("size-[18px] shrink-0 transition-colors", active ? "text-white" : "text-sidebar-foreground/80 group-hover:text-sidebar-foreground")} />
-                    <span className="truncate">{item.label}</span>
-                    {(item as any).badge && (
-                      <span className="ml-auto grid size-5 place-items-center rounded-full bg-destructive text-[10px] font-semibold text-destructive-foreground">
-                        {(item as any).badge}
-                      </span>
-                    )}
+                      className={cn(
+                        "group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-sidebar-foreground transition-all",
+                        "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                        active && "bg-sidebar-primary text-sidebar-primary-foreground",
+                      )}
+                    >
+                      <item.icon className={cn("size-[18px] shrink-0 transition-colors", active ? "text-white" : "text-sidebar-foreground/80 group-hover:text-sidebar-foreground")} />
+                      <span className="truncate">{item.label}</span>
+                      {(item as any).badge && (
+                        <span className="ml-auto grid size-5 place-items-center rounded-full bg-destructive text-[10px] font-semibold text-destructive-foreground">
+                          {(item as any).badge}
+                        </span>
+                      )}
                     </Link>
                   </div>
                 );
@@ -757,22 +757,22 @@ export function AppShell({
                   </p>
                 )}
                 <Link
-                to={itemPath as any}
-                search={itemSearch as any}
+                  to={itemPath as any}
+                  search={itemSearch as any}
 
-                className={cn(
-                  "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground transition-all",
-                  "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                  active && "bg-sidebar-primary text-sidebar-primary-foreground",
-                )}
-              >
-                <item.icon className={cn("size-[18px] shrink-0 transition-colors", active ? "text-white" : "text-sidebar-foreground/80 group-hover:text-sidebar-foreground")} />
-                {!desktopSidebarCollapsed && <span className="truncate">{item.label}</span>}
-                {!desktopSidebarCollapsed && (item as any).badge && (
-                  <span className="ml-auto grid size-5 place-items-center rounded-full bg-destructive text-[10px] font-semibold text-destructive-foreground">
-                    {(item as any).badge}
-                  </span>
-                )}
+                  className={cn(
+                    "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground transition-all",
+                    "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                    active && "bg-sidebar-primary text-sidebar-primary-foreground",
+                  )}
+                >
+                  <item.icon className={cn("size-[18px] shrink-0 transition-colors", active ? "text-white" : "text-sidebar-foreground/80 group-hover:text-sidebar-foreground")} />
+                  {!desktopSidebarCollapsed && <span className="truncate">{item.label}</span>}
+                  {!desktopSidebarCollapsed && (item as any).badge && (
+                    <span className="ml-auto grid size-5 place-items-center rounded-full bg-destructive text-[10px] font-semibold text-destructive-foreground">
+                      {(item as any).badge}
+                    </span>
+                  )}
                 </Link>
               </div>
             );
@@ -919,19 +919,19 @@ export function AppShell({
             </form>}
 
             <div className="ml-auto flex items-center gap-1.5">
-                    <a
-                      href="/notifications"
-                      aria-label="Notifications"
-                      title="Open notifications"
-                      className="relative grid size-10 place-items-center rounded-xl bg-transparent text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus:bg-transparent focus-visible:outline-none"
-                    >
-                      <Bell className="size-[18px]" />
-                      {unreadNotifications > 0 && (
-                        <span className="pointer-events-none absolute right-2 top-2 grid size-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-white">
-                          {unreadNotifications}
-                        </span>
-                      )}
-                    </a>
+              <a
+                href="/notifications"
+                aria-label="Notifications"
+
+                className="relative grid size-10 place-items-center rounded-xl bg-transparent text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus:bg-transparent focus-visible:outline-none"
+              >
+                <Bell className="size-[18px]" />
+                {unreadNotifications > 0 && (
+                  <span className="pointer-events-none absolute right-2 top-2 grid size-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-white">
+                    {unreadNotifications}
+                  </span>
+                )}
+              </a>
               <div className="group relative ml-1 flex items-center gap-2.5 rounded-xl border border-border bg-card py-1.5 pl-1.5 pr-3 transition-colors hover:bg-accent/50">
                 <span
                   suppressHydrationWarning

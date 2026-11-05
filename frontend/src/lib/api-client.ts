@@ -87,8 +87,51 @@ function normalizeQuantityValues(value: unknown, key = ""): unknown {
   return value;
 }
 
-// Request helper with automatic header injection
+// In-flight GET request deduplication map (CHG-PERF-003)
+const inFlightRequests = new Map<string, Promise<unknown>>();
+
+// Metadata query cache for static lookups with TTL (CHG-PERF-003)
+interface CacheEntry {
+  data: unknown;
+  expiresAt: number;
+}
+const metadataCache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 60 * 1000; // 60s cache TTL for read-only metadata
+
+export function invalidateApiCache(pattern?: string): void {
+  if (!pattern) {
+    metadataCache.clear();
+    return;
+  }
+  for (const key of metadataCache.keys()) {
+    if (key.includes(pattern)) {
+      metadataCache.delete(key);
+    }
+  }
+}
+
+// Request helper with automatic header injection, deduplication and caching
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const method = (options.method || "GET").toUpperCase();
+
+  // Invalidate cache on mutations (POST, PUT, DELETE, PATCH)
+  if (method !== "GET") {
+    invalidateApiCache();
+  }
+
+  // Deduplicate and cache eligible GET requests
+  const isCachable = method === "GET" && !options.signal && !url.includes("nocache");
+  if (isCachable) {
+    const cached = metadataCache.get(url);
+    if (cached && cached.expiresAt > Date.now()) {
+      return Promise.resolve(cached.data as T);
+    }
+    const inFlight = inFlightRequests.get(url);
+    if (inFlight) {
+      return inFlight as Promise<T>;
+    }
+  }
+
   const token = getAuthToken();
   const headers = new Headers(options.headers || {});
 
@@ -130,52 +173,77 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
     // Ignore if running in non-browser context
   }
 
-  const method = (options.method || "GET").toUpperCase();
-  let response: Response;
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      response = await fetch(url, {
-        ...options,
-        headers,
-      });
-      break;
-    } catch (error) {
-      // Browser network changes briefly interrupt local API calls while the
-      // dev server or network adapter reconnects. Retry idempotent reads only.
-      if (!(error instanceof TypeError) || method !== "GET" || attempt >= 2) {
-        throw error;
+  const executeRequest = async (): Promise<T> => {
+    let response: Response;
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        response = await fetch(url, {
+          ...options,
+          headers,
+        });
+        break;
+      } catch (error) {
+        // Browser network changes briefly interrupt local API calls while the
+        // dev server or network adapter reconnects. Retry idempotent reads only.
+        if (!(error instanceof TypeError) || method !== "GET" || attempt >= 2) {
+          throw error;
+        }
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 300 * (attempt + 1)));
       }
-      await new Promise((resolve) => globalThis.setTimeout(resolve, 300 * (attempt + 1)));
     }
-  }
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    let errorMessage = "API request failed";
-    try {
-      const errorJson = JSON.parse(errorText);
-      errorMessage = getApiErrorMessage(errorJson, errorMessage);
-    } catch {
-      errorMessage = errorText || errorMessage;
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = "API request failed";
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMessage = getApiErrorMessage(errorJson, errorMessage);
+      } catch {
+        errorMessage = errorText || errorMessage;
+      }
+      const httpError = new Error(errorMessage) as Error & { status?: number };
+      httpError.status = response.status;
+      if (response.status === 401) clearAuthSession();
+      throw httpError;
     }
-    const httpError = new Error(errorMessage) as Error & { status?: number };
-    httpError.status = response.status;
-    if (response.status === 401) clearAuthSession();
-    throw httpError;
+
+    // Successful DELETE requests commonly return 204 with no response body.
+    // Calling response.json() for an empty body throws "Unexpected end of JSON input".
+    if (response.status === 204 || response.status === 205) {
+      return undefined as T;
+    }
+
+    const responseText = await response.text();
+    if (!responseText.trim()) {
+      return undefined as T;
+    }
+
+    return normalizeQuantityValues(JSON.parse(responseText)) as T;
+  };
+
+  const reqPromise = executeRequest();
+
+  if (isCachable) {
+    inFlightRequests.set(url, reqPromise);
+    reqPromise
+      .then((data) => {
+        if (
+          url.includes("/warehouse/") ||
+          url.includes("/materials") ||
+          url.includes("/reasons") ||
+          url.includes("/layout") ||
+          url.includes("/config")
+        ) {
+          metadataCache.set(url, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        inFlightRequests.delete(url);
+      });
   }
 
-  // Successful DELETE requests commonly return 204 with no response body.
-  // Calling response.json() for an empty body throws "Unexpected end of JSON input".
-  if (response.status === 204 || response.status === 205) {
-    return undefined as T;
-  }
-
-  const responseText = await response.text();
-  if (!responseText.trim()) {
-    return undefined as T;
-  }
-
-  return normalizeQuantityValues(JSON.parse(responseText)) as T;
+  return reqPromise;
 }
 
 async function requestWithTimeout<T>(
@@ -200,6 +268,12 @@ async function requestWithTimeout<T>(
 }
 
 export const api = {
+  async getOperationalReport(resource: "catalog" | "summary" | "records" | "detail" | "journeys", params: Record<string, string>): Promise<any> {
+    const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== ""));
+    query.set("nocache", "1");
+    return request<any>(BUSINESS_API_URL + "/api/v1/reports/" + resource + "?" + query.toString(), { cache: "no-store" });
+  },
+
   // Authentication Use Cases
   async login(
     username: string,

@@ -53,3 +53,10 @@ async def get(
             for l in return_request.lines
         ],
     )
+
+
+@router.get("/reasons")
+async def list_reasons():
+    """Canonical return reason enumeration (CHG-MOD-002)."""
+    from app.modules.returns.domain.return_reason import ReturnReason
+    return [{"code": r.value, "label": r.name.replace("_", " ").title()} for r in ReturnReason]

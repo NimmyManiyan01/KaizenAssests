@@ -7,14 +7,48 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
+import logging
+from typing import Any
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.config.settings import get_settings
+from app.config.settings import Settings, get_settings
 from app.security.jwt import TokenValidationError, decode_and_validate
 
+logger = logging.getLogger(__name__)
 _bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def _supplier_material_permissions(page_permissions: dict[str, str]) -> list[str]:
+    access = str(page_permissions.get("/supplier-materials", "")).upper()
+    if access == "WRITE":
+        return ["material:read", "material:write"]
+    if access == "READ":
+        return ["material:read"]
+    return []
+
+
+def is_test_bypass_enabled(settings: Any) -> bool:
+    """
+    Evaluate whether test-header authentication bypass is strictly permitted.
+    STRICTLY disallowed if:
+    1. settings.environment is not 'test'
+    2. settings.is_production_like (prod, production, staging)
+    3. settings.force_https is enabled
+    4. trusted_hosts contains any non-local/non-test hostnames
+    """
+    env = str(getattr(settings, "environment", "")).lower()
+    if env != "test":
+        return False
+    if getattr(settings, "is_production_like", False) or env in {"prod", "production", "staging"}:
+        return False
+    if getattr(settings, "force_https", False):
+        return False
+    trusted = getattr(settings, "trusted_hosts", []) or []
+    if any(h not in {"localhost", "127.0.0.1", "testserver"} for h in trusted):
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -39,7 +73,8 @@ async def _resolve_current_user(
         or request.headers.get("X-User-Role")
         or request.headers.get("x-user-role")
     )
-    if roles_hdr and settings.environment.lower() == "test":
+    if roles_hdr and is_test_bypass_enabled(settings):
+        logger.warning("SECURITY: Test-header authentication bypass invoked for role(s): %s", roles_hdr)
         roles = [r.strip() for r in roles_hdr.split(",") if r.strip()]
         user_name = request.headers.get("X-User-Name") or request.headers.get("x-user-name") or request.headers.get("X-User-Username") or request.headers.get("x-user-username") or "test_user"
         user_id = request.headers.get("X-User-Id") or request.headers.get("x-user-id") or request.headers.get("X-User-Subject") or request.headers.get("x-user-subject") or user_name
@@ -56,7 +91,7 @@ async def _resolve_current_user(
         roles_upper = {r.upper() for r in roles}
         perms = []
         if "WAREHOUSE" in roles_upper or "WAREHOUSE_MANAGER" in roles_upper:
-            perms.extend(["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "warehouse:read", "warehouse:write"])
+            perms.extend(["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "warehouse:read", "warehouse:write", "material:read", "material:write"])
         if "GATE_SECURITY" in roles_upper:
             # Gate security also operates the outbound gate queue.  These are
             # read/execute permissions for dispatches that have already passed
@@ -86,6 +121,8 @@ async def _resolve_current_user(
         from app.common.persistence.models import SupplierUserModel
         from app.database.session import AsyncSessionFactory
 
+        from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel
+
         session_token = token.removeprefix("supplier-db-token-")
         token_hash = hashlib.sha256(session_token.encode()).hexdigest()
         async with AsyncSessionFactory() as session:
@@ -97,13 +134,22 @@ async def _resolve_current_user(
                     )
                 )
             ).scalar_one_or_none()
+            managed_account = None
+            if supplier_account is not None:
+                managed_account = (await session.execute(
+                    select(UserAccountModel).where(
+                        UserAccountModel.username == supplier_account.username,
+                        UserAccountModel.role == "SUPPLIER",
+                        UserAccountModel.status == "ACTIVE",
+                    )
+                )).scalar_one_or_none()
         if supplier_account is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or invalid")
         return CurrentUser(
             subject=str(supplier_account.id),
             username=supplier_account.username,
             roles=["SUPPLIER"],
-            permissions=[],
+            permissions=_supplier_material_permissions(managed_account.page_permissions or {}) if managed_account else [],
             raw_claims={"supplier_id": str(supplier_account.supplier_id)},
         )
 
@@ -149,6 +195,8 @@ async def _resolve_current_user(
                 perms = []
                 if role in ("ADMIN", "WAREHOUSE_MANAGER", "WAREHOUSE"):
                     perms = ["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "warehouse:read", "warehouse:write", "dispatch:read", "dispatch:write", "dispatch:execute"]
+                elif role == "SUPPLIER":
+                    perms = _supplier_material_permissions(account.page_permissions or {})
                 elif role == "WAREHOUSE_OPERATOR":
                     perms = ["warehouse:read", "warehouse:write", "storage:read", "putaway:execute", "pickup:execute"]
                 elif role == "WAREHOUSE_OPERATOR":
@@ -398,7 +446,7 @@ async def _resolve_current_user(
             permissions=claims.get("permissions", []),
             raw_claims=claims,
         )
-        if roles_hdr and settings.environment.lower() == "test":
+        if roles_hdr and is_test_bypass_enabled(settings):
             roles = [r.strip() for r in roles_hdr.split(",") if r.strip()]
             user_name = request.headers.get("X-User-Name") or request.headers.get("x-user-name") or request.headers.get("X-User-Username") or request.headers.get("x-user-username") or user.username
             user_id = request.headers.get("X-User-Id") or request.headers.get("x-user-id") or request.headers.get("X-User-Subject") or request.headers.get("x-user-subject") or user.subject
@@ -415,7 +463,7 @@ async def _resolve_current_user(
             roles_upper = {r.upper() for r in roles}
             perms = list(user.permissions)
             if "WAREHOUSE" in roles_upper or "WAREHOUSE_MANAGER" in roles_upper:
-                perms.extend(["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "warehouse:read", "warehouse:write"])
+                perms.extend(["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "warehouse:read", "warehouse:write", "material:read", "material:write"])
             if "GATE_SECURITY" in roles_upper:
                 perms.extend(["gate:read", "gate:write", "gate:entry:read", "gate:entry:create", "gate:entry:verify"])
             if "WAREHOUSE_OPERATOR" in roles_upper:
@@ -453,8 +501,18 @@ async def get_current_user(
 
 def require_permission(*permissions: str):
     async def _checker(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-        user_roles = set(user.roles)
-        if "ADMIN" in user_roles or "WAREHOUSE" in user_roles or "PROCUREMENT" in user_roles or "GRN" in user_roles or "DISPATCH" in user_roles or "DISPATCH_MANAGER" in user_roles:
+        user_roles = {r.strip().upper() for r in user.roles}
+        if (
+            "ADMIN" in user_roles
+            or "WAREHOUSE" in user_roles
+            or "WAREHOUSE_MANAGER" in user_roles
+            or "PROCUREMENT" in user_roles
+            or "PROCUREMENT_OFFICER" in user_roles
+            or "GRN" in user_roles
+            or "GRN_MANAGER" in user_roles
+            or "DISPATCH" in user_roles
+            or "DISPATCH_MANAGER" in user_roles
+        ):
             return user
         if "GATE_SECURITY" in user_roles and any(
             permission in {"gate:read", "gate:write", "gate:verify", "gate:entry:read", "gate:entry:create", "gate:entry:verify"}

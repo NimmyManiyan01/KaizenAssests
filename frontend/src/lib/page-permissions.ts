@@ -57,6 +57,10 @@ export const ROLE_PAGES: Record<string, PermissionPage[]> = {
   ],
 };
 
+for (const pages of Object.values(ROLE_PAGES)) {
+  pages.push({ key: "/reports", label: "Reports & Analytics" });
+}
+
 export function permissionKeyForLocation(pathname: string, search = ""): string {
   const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
   const tab = params.get("tab");
@@ -68,6 +72,8 @@ export function getPageAccess(
   pathname: string,
   search = "",
 ): PageAccess | null | undefined {
+  // Reports are built-in read access; the API enforces the role and data scope.
+  if (pathname === "/reports") return permissions?.["/reports"] || "READ";
   if (!permissions || Object.keys(permissions).length === 0) return undefined;
   const key = permissionKeyForLocation(pathname, search);
   const exactAccess = permissions[key] ?? permissions[pathname];

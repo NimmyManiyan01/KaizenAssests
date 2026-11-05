@@ -19,11 +19,22 @@ from app.config.settings import get_settings
 
 _settings = get_settings()
 
-engine = create_async_engine(
-    _settings.database_url,
-    echo=_settings.database_echo,
-    poolclass=NullPool,
-)
+# Configure connection pooling for PostgreSQL (NullPool only for SQLite fallbacks)
+if _settings.database_url.startswith('sqlite'):
+    engine = create_async_engine(
+        _settings.database_url,
+        echo=_settings.database_echo,
+        poolclass=NullPool,
+    )
+else:
+    engine = create_async_engine(
+        _settings.database_url,
+        echo=_settings.database_echo,
+        pool_size=_settings.database_pool_size,
+        max_overflow=_settings.database_max_overflow,
+        pool_recycle=1800,
+        pool_pre_ping=True,
+    )
 
 AsyncSessionFactory = async_sessionmaker(
     bind=engine,

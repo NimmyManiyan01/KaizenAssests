@@ -149,9 +149,12 @@ function AssemblyDispatchPage() {
             const value = Date.parse(request.requested_on || request.created_at || request.submitted_at || "");
             return Number.isNaN(value) ? 0 : value;
           };
-          return requestTime(b) - requestTime(a) ||
-            String(b.request_number || "").localeCompare(String(a.request_number || ""), undefined, { numeric: true }) ||
-            b.id.localeCompare(a.id);
+          const rankA = a.priority_rank ?? (a.next_to_process ? 0 : 9999);
+          const rankB = b.priority_rank ?? (b.next_to_process ? 0 : 9999);
+          if (rankA !== rankB) return rankA - rankB;
+          return requestTime(a) - requestTime(b) ||
+            String(a.request_number || "").localeCompare(String(b.request_number || ""), undefined, { numeric: true }) ||
+            a.id.localeCompare(b.id);
         },
       ),
     );

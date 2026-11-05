@@ -67,7 +67,7 @@ export function FgSections({ sections = EMPTY_SECTIONS }: { sections?: any[] }) 
             <FgQrInput
               value={scan}
               onChange={setScan}
-              label="Scan or enter the section QR identity"
+              label="Verify section QR"
               inputId="section-verify"
             />
             <Button
@@ -155,8 +155,8 @@ export function FgLoading() {
   const [selected, setSelected] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState(false);
   const load = () =>
-    api
-      .getFgLoading()
+    (api?.getFgLoading ? api.getFgLoading() : Promise.resolve([]))
+
       .then((rows) => {
         setVisits(rows);
         setError("");
@@ -338,7 +338,7 @@ export function FgLoading() {
                   <FgQrInput
                     value={currentScan[v.gate_pass_number] || ""}
                     inputId={`load-${v.gate_pass_number}`}
-                    label="Scan or upload a selected section QR"
+                    label="Scan selected section QRs (one per line)"
                     onChange={(value) => {
                       setCurrentScan((prev) => ({ ...prev, [v.gate_pass_number]: value }));
                       const normalized = value.trim();
@@ -396,7 +396,7 @@ export function FgLoading() {
                       setCurrentScan((prev) => ({ ...prev, [v.gate_pass_number]: "" }));
                     }}
                   >
-                    Verify entered QR
+                    Add verified scan
                   </Button>
                 </div>
                 <div className="mt-4">

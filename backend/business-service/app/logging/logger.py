@@ -1,7 +1,7 @@
 """
-Structured logging setup. Uses stdlib logging with an optional JSON
-formatter so log lines are directly ingestible by the same Vector /
-ClickHouse observability pipeline the rest of the platform uses.
+Structured logging setup (CHG-AZ-004). Uses stdlib logging with an optional JSON
+formatter and CorrelationIdFilter so log lines are directly ingestible by
+Azure Application Insights, Azure Monitor, Log Analytics, and ClickHouse observability pipelines.
 """
 import logging
 import sys
@@ -11,8 +11,30 @@ from datetime import datetime, timezone
 from app.config.settings import get_settings
 
 
+class CorrelationIdFilter(logging.Filter):
+    """Injects active request correlation_id from contextvars into standard LogRecord."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            from app.middleware.request_context import get_correlation_id
+            cid = get_correlation_id() or "-"
+        except Exception:
+            cid = "-"
+        record.correlation_id = cid
+        record.request_id = cid
+        return True
+
+
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
+        cid = getattr(record, "correlation_id", None)
+        if not cid or cid == "-":
+            try:
+                from app.middleware.request_context import get_correlation_id
+                cid = get_correlation_id()
+            except Exception:
+                cid = None
+
         payload = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
@@ -20,6 +42,10 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
             "module": record.module,
         }
+        if cid:
+            payload["correlation_id"] = cid
+            payload["request_id"] = cid
+
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         extra = getattr(record, "extra_fields", None)
@@ -34,11 +60,12 @@ def configure_logging() -> None:
     root.setLevel(settings.log_level.upper())
 
     handler = logging.StreamHandler(sys.stdout)
+    handler.addFilter(CorrelationIdFilter())
     if settings.log_json:
         handler.setFormatter(JsonFormatter())
     else:
         handler.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
+            logging.Formatter("%(asctime)s %(levelname)s [%(name)s] [%(correlation_id)s] %(message)s")
         )
     root.handlers = [handler]
 

@@ -54,8 +54,17 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def handle_not_found(request: Request, exc: NotFoundException):
         return JSONResponse(status_code=404, content=_error_body(str(exc)), headers=_cors_headers(request))
 
-    from sqlalchemy.exc import DBAPIError
+    from sqlalchemy.exc import DBAPIError, IntegrityError
     import re
+
+    @app.exception_handler(IntegrityError)
+    async def handle_integrity_error(request: Request, exc: IntegrityError):
+        logger.warning("Database integrity constraint violation: %s", exc)
+        return JSONResponse(
+            status_code=409,
+            content=_error_body("Database constraint violation or unique conflict occurred."),
+            headers=_cors_headers(request),
+        )
 
     @app.exception_handler(DBAPIError)
     async def handle_rack_database_rule(request: Request, exc: DBAPIError):

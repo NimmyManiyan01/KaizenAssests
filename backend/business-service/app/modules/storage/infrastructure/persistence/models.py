@@ -8,7 +8,7 @@ from decimal import Decimal
 import uuid
 from typing import List, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Index, Boolean, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, GUID
@@ -148,7 +148,10 @@ class PutawayMovementModel(Base):
 
 class InventoryLocationBalanceModel(Base):
     __tablename__ = "inventory_location_balance"
-    __table_args__ = (UniqueConstraint("material_code", "storage_location_id", "batch_number", name="uq_inventory_location_material_bin_batch"),)
+    __table_args__ = (
+        UniqueConstraint("material_code", "storage_location_id", "batch_number", name="uq_inventory_location_material_bin_batch"),
+        Index("ix_inv_balance_wh_mat", "warehouse_id", "material_code"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     material_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)

@@ -60,7 +60,7 @@ const STATUS_OPTIONS = [
 ];
 
 function dateOnly(value: string | null | undefined): string {
-  return value ? String(value).split("T")[0] : "";
+  return value ? (String(value).split("T")[0] ?? "") : "";
 }
 
 function DispatchOrdersPage() {
@@ -88,9 +88,9 @@ function DispatchOrdersPage() {
   const [dispatchDate, setDispatchDate] = useState("");
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState("");
   // Retained for backwards-compatible draft payloads; transport is assigned during Loading.
-  const [transportMode] = useState("Road");
-  const [transportType] = useState("Full Truckload");
-  const [transporter] = useState("");
+  const [transportMode, setTransportMode] = useState("Road");
+  const [transportType, setTransportType] = useState("Full Truckload");
+  const [transporter, setTransporter] = useState("");
 
   // Section 2: Delivery Info
   const [customerAddress, setCustomerAddress] = useState("");
@@ -171,7 +171,7 @@ function DispatchOrdersPage() {
       setContactPhone(found.contact_phone);
       setDeliveryInstructions(found.delivery_instructions);
       setRemarks(found.notes);
-      setFormItems(found.items.map((i) => ({ ...i })));
+      setFormItems(found.items.map((i: any) => ({ ...i })));
       setIsStockReserved(false);
       toast.success("Finished goods retrieved", {
         description: `Loaded ${found.items.length} items from ${soNum}`,
@@ -256,7 +256,7 @@ function DispatchOrdersPage() {
                 (sum: number, b: any) => sum + Number(b.quantity_available || 0),
                 0,
               );
-              const first = stocks[0] || {};
+              const first = (stocks[0] as any) || {};
               const remaining = Number(orderItem.remaining_quantity || 0);
               return {
                 material_code: orderItem.product_code,

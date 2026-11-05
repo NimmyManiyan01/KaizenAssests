@@ -151,6 +151,10 @@ function InboundArrivals() {
   const [exitPass, setExitPass] = useState("");
   const [exitVerified, setExitVerified] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  useEffect(() => {
+    if (typeof search.search === "string") setSearchQuery(search.search);
+  }, [search.search]);
+
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [arrivalPage, setArrivalPage] = useState(1);
   const arrivalsPerPage = 10;
