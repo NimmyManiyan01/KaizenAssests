@@ -49,6 +49,12 @@ export const ROLE_PAGES: Record<string, PermissionPage[]> = {
     { key: "/grn?tab=records", label: "Incoming QC" },
     { key: "/assembly/quality", label: "Finished-Goods QC" },
   ],
+  SUPER_ADMIN: [
+    { key: "/admin", label: "Admin Overview" },
+    { key: "/admin/users", label: "User Management" },
+    { key: "/admin/audit", label: "Audit Log" },
+    { key: "/warehouse-dashboard", label: "Operations" },
+  ],
   ADMIN: [
     { key: "/admin", label: "Admin Overview" },
     { key: "/admin/users", label: "User Management" },

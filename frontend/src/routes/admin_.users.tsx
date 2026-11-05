@@ -23,6 +23,9 @@ import { PasswordInput } from "@/components/admin/password-input";
 const ADMIN_PAGE_SIZE = 10;
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 const hasValidPageAccess = (role: string, permissions: Record<string, PageAccess>) => {
+  if (["ADMIN", "SUPERUSER", "SUPER_ADMIN"].includes(role.trim().toUpperCase().replace(/[\s-]+/g, "_"))) {
+    return true;
+  }
   const allowedPages = new Set((ROLE_PAGES[role] || []).map((page) => page.key));
   const entries = Object.entries(permissions);
   return entries.length > 0 && entries.every(([key, access]) =>
@@ -50,6 +53,16 @@ type ManagedUser = {
 };
 
 type RoleOption = { value: string; label: string };
+const DEFAULT_ROLES: RoleOption[] = [
+  { value: "SUPER_ADMIN", label: "Super Administrator" },
+  { value: "ADMIN", label: "System Administrator" },
+  { value: "WAREHOUSE_MANAGER", label: "Warehouse Manager" },
+  { value: "GATE_SECURITY", label: "Gate Security" },
+  { value: "GRN", label: "GRN / Receiving" },
+  { value: "ASSEMBLY_MANAGER", label: "Assembly Manager" },
+  { value: "QUALITY", label: "Quality Inspector" },
+  { value: "SUPPLIER", label: "Supplier" },
+];
 type AssemblyUnit = { id: string; code: string; name: string; description?: string | null; status: string };
 
 const emptyForm = {
@@ -77,7 +90,7 @@ type EditForm = {
 
 function AdminUsersPage() {
   const [users, setUsers] = useState<ManagedUser[]>([]);
-  const [roles, setRoles] = useState<RoleOption[]>([]);
+  const [roles, setRoles] = useState<RoleOption[]>(DEFAULT_ROLES);
   const [assemblyUnits, setAssemblyUnits] = useState<AssemblyUnit[]>([]);
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
@@ -106,7 +119,13 @@ function AdminUsersPage() {
         api.getAdminAssemblyUnits(),
       ]);
       setUsers(userData);
-      setRoles(roleData);
+      const mergedRoles = [...DEFAULT_ROLES];
+      for (const r of (roleData || [])) {
+        if (!mergedRoles.some((existing) => existing.value === r.value)) {
+          mergedRoles.push(r);
+        }
+      }
+      setRoles(mergedRoles);
       setAssemblyUnits(unitData);
     } catch (error: any) {
       toast.error(error.message || "Unable to load users");
@@ -312,7 +331,9 @@ function AdminUsersPage() {
         username,
         full_name: fullName,
         email,
-        role: editForm.role,
+        ...(editForm.role !== editForm.user.role || !["SUPER_ADMIN", "ADMIN", "SUPERUSER"].includes(editForm.role)
+          ? { role: editForm.role }
+          : {}),
         shift_name: editForm.role === "SUPPLIER" ? null : editForm.shift_name.trim(),
         assembly_unit_code: editForm.role === "ASSEMBLY_MANAGER" ? editForm.assembly_unit_code.trim().toUpperCase() : null,
         page_permissions: editForm.page_permissions,
