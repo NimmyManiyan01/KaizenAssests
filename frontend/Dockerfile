@@ -15,6 +15,10 @@ RUN npm ci
 
 COPY . .
 
+ARG VITE_BUSINESS_API_URL="https://kaizen-wms-backend.graybeach-6b6c99c3.centralindia.azurecontainerapps.io"
+ENV VITE_BUSINESS_API_URL=$VITE_BUSINESS_API_URL
+ENV VITE_BUSINESS_SERVICE_URL=$VITE_BUSINESS_API_URL
+
 # Build Vite SPA with production bundle minification
 RUN npm run build && \
     if [ -d ".output/public" ] && [ ! -d "dist" ]; then cp -r .output/public dist; fi
