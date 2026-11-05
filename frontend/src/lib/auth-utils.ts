@@ -193,6 +193,10 @@ export function requireRouteAccess(pathname: string, search = ""): void {
 }
 
 function redirectToDefault(user: UserInfo | null, pathname: string, search = ""): never {
+  if (!user || !user.token) {
+    clearAuthSession();
+    throw redirect({ to: "/login" });
+  }
   const target = getDefaultRouteForUser(user);
   const targetUrl = new URL(target, window.location.origin);
   const currentSearch = search

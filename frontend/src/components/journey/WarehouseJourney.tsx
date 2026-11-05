@@ -127,7 +127,11 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
         gateExits: count(exits),
       });
     };
-    void loadSnapshot();
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      (window as any).requestIdleCallback(() => void loadSnapshot());
+    } else {
+      setTimeout(() => void loadSnapshot(), 1200);
+    }
     return () => {
       cancelled = true;
     };

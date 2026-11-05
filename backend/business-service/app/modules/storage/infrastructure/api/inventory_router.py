@@ -3328,25 +3328,29 @@ async def get_role_notifications(
     if not allowed_roles:
         return []
 
-    result = await uow.session.execute(
-        select(NotificationModel)
-        .where(func.upper(NotificationModel.user_role).in_(allowed_roles))
-        .order_by(NotificationModel.created_at.desc())
-        .limit(100)
-    )
-    return [
-        {
-            "id": str(notification.id),
-            "target_role": notification.user_role,
-            "title": notification.title,
-            "message": notification.message,
-            "category": notification.notification_type,
-            "created_at": notification.created_at.isoformat() if notification.created_at else None,
-            "is_read": notification.is_read,
-            "link": notification.link,
-        }
-        for notification in result.scalars().all()
-    ]
+    try:
+        result = await uow.session.execute(
+            select(NotificationModel)
+            .where(func.upper(NotificationModel.user_role).in_(allowed_roles))
+            .order_by(NotificationModel.created_at.desc())
+            .limit(100)
+        )
+        return [
+            {
+                "id": str(notification.id),
+                "target_role": notification.user_role,
+                "title": notification.title,
+                "message": notification.message,
+                "category": notification.notification_type,
+                "created_at": notification.created_at.isoformat() if notification.created_at else None,
+                "is_read": notification.is_read,
+                "link": notification.link,
+            }
+            for notification in result.scalars().all()
+        ]
+    except Exception as exc:
+        logger.warning("Notification query fallback: %s", exc)
+        return []
 
 
 

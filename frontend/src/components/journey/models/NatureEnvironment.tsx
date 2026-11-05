@@ -143,7 +143,7 @@ function WindGrass() {
   useEffect(() => () => geometry.dispose(), [geometry]);
 
   return (
-    <instancedMesh ref={meshRef} args={[geometry, undefined, 2200]} castShadow receiveShadow>
+    <instancedMesh ref={meshRef} args={[geometry, undefined, 2200]} receiveShadow>
       <shaderMaterial
         ref={materialRef}
         vertexColors

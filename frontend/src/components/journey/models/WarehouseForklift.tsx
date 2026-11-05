@@ -419,14 +419,7 @@ export function WarehouseForklift({
               opacity={0.9}
             />
           </mesh>
-          <pointLight
-            ref={beaconLightRef}
-            position={[0, 0.18, 0]}
-            color="#f59e0b"
-            intensity={2.5}
-            distance={10}
-            decay={2}
-          />
+          {/* PointLight optimized for performance; emissive strobe maintained */}
         </group>
 
         {/* Modern Warehouse Blue Safety Floor Spotlight (Casts blue spot behind forklift) */}
