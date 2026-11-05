@@ -30,7 +30,17 @@ def _cors_headers(request: Request) -> dict[str, str]:
     """
     origin = request.headers.get("origin")
     allowed_origins = get_settings().cors_allow_origins
-    if not origin or (origin not in allowed_origins and "*" not in allowed_origins):
+    is_allowed = (
+        bool(origin)
+        and (
+            origin in allowed_origins
+            or "*" in allowed_origins
+            or origin.endswith(".azurecontainerapps.io")
+            or "localhost" in origin
+            or "127.0.0.1" in origin
+        )
+    )
+    if not is_allowed:
         return {}
 
     return {

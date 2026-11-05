@@ -1,4 +1,5 @@
 from __future__ import annotations
+from decimal import Decimal
 
 import re
 import uuid
@@ -490,6 +491,15 @@ async def create_user(
     if duplicate.first():
         raise HTTPException(status_code=409, detail="Username or email already exists")
 
+    if role == "SUPPLIER":
+        sup_dup = await uow.session.execute(
+            select(SupplierUserModel.id).where(
+                func.lower(SupplierUserModel.username) == payload.username.strip().lower()
+            )
+        )
+        if sup_dup.first():
+            raise HTTPException(status_code=409, detail="Supplier username already exists")
+
     account = UserAccountModel(
         employee_id=generate_employee_id(),
         username=payload.username.strip(),
@@ -506,6 +516,8 @@ async def create_user(
     uow.session.add(account)
     if role == "SUPPLIER":
         supplier_id = uuid.uuid4()
+        supplier_code = f"SUP-{account.employee_id.removeprefix('EMP-')}"
+        now_dt = datetime.now(timezone.utc)
         supplier = SupplierModel(
             id=supplier_id,
             supplier_name=payload.full_name.strip(),
@@ -514,19 +526,33 @@ async def create_user(
             category=[],
             industry="GENERAL",
             gstin=f"AUTO-{uuid.uuid4().hex[:12].upper()}",
-            supplier_code=f"SUP-{account.employee_id.removeprefix('EMP-')}",
+            supplier_code=supplier_code,
+            rating=Decimal("0.0"),
+            performance_score=Decimal("0.0"),
+            created_at=now_dt,
+            updated_at=now_dt,
             status="Active",
         )
         uow.session.add(supplier)
         uow.session.add(
             SupplierUserModel(
+                id=uuid.uuid4(),
                 supplier_id=supplier_id,
                 username=account.username,
                 password_hash=account.password_hash,
                 must_change_password=False,
             )
         )
-    await uow.commit()
+    try:
+        await uow.commit()
+    except IntegrityError as exc:
+        await uow.rollback()
+        logger.warning("Integrity constraint error creating user: %s", exc)
+        raise HTTPException(status_code=409, detail="Username, email, or supplier identity conflict")
+    except Exception as exc:
+        await uow.rollback()
+        logger.exception("Unexpected error creating user: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Failed to create user: {str(exc)}")
     return serialize_user(account)
 
 

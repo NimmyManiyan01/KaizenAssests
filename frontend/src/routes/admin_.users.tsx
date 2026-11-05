@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { CircleCheck, Factory, Loader2, LockKeyhole, Pencil, Plus, Search, ShieldCheck, UserX, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -89,6 +89,7 @@ type EditForm = {
 };
 
 function AdminUsersPage() {
+  const navigate = useNavigate();
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [roles, setRoles] = useState<RoleOption[]>(DEFAULT_ROLES);
   const [assemblyUnits, setAssemblyUnits] = useState<AssemblyUnit[]>([]);
@@ -128,6 +129,17 @@ function AdminUsersPage() {
       setRoles(mergedRoles);
       setAssemblyUnits(unitData);
     } catch (error: any) {
+      if (
+        error?.message?.toLowerCase().includes("session expired") ||
+        error?.message?.toLowerCase().includes("invalid") ||
+        error?.message?.toLowerCase().includes("401")
+      ) {
+        toast.error("Your session has expired. Redirecting to login...");
+        setTimeout(() => {
+          navigate({ to: "/login" });
+        }, 1500);
+        return;
+      }
       toast.error(error.message || "Unable to load users");
     } finally {
       setLoading(false);
@@ -367,6 +379,7 @@ function AdminUsersPage() {
         <Button className="rounded-xl shadow-sm" onClick={() => {
               setShowUnitForm(false);
               setActiveTab("staff");
+              setForm(emptyForm);
               setShowForm((current) => !current);
             }}>
           <Plus /> Create user
@@ -402,7 +415,7 @@ function AdminUsersPage() {
               <DialogTitle className="flex items-center gap-2"><ShieldCheck className="text-primary" /> Create staff account</DialogTitle>
               <DialogDescription>Create a user, assign their operational role, and configure page access.</DialogDescription>
             </DialogHeader>
-              <form onSubmit={createUser} className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <form onSubmit={createUser} autoComplete="off" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {(
                   [
                     ["full_name", "Full name"],
@@ -414,6 +427,9 @@ function AdminUsersPage() {
                     {label}
                     <input
                       required
+                      name={`new-staff-${key}`}
+                      id={`new-staff-${key}`}
+                      autoComplete="off"
                       minLength={key === "username" || key === "email" ? 3 : 2}
                       maxLength={key === "username" ? 64 : 128}
                       type={key === "email" ? "email" : "text"}
@@ -426,6 +442,8 @@ function AdminUsersPage() {
                 <PasswordInput
                   label="Password"
                   required
+                  name="new-staff-password"
+                  autoComplete="new-password"
                   minLength={8}
                   maxLength={128}
                   value={form.password}
@@ -435,14 +453,14 @@ function AdminUsersPage() {
                   Role
                   <select
                     required
-                    value={form.role}
+                    value={form.role || "WAREHOUSE_MANAGER"}
                     onChange={(event) => {
                       const role = event.target.value;
                       setForm({ ...form, role, shift_name: role === "SUPPLIER" ? "" : form.shift_name || "GENERAL", page_permissions: {} });
                     }}
                     className="h-10 w-full rounded-md border bg-background px-3 font-normal"
                   >
-                    {roles.map((role) => (
+                    {(roles.length > 0 ? roles : DEFAULT_ROLES).map((role) => (
                       <option key={role.value} value={role.value}>
                         {role.label}
                       </option>
