@@ -20,6 +20,11 @@ ENV VITE_BUSINESS_API_URL=$VITE_BUSINESS_API_URL
 ENV VITE_BUSINESS_SERVICE_URL=$VITE_BUSINESS_API_URL
 ENV NODE_OPTIONS="--experimental-require-module"
 
+# Remove local .env overrides and ensure production API URL is baked into Vite client bundle
+RUN rm -f .env .env.local && \
+    echo "VITE_BUSINESS_API_URL=$VITE_BUSINESS_API_URL" > .env.production && \
+    echo "VITE_BUSINESS_SERVICE_URL=$VITE_BUSINESS_API_URL" >> .env.production
+
 # Build TanStack Start SSR application with node-server preset
 RUN npm run build
 

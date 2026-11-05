@@ -5,14 +5,32 @@ import { normalizeGrnResponse } from "./grn-response";
  * and Java auth-service (port 8080).
  */
 
-export const BUSINESS_API_URL =
-  (typeof import.meta !== "undefined" &&
-    (import.meta.env?.VITE_BUSINESS_API_URL || import.meta.env?.VITE_BUSINESS_SERVICE_URL)) ||
-  (typeof window !== "undefined"
-    ? window.location.hostname.includes("loca.lt")
-      ? "https://wms-mobile-backend-8000.loca.lt"
-      : `${window.location.protocol}//${window.location.hostname}:8000`
-    : "http://localhost:8000");
+function resolveBusinessApiUrl(): string {
+  if (typeof window !== "undefined") {
+    if (window.location.hostname.includes("azurecontainerapps.io")) {
+      return "https://kaizen-wms-backend.graybeach-6b6c99c3.centralindia.azurecontainerapps.io";
+    }
+  }
+  const envUrl =
+    (typeof import.meta !== "undefined" &&
+      (import.meta.env?.VITE_BUSINESS_API_URL || import.meta.env?.VITE_BUSINESS_SERVICE_URL)) ||
+    "";
+  if (envUrl && !(typeof window !== "undefined" && window.location.protocol === "https:" && envUrl.includes("localhost"))) {
+    return envUrl;
+  }
+  if (typeof window !== "undefined") {
+    if (window.location.hostname.includes("loca.lt")) {
+      return "https://wms-mobile-backend-8000.loca.lt";
+    }
+    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+      return `${window.location.protocol}//${window.location.hostname}:8000`;
+    }
+    return "https://kaizen-wms-backend.graybeach-6b6c99c3.centralindia.azurecontainerapps.io";
+  }
+  return "http://localhost:8000";
+}
+
+export const BUSINESS_API_URL = resolveBusinessApiUrl();
 import { clearAuthSession, getAuthToken, storeAuthSession, getUserInfo } from "./auth-utils";
 function getApiErrorMessage(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== "object") return fallback;
