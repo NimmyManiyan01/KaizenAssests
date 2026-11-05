@@ -170,7 +170,16 @@ export function getRequiredRolesForPath(pathname: string): string[] | null {
   return null;
 }
 
+export function isPublicPath(pathname: string): boolean {
+  if (!pathname) return true;
+  const clean = pathname.trim().replace(/\/+$/, "") || "/";
+  return clean === "/" || clean === "" || clean === "/login" || clean.startsWith("/login");
+}
+
 export function requireRouteAccess(pathname: string, search = ""): void {
+  if (isPublicPath(pathname)) {
+    return;
+  }
   requireAuth();
   const user = getUserInfo();
   const supplierDamageClaims = pathname === "/damage-claims" && hasRole("SUPPLIER");

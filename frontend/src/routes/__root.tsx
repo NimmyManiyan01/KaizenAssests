@@ -97,11 +97,21 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     // Skip server-side redirects for localStorage-based auth to prevent refresh redirects to login
     if (typeof window === "undefined") return;
 
-    // List of routes that don't require authentication
-    const publicRoutes = new Set(["/login", "/"]);
+    // Normalize path to handle root, empty path, and trailing slashes safely
+    const rawPath = (location?.pathname || window.location.pathname || "/").trim();
+    const cleanPath = rawPath.replace(/\/+$/, "") || "/";
 
-    if (!publicRoutes.has(location.pathname))
-      requireRouteAccess(location.pathname, location.searchStr);
+    // Public routes that never require authentication
+    if (
+      cleanPath === "/" ||
+      cleanPath === "" ||
+      cleanPath === "/login" ||
+      cleanPath.startsWith("/login")
+    ) {
+      return;
+    }
+
+    requireRouteAccess(cleanPath, location.searchStr || window.location.search || "");
   },
   shellComponent: RootShell,
   component: RootComponent,

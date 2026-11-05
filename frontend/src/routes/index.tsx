@@ -15,6 +15,10 @@ const WarehouseJourney = lazy(() =>
 );
 
 export const Route = createFileRoute("/")({
+  beforeLoad: () => {
+    // Landing page is public and must never trigger redirects to /login
+    return;
+  },
   component: HomePage,
 });
 
