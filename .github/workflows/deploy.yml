@@ -1,0 +1,202 @@
+name: Deploy to Azure Production (CD)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target Deployment Environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+concurrency:
+  group: cd-production
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'rg-kaizenx-dev' }}
+  AZURE_ACR_NAME: ${{ vars.AZURE_ACR_NAME || 'kaizenwmsacr' }}
+  ACR_LOGIN_SERVER: ${{ vars.AZURE_ACR_NAME || 'kaizenwmsacr' }}.azurecr.io
+  BACKEND_APP_NAME: ${{ vars.BACKEND_APP_NAME || 'kaizen-wms-backend' }}
+  FRONTEND_APP_NAME: ${{ vars.FRONTEND_APP_NAME || 'kaizen-wms-frontend' }}
+  BACKEND_IMAGE_NAME: kaizen-backend
+  FRONTEND_IMAGE_NAME: kaizen-frontend
+  IMAGE_TAG: sha-${{ github.sha }}
+
+jobs:
+  deploy:
+    name: Build, Publish & Deploy to Azure
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://kaizen-wms-frontend.graybeach-6b6c99c3.centralindia.azurecontainerapps.io
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Microsoft Azure (OIDC or Service Principal)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Log in to Azure Container Registry
+        run: |
+          az acr login --name ${{ env.AZURE_ACR_NAME }}
+
+      - name: Record Current Active Revisions (Rollback Safeguard)
+        id: pre_deploy
+        run: |
+          PREV_BACKEND_IMAGE=$(az containerapp show \
+            --name ${{ env.BACKEND_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "properties.template.containers[0].image" -o tsv)
+          
+          PREV_FRONTEND_IMAGE=$(az containerapp show \
+            --name ${{ env.FRONTEND_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "properties.template.containers[0].image" -o tsv)
+          
+          echo "prev_backend_image=$PREV_BACKEND_IMAGE" >> $GITHUB_OUTPUT
+          echo "prev_frontend_image=$PREV_FRONTEND_IMAGE" >> $GITHUB_OUTPUT
+          echo "Previous backend image: $PREV_BACKEND_IMAGE"
+          echo "Previous frontend image: $PREV_FRONTEND_IMAGE"
+
+      - name: Build & Publish Production Backend Container Image
+        id: build_backend
+        run: |
+          FULL_IMAGE="${{ env.ACR_LOGIN_SERVER }}/${{ env.BACKEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+          echo "Building $FULL_IMAGE..."
+          az acr build \
+            --registry ${{ env.AZURE_ACR_NAME }} \
+            --image ${{ env.BACKEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+            --file backend/business-service/Dockerfile \
+            backend/business-service
+          
+          BACKEND_DIGEST=$(az acr repository show \
+            --name ${{ env.AZURE_ACR_NAME }} \
+            --image ${{ env.BACKEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+            --query "digest" -o tsv)
+          echo "backend_digest=$BACKEND_DIGEST" >> $GITHUB_OUTPUT
+          echo "Backend Image Digest: $BACKEND_DIGEST"
+
+      - name: Build & Publish Production Frontend Container Image
+        id: build_frontend
+        run: |
+          FULL_IMAGE="${{ env.ACR_LOGIN_SERVER }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+          echo "Building $FULL_IMAGE..."
+          az acr build \
+            --registry ${{ env.AZURE_ACR_NAME }} \
+            --image ${{ env.FRONTEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+            --file frontend/Dockerfile \
+            frontend
+          
+          FRONTEND_DIGEST=$(az acr repository show \
+            --name ${{ env.AZURE_ACR_NAME }} \
+            --image ${{ env.FRONTEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+            --query "digest" -o tsv)
+          echo "frontend_digest=$FRONTEND_DIGEST" >> $GITHUB_OUTPUT
+          echo "Frontend Image Digest: $FRONTEND_DIGEST"
+
+      - name: Deploy Backend to Azure Container Apps
+        run: |
+          az containerapp update \
+            --name ${{ env.BACKEND_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ env.ACR_LOGIN_SERVER }}/${{ env.BACKEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+      - name: Deploy Frontend to Azure Container Apps
+        run: |
+          az containerapp update \
+            --name ${{ env.FRONTEND_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ env.ACR_LOGIN_SERVER }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+      - name: Execute Post-Deployment Smoke Probes
+        id: health_check
+        run: |
+          echo "Waiting for container revisions to stabilize..."
+          BACKEND_FQDN=$(az containerapp show -n ${{ env.BACKEND_APP_NAME }} -g ${{ env.AZURE_RESOURCE_GROUP }} --query "properties.configuration.ingress.fqdn" -o tsv)
+          FRONTEND_FQDN=$(az containerapp show -n ${{ env.FRONTEND_APP_NAME }} -g ${{ env.AZURE_RESOURCE_GROUP }} --query "properties.configuration.ingress.fqdn" -o tsv)
+          
+          echo "Probing Backend: https://${BACKEND_FQDN}/health/ready"
+          BACKEND_OK=false
+          for i in {1..12}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://${BACKEND_FQDN}/health/ready" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "Backend healthy (HTTP 200)"
+              BACKEND_OK=true
+              break
+            fi
+            echo "Attempt $i: Backend returned status $STATUS. Retrying in 10s..."
+            sleep 10
+          done
+
+          if [ "$BACKEND_OK" != "true" ]; then
+            echo "ERROR: Backend readiness probe failed!"
+            exit 1
+          fi
+
+          echo "Probing Frontend: https://${FRONTEND_FQDN}/login"
+          FRONTEND_OK=false
+          for i in {1..12}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://${FRONTEND_FQDN}/login" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "Frontend healthy (HTTP 200)"
+              FRONTEND_OK=true
+              break
+            fi
+            echo "Attempt $i: Frontend returned status $STATUS. Retrying in 10s..."
+            sleep 10
+          done
+
+          if [ "$FRONTEND_OK" != "true" ]; then
+            echo "ERROR: Frontend readiness probe failed!"
+            exit 1
+          fi
+
+      - name: Automated Rollback on Probe Failure
+        if: failure() && steps.health_check.outcome == 'failure'
+        run: |
+          echo "CRITICAL: Post-deployment smoke probes failed! Triggering automatic rollback to previous images..."
+          az containerapp update \
+            --name ${{ env.BACKEND_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ steps.pre_deploy.outputs.prev_backend_image }}
+          
+          az containerapp update \
+            --name ${{ env.FRONTEND_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ steps.pre_deploy.outputs.prev_frontend_image }}
+          echo "Rollback completed. Restored stable revisions."
+
+      - name: Generate Deployment Audit Summary
+        if: always()
+        run: |
+          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+          ## 🚀 Kaizen WMS Azure Deployment Summary
+          
+          - **Triggered Commit**: \`${{ github.sha }}\`
+          - **Git Branch / Ref**: \`${{ github.ref }}\`
+          - **Azure Subscription**: \`${{ secrets.AZURE_SUBSCRIPTION_ID || 'KaizentrixProduction' }}\`
+          - **Resource Group**: \`${{ env.AZURE_RESOURCE_GROUP }}\`
+          - **Container Registry**: \`${{ env.ACR_LOGIN_SERVER }}\`
+          - **Backend Image**: \`${{ env.ACR_LOGIN_SERVER }}/${{ env.BACKEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}\`
+          - **Backend Digest**: \`${{ steps.build_backend.outputs.backend_digest }}\`
+          - **Frontend Image**: \`${{ env.ACR_LOGIN_SERVER }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}\`
+          - **Frontend Digest**: \`${{ steps.build_frontend.outputs.frontend_digest }}\`
+          - **Deployment Status**: **${{ job.status }}**
+          EOF

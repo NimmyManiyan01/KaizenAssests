@@ -3,4 +3,10 @@ node_modules
 .wrangler
 dist
 .git
-
+.env
+.env.*
+!.env.example
+tests/
+playwright-report/
+test-results/
+*.log
