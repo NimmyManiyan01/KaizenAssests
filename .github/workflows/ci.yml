@@ -7,9 +7,17 @@ on:
       - 'feature/**'
       - 'fix/**'
       - 'chore/**'
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
 
 concurrency:
   group: ci-${{ github.ref }}
