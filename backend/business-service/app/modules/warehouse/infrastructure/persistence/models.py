@@ -175,7 +175,7 @@ class UserAccountModel(Base):
     assembly_unit_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     applications: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=lambda: ["WMS"])
     page_permissions: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    auth_token_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    auth_token_hash: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     auth_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     failed_login_attempts: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

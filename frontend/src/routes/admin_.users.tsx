@@ -191,6 +191,19 @@ function AdminUsersPage() {
   const pageInactiveAssemblyUnits = visibleInactiveAssemblyUnits.slice((inactiveUnitPage - 1) * ADMIN_PAGE_SIZE, inactiveUnitPage * ADMIN_PAGE_SIZE);
   const shifts = Array.from(new Set(users.map((user) => user.shift_name || "GENERAL"))).sort();
 
+  const availableEditRoles = useMemo(() => {
+    const list = roles.length > 0 ? [...roles] : [...DEFAULT_ROLES];
+    const currentRole = editForm?.role;
+    if (currentRole && !list.some((r) => r.value === currentRole)) {
+      const formatted = currentRole
+        .split("_")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(" ");
+      list.unshift({ value: currentRole, label: formatted });
+    }
+    return list;
+  }, [roles, editForm?.role]);
+
   useEffect(() => { setUserPage(1); }, [activeTab, roleFilter, search, shiftFilter, statusFilter]);
   useEffect(() => { setActiveUnitPage(1); setInactiveUnitPage(1); }, [unitSearch]);
   useEffect(() => { setUserPage((current) => Math.min(current, Math.max(1, Math.ceil(filteredUsers.length / ADMIN_PAGE_SIZE)))); }, [filteredUsers.length]);
@@ -416,6 +429,11 @@ function AdminUsersPage() {
               <DialogDescription>Create a user, assign their operational role, and configure page access.</DialogDescription>
             </DialogHeader>
               <form onSubmit={createUser} autoComplete="off" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {/* Trap browser autofill heuristics */}
+                <div style={{ display: "none" }} aria-hidden="true">
+                  <input type="text" tabIndex={-1} autoComplete="username" readOnly />
+                  <input type="password" tabIndex={-1} autoComplete="current-password" readOnly />
+                </div>
                 {(
                   [
                     ["full_name", "Full name"],
@@ -771,6 +789,11 @@ function AdminUsersPage() {
             </DialogHeader>
             {editForm && (
               <form onSubmit={saveEdit} autoComplete="off" className="space-y-5">
+                {/* Trap browser autofill heuristics */}
+                <div style={{ display: "none" }} aria-hidden="true">
+                  <input type="text" tabIndex={-1} autoComplete="username" readOnly />
+                  <input type="password" tabIndex={-1} autoComplete="current-password" readOnly />
+                </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   {(
                     [
@@ -821,7 +844,7 @@ function AdminUsersPage() {
                       }}
                       className="h-10 w-full rounded-md border bg-background px-3 font-normal"
                     >
-                      {roles.map((role) => (
+                      {availableEditRoles.map((role) => (
                         <option key={role.value} value={role.value}>
                           {role.label}
                         </option>

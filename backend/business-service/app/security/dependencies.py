@@ -129,11 +129,13 @@ async def _resolve_current_user(
             supplier_account = (
                 await session.execute(
                     select(SupplierUserModel).where(
-                        SupplierUserModel.auth_token_hash == token_hash,
+                        SupplierUserModel.auth_token_hash.contains(token_hash),
                         SupplierUserModel.auth_token_expires_at > datetime.now(timezone.utc),
                     )
                 )
             ).scalar_one_or_none()
+            if supplier_account and token_hash not in [h.strip() for h in (supplier_account.auth_token_hash or "").split(",") if h.strip()]:
+                supplier_account = None
             managed_account = None
             if supplier_account is not None:
                 managed_account = (await session.execute(
@@ -169,17 +171,20 @@ async def _resolve_current_user(
             from app.database.session import AsyncSessionFactory
             from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel
 
+            token_hash = hashlib.sha256(session_token.encode()).hexdigest()
             async with AsyncSessionFactory() as session:
                 result = await session.execute(
                     select(UserAccountModel)
                     .options(selectinload(UserAccountModel.warehouse))
                     .where(
-                        UserAccountModel.auth_token_hash == hashlib.sha256(session_token.encode()).hexdigest(),
+                        UserAccountModel.auth_token_hash.contains(token_hash),
                         UserAccountModel.status == "ACTIVE",
                         UserAccountModel.auth_token_expires_at > datetime.now(timezone.utc),
                     )
                 )
                 account = result.scalar_one_or_none()
+                if account and token_hash not in [h.strip() for h in (account.auth_token_hash or "").split(",") if h.strip()]:
+                    account = None
             if account:
                 role_key = account.role.strip().upper().replace(" ", "_")
                 role = {

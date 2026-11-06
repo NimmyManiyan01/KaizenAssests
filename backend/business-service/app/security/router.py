@@ -255,7 +255,10 @@ async def dev_login(
         session_token = secrets.token_urlsafe(48)
         if needs_rehash:
             account.password_hash = hash_password(req_password)
-        account.auth_token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+        new_token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+        existing_hashes = [h.strip() for h in (account.auth_token_hash or "").split(",") if h.strip()]
+        active_hashes = [h for h in existing_hashes if h != new_token_hash][-9:] + [new_token_hash]
+        account.auth_token_hash = ",".join(active_hashes)
         account.auth_token_expires_at = now + timedelta(minutes=settings.local_session_lifetime_minutes)
         account.failed_login_attempts = 0
         account.locked_until = None
@@ -318,7 +321,10 @@ async def supplier_login(
 
     settings = get_settings()
     session_token = secrets.token_urlsafe(48)
-    user.auth_token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+    new_token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+    existing_hashes = [h.strip() for h in (user.auth_token_hash or "").split(",") if h.strip()]
+    active_hashes = [h for h in existing_hashes if h != new_token_hash][-9:] + [new_token_hash]
+    user.auth_token_hash = ",".join(active_hashes)
     user.auth_token_expires_at = datetime.now(timezone.utc) + timedelta(
         minutes=settings.local_session_lifetime_minutes
     )
@@ -431,7 +437,10 @@ async def magic_login(
             detail="Unable to establish a supplier session",
         )
     session_token = secrets.token_urlsafe(48)
-    user.auth_token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+    new_token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+    existing_hashes = [h.strip() for h in (user.auth_token_hash or "").split(",") if h.strip()]
+    active_hashes = [h for h in existing_hashes if h != new_token_hash][-9:] + [new_token_hash]
+    user.auth_token_hash = ",".join(active_hashes)
     user.auth_token_expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
     await uow.commit()
 
