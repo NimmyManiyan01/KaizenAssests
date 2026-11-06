@@ -803,6 +803,7 @@ function AssemblyMaterialRequestsPage() {
                 <thead className="bg-muted/50">
                   <tr className="border-b border-border/70 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     <th className="py-3 px-3">Request ID</th>
+                    <th className="py-3 px-3">Assembly Unit</th>
                     <th className="py-3 px-3">Product</th>
                     <th className="py-3 px-3">Quantity</th>
                     <th className="py-3 px-3">Required Date</th>
@@ -826,6 +827,8 @@ function AssemblyMaterialRequestsPage() {
                           {formatDate(r.created_at)}
                         </div>
                       </td>
+
+                      <td className="py-3.5 px-3 font-mono">{r.assembly_unit_code || "—"}</td>
 
                       {/* Product to Manufacture */}
                       <td className="py-3.5 px-3">

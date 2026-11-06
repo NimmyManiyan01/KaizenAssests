@@ -2016,8 +2016,8 @@ function SimpleWarehouseModule() {
                                 ...(item.batch ? String(item.batch).split(",") : []),
                               ].map((batch) => batch.trim()).filter((batch, index, all) => batch && all.indexOf(batch) === index);
                               return batchCodes.length ? (
-                                <button type="button" onClick={() => void openInventoryBatchDetails(item)} className="inline-flex min-w-20 items-center justify-center rounded-full border bg-muted/40 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                                  Batch {batchCodes.length}
+                                <button type="button" onClick={() => void openInventoryBatchDetails(item)} aria-label={`View ${batchCodes.length} batch${batchCodes.length === 1 ? "" : "es"}`} className="inline-flex min-w-20 items-center justify-center rounded-full border bg-muted/40 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                                  {batchCodes.length} batch{batchCodes.length === 1 ? "" : "es"}
                                 </button>
                               ) : "—";
                             })()}

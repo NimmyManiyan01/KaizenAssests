@@ -121,7 +121,7 @@ class DockMasterResponse(BaseModel):
 
 class DockAllocationHistoryResponse(BaseModel):
     id: uuid.UUID
-    allocation_request_id: uuid.UUID
+    allocation_request_id: Optional[uuid.UUID] = None
     existing_gate_pass_id: Optional[str] = None
     vehicle_number: Optional[str] = None
     vendor_reference: Optional[str] = None

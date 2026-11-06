@@ -61,6 +61,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/assembly", tags=["assembly"])
 
 
+def _assembly_unit_scope(user: Optional[CurrentUser]) -> Optional[str]:
+    """Return the unit boundary for a unit manager; None means unrestricted role."""
+    if not user or not {role.upper() for role in user.roles}.intersection({"ASSEMBLY", "ASSEMBLY_MANAGER"}):
+        return None
+    return str(user.raw_claims.get("assembly_unit_code") or "").strip().upper()
+
+
+def _scope_assembly_orders(query, user: Optional[CurrentUser]):
+    unit_code = _assembly_unit_scope(user)
+    if unit_code is None:
+        return query
+    if not unit_code:
+        return query.where(AssemblyOrderModel.id.is_(None))
+    return query.where(AssemblyOrderModel.assembly_unit_code == unit_code)
+
+
+def _require_assembly_unit(order: Optional[AssemblyOrderModel], user: Optional[CurrentUser]) -> None:
+    unit_code = _assembly_unit_scope(user)
+    if unit_code is not None and (not unit_code or not order or (order.assembly_unit_code or "").upper() != unit_code):
+        # Use 404 so another unit's order cannot be enumerated by ID.
+        raise HTTPException(status_code=404, detail="Assembly order not found")
+
+
 class SupplierTransportEntryPayload(BaseModel):
     vehicle_number: str = Field(..., min_length=1)
     driver_name: str = Field(..., min_length=1)
@@ -151,6 +174,7 @@ async def create_supplier_finished_goods_dispatch_request(
         raise HTTPException(403, "Supplier access required")
     async with uow:
         selected_fg = None
+        selected_fg_unit = None
         if payload.finished_goods_id:
             await require_section_schema(uow.session)
             selected_fg = await uow.session.scalar(select(AssemblyFinishedGoodsModel).where(AssemblyFinishedGoodsModel.id == payload.finished_goods_id).with_for_update())
@@ -158,6 +182,9 @@ async def create_supplier_finished_goods_dispatch_request(
                 raise HTTPException(404, "Finished goods record not found")
             if selected_fg.status not in ("QC_APPROVED", "AVAILABLE"):
                 raise HTTPException(409, "FG is not QC approved")
+            selected_fg_unit = await uow.session.scalar(select(AssemblyOrderModel.assembly_unit_code).where(
+                AssemblyOrderModel.id == selected_fg.assembly_order_id
+            ))
             summary = await section_summary(uow.session, selected_fg.id)
             if len(summary["sections"]) != 8:
                 raise HTTPException(409, "Assembly must create the eight transport sections before pickup registration")
@@ -184,6 +211,7 @@ async def create_supplier_finished_goods_dispatch_request(
         supplier_id = current_user.raw_claims.get("supplier_id") or current_user.subject
         row = FinishedGoodsRequestModel(
             section_fg_id=selected_fg.id if selected_fg else None,
+            assembly_unit_code=selected_fg_unit,
             request_number=request_number, material_code=payload.product_code, material_name=payload.product_name,
             quantity=payload.quantity, uom=payload.uom, warehouse="ASSEMBLY", requested_by=current_user.username,
             department="SUPPLIER", priority="MEDIUM", required_date=payload.expected_pickup_date,
@@ -269,17 +297,19 @@ async def list_supplier_finished_goods_dispatch_requests(
         dispatches = (await uow.session.execute(select(DispatchModel).where(DispatchModel.order_number.in_([r.request_number for r in rows])))).scalars().all()
         dispatch_by_number = {d.order_number: d for d in dispatches}
         allocated_rows = (await uow.session.execute(
-            select(AssemblyFinishedGoodsAllocationModel, AssemblyFinishedGoodsModel)
+            select(AssemblyFinishedGoodsAllocationModel, AssemblyFinishedGoodsModel, AssemblyOrderModel.assembly_unit_code)
             .join(AssemblyFinishedGoodsModel, AssemblyFinishedGoodsModel.id == AssemblyFinishedGoodsAllocationModel.finished_goods_id)
+            .join(AssemblyOrderModel, AssemblyOrderModel.id == AssemblyFinishedGoodsModel.assembly_order_id)
             .where(AssemblyFinishedGoodsAllocationModel.finished_goods_request_id.in_([r.id for r in rows]))
             .order_by(AssemblyFinishedGoodsModel.posted_at, AssemblyFinishedGoodsModel.id)
         )).all()
         allocations_by_request = {}
-        for allocation, fg in allocated_rows:
+        for allocation, fg, assembly_unit_code in allocated_rows:
             allocations_by_request.setdefault(allocation.finished_goods_request_id, []).append({
                 "finished_goods_id": str(fg.id), "batch_number": fg.batch_number,
                 "quantity": float(allocation.quantity), "qr_code": fg.qr_code,
                 "status": allocation.status, "location_code": fg.location_code,
+                "assembly_unit_code": assembly_unit_code,
             })
         priorities = await dispatch_priorities(uow.session)
         # Rank the complete submission history, never just pending requests.
@@ -302,6 +332,7 @@ async def list_supplier_finished_goods_dispatch_requests(
                 "fg_id": str(r.section_fg_id) if r.section_fg_id else None,
                 **(await section_summary(uow.session, r.section_fg_id) if r.section_fg_id else {}),
                 "dispatch_number": r.request_number, "order_number": r.request_number,
+                "assembly_unit_code": r.assembly_unit_code or (dispatch.assembly_unit_code if dispatch else None),
                 "supplier_name": r.supplier_name, "product_code": r.material_code,
                 "product_name": r.material_name, "quantity": float(r.quantity), "uom": r.uom,
                 "items": [{"material_code": r.material_code, "material_name": r.material_name, "quantity_ordered": float(r.quantity), "uom": r.uom}],
@@ -320,6 +351,7 @@ async def list_supplier_finished_goods_dispatch_requests(
                     "gate_pass_number": visit.gate_pass_number,
                     "vehicle_number": visit.vehicle_number,
                     "driver_name": visit.driver_name,
+                    "assembly_unit_code": visit.assembly_unit_code or r.assembly_unit_code,
                     "status": visit.status,
                     "arrived_at": visit.arrived_at.isoformat() if visit.arrived_at else None,
                     "exited_at": visit.exited_at.isoformat() if visit.exited_at else None,
@@ -347,12 +379,32 @@ async def allocate_supplier_finished_goods_fifo(
         if request and request.section_fg_id:
             raise HTTPException(409, "Use Assembly FG Loading for transport sections; FIFO stock allocation is not applicable")
         if not request: raise HTTPException(404, "Finished-goods dispatch request not found")
+        actor_unit = _assembly_unit_scope(current_user)
+        if actor_unit == "":
+            raise HTTPException(403, "This Assembly Manager is not assigned to an assembly unit")
+        if actor_unit and request.assembly_unit_code and request.assembly_unit_code != actor_unit:
+            raise HTTPException(404, "Finished-goods dispatch request not found")
+        if actor_unit:
+            request.assembly_unit_code = actor_unit
         if request.status not in ("PENDING_ASSEMBLY", "APPROVED", "ALLOCATED"):
             raise HTTPException(409, f"Request is already {request.status}")
         existing = (await uow.session.execute(select(AssemblyFinishedGoodsAllocationModel).where(AssemblyFinishedGoodsAllocationModel.finished_goods_request_id == request.id))).scalars().all()
+        if existing:
+            existing_units = set((await uow.session.scalars(
+                select(AssemblyOrderModel.assembly_unit_code)
+                .join(AssemblyFinishedGoodsModel, AssemblyFinishedGoodsModel.assembly_order_id == AssemblyOrderModel.id)
+                .where(AssemblyFinishedGoodsModel.id.in_([allocation.finished_goods_id for allocation in existing]))
+            )).all())
+            existing_units.discard(None)
+            if len(existing_units) > 1:
+                raise HTTPException(409, "This pickup is allocated across multiple assembly units and cannot be assigned to one unit")
+            allocated_unit = next(iter(existing_units), None)
+            if allocated_unit and request.assembly_unit_code and allocated_unit != request.assembly_unit_code:
+                raise HTTPException(409, "Allocated finished goods belong to a different assembly unit")
+            request.assembly_unit_code = request.assembly_unit_code or allocated_unit
         linked_dispatch = (await uow.session.execute(select(DispatchModel).where(DispatchModel.order_number == request.request_number))).scalar_one_or_none()
         if not linked_dispatch:
-            linked_dispatch = DispatchModel(id=uuid.uuid4(), dispatch_number=request.request_number, order_number=request.request_number, customer_name=request.supplier_name or "Supplier", warehouse_id="ASSEMBLY", dispatch_type="SUPPLIER_FINISHED_GOODS", status="STOCK_RESERVED", priority="Normal", notes=request.remarks)
+            linked_dispatch = DispatchModel(id=uuid.uuid4(), dispatch_number=request.request_number, order_number=request.request_number, customer_name=request.supplier_name or "Supplier", warehouse_id="ASSEMBLY", dispatch_type="SUPPLIER_FINISHED_GOODS", assembly_unit_code=request.assembly_unit_code, status="STOCK_RESERVED", priority="Normal", notes=request.remarks)
             uow.session.add(linked_dispatch)
             linked_item = DispatchItemModel(id=uuid.uuid4(), dispatch_order_id=linked_dispatch.id, material_code=request.material_code, material_name=request.material_name, quantity_ordered=request.quantity, quantity_available=request.quantity, quantity_reserved=request.quantity, quantity_pending=0, uom=request.uom, status="RESERVED")
             uow.session.add(linked_item)
@@ -361,6 +413,9 @@ async def allocate_supplier_finished_goods_fifo(
                 allocation.dispatch_order_id = linked_dispatch.id
                 allocation.dispatch_item_id = linked_item.id
         else:
+            if linked_dispatch.assembly_unit_code and request.assembly_unit_code and linked_dispatch.assembly_unit_code != request.assembly_unit_code:
+                raise HTTPException(409, "Dispatch assembly unit does not match its finished-goods request")
+            linked_dispatch.assembly_unit_code = linked_dispatch.assembly_unit_code or request.assembly_unit_code
             linked_item = (await uow.session.execute(select(DispatchItemModel).where(DispatchItemModel.dispatch_order_id == linked_dispatch.id))).scalars().first()
             if not linked_item:
                 linked_item = DispatchItemModel(id=uuid.uuid4(), dispatch_order_id=linked_dispatch.id, material_code=request.material_code, material_name=request.material_name, quantity_ordered=request.quantity, quantity_available=request.quantity, quantity_reserved=request.quantity, quantity_pending=0, uom=request.uom, status="RESERVED")
@@ -371,7 +426,10 @@ async def allocate_supplier_finished_goods_fifo(
             qr_by_id = {fg.id: fg.qr_code for fg in finished_goods}
             return {"request_number": request.request_number, "status": request.status, "dispatch_number": linked_dispatch.dispatch_number, "dispatch_id": str(linked_dispatch.id), "allocated": [{"finished_goods_id": str(a.finished_goods_id), "quantity": float(a.quantity), "status": a.status, "qr_code": qr_by_id.get(a.finished_goods_id)} for a in existing], "fifo_enforced": True, "already_allocated": True}
         if request.status not in ("PENDING_ASSEMBLY", "APPROVED"): raise HTTPException(409, f"Request is already {request.status}")
-        allocated = await allocate_fifo(uow.session, linked_dispatch.id, request.id)
+        allocated = await allocate_fifo(
+            uow.session, linked_dispatch.id, request.id,
+            assembly_unit_code=request.assembly_unit_code,
+        )
         request.status = "ALLOCATED"
         await uow.commit()
         return {"request_number": request.request_number, "status": request.status, "allocated": allocated, "fifo_enforced": True}
@@ -414,6 +472,7 @@ def _serialize_order(order: AssemblyOrderModel) -> Dict[str, Any]:
     return {
         "id": str(order.id),
         "order_number": order.order_number,
+        "assembly_unit_code": order.assembly_unit_code,
         "product_code": order.product_code or "",
         "product_name": order.product_name,
         "bom_id": str(order.bom_id) if order.bom_id else None,
@@ -538,9 +597,9 @@ async def get_assembly_dashboard(
     """
     async with uow:
         # Fetch all orders
-        res = await uow.session.execute(
-            select(AssemblyOrderModel).order_by(AssemblyOrderModel.created_at.desc())
-        )
+        res = await uow.session.execute(_scope_assembly_orders(
+            select(AssemblyOrderModel).order_by(AssemblyOrderModel.created_at.desc()), current_user
+        ))
         orders = list(res.scalars().all())
         rejected_order_ids = await _rejected_order_ids(uow.session, orders)
 
@@ -686,6 +745,7 @@ async def get_assembly_dashboard(
         recent_activity.sort(key=lambda x: x["timestamp"], reverse=True)
 
         return {
+            "assembly_unit": _assembly_unit_scope(current_user),
             "kpis": {
                 "open_orders": open_orders,
                 "material_pending": material_pending,
@@ -1166,6 +1226,9 @@ async def create_assembly_material_request(
     7. Atomically commits in PostgreSQL so Warehouse sees the real requisition.
     """
     async with uow:
+        unit_code = _assembly_unit_scope(current_user)
+        if unit_code == "":
+            raise HTTPException(status_code=403, detail="This Assembly Manager is not assigned to an assembly unit")
         # 1. Lookup Product & active BOM
         bom_res = await uow.session.execute(
             select(BillOfMaterialsModel).where(
@@ -1252,16 +1315,17 @@ async def create_assembly_material_request(
             try:
                 ord_uuid = uuid.UUID(payload.order_id)
                 ord_res = await uow.session.execute(
-                    select(AssemblyOrderModel).where(
+                    _scope_assembly_orders(select(AssemblyOrderModel).where(
                         or_(AssemblyOrderModel.id == ord_uuid, AssemblyOrderModel.order_number == payload.order_id)
-                    )
+                    ), current_user)
                 )
                 order = ord_res.scalars().first()
             except ValueError:
-                ord_res = await uow.session.execute(
-                    select(AssemblyOrderModel).where(AssemblyOrderModel.order_number == payload.order_id)
-                )
+                ord_res = await uow.session.execute(_scope_assembly_orders(
+                    select(AssemblyOrderModel).where(AssemblyOrderModel.order_number == payload.order_id), current_user
+                ))
                 order = ord_res.scalars().first()
+            _require_assembly_unit(order, current_user)
 
         order_number_to_use = order.order_number if order else None
         if not order_number_to_use:
@@ -1283,6 +1347,7 @@ async def create_assembly_material_request(
             request_number=request_number,
             warehouse_id="WH-01",
             department="Assembly",
+            assembly_unit_code=unit_code,
             requested_by=user_name,
             status="PENDING_WAREHOUSE_APPROVAL",
             priority=payload.priority.upper(),
@@ -1376,11 +1441,13 @@ async def create_assembly_material_request(
                 items=calculated_materials,
                 assembly_steps=work_steps,
                 created_by=user_name,
+                assembly_unit_code=unit_code,
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
             )
             uow.session.add(order)
         else:
+            _require_assembly_unit(order, current_user)
             order.status = "MATERIAL_PENDING"
             order.material_request_id = new_mr.id
             order.request_number = new_mr.request_number
@@ -1396,6 +1463,7 @@ async def create_assembly_material_request(
             "request_number": new_mr.request_number,
             "order_id": str(order.id),
             "order_number": order.order_number,
+            "assembly_unit_code": order.assembly_unit_code,
             "product_code": order.product_code,
             "product_name": order.product_name,
             "target_quantity": float(order.planned_quantity),
@@ -1437,6 +1505,17 @@ async def list_assembly_material_requests(
             )
             .order_by(MaterialRequestModel.created_at.desc())
         )
+        unit_code = _assembly_unit_scope(current_user)
+        if unit_code is not None:
+            if not unit_code:
+                query = query.where(MaterialRequestModel.id.is_(None))
+            else:
+                query = query.where(MaterialRequestModel.id.in_(
+                    select(AssemblyOrderModel.material_request_id).where(
+                        AssemblyOrderModel.assembly_unit_code == unit_code,
+                        AssemblyOrderModel.material_request_id.is_not(None),
+                    )
+                ))
 
         if status and status.upper() != "ALL":
             query = query.where(MaterialRequestModel.status.ilike(f"%{status.strip()}%"))
@@ -1447,12 +1526,12 @@ async def list_assembly_material_requests(
         results = []
         for req in requests:
             ord_res = await uow.session.execute(
-                select(AssemblyOrderModel).where(
+                _scope_assembly_orders(select(AssemblyOrderModel).where(
                     or_(
                         AssemblyOrderModel.material_request_id == req.id,
                         AssemblyOrderModel.request_number == req.request_number,
                     )
-                ).limit(1)
+                ).limit(1), current_user)
             )
             order = ord_res.scalars().first()
 
@@ -1502,6 +1581,7 @@ async def list_assembly_material_requests(
             results.append({
                 "id": str(req.id),
                 "request_number": req.request_number,
+                "assembly_unit_code": order.assembly_unit_code if order else None,
                 "order_id": str(order.id) if order else None,
                 "order_number": order.order_number if order else (req.remarks or "—"),
                 "order_status": effective_order_status,
@@ -1750,6 +1830,15 @@ async def complete_assembly_picking_task(
             )
         else:
             location_filters.append(InventoryLocationBalanceModel.warehouse_id == (task.warehouse_id or "WH-01"))
+        # A material may have several batches at the same BIN. When the
+        # scanned material label identifies a batch, reserve and decrement
+        # that batch's location balance instead of whichever lot happens to
+        # have the largest available quantity.
+        if scanned_batch_number:
+            location_filters.append(
+                func.upper(InventoryLocationBalanceModel.batch_number)
+                == scanned_batch_number.upper()
+            )
         location_res = await uow.session.execute(
             select(InventoryLocationBalanceModel, StorageLocationModel)
             .join(StorageLocationModel, StorageLocationModel.id == InventoryLocationBalanceModel.storage_location_id)
@@ -1771,8 +1860,10 @@ async def complete_assembly_picking_task(
                 ),
             )
 
-        # Enforce FIFO against the actual batch movement ledger. Replaying
-        # movements keeps the rule compatible with existing putaway records.
+        # Enforce FIFO against the net batch movement ledger. Sum signed
+        # movements instead of clamping after each event: legacy records can
+        # have timezone-normalized timestamps that place a TAKEAWAY before its
+        # PUTAWAY, and chronological replay would incorrectly restore stock.
         movement_res = await uow.session.execute(
             select(InventoryMovementHistoryModel)
             .where(
@@ -1793,9 +1884,9 @@ async def complete_assembly_picking_task(
                 batch_balances[lot] = batch_balances.get(lot, Decimal("0")) + movement.quantity
                 batch_first_seen.setdefault(lot, movement.performed_at.replace(tzinfo=None))
             elif movement_kind in ("TAKEAWAY", "DISPATCH"):
-                batch_balances[lot] = max(Decimal("0"), batch_balances.get(lot, Decimal("0")) - movement.quantity)
+                batch_balances[lot] = batch_balances.get(lot, Decimal("0")) - movement.quantity
         eligible_batches = [
-            (lot, quantity, batch_first_seen.get(lot, now))
+            (lot, max(Decimal("0"), quantity), batch_first_seen.get(lot, now))
             for lot, quantity in batch_balances.items()
             if quantity > 0
         ]
@@ -1859,6 +1950,20 @@ async def complete_assembly_picking_task(
         location_balance.available_quantity -= payload.quantity
         location_balance.quantity = max(Decimal("0"), location_balance.quantity - payload.quantity)
         location_balance.updated_at = now
+        picked_location.occupied_quantity = max(
+            Decimal("0"),
+            (picked_location.occupied_quantity or Decimal("0")) - payload.quantity,
+        )
+        if picked_location.bin_id:
+            picked_bin = await uow.session.get(
+                WarehouseBinModel, picked_location.bin_id, with_for_update=True
+            )
+            if picked_bin:
+                picked_bin.occupied_quantity = max(
+                    Decimal("0"),
+                    (picked_bin.occupied_quantity or Decimal("0")) - payload.quantity,
+                )
+                picked_bin.updated_at = now
         stock.available_quantity -= payload.quantity
         stock.on_hand_quantity -= payload.quantity
         stock.updated_at = now
@@ -1930,10 +2035,10 @@ async def complete_assembly_picking_task(
                 })
                 req.approval_history = history
             order = (await uow.session.execute(
-                select(AssemblyOrderModel).where(
+                _scope_assembly_orders(select(AssemblyOrderModel).where(
                     or_(AssemblyOrderModel.material_request_id == task.request_id,
                         AssemblyOrderModel.request_number == task.request_number)
-                ).limit(1)
+                ).limit(1), current_user)
             )).scalars().first()
             if order:
                 if not order.material_issue_id:
@@ -1994,11 +2099,12 @@ async def get_assembly_material_request_detail(
             raise HTTPException(status_code=404, detail=f"Material request '{request_id}' not found.")
 
         ord_res = await uow.session.execute(
-            select(AssemblyOrderModel).where(
+            _scope_assembly_orders(select(AssemblyOrderModel).where(
                 or_(AssemblyOrderModel.material_request_id == req.id, AssemblyOrderModel.request_number == req.request_number)
-            ).limit(1)
+            ).limit(1), current_user)
         )
         order = ord_res.scalars().first()
+        _require_assembly_unit(order, current_user)
 
         items_res = await uow.session.execute(
             select(MaterialRequestItemModel).where(MaterialRequestItemModel.request_id == req.id)
@@ -2028,6 +2134,7 @@ async def get_assembly_material_request_detail(
         return {
             "id": str(req.id),
             "request_number": req.request_number,
+            "assembly_unit_code": order.assembly_unit_code if order else None,
             "order_id": str(order.id) if order else None,
             "order_number": order.order_number if order else None,
             "order_status": order.status if order else req.status,
@@ -2098,14 +2205,14 @@ async def approve_assembly_material_request(
         # The approval path uses its pick_task_id to remain idempotent; leaving
         # this lookup out caused a NameError and returned a 500 response.
         order_res = await uow.session.execute(
-            select(AssemblyOrderModel)
+            _scope_assembly_orders(select(AssemblyOrderModel)
             .where(
                 or_(
                     AssemblyOrderModel.material_request_id == req.id,
                     AssemblyOrderModel.request_number == req.request_number,
                 )
             )
-            .limit(1)
+            .limit(1), current_user)
         )
         order = order_res.scalars().first()
         if not order:
@@ -2238,9 +2345,9 @@ async def warehouse_issue_materials(
 
         # Check existing order
         ord_res = await uow.session.execute(
-            select(AssemblyOrderModel).where(
+            _scope_assembly_orders(select(AssemblyOrderModel).where(
                 or_(AssemblyOrderModel.material_request_id == req.id, AssemblyOrderModel.request_number == req.request_number)
-            ).limit(1)
+            ).limit(1), current_user)
         )
         order = ord_res.scalars().first()
         if not order:
@@ -2453,9 +2560,9 @@ async def confirm_assembly_material_receipt(
             raise HTTPException(status_code=404, detail=f"Material request '{request_id}' not found.")
 
         ord_res = await uow.session.execute(
-            select(AssemblyOrderModel).where(
+            _scope_assembly_orders(select(AssemblyOrderModel).where(
                 or_(AssemblyOrderModel.material_request_id == req.id, AssemblyOrderModel.request_number == req.request_number)
-            ).limit(1)
+            ).limit(1), current_user)
         )
         order = ord_res.scalars().first()
         if not order:
@@ -2639,7 +2746,9 @@ async def list_production_orders(
     - Action availability (can_start if MATERIAL_READY, can_complete if IN_PRODUCTION)
     """
     async with uow:
-        query = select(AssemblyOrderModel).order_by(AssemblyOrderModel.created_at.desc())
+        query = _scope_assembly_orders(
+            select(AssemblyOrderModel).order_by(AssemblyOrderModel.created_at.desc()), current_user
+        )
 
         if search:
             sterm = f"%{search.strip()}%"
@@ -2667,6 +2776,7 @@ async def list_production_orders(
             results.append({
                 "id": str(o.id),
                 "order_number": o.order_number,
+                "assembly_unit_code": o.assembly_unit_code,
                 "product_code": o.product_code or "",
                 "product_name": o.product_name,
                 "target_quantity": float(o.planned_quantity),
@@ -2704,16 +2814,17 @@ async def start_production(
     async with uow:
         try:
             ord_uuid = uuid.UUID(order_id)
-            q = select(AssemblyOrderModel).where(
+            q = _scope_assembly_orders(select(AssemblyOrderModel).where(
                 or_(AssemblyOrderModel.id == ord_uuid, AssemblyOrderModel.order_number == order_id)
-            )
+            ), current_user)
         except ValueError:
-            q = select(AssemblyOrderModel).where(AssemblyOrderModel.order_number == order_id)
+            q = _scope_assembly_orders(select(AssemblyOrderModel).where(AssemblyOrderModel.order_number == order_id), current_user)
 
         res = await uow.session.execute(q)
         order = res.scalars().first()
         if not order:
             raise HTTPException(status_code=404, detail=f"Assembly Order '{order_id}' not found.")
+        _require_assembly_unit(order, current_user)
 
         # Require materials confirmed received
         if order.status != "MATERIAL_READY":
@@ -2862,14 +2973,14 @@ def _require_assembly_traceability_role(current_user: CurrentUser) -> None:
         raise HTTPException(status_code=403, detail="Assembly access is required")
 
 
-async def _get_assembly_traceability_order(session, order_id: str):
+async def _get_assembly_traceability_order(session, order_id: str, current_user: CurrentUser):
     try:
         order_uuid = uuid.UUID(order_id)
-        query = select(AssemblyOrderModel).where(
+        query = _scope_assembly_orders(select(AssemblyOrderModel).where(
             or_(AssemblyOrderModel.id == order_uuid, AssemblyOrderModel.order_number == order_id)
-        )
+        ), current_user)
     except ValueError:
-        query = select(AssemblyOrderModel).where(AssemblyOrderModel.order_number == order_id)
+        query = _scope_assembly_orders(select(AssemblyOrderModel).where(AssemblyOrderModel.order_number == order_id), current_user)
     order = (await session.execute(query)).scalars().first()
     if order is None:
         raise HTTPException(status_code=404, detail="Assembly order not found")
@@ -2885,7 +2996,7 @@ async def get_material_consumption_history(
     """Return separate verified consumption events and completion readiness."""
     _require_assembly_traceability_role(current_user)
     async with uow:
-        order = await _get_assembly_traceability_order(uow.session, order_id)
+        order = await _get_assembly_traceability_order(uow.session, order_id, current_user)
         events = (await uow.session.execute(
             select(AssemblyMaterialConsumptionEventModel)
             .where(AssemblyMaterialConsumptionEventModel.assembly_order_id == order.id)
@@ -2931,7 +3042,7 @@ async def verify_material_consumption_qr(
     """Resolve only a persisted original GRN QR with order-specific issue evidence."""
     _require_assembly_traceability_role(current_user)
     async with uow:
-        order = await _get_assembly_traceability_order(uow.session, order_id)
+        order = await _get_assembly_traceability_order(uow.session, order_id, current_user)
         if order.status not in ("IN_PRODUCTION", "IN-PROGRESS", "RUNNING"):
             raise HTTPException(status_code=409, detail="Order must be in production to verify material")
         # GRN labels encode a descriptive payload. Resolve its material and lot
@@ -3026,15 +3137,16 @@ async def record_material_consumption(
     async with uow:
         try:
             order_uuid = uuid.UUID(order_id)
-            order_query = select(AssemblyOrderModel).where(
+            order_query = _scope_assembly_orders(select(AssemblyOrderModel).where(
                 or_(AssemblyOrderModel.id == order_uuid, AssemblyOrderModel.order_number == order_id)
-            )
+            ), current_user)
         except ValueError:
-            order_query = select(AssemblyOrderModel).where(AssemblyOrderModel.order_number == order_id)
+            order_query = _scope_assembly_orders(select(AssemblyOrderModel).where(AssemblyOrderModel.order_number == order_id), current_user)
 
         order = (await uow.session.execute(order_query.with_for_update())).scalars().first()
         if order is None:
             raise HTTPException(status_code=404, detail=f"Assembly Order '{order_id}' not found")
+        _require_assembly_unit(order, current_user)
 
         # A retried request returns the already-recorded event if every identity
         # and quantity field matches; reuse of a key for different data conflicts.
@@ -3212,16 +3324,17 @@ async def complete_production(
     async with uow:
         try:
             ord_uuid = uuid.UUID(order_id)
-            q = select(AssemblyOrderModel).where(
+            q = _scope_assembly_orders(select(AssemblyOrderModel).where(
                 or_(AssemblyOrderModel.id == ord_uuid, AssemblyOrderModel.order_number == order_id)
-            )
+            ), current_user)
         except ValueError:
-            q = select(AssemblyOrderModel).where(AssemblyOrderModel.order_number == order_id)
+            q = _scope_assembly_orders(select(AssemblyOrderModel).where(AssemblyOrderModel.order_number == order_id), current_user)
 
         res = await uow.session.execute(q)
         order = res.scalars().first()
         if not order:
             raise HTTPException(status_code=404, detail=f"Assembly Order '{order_id}' not found.")
+        _require_assembly_unit(order, current_user)
 
         if order.status not in ("IN_PRODUCTION", "IN-PROGRESS", "RUNNING"):
             raise HTTPException(
@@ -3431,6 +3544,7 @@ async def list_quality_inspections(
             )
             .order_by(AssemblyOrderModel.completed_at.desc().nullslast(), AssemblyOrderModel.created_at.desc())
         )
+        orders_q = _scope_assembly_orders(orders_q, current_user)
 
         res = await uow.session.execute(orders_q)
         rows = res.all()
@@ -3479,6 +3593,7 @@ async def list_quality_inspections(
             results.append({
                 "order_id": str(order.id),
                 "order_number": order.order_number,
+                "assembly_unit_code": order.assembly_unit_code,
                 "product_code": order.product_code or "",
                 "product_name": order.product_name,
                 "uom": order.uom or "PCS",
@@ -3524,16 +3639,17 @@ async def perform_quality_inspection(
         await require_section_schema(uow.session)
         try:
             ord_uuid = uuid.UUID(payload.order_id)
-            q = select(AssemblyOrderModel).where(
+            q = _scope_assembly_orders(select(AssemblyOrderModel).where(
                 or_(AssemblyOrderModel.id == ord_uuid, AssemblyOrderModel.order_number == payload.order_id)
-            )
+            ), current_user)
         except ValueError:
-            q = select(AssemblyOrderModel).where(AssemblyOrderModel.order_number == payload.order_id)
+            q = _scope_assembly_orders(select(AssemblyOrderModel).where(AssemblyOrderModel.order_number == payload.order_id), current_user)
 
         res = await uow.session.execute(q.with_for_update())
         order = res.scalars().first()
         if not order:
             raise HTTPException(status_code=404, detail=f"Assembly Order '{payload.order_id}' not found.")
+        _require_assembly_unit(order, current_user)
 
         # Require order to be in QC_PENDING or REWORK_REQUIRED
         if order.status not in ("QC_PENDING", "REWORK_REQUIRED", "IN_PRODUCTION"):
@@ -3771,6 +3887,7 @@ async def list_assembly_finished_goods(
             .join(AssemblyOrderModel, AssemblyOrderModel.id == AssemblyFinishedGoodsModel.assembly_order_id)
             .order_by(AssemblyFinishedGoodsModel.posted_at.desc())
         )
+        q = _scope_assembly_orders(q, current_user)
 
         res = await uow.session.execute(await compatible_fg_read(uow.session, q))
         rows = res.all()
@@ -3803,6 +3920,7 @@ async def list_assembly_finished_goods(
                 "id": str(fg.id),
                 "order_id": str(order.id),
                 "order_number": order.order_number,
+                "assembly_unit_code": order.assembly_unit_code,
                 "product_code": fg.product_code,
                 "product_name": fg.product_name,
                 "quantity": float(fg.quantity),
@@ -3846,21 +3964,33 @@ async def get_finished_goods_inventory_summary(
 ):
     """Return Assembly-resident FG inventory without treating it as a warehouse."""
     async with uow:
-        produced = (await uow.session.execute(select(func.coalesce(func.sum(AssemblyOrderModel.completed_quantity), 0)).where(AssemblyOrderModel.completed_quantity > 0))).scalar_one()
-        inspected = (await uow.session.execute(select(AssemblyQualityInspectionModel))).scalars().all()
-        finished_goods = (await uow.session.execute(await compatible_fg_read(uow.session, select(AssemblyFinishedGoodsModel)))).scalars().all()
+        unit_code = _assembly_unit_scope(current_user)
+        if unit_code is not None:
+            order_ids = select(AssemblyOrderModel.id).where(AssemblyOrderModel.assembly_unit_code == unit_code) if unit_code else select(AssemblyOrderModel.id).where(AssemblyOrderModel.id.is_(None))
+            produced = (await uow.session.execute(select(func.coalesce(func.sum(AssemblyOrderModel.completed_quantity), 0)).where(AssemblyOrderModel.id.in_(order_ids), AssemblyOrderModel.completed_quantity > 0))).scalar_one()
+            inspection_query = select(AssemblyQualityInspectionModel).where(AssemblyQualityInspectionModel.assembly_order_id.in_(order_ids))
+            fg_query = select(AssemblyFinishedGoodsModel).where(AssemblyFinishedGoodsModel.assembly_order_id.in_(order_ids))
+        else:
+            produced = (await uow.session.execute(select(func.coalesce(func.sum(AssemblyOrderModel.completed_quantity), 0)).where(AssemblyOrderModel.completed_quantity > 0))).scalar_one()
+            inspection_query = select(AssemblyQualityInspectionModel)
+            fg_query = select(AssemblyFinishedGoodsModel)
+        inspected = (await uow.session.execute(inspection_query)).scalars().all()
+        finished_goods = (await uow.session.execute(await compatible_fg_read(uow.session, fg_query))).scalars().all()
         totals = [await stock_quantities(uow.session, fg) for fg in finished_goods]
         reserved = sum(t["reserved_quantity"] for t in totals)
         dispatched = sum(t["dispatched_quantity"] for t in totals)
         approved = sum(t["produced_quantity"] for t in totals)
         available = sum(t["available_quantity"] for t in totals)
         rejected_held = sum((i.failed_quantity + i.rework_quantity + i.held_quantity for i in inspected), Decimal("0"))
-        packed_rows = (await uow.session.execute(
+        packed_query = (
             select(DispatchItemModel.quantity_packed, func.sum(AssemblyFinishedGoodsAllocationModel.quantity))
             .join(AssemblyFinishedGoodsAllocationModel, AssemblyFinishedGoodsAllocationModel.dispatch_item_id == DispatchItemModel.id)
             .where(AssemblyFinishedGoodsAllocationModel.status.in_(["ALLOCATED", "LOADED"]))
             .group_by(DispatchItemModel.id, DispatchItemModel.quantity_packed)
-        )).all()
+        )
+        if unit_code is not None:
+            packed_query = packed_query.where(AssemblyFinishedGoodsAllocationModel.finished_goods_id.in_(select(AssemblyFinishedGoodsModel.id).where(AssemblyFinishedGoodsModel.assembly_order_id.in_(order_ids))))
+        packed_rows = (await uow.session.execute(packed_query)).all()
         packed = sum((min(packed_qty or Decimal("0"), allocated_qty) for packed_qty, allocated_qty in packed_rows), Decimal("0"))
         fifo_dates = sorted((fg.posted_at for fg in finished_goods if fg.posted_at), key=lambda d: d)
         return {
@@ -3904,6 +4034,8 @@ async def get_assembly_finished_goods_detail(
                     )
                 )
             )
+
+        q = _scope_assembly_orders(q, current_user)
 
         res = await uow.session.execute(await compatible_fg_read(uow.session, q))
         row = res.first()
@@ -3990,6 +4122,7 @@ async def get_finished_goods_traceability(
         fg_order_query = select(AssemblyFinishedGoodsModel, AssemblyOrderModel).join(
             AssemblyOrderModel, AssemblyOrderModel.id == AssemblyFinishedGoodsModel.assembly_order_id
         )
+        fg_order_query = _scope_assembly_orders(fg_order_query, current_user)
         fg_order_query = await compatible_fg_read(uow.session, fg_order_query)
         fg = order = None
         try:

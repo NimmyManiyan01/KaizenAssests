@@ -46,6 +46,7 @@ class DispatchOrderResponse(BaseModel):
     order_number: str
     customer_name: str
     warehouse_id: str
+    assembly_unit_code: str | None = None
     status: str
     items: list[DispatchItemResponse] = Field(default_factory=list)
     loaded_goods: list[dict] = Field(default_factory=list)

@@ -68,7 +68,7 @@ REPORTS = [
  Report("gate_entries","gate","Inbound gate entries","gate_entry","gate_entry_number","created_at",
         "gate_entry_number vehicle_number driver_name status asn_id facility_entry_at exited_at exited_by assigned_dock_id created_at updated_at"),
  Report("gate_pickups","gate","FG pickup entry / exit","finished_goods_pickup_gate_visit","gate_pass_number","created_at",
-        "gate_pass_number supplier_name vehicle_number driver_name request_id status arrived_at entered_at exited_at security_officer documents_verified created_at"),
+        "gate_pass_number supplier_name vehicle_number driver_name request_id assembly_unit_code status arrived_at entered_at exited_at security_officer documents_verified created_at"),
  Report("asns","supplier","Advance shipment notices","asn","asn_number","created_at",
         "asn_number supplier_id vehicle_number driver_name transporter warehouse_id status shipment_type shipment_date expected_arrival_at invoice_number challan_number number_of_packages package_type created_at",
         done=("RECEIVED","RECEIVING_COMPLETED","GRN_COMPLETED","CLOSED")),
@@ -80,7 +80,7 @@ REPORTS = [
         "shipment_number claim_id asn_id vehicle_number status expected_quantity received_quantity accepted_quantity damaged_quantity replacement_grn_number gate_entry_number expected_arrival received_at inventory_posted_at",
         done=("INVENTORY_POSTED",)),
  Report("fg_requests","supplier","Finished-goods requests","finished_goods_request","request_number","created_at",
-        "request_number supplier_id supplier_name finished_goods_code finished_goods_name quantity uom status work_order_number completed_quantity vehicle_number driver_name expected_pickup_date created_at"),
+        "request_number supplier_id supplier_name assembly_unit_code finished_goods_code finished_goods_name quantity uom status work_order_number completed_quantity vehicle_number driver_name expected_pickup_date created_at"),
  Report("receipts","grn","Goods receipt notes","grn","grn_number","created_at",
         "grn_number asn_number gate_entry_number supplier_name supplier_company_name vehicle_number driver_name warehouse_id dock_number receipt_type receipt_date received_by status posted_by posted_at created_at",
         done=("GRN_POSTED","PUT_AWAY","CONFIRMED")),
@@ -95,7 +95,7 @@ REPORTS = [
  Report("requisitions","warehouse","Assembly requisitions","assembly_requisition","requisition_number","created_at",
         "requisition_number warehouse_id department requested_by priority required_date status assigned_warehouse_code assigned_by assigned_at created_at"),
  Report("material_requests","warehouse","Material requests","material_request","request_number","created_at",
-        "request_number warehouse_id department requested_by priority required_date status remarks created_at updated_at"),
+        "request_number assembly_unit_code warehouse_id department requested_by priority required_date status remarks created_at updated_at"),
  Report("picks","warehouse","Picking orders","pick_task","task_number","created_at",
         "task_number request_number warehouse_id department status destination assigned_to assigned_at started_at completed_at completed_by created_at"),
  Report("pickup_batches","warehouse","Warehouse pickup batches","pickup_task","task_number","created_at",
@@ -107,7 +107,7 @@ REPORTS = [
         "existing_gate_pass_id vendor_reference vehicle_number material_description quantity status assigned_dock_id assigned_warehouse_code assigned_by assigned_at arrived_at released_at created_at",
         done=("RELEASED",)),
  Report("orders","assembly","Production orders","assembly_order","order_number","created_at",
-        "order_number product_code product_name bom_number planned_quantity completed_quantity rejected_quantity uom priority required_date assigned_line assigned_operator status material_received_at started_at completed_at created_at"),
+        "order_number assembly_unit_code product_code product_name bom_number planned_quantity completed_quantity rejected_quantity uom priority required_date assigned_line assigned_operator status material_received_at started_at completed_at created_at"),
  Report("inspections","assembly","Quality inspections","assembly_quality_inspection","id","inspected_at",
         "assembly_order_id produced_quantity passed_quantity failed_quantity rework_quantity held_quantity status inspected_by authorized_person_confirmed notes inspected_at",
         done=("QC_APPROVED","PASSED"), progress=("PARTIALLY_APPROVED",)),
@@ -120,7 +120,7 @@ REPORTS = [
         "assembly_order_id material_code quantity uom reason employee_team approval_required status recorded_at approved_by approved_at",
         done=("APPROVED",)),
  Report("dispatches","dispatch","Dispatch orders","dispatch_order","dispatch_number","created_at",
-        "dispatch_number order_number customer_name warehouse_id dispatch_type status destination scheduled_date expected_delivery_date priority transporter transport_mode gate_exit_completed_at gate_exit_security_officer created_at updated_at",
+        "dispatch_number order_number assembly_unit_code customer_name warehouse_id dispatch_type status destination scheduled_date expected_delivery_date priority transporter transport_mode gate_exit_completed_at gate_exit_security_officer created_at updated_at",
         progress=("READY_FOR_DISPATCH","OUT_FOR_DELIVERY")),
 ]
 REGISTRY = {r.key: r for r in REPORTS}
@@ -164,7 +164,7 @@ def bucket_expression(report):
 async def access(user, session):
     roles = {r.upper().replace(" ", "_") for r in user.roles}
     if roles & {"ADMIN","SUPER_ADMIN","SUPERUSER"}:
-        return set(MODULES), None, None
+        return set(MODULES), None, None, None
     modules = set()
     supplier_id = None
     warehouse = None
@@ -177,7 +177,7 @@ async def access(user, session):
         supplier_id = await supplier_id_for_user(user, scope)
         # Fail closed: an unmapped supplier sees no records, never all suppliers.
         supplier_id = supplier_id or uuid.UUID(int=0)
-        return {"supplier","warehouse"}, supplier_id, None
+        return {"supplier","warehouse"}, supplier_id, None, None
     if roles & {"GATE_SECURITY","GATE_OPERATOR"}: modules.add("gate")
     if roles & {"GRN","GRN_MANAGER","RECEIVING","OPERATIONS","OPERATIONS_MANAGER"}: modules.add("grn")
     if roles & {"WAREHOUSE","WAREHOUSE_MANAGER","WAREHOUSE_OPERATOR"}: modules.add("warehouse")
@@ -185,17 +185,22 @@ async def access(user, session):
     if roles & {"DISPATCH","DISPATCH_MANAGER","DISPATCH_OFFICER","DISPATCH_OPERATOR"}: modules.add("dispatch")
     if roles & {"QUALITY","QC"}: modules |= {"grn","assembly"}
     if roles & {"PROCUREMENT","PROCUREMENT_OFFICER","MANAGER"}: modules |= {"supplier","grn"}
+    assembly_unit = (
+        str(user.raw_claims.get("assembly_unit_code") or "").strip().upper()
+        if roles & {"ASSEMBLY", "ASSEMBLY_MANAGER"}
+        else None
+    )
     if "WAREHOUSE_OPERATOR" in roles and not roles & {"WAREHOUSE","WAREHOUSE_MANAGER"}:
         account = table("user_account")
         warehouse = await session.scalar(select(account.c.warehouse_ref_id).where(account.c.username==user.username, account.c.status=="ACTIVE"))
         warehouse = warehouse or uuid.UUID(int=0)
     if not modules: raise HTTPException(403, "No reporting access is assigned to this role")
-    return modules, supplier_id, warehouse
+    return modules, supplier_id, warehouse, assembly_unit
 
 def eligible(report, modules, supplier_id):
     return report.module in modules and (supplier_id is None or report.module != "warehouse" or report.key in SUPPLIER_WAREHOUSE)
 
-def scope_condition(report, supplier_id, warehouse):
+def scope_condition(report, supplier_id, warehouse, assembly_unit):
     t = table(report.table)
     conditions = []
     if supplier_id is not None:
@@ -235,11 +240,21 @@ def scope_condition(report, supplier_id, warehouse):
         elif "assigned_warehouse_ref_id" in t.c:
             conditions.append(t.c.assigned_warehouse_ref_id==warehouse)
         else: conditions.append(false())
+    if assembly_unit is not None:
+        if not assembly_unit:
+            conditions.append(false())
+        elif report.key in {"orders", "dispatches", "gate_pickups", "fg_requests", "material_requests"}:
+            conditions.append(t.c.assembly_unit_code == assembly_unit)
+        elif report.key in {"inspections", "finished_goods", "rework", "scrap"}:
+            order = table("assembly_order")
+            conditions.append(t.c.assembly_order_id.in_(select(order.c.id).where(order.c.assembly_unit_code == assembly_unit)))
+        else:
+            conditions.append(false())
     return conditions
 
-def filters(report, supplier_id, warehouse, start, end, search="", status="", bucket=""):
+def filters(report, supplier_id, warehouse, assembly_unit, start, end, search="", status="", bucket=""):
     t = table(report.table)
-    conditions = scope_condition(report,supplier_id,warehouse)
+    conditions = scope_condition(report,supplier_id,warehouse,assembly_unit)
     if end == date.max: raise HTTPException(422,"End date must be earlier than 9999-12-31")
     if start and end and start > end: raise HTTPException(422,"Start date must be on or before end date")
     date_column = t.c[report.date_field]
@@ -264,30 +279,30 @@ def definition(r):
 async def selected(key,user,session):
     report = REGISTRY.get(key)
     if report is None: raise HTTPException(404,"Report not found")
-    modules,supplier,warehouse = await access(user,session)
+    modules,supplier,warehouse,assembly_unit = await access(user,session)
     if not eligible(report,modules,supplier): raise HTTPException(403,"Report is outside your reporting scope")
-    return report,supplier,warehouse
+    return report,supplier,warehouse,assembly_unit
 
 @router.get("/catalog")
 async def catalog(user:CurrentUser=Depends(get_current_user),uow:UnitOfWork=Depends(get_report_uow)):
-    modules,supplier,warehouse = await access(user,uow.session)
+    modules,supplier,warehouse,assembly_unit = await access(user,uow.session)
     roles = {r.strip().upper() for r in user.roles}
     return {"journey_access":bool(roles & {"ADMIN","SUPER_ADMIN","SUPERUSER","SUPPLIER"}),
             "modules":[{"key":k,"label":v} for k,v in MODULES.items() if k in modules],
             "reports":[definition(r) for r in REPORTS if eligible(r,modules,supplier)],
-            "scope":"Your supplier's receipts and receipt-linked warehouse activity" if supplier is not None else ("Your assigned warehouse" if warehouse else "Your authorized modules"),
+            "scope":"Your supplier's receipts and receipt-linked warehouse activity" if supplier is not None else ("Your assigned warehouse" if warehouse else (f"Assembly unit {assembly_unit}" if assembly_unit else "Your authorized modules")),
             "buckets":list(BUCKETS)}
 
 @router.get("/summary")
 async def summary(module:str="",start:date|None=None,end:date|None=None,user:CurrentUser=Depends(get_current_user),uow:UnitOfWork=Depends(get_report_uow)):
-    modules,supplier,warehouse = await access(user,uow.session)
+    modules,supplier,warehouse,assembly_unit = await access(user,uow.session)
     if module and module not in modules: raise HTTPException(403,"Module is outside your reporting scope")
     results = []
     daily = {}
     for r in REPORTS:
         if not eligible(r,modules,supplier) or module and r.module!=module: continue
         t = table(r.table)
-        where = filters(r,supplier,warehouse,start,end)
+        where = filters(r,supplier,warehouse,assembly_unit,start,end)
         status_expr = status_expression(r)
         statuses = (await uow.session.execute(select(status_expr.label("status"),func.count().label("count")).select_from(t).where(*where).group_by(status_expr))).mappings().all()
         counts = dict.fromkeys(BUCKETS,0)
@@ -316,17 +331,17 @@ def csv_cell(value):
     s = str(value)
     return "'"+s if s.lstrip().startswith(("=","+","-","@")) else s
 
-async def query_records(report,supplier,warehouse,session,start,end,search,status,bucket,limit,offset):
+async def query_records(report,supplier,warehouse,assembly_unit,session,start,end,search,status,bucket,limit,offset):
     t = table(report.table)
-    where = filters(report,supplier,warehouse,start,end,search,status,bucket)
+    where = filters(report,supplier,warehouse,assembly_unit,start,end,search,status,bucket)
     total = await session.scalar(select(func.count()).select_from(t).where(*where))
     columns = list(dict.fromkeys(["id"]+report.fields.split()))
     rows = (await session.execute(select(*[t.c[c] for c in columns]).where(*where).order_by(t.c[report.date_field].desc().nullslast(),t.c.id).limit(limit).offset(offset))).mappings().all()
     return total,[{**dict(row),"lifecycle":classify(report,row.get(report.status_field) if report.status_field else report.fixed_status)} for row in rows]
 
-async def quantity_totals(report,supplier,warehouse,session,start,end,search,status,bucket):
+async def quantity_totals(report,supplier,warehouse,assembly_unit,session,start,end,search,status,bucket):
     t = table(report.table)
-    parent = select(t.c.id).where(*filters(report,supplier,warehouse,start,end,search,status,bucket))
+    parent = select(t.c.id).where(*filters(report,supplier,warehouse,assembly_unit,start,end,search,status,bucket))
     source = t
     condition = t.c.id.in_(parent)
     fields = [f for f in ("quantity","available_quantity","requested_quantity","picked_quantity","planned_quantity","completed_quantity","rejected_quantity","damaged_quantity","actual_consumed") if f in t.c]
@@ -343,16 +358,16 @@ async def quantity_totals(report,supplier,warehouse,session,start,end,search,sta
 @router.get("/records")
 async def records(report:str,start:date|None=None,end:date|None=None,search:str=Query("",max_length=200),status:str="",bucket:str="",
                   limit:int=Query(25,ge=1,le=100),offset:int=Query(0,ge=0),user:CurrentUser=Depends(get_current_user),uow:UnitOfWork=Depends(get_report_uow)):
-    r,supplier,warehouse = await selected(report,user,uow.session)
-    total,rows = await query_records(r,supplier,warehouse,uow.session,start,end,search,status,bucket,limit,offset)
-    totals = await quantity_totals(r,supplier,warehouse,uow.session,start,end,search,status,bucket)
+    r,supplier,warehouse,assembly_unit = await selected(report,user,uow.session)
+    total,rows = await query_records(r,supplier,warehouse,assembly_unit,uow.session,start,end,search,status,bucket,limit,offset)
+    totals = await quantity_totals(r,supplier,warehouse,assembly_unit,uow.session,start,end,search,status,bucket)
     return {"total":total,"rows":rows,"quantity_totals":totals,"definition":definition(r),"limit":limit,"offset":offset}
 
 @router.get("/export")
 async def export(report:str,start:date|None=None,end:date|None=None,search:str=Query("",max_length=200),status:str="",bucket:str="",
                  user:CurrentUser=Depends(get_current_user),uow:UnitOfWork=Depends(get_report_uow)):
-    r,supplier,warehouse = await selected(report,user,uow.session)
-    total,rows = await query_records(r,supplier,warehouse,uow.session,start,end,search,status,bucket,10001,0)
+    r,supplier,warehouse,assembly_unit = await selected(report,user,uow.session)
+    total,rows = await query_records(r,supplier,warehouse,assembly_unit,uow.session,start,end,search,status,bucket,10001,0)
     if total>10000: raise HTTPException(422,"Export exceeds 10,000 records. Narrow the date or status filters.")
     output=io.StringIO()
     writer=csv.writer(output)
@@ -363,10 +378,10 @@ async def export(report:str,start:date|None=None,end:date|None=None,search:str=Q
 
 @router.get("/detail")
 async def detail(report:str,id:uuid.UUID,user:CurrentUser=Depends(get_current_user),uow:UnitOfWork=Depends(get_report_uow)):
-    r,supplier,warehouse = await selected(report,user,uow.session)
+    r,supplier,warehouse,assembly_unit = await selected(report,user,uow.session)
     t=table(r.table)
     columns=definition(r)["columns"]
-    row=(await uow.session.execute(select(*[t.c[c] for c in columns]).where(t.c.id==id,*scope_condition(r,supplier,warehouse)))).mappings().first()
+    row=(await uow.session.execute(select(*[t.c[c] for c in columns]).where(t.c.id==id,*scope_condition(r,supplier,warehouse,assembly_unit)))).mappings().first()
     if row is None: raise HTTPException(404,"Report record not found")
     children=[]
     if r.key in CHILDREN:

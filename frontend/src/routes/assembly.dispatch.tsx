@@ -378,6 +378,7 @@ function AssemblyDispatchPage() {
                     {[
                       "Priority",
                       "Request / Supplier",
+                      "Assembly Unit",
                       "Product",
                       "Quantity",
                       "Pickup Date",
@@ -418,6 +419,7 @@ function AssemblyDispatchPage() {
                           {request.supplier_name}
                         </span>
                       </td>
+                      <td className="px-4 py-3 font-mono">{request.assembly_unit_code || "—"}</td>
                       <td className="px-4 py-3">
                         {request.product_name}
                         <span className="block mt-1 text-muted-foreground font-mono">

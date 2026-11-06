@@ -57,6 +57,7 @@ class AssemblyOrderModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
     material_received_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     material_received_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    assembly_unit_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)

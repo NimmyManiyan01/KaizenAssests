@@ -33,7 +33,7 @@ from app.modules.dock.infrastructure.persistence.models import (
 )
 from app.security.dependencies import CurrentUser, get_current_user, require_permission, _bearer_scheme
 from app.modules.warehouse.infrastructure.persistence.models import WarehouseModel, UserAccountModel
-from app.modules.gate.infrastructure.persistence.models import GateEntryModel, DockAssignmentModel
+from app.modules.gate.infrastructure.persistence.models import GateEntryModel, DockAssignmentModel, DockModel
 
 router = APIRouter(prefix="/api/v1/warehouse", tags=["dock-management"])
 
@@ -418,6 +418,67 @@ async def update_dock(
         await uow.session.rollback()
         raise HTTPException(status_code=409, detail="Dock code already exists") from exc
     return await get_dock_by_id(dock.id, uow=uow)
+
+
+@router.delete("/docks/{dock_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_dock(
+    dock_id: uuid.UUID,
+    user: CurrentUser = Depends(require_permission("gate:write")),
+    uow: UnitOfWork = Depends(get_uow),
+):
+    # Lock active docks in a stable order so simultaneous deactivations cannot
+    # remove the final active dock.
+    active_docks = list((await uow.session.scalars(
+        select(DockMasterModel)
+        .where(DockMasterModel.is_active.is_(True))
+        .order_by(DockMasterModel.id)
+        .with_for_update()
+    )).all())
+    dock = next((active_dock for active_dock in active_docks if active_dock.id == dock_id), None)
+    if dock is None:
+        dock = (await uow.session.execute(
+            select(DockMasterModel).where(DockMasterModel.id == dock_id).with_for_update()
+        )).scalar_one_or_none()
+    if not dock:
+        raise HTTPException(status_code=404, detail="Dock not found")
+
+    if dock.is_active and len(active_docks) <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The last active dock cannot be deleted. Add another active dock first.",
+        )
+
+    active_allocations = await DockAllocationService.get_active_allocations_for_docks(
+        uow.session, [dock.id]
+    )
+    active_gate_vehicle = await uow.session.scalar(
+        select(DockAssignmentModel.id)
+        .join(GateEntryModel, DockAssignmentModel.gate_entry_id == GateEntryModel.id)
+        .where(
+            func.upper(DockAssignmentModel.dock_number) == dock.dock_code.upper(),
+            DockAssignmentModel.dock_released_at.is_(None),
+            GateEntryModel.status.notin_([
+                "RELEASED", "EXITED", "CANCELLED", "GATE_EXIT_COMPLETED",
+                "VEHICLE_EXITED", "CHECKED_OUT", "COMPLETED", "REJECTED",
+                "DENIED_ENTRY",
+            ]),
+        )
+        .limit(1)
+    )
+    if dock.id in active_allocations or active_gate_vehicle is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This dock cannot be deleted while a vehicle is assigned or inside it. Release the vehicle first.",
+        )
+
+    gate_dock = (await uow.session.execute(
+        select(DockModel).where(func.upper(DockModel.dock_number) == dock.dock_code.upper())
+    )).scalar_one_or_none()
+    if gate_dock:
+        await uow.session.delete(gate_dock)
+
+    await uow.session.delete(dock)
+    await uow.session.commit()
 
 
 @router.patch("/docks/{dock_id}/status", response_model=DockMasterResponse)
@@ -1057,43 +1118,64 @@ async def list_dock_history(
     user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ):
-    result = await uow.session.execute(
+    allocation_rows = (await uow.session.execute(
         select(DockAllocationHistoryModel)
         .order_by(desc(DockAllocationHistoryModel.performed_at))
         .limit(100)
-    )
-    histories = result.scalars().all()
-    req_ids = [h.allocation_request_id for h in histories]
-    req_map = {}
-    if req_ids:
-        r_res = await uow.session.execute(
-            select(DockAllocationRequestModel).where(DockAllocationRequestModel.id.in_(req_ids))
-        )
-        req_map = {r.id: r for r in r_res.scalars().all()}
+    )).scalars().all()
+    status_rows = (await uow.session.execute(
+        select(DockStatusHistoryModel)
+        .order_by(desc(DockStatusHistoryModel.changed_at))
+        .limit(100)
+    )).scalars().all()
 
-    dock_ids = [h.dock_id for h in histories if h.dock_id]
+    request_ids = [row.allocation_request_id for row in allocation_rows]
+    request_map = {}
+    if request_ids:
+        requests = (await uow.session.execute(
+            select(DockAllocationRequestModel).where(DockAllocationRequestModel.id.in_(request_ids))
+        )).scalars().all()
+        request_map = {row.id: row for row in requests}
+
+    dock_ids = {
+        row.dock_id for row in allocation_rows if row.dock_id
+    } | {
+        row.dock_id for row in status_rows if row.dock_id
+    }
     dock_map = {}
     if dock_ids:
-        d_res = await uow.session.execute(select(DockMasterModel).where(DockMasterModel.id.in_(dock_ids)))
-        dock_map = {d.id: d.dock_code for d in d_res.scalars().all()}
+        docks = (await uow.session.execute(
+            select(DockMasterModel).where(DockMasterModel.id.in_(dock_ids))
+        )).scalars().all()
+        dock_map = {row.id: row.dock_code for row in docks}
 
-    res = []
-    for h in histories:
-        r = req_map.get(h.allocation_request_id)
-        res.append(
-            DockAllocationHistoryResponse(
-                id=h.id,
-                allocation_request_id=h.allocation_request_id,
-                existing_gate_pass_id=r.existing_gate_pass_id if r else None,
-                vehicle_number=r.vehicle_number if r else None,
-                vendor_reference=r.vendor_reference if r else None,
-                dock_code=dock_map.get(h.dock_id),
-                action=h.action,
-                previous_status=h.previous_status,
-                new_status=h.new_status,
-                performed_by=h.performed_by,
-                performed_at=h.performed_at,
-                remarks=h.remarks,
-            )
-        )
-    return res
+    history = []
+    for row in allocation_rows:
+        request = request_map.get(row.allocation_request_id)
+        history.append(DockAllocationHistoryResponse(
+            id=row.id,
+            allocation_request_id=row.allocation_request_id,
+            existing_gate_pass_id=request.existing_gate_pass_id if request else None,
+            vehicle_number=request.vehicle_number if request else None,
+            vendor_reference=request.vendor_reference if request else None,
+            dock_code=dock_map.get(row.dock_id),
+            action=row.action,
+            previous_status=row.previous_status,
+            new_status=row.new_status,
+            performed_by=row.performed_by,
+            performed_at=row.performed_at,
+            remarks=row.remarks,
+        ))
+    for row in status_rows:
+        history.append(DockAllocationHistoryResponse(
+            id=row.id,
+            allocation_request_id=None,
+            dock_code=dock_map.get(row.dock_id),
+            action="DOCK_DEACTIVATED" if row.new_status == "DEACTIVATED" else "DOCK_STATUS_CHANGED",
+            previous_status=row.previous_status,
+            new_status=row.new_status,
+            performed_by=row.changed_by,
+            performed_at=row.changed_at,
+            remarks=row.reason,
+        ))
+    return sorted(history, key=lambda row: row.performed_at, reverse=True)[:100]

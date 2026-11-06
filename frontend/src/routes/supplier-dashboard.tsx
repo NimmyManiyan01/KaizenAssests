@@ -262,8 +262,9 @@ function SupplierDashboard() {
             "",
         })),
       );
-    } catch {
-      setAsnsError("Unable to load delivery notices. Please try again.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to load delivery notices.";
+      setAsnsError(`${message} Check that the local backend is running and that this account is linked to a supplier.`);
     } finally {
       setAsnsLoading(false);
     }
@@ -681,7 +682,9 @@ function SupplierDashboard() {
                         colSpan={5}
                         className="px-4 py-10 text-center text-sm text-muted-foreground"
                       >
-                        {query ? "No deliveries match your search." : "No delivery notices yet."}
+                        {query
+                          ? "No deliveries match your search."
+                          : "No delivery notices yet. The local database currently has no supplier delivery records."}
                       </td>
                     </tr>
                   )}
@@ -809,12 +812,14 @@ function SupplierDashboard() {
                 Loading activity…
               </div>
             ) : asnsError && asns.length === 0 ? (
-              <div className="mt-4 flex h-36 items-center justify-center rounded-lg border border-border text-sm text-muted-foreground">
-                Activity is unavailable until delivery notices load.
+              <div role="alert" className="mt-4 flex h-36 flex-col items-center justify-center gap-1 rounded-lg border border-border px-4 text-center text-sm text-destructive">
+                <span>Supplier activity could not be loaded.</span>
+                <span className="text-xs text-muted-foreground">{asnsError}</span>
               </div>
             ) : trend.every(({ count }) => count === 0) ? (
-              <div className="mt-4 flex h-36 items-center justify-center rounded-lg border border-border text-sm text-muted-foreground">
-                No delivery notices in this period.
+              <div className="mt-4 flex h-36 flex-col items-center justify-center gap-1 rounded-lg border border-border px-4 text-center text-sm text-muted-foreground">
+                <span>No delivery notices in this period.</span>
+                {asns.length === 0 && <span className="text-xs">Create an ASN to populate supplier activity.</span>}
               </div>
             ) : (
               <div className="mt-4 flex h-36 items-end gap-2 overflow-x-auto rounded-lg border-b border-l border-border bg-[repeating-linear-gradient(to_bottom,transparent_0,transparent_34px,color-mix(in_oklab,var(--border)_50%,transparent)_35px)] px-2 pb-1 pt-3">

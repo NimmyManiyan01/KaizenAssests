@@ -1284,6 +1284,7 @@ function DispatchOrdersPage() {
                 <thead className="bg-muted/50 text-[10px] uppercase text-muted-foreground font-bold">
                   <tr>
                     <th className="px-4 py-3">Dispatch # / Order #</th>
+                    <th className="px-4 py-3">Assembly Unit</th>
                     <th className="px-4 py-3">Customer & Destination</th>
                     <th className="px-4 py-3">Priority</th>
                     <th className="px-4 py-3">Warehouse</th>
@@ -1295,7 +1296,7 @@ function DispatchOrdersPage() {
                 <tbody>
                   {filteredOrders.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="text-center py-12 text-muted-foreground">
+                      <td colSpan={8} className="text-center py-12 text-muted-foreground">
                         No dispatch orders match the selected filters.
                       </td>
                     </tr>
@@ -1310,6 +1311,7 @@ function DispatchOrdersPage() {
                             SO: {order.order_number}
                           </div>
                         </td>
+                        <td className="px-4 py-3 font-mono">{order.assembly_unit_code || "—"}</td>
                         <td className="px-4 py-3">
                           <div className="font-semibold">{order.customer_name}</div>
                           <div className="text-xs text-muted-foreground">

@@ -2570,6 +2570,14 @@ async def resolve_grn_qr(
             InventoryMovementHistoryModel.grn_number == grn.grn_number,
             InventoryMovementHistoryModel.material_code == item_code,
         )
+        # Older putaway movements are recorded in the audit table rather than
+        # PutawayMovementModel. When scanning a batch QR, only include legacy
+        # history for that same batch; a GRN can contain several batches of
+        # the same material, and GRN-wide history would consume the wrong lot.
+        if batch_number:
+            hist_stmt = hist_stmt.where(
+                func.upper(InventoryMovementHistoryModel.batch_lot) == batch_number.upper()
+            )
         hist_res = await uow.session.execute(hist_stmt)
         already_put_away = Decimal(str(hist_res.scalar() or 0))
 

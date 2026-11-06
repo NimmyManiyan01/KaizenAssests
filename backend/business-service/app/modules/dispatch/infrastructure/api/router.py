@@ -28,7 +28,7 @@ from app.modules.dispatch.infrastructure.persistence.repository_impl import (
     SQLAlchemyVehicleRepository,
 )
 from app.modules.dispatch.infrastructure.persistence.models import DispatchModel, DriverModel, VehicleModel
-from app.modules.assembly.infrastructure.persistence.models import AssemblyFinishedGoodsModel, AssemblyFinishedGoodsAllocationModel
+from app.modules.assembly.infrastructure.persistence.models import AssemblyFinishedGoodsModel, AssemblyFinishedGoodsAllocationModel, AssemblyOrderModel
 from app.modules.gate.infrastructure.persistence.models import GateEntryModel, FinishedGoodsPickupGateVisitModel
 from app.modules.dispatch.infrastructure.api.schemas import (
     DispatchOrderResponse,
@@ -101,6 +101,7 @@ def _to_dispatch_dto(o, *, driver_name: str | None = None, vehicle_number: str |
         order_number=o.order_number,
         customer_name=o.customer_name,
         warehouse_id=o.warehouse_id,
+        assembly_unit_code=o.assembly_unit_code,
         status=o.status.value if hasattr(o.status, "value") else str(o.status),
         items=items,
         loaded_goods=loaded_goods,
@@ -288,6 +289,10 @@ async def create_dispatch(
     uc = _get_use_cases(db)
     try:
         order = await uc.create_dispatch(cmd)
+        if not order.assembly_unit_code:
+            order.assembly_unit_code = await db.scalar(select(AssemblyOrderModel.assembly_unit_code).where(
+                AssemblyOrderModel.order_number == order.order_number
+            ))
         db.add(NotificationModel(
             id=uuid.uuid4(),
             user_role="GATE_SECURITY",

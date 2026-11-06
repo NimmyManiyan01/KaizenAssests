@@ -144,16 +144,16 @@ async def create_finished_goods_pickup_gate_entry(
         )
         if used_vehicle_visit:
             if used_vehicle_visit.status == "INSIDE_FACILITY":
-                return {"gate_pass_number": used_vehicle_visit.gate_pass_number, "status": used_vehicle_visit.status, "request_number": request.request_number}
+                return {"gate_pass_number": used_vehicle_visit.gate_pass_number, "status": used_vehicle_visit.status, "request_number": request.request_number, "assembly_unit_code": used_vehicle_visit.assembly_unit_code or request.assembly_unit_code}
             raise HTTPException(409, "This assigned vehicle already used its gate pass for this dispatch.")
         gate_pass = uuid.uuid4().hex.upper()[:6]
         while (await uow.session.execute(select(FinishedGoodsPickupGateVisitModel.id).where(FinishedGoodsPickupGateVisitModel.gate_pass_number == gate_pass))).scalar_one_or_none(): gate_pass = uuid.uuid4().hex.upper()[:6]
         now = datetime.datetime.now(datetime.timezone.utc)
-        visit = FinishedGoodsPickupGateVisitModel(request_id=request.id, gate_pass_number=gate_pass, supplier_id=request.supplier_id, supplier_name=request.supplier_name or request.requested_by, vehicle_number=vehicle_number, driver_name=driver_name, driver_contact=driver_contact, status="INSIDE_FACILITY", arrived_at=now, entered_at=now, security_officer=user.username)
+        visit = FinishedGoodsPickupGateVisitModel(request_id=request.id, assembly_unit_code=request.assembly_unit_code, gate_pass_number=gate_pass, supplier_id=request.supplier_id, supplier_name=request.supplier_name or request.requested_by, vehicle_number=vehicle_number, driver_name=driver_name, driver_contact=driver_contact, status="INSIDE_FACILITY", arrived_at=now, entered_at=now, security_officer=user.username)
         uow.session.add(visit)
         uow.session.add(NotificationModel(user_role="ASSEMBLY_MANAGER", title="Finished-goods pickup vehicle arrived", message=f"Pickup {request.request_number} arrived. Gate pass {gate_pass}. Vehicle {vehicle_number}.", link="/assembly/finished-goods" if request.section_fg_id else "/assembly/dispatch"))
         await uow.commit()
-        return {"gate_pass_number": gate_pass, "request_number": request.request_number, "status": visit.status, "arrived_at": now.isoformat(), "visit_purpose": "FINISHED_GOODS_PICKUP"}
+        return {"gate_pass_number": gate_pass, "request_number": request.request_number, "assembly_unit_code": visit.assembly_unit_code, "status": visit.status, "arrived_at": now.isoformat(), "visit_purpose": "FINISHED_GOODS_PICKUP"}
 
 
 @router.get("/finished-goods-pickup/{gate_pass_number}")
@@ -177,6 +177,7 @@ async def get_finished_goods_pickup_gate_pass(
             "gate_pass_number": visit.gate_pass_number,
             "status": visit.status,
             "request_number": request.request_number,
+            "assembly_unit_code": visit.assembly_unit_code or request.assembly_unit_code,
             "supplier_name": visit.supplier_name,
             "vehicle_number": visit.vehicle_number,
             "driver_name": visit.driver_name,
@@ -217,13 +218,16 @@ async def complete_finished_goods_pickup_gate_exit(
                 raise HTTPException(409, "Assembly must confirm loading first")
             loaded = (await uow.session.scalars(select(FinishedGoodsSectionModel.qr_identity).where(
                 FinishedGoodsSectionModel.gate_visit_id == visit.id, FinishedGoodsSectionModel.status == "LOADED"))).all()
-            if not loaded or set(loaded) != set(payload.section_qr_identities):
-                raise HTTPException(422, "Verify all and only the sections loaded on this vehicle")
+            if not loaded:
+                raise HTTPException(409, "No loaded finished-goods sections are linked to this vehicle")
             claimed = await uow.session.execute(update(FinishedGoodsPickupGateVisitModel).where(
                 FinishedGoodsPickupGateVisitModel.id == visit.id, FinishedGoodsPickupGateVisitModel.status == "READY_FOR_GATE_EXIT").values(status="CLOSED"))
             if claimed.rowcount != 1:
                 raise HTTPException(409, "Gate exit already confirmed")
-            await transition_sections(uow.session, request.section_fg_id, visit.id, payload.section_qr_identities, user.username, exiting=True)
+            # Gate exit confirms the vehicle and dispatch documents. The
+            # assembly loading workflow already recorded the loaded sections,
+            # so a second section QR scan is not required here.
+            await transition_sections(uow.session, request.section_fg_id, visit.id, loaded, user.username, exiting=True)
             visit.exited_at = datetime.datetime.now(datetime.timezone.utc)
             visit.exit_approved_by = user.username
             visit.documents_verified = True
@@ -235,7 +239,7 @@ async def complete_finished_goods_pickup_gate_exit(
             request.status = "DISPATCHED" if planned.issubset(closed_vehicles) else "READY_FOR_PICKUP"
             summary = await section_summary(uow.session, request.section_fg_id)
             await uow.commit()
-            return {"gate_pass_number": visit.gate_pass_number, "request_number": request.request_number, "exited_at": visit.exited_at.isoformat(), **summary}
+            return {"gate_pass_number": visit.gate_pass_number, "request_number": request.request_number, "assembly_unit_code": visit.assembly_unit_code or request.assembly_unit_code, "exited_at": visit.exited_at.isoformat(), **summary}
         allocations = (await uow.session.execute(select(AssemblyFinishedGoodsAllocationModel).where(AssemblyFinishedGoodsAllocationModel.finished_goods_request_id == visit.request_id, AssemblyFinishedGoodsAllocationModel.status.in_(["ALLOCATED", "LOADED"])))).scalars().all()
         if not request or request.status != "ALLOCATED": raise HTTPException(409, "Dispatch request is not ready for gate exit")
         if not allocations: raise HTTPException(409, "No allocated finished goods found")
@@ -278,7 +282,7 @@ async def complete_finished_goods_pickup_gate_exit(
             link="/assembly/dispatch",
         ))
         await uow.commit()
-        return {"gate_pass_number": visit.gate_pass_number, "request_number": request.request_number, "visit_status": "EXITED", "gate_pass_status": "CLOSED", "dispatch_status": dispatch.status if dispatch else request.status, "request_status": request.status, "all_assigned_vehicles_exited": final_vehicle_exited, "exited_at": now.isoformat()}
+        return {"gate_pass_number": visit.gate_pass_number, "request_number": request.request_number, "assembly_unit_code": visit.assembly_unit_code or request.assembly_unit_code or (dispatch.assembly_unit_code if dispatch else None), "visit_status": "EXITED", "gate_pass_status": "CLOSED", "dispatch_status": dispatch.status if dispatch else request.status, "request_status": request.status, "all_assigned_vehicles_exited": final_vehicle_exited, "exited_at": now.isoformat()}
 logger = logging.getLogger(__name__)
 
 

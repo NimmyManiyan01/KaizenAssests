@@ -509,6 +509,7 @@ class MaterialRequestModel(Base):
     request_number: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     warehouse_id: Mapped[str] = mapped_column(String(64), nullable=False)
     department: Mapped[str] = mapped_column(String(64), nullable=False)
+    assembly_unit_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     requested_by: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
     priority: Mapped[str] = mapped_column(String(32), nullable=False, default="MEDIUM")
@@ -620,6 +621,7 @@ class QuotationMagicLinkModel(Base):
 class FinishedGoodsRequestModel(Base):
     __tablename__ = "finished_goods_request"
     section_fg_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("assembly_finished_goods.id", ondelete="RESTRICT"), nullable=True)
+    assembly_unit_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     request_number: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)

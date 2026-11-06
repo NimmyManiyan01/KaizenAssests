@@ -1,4 +1,3 @@
-import { FgQrInput } from "@/components/wms/fg-qr-input";
 import { useSearch, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
@@ -40,8 +39,6 @@ function FinishedGoodsPickupGatePage() {
   const [exitOpen, setExitOpen] = useState(false);
   const [exitPass, setExitPass] = useState("");
   const [exitDetails, setExitDetails] = useState<any | null>(null);
-  const [sectionScan, setSectionScan] = useState("");
-  const [verifiedScans, setVerifiedScans] = useState<string[]>([]);
   const [exitDocs, setExitDocs] = useState(false);
   const [exitBusy, setExitBusy] = useState(false);
 
@@ -56,8 +53,6 @@ function FinishedGoodsPickupGatePage() {
       const result = await api.getFinishedGoodsPickupGatePass(normalized);
       setExitDetails(result);
       setExitDocs(false);
-      setVerifiedScans([]);
-      setSectionScan("");
     } catch (err) {
       setExitDetails(null);
       toast.error(err instanceof Error ? err.message : "Gate pass not found.");
@@ -72,7 +67,6 @@ function FinishedGoodsPickupGatePage() {
         vehicle_number: exitDetails.vehicle_number,
         driver_name: exitDetails.driver_name,
         documents_verified: true,
-        section_qr_identities: verifiedScans,
       });
       toast.success(`${result.request_number} exited successfully`, {
         description: `Exit recorded at ${new Date(result.exited_at).toLocaleString()}.`,
@@ -290,12 +284,6 @@ function FinishedGoodsPickupGatePage() {
                   <p className="sm:col-span-2"><span className="text-muted-foreground">Entry:</span> {exitDetails.entered_at ? new Date(exitDetails.entered_at).toLocaleString() : "—"}</p>
                 </Card>
               )}
-              {exitDetails?.fg_id && <div className="space-y-2">
-                <p>FG: {exitDetails.fg_id}</p>
-                {exitDetails.loaded_sections?.map((s: any) => <p key={s.sub_id}>{s.sub_id} ? {s.status} ? {verifiedScans.includes(s.qr_identity) ? "Verified" : "Scan required"}</p>)}
-                <FgQrInput value={sectionScan} onChange={setSectionScan} label="Verify loaded section" inputId="exit-section-scan" />
-                <Button onClick={() => { if (!exitDetails.loaded_sections?.some((s: any) => s.qr_identity === sectionScan)) { toast.error("QR is not loaded on this vehicle"); return; } setVerifiedScans(prev => [...new Set([...prev, sectionScan])]); setSectionScan(""); }}>Verify section</Button>
-              </div>}
               {exitDetails && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={exitDocs} onChange={(e) => setExitDocs(e.target.checked)} /> Packing list and dispatch documents verified</label>}
             </div>
             <DialogFooter>
@@ -640,6 +628,7 @@ function FinishedGoodsPickupGatePage() {
                   <tr>
                     {[
                       "Request Number",
+                      "Assembly Unit",
                       "Supplier",
                       "Finished Goods",
                       "Quantity",
@@ -659,23 +648,54 @@ function FinishedGoodsPickupGatePage() {
                   {pagedRequests.map((request) => {
                     const status = request.gate_pass_status || request.status;
                     const isExited = ["CLOSED", "EXITED", "VEHICLE_EXITED"].includes(status);
+                    const gatePasses = (Array.isArray(request.gate_passes) ? request.gate_passes : [])
+                      .filter((pass: any) =>
+                        pass?.gate_pass_number &&
+                        ["INSIDE_FACILITY", "READY_FOR_GATE_EXIT", "EXITED", "CLOSED", "VEHICLE_EXITED"]
+                          .includes(String(pass.status || "").toUpperCase()),
+                      );
                     return (
                     <tr key={request.id}>
                       <td className="px-4 py-3 font-mono font-semibold text-primary">
                         {request.request_number}
                       </td>
+                      <td className="px-4 py-3 font-mono">{request.assembly_unit_code || "—"}</td>
                       <td className="px-4 py-3">{request.supplier_name || "—"}</td>
                       <td className="px-4 py-3">{request.product_name || "—"}</td>
                       <td className="px-4 py-3">
                         {request.quantity} {request.uom}
                       </td>
                       <td className="px-4 py-3">{request.expected_pickup_date || "—"}</td>
-                      <td className="px-4 py-3">{request.vehicle_number || "—"}</td>
-                      <td className="px-4 py-3">{request.driver_name || "—"}</td>
+                      <td className="px-4 py-3">
+                        {gatePasses.length
+                          ? gatePasses.map((pass: any, index: number) => (
+                              <div key={`${pass.gate_pass_number}-${index}`}>
+                                {gatePasses.length > 1 ? `${index + 1}. ` : ""}{pass.vehicle_number || "—"}
+                              </div>
+                            ))
+                          : "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        {gatePasses.length
+                          ? gatePasses.map((pass: any, index: number) => (
+                              <div key={`${pass.gate_pass_number}-${index}`}>
+                                {gatePasses.length > 1 ? `${index + 1}. ` : ""}{pass.driver_name || "—"}
+                              </div>
+                            ))
+                          : "—"}
+                      </td>
                       <td className="px-4 py-3">
                         <StatusBadge status={isExited ? "EXITED" : status} />
                       </td>
-                      <td className="px-4 py-3 font-mono font-semibold text-primary">{request.gate_pass_number || "—"}</td>
+                      <td className="px-4 py-3 font-mono font-semibold text-primary">
+                        {gatePasses.length
+                          ? gatePasses.map((pass: any, index: number) => (
+                              <div key={`${pass.gate_pass_number}-${index}`}>
+                                {gatePasses.length > 1 ? `${index + 1}. ` : ""}{pass.gate_pass_number}
+                              </div>
+                            ))
+                          : "—"}
+                      </td>
                     </tr>
                     );
                   })}

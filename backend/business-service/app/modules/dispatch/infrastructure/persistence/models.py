@@ -13,6 +13,7 @@ class DispatchModel(Base):
     customer_name = Column(String(255), nullable=False)
     warehouse_id = Column(String(64), nullable=False, default="WH-01")
     dispatch_type = Column(String(64), nullable=True, default="Standard")
+    assembly_unit_code = Column(String(64), nullable=True, index=True)
     status = Column(String(32), nullable=False, default="DRAFT")
     driver_id = Column(String(36), nullable=True)
     vehicle_id = Column(String(36), nullable=True)

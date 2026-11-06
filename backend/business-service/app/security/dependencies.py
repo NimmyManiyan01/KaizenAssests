@@ -208,6 +208,7 @@ async def _resolve_current_user(
 
                 claims = {
                     "employee_id": account.employee_id,
+                    "assembly_unit_code": account.assembly_unit_code,
                     "applications": account.applications or [],
                     "warehouse_ref_id": str(account.warehouse_ref_id) if account.warehouse_ref_id else None,
                     "warehouse_code": account.warehouse.warehouse_code if account.warehouse else None,

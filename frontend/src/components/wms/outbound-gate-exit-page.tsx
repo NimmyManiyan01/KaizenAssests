@@ -123,6 +123,7 @@ export function OutboundGateExitPage({
               <thead className="bg-muted/50 text-[10px] uppercase text-muted-foreground font-bold">
                 <tr>
                   <th className="px-4 py-3">Dispatch / Order</th>
+                  <th className="px-4 py-3">Assembly Unit</th>
                   <th className="px-4 py-3">Customer & Destination</th>
                   <th className="px-4 py-3">Vehicle / Driver</th>
                   <th className="px-4 py-3">Gate remarks</th>
@@ -132,7 +133,7 @@ export function OutboundGateExitPage({
               <tbody>
                 {orders.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-12 text-center text-muted-foreground">
+                    <td colSpan={6} className="py-12 text-center text-muted-foreground">
                       No dispatches are waiting for gate exit.
                     </td>
                   </tr>
@@ -147,6 +148,7 @@ export function OutboundGateExitPage({
                           SO: {order.order_number || "—"}
                         </p>
                       </td>
+                      <td className="px-4 py-4 font-mono">{order.assembly_unit_code || "—"}</td>
                       <td className="px-4 py-4">
                         <p className="font-semibold">{order.customer_name || "—"}</p>
                         <p className="text-xs text-muted-foreground">

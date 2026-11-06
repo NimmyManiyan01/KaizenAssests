@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import case, select, update
 
 from app.common.persistence.models import FinishedGoodsRequestModel
-from app.modules.assembly.infrastructure.persistence.models import AssemblyFinishedGoodsModel, AssemblyFinishedGoodsAllocationModel
+from app.modules.assembly.infrastructure.persistence.models import AssemblyFinishedGoodsModel, AssemblyFinishedGoodsAllocationModel, AssemblyOrderModel
 from app.modules.dispatch.infrastructure.persistence.models import DispatchModel, DispatchItemModel
 
 
@@ -79,7 +79,7 @@ async def enforce_dispatch_priority(session, request_id):
         raise HTTPException(409, f"Process older eligible request {first.request_number} first (FCFS submission priority).")
 
 
-async def allocate_fifo(session, dispatch_id, request_id=None):
+async def allocate_fifo(session, dispatch_id, request_id=None, assembly_unit_code=None):
     # Resolve supplier identity before taking dispatch/batch locks so every
     # supplier allocation path uses the same request -> batch -> dispatch order.
     dispatch = await session.get(DispatchModel, dispatch_id)
@@ -99,11 +99,19 @@ async def allocate_fifo(session, dispatch_id, request_id=None):
     result = []
     for item in items:
         # All allocators lock the same batches before reading reservations.
-        batches = (await session.execute(select(AssemblyFinishedGoodsModel).where(
+        batch_query = select(AssemblyFinishedGoodsModel).where(
             AssemblyFinishedGoodsModel.product_code == item.material_code,
             AssemblyFinishedGoodsModel.status.in_(["QC_APPROVED", "AVAILABLE"]),
             AssemblyFinishedGoodsModel.quantity > 0,
-        ).order_by(AssemblyFinishedGoodsModel.posted_at, AssemblyFinishedGoodsModel.id).with_for_update())).scalars().all()
+        )
+        if assembly_unit_code:
+            batch_query = batch_query.join(
+                AssemblyOrderModel,
+                AssemblyOrderModel.id == AssemblyFinishedGoodsModel.assembly_order_id,
+            ).where(AssemblyOrderModel.assembly_unit_code == assembly_unit_code)
+        batches = (await session.execute(batch_query.order_by(
+            AssemblyFinishedGoodsModel.posted_at, AssemblyFinishedGoodsModel.id
+        ).with_for_update())).scalars().all()
         if session.bind.dialect.name == "sqlite" and batches:
             await session.execute(update(AssemblyFinishedGoodsModel).where(
                 AssemblyFinishedGoodsModel.id.in_([fg.id for fg in batches])).values(
@@ -130,7 +138,8 @@ async def allocate_fifo(session, dispatch_id, request_id=None):
             remaining -= quantity
             result.append({"dispatch_item_id": str(item.id), "finished_goods_id": str(fg.id), "batch_number": fg.batch_number,
                            "product_code": fg.product_code, "quantity": float(quantity), "qr_code": fg.qr_code,
-                           "posted_at": fg.posted_at.isoformat(), "location_code": fg.location_code})
+                           "posted_at": fg.posted_at.isoformat(), "location_code": fg.location_code,
+                           "assembly_unit_code": await session.scalar(select(AssemblyOrderModel.assembly_unit_code).where(AssemblyOrderModel.id == fg.assembly_order_id))})
         if remaining > 0:
             raise HTTPException(409, f"Insufficient Assembly finished-goods stock for {item.material_code}. Short by {remaining:g} {item.uom}.")
         item.quantity_reserved = item.quantity_ordered

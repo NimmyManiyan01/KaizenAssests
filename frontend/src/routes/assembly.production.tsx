@@ -448,6 +448,7 @@ function AssemblyProductionPage() {
                 <thead>
                   <tr className="border-b border-border/60 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                     <th className="py-3 px-3">Order Number</th>
+                    <th className="py-3 px-3">Assembly Unit</th>
                     <th className="py-3 px-3">Product Details</th>
                     <th className="py-3 px-3">Target Qty</th>
                     <th className="py-3 px-3 min-w-[140px]">Progress<InformationTooltip help="production" /></th>
@@ -487,6 +488,8 @@ function AssemblyProductionPage() {
                             )}
                           </div>
                         </td>
+
+                        <td className="py-3.5 px-3 font-mono">{order.assembly_unit_code || "—"}</td>
 
                         {/* Product Details */}
                         <td className="py-3.5 px-3">

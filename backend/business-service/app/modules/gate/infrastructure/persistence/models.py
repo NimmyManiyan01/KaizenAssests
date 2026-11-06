@@ -39,7 +39,9 @@ class DockAssignmentModel(Base):
     asn_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("asn.id", ondelete="RESTRICT"), nullable=True, index=True)
     po_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("purchase_order.id", ondelete="RESTRICT"), nullable=True, index=True)
     vehicle_number: Mapped[str] = mapped_column(String(32), nullable=False)
-    dock_number: Mapped[str] = mapped_column(String(32), ForeignKey("warehouse_dock.dock_number", ondelete="RESTRICT"), nullable=False, index=True)
+    # Keep the dock code as an immutable historical snapshot. Dock registry
+    # rows can be physically deleted after release without erasing assignments.
+    dock_number: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     assigned_warehouse_ref_id: Mapped[uuid.UUID | None] = mapped_column(GUID, ForeignKey("warehouse_configuration.id", ondelete="SET NULL"), nullable=True, index=True)
     assigned_warehouse_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     assigned_warehouse_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -310,6 +312,7 @@ class FinishedGoodsPickupGateVisitModel(Base):
     # Existing databases warehouse this primary key as VARCHAR, not UUID.
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
     request_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("finished_goods_request.id", ondelete="RESTRICT"), nullable=False, index=True)
+    assembly_unit_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     gate_pass_number: Mapped[str] = mapped_column(String(6), nullable=False, unique=True, index=True)
     supplier_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)

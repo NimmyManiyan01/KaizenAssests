@@ -648,6 +648,12 @@ export const api = {
       },
     );
   },
+  async deleteDock(dockId: string): Promise<void> {
+    return request<void>(
+      BUSINESS_API_URL + "/api/v1/warehouse/docks/" + encodeURIComponent(dockId),
+      { method: "DELETE" },
+    );
+  },
   async updateDockStatus(dockId: string, status: string, reason?: string): Promise<any> {
     return request<any>(
       `${BUSINESS_API_URL}/api/v1/warehouse/docks/${encodeURIComponent(dockId)}/status`,
@@ -4053,6 +4059,7 @@ export interface AssemblyFinishedGoodsTraceability {
 export interface AssemblyProductionOrder {
   id: string;
   order_number: string;
+  assembly_unit_code?: string | null;
   product_code: string;
   product_name: string;
   target_quantity: number;
@@ -4103,6 +4110,7 @@ export interface AssemblyMaterialRequestItem {
 export interface AssemblyMaterialRequest {
   id: string;
   request_number: string;
+  assembly_unit_code?: string | null;
   order_id?: string | null;
   order_number?: string | null;
   order_status?: string | null;
@@ -4200,6 +4208,7 @@ export interface AssemblyWorkStep {
 export interface AssemblyOrder {
   id: string;
   order_number: string;
+  assembly_unit_code?: string | null;
   product_code: string;
   product_name: string;
   bom_id?: string | null;

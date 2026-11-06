@@ -17,7 +17,6 @@ import {
   isValidAsnDriverName,
   isValidAsnVehicleNumber,
   normalizeAsnVehicleNumber,
-  parsePositiveNumber,
   requiredText,
   sanitizeAsnDriverName,
   sanitizeMobileNumber,
@@ -61,7 +60,7 @@ function SupplierDispatchPage() {
   >([]);
   const [finishedGoodsLoading, setFinishedGoodsLoading] = React.useState(false);
   const [finishedGoodsError, setFinishedGoodsError] = React.useState<string>();
-  const [goods, setGoods] = React.useState([{ name: "", quantity: "", custom: false }]);
+  const [goods, setGoods] = React.useState([{ name: "", custom: false }]);
   const [dispatchHistory, setDispatchHistory] = React.useState<any[]>([]);
   const [historyPage, setHistoryPage] = React.useState(1);
   const newestFirstDispatchHistory = React.useMemo(
@@ -184,7 +183,7 @@ function SupplierDispatchPage() {
       const selected = finishedGoods.find(
         (good) => good.name === name || good.code === name,
       );
-      return { item, selected, quantity: parsePositiveNumber(item.quantity) };
+      return { item, selected, quantity: selected?.quantity ?? null };
     });
     if (requestedGoods.some(({ selected }) => !selected)) {
       toast.error("Select a QC-approved finished product for every row");
@@ -192,19 +191,6 @@ function SupplierDispatchPage() {
     }
     if (new Set(requestedGoods.map(({ selected }) => selected!.id)).size !== requestedGoods.length) {
       toast.error("Select each finished good only once");
-      return;
-    }
-    if (requestedGoods.some(({ quantity }) => quantity === null || !Number.isInteger(quantity))) {
-      toast.error("Enter a whole number of sections for every finished good");
-      return;
-    }
-    const overLimit = requestedGoods.find(
-      ({ selected, quantity }) => quantity! > selected!.quantity,
-    );
-    if (overLimit) {
-      toast.error(
-        `${overLimit.selected!.name} has only ${overLimit.selected!.quantity} transport sections available`,
-      );
       return;
     }
     if (
@@ -282,7 +268,7 @@ function SupplierDispatchPage() {
       );
       setOpen(false);
       setTransportEntries([createTransportEntry()]);
-      setGoods([{ name: "", quantity: "", custom: false }]);
+      setGoods([{ name: "", custom: false }]);
       setExpectedPickupDate("");
       void loadDispatchHistory();
     } catch (error) {
@@ -411,10 +397,30 @@ function SupplierDispatchPage() {
                           .join(", ") || "—"}
                       </td>
                       <td className="px-5 py-3">
-                        {dispatch.vehicle_number || dispatch.transporter || "—"}
+                        {Array.isArray(dispatch.transport_entries) && dispatch.transport_entries.length ? (
+                          <div className="space-y-1">
+                            {dispatch.transport_entries.map((entry: any, index: number) => (
+                              <p key={`${entry.vehicle_number || "vehicle"}-${index}`}>
+                                {index + 1}. {entry.vehicle_number || "—"}
+                              </p>
+                            ))}
+                          </div>
+                        ) : (
+                          dispatch.vehicle_number || dispatch.transporter || "—"
+                        )}
                       </td>
                       <td className="px-5 py-3">
-                        {dispatch.driver_name || dispatch.contact_person || "—"}
+                        {Array.isArray(dispatch.transport_entries) && dispatch.transport_entries.length ? (
+                          <div className="space-y-1">
+                            {dispatch.transport_entries.map((entry: any, index: number) => (
+                              <p key={`${entry.driver_name || "driver"}-${index}`}>
+                                {index + 1}. {entry.driver_name || "—"}
+                              </p>
+                            ))}
+                          </div>
+                        ) : (
+                          dispatch.driver_name || dispatch.contact_person || "—"
+                        )}
                       </td>
                       <td className="px-5 py-3">
                         <StatusBadge status={dispatch.status || "—"} />
@@ -682,7 +688,7 @@ function SupplierDispatchPage() {
               <div>
                 <h3 className="font-semibold">Finished goods</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Select an eligible finished good and request up to its remaining transport sections. Assembly assigns and scans the specific section QR codes for loading.
+                  Select an eligible finished good. All of its remaining transport sections will be included in the dispatch request; Assembly assigns and scans the sections for loading.
                 </p>
               </div>
               {finishedGoodsError && (
@@ -744,14 +750,12 @@ function SupplierDispatchPage() {
                       disabled={finishedGoodsLoading || finishedGoods.length === 0}
                       onChange={(e) => {
                         const val = e.target.value;
-                        const chosen = finishedGoods.find((g) => g.name === val || g.code === val);
                         setGoods((rows) =>
                           rows.map((row, i) =>
                             i === index
                               ? {
                                   ...row,
                                   name: val === "__clear_selection__" ? "" : val,
-                                  quantity: val === "__clear_selection__" ? "" : (row.quantity || String(chosen?.quantity || "")),
                                   custom: false,
                                 }
                               : row,
@@ -793,7 +797,6 @@ function SupplierDispatchPage() {
                               ? {
                                   ...row,
                                   name: value === "__clear_selection__" ? "" : value,
-                                  quantity: value === "__clear_selection__" ? "" : (row.quantity || String(finishedGoods.find((g) => g.name === value)?.quantity || "")),
                                   custom: false,
                                 }
                               : row,
@@ -801,7 +804,7 @@ function SupplierDispatchPage() {
                         )
                       }
                     >
-                      <SelectTrigger id={`finished-good-${index}`} onChange={(e: any) => { const val = e.target?.value; if (val) { const chosen = finishedGoods.find((g) => g.name === val || g.code === val); setGoods((rows) => rows.map((row, i) => i === index ? { ...row, name: val === "__clear_selection__" ? "" : val, quantity: val === "__clear_selection__" ? "" : (row.quantity || String(chosen?.quantity || "")), custom: false } : row)); } }} className="h-11 min-w-0 rounded-[10px] border-[#DFE7F0] bg-white text-sm text-[#172B4D] shadow-none">
+                    <SelectTrigger id={`finished-good-${index}`} className="h-11 min-w-0 rounded-[10px] border-[#DFE7F0] bg-white text-sm text-[#172B4D] shadow-none">
                         <SelectValue placeholder={finishedGoodsLoading
                           ? "Loading finished goods…"
                           : finishedGoodsError
@@ -838,34 +841,6 @@ function SupplierDispatchPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor={`finished-good-quantity-${index}`}>Sections requested *</Label>
-                    <Input
-                      id={`finished-good-quantity-${index}`}
-                      aria-label={`Sections requested for finished good ${index + 1}`}
-                      required
-                      className="h-11 rounded-[10px] text-right"
-                      min="1"
-                      max={
-                        finishedGoods.find(
-                          (good) => good.name === item.name || good.code === item.name,
-                        )?.quantity || undefined
-                      }
-                      step="1"
-                      type="number"
-                      inputMode="numeric"
-                      placeholder="Sections"
-                      value={item.quantity}
-                      disabled={!item.name || finishedGoodsLoading}
-                      onChange={(event) =>
-                        setGoods((rows) =>
-                          rows.map((row, rowIndex) =>
-                            rowIndex === index ? { ...row, quantity: event.target.value } : row,
-                          ),
-                        )
-                      }
-                    />
-                  </div>
                   {goods.length > 1 && (
                     <Button
                       type="button"
@@ -890,7 +865,7 @@ function SupplierDispatchPage() {
                   goods.length >= finishedGoods.length
                 }
                 onClick={() =>
-                  setGoods((rows) => [...rows, { name: "", quantity: "", custom: false }])
+                  setGoods((rows) => [...rows, { name: "", custom: false }])
                 }
               >
                 <Plus className="mr-1.5 size-4" />
