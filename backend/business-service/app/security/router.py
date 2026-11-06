@@ -32,14 +32,14 @@ def _parse_device_summary(user_agent: str | None) -> str:
     ua = user_agent
     if "Mobile" in ua or "Android" in ua or "iPhone" in ua:
         return "Mobile Device"
+    if "Edg" in ua or "Edge" in ua:
+        return "Edge Browser"
     if "Chrome" in ua:
         return "Chrome Browser"
     if "Firefox" in ua:
         return "Firefox Browser"
     if "Safari" in ua:
         return "Safari Browser"
-    if "Edge" in ua:
-        return "Edge Browser"
     return "Desktop Client"
 
 from app.security.dependencies import CurrentUser, get_current_user

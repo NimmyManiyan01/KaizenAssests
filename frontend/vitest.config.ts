@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   test: {
-    pool: "threads",
+    pool: "forks",
     maxWorkers: 1,
-    environment: "jsdom",
+    environment: "node",
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/**/*.test.tsx"],
     clearMocks: true,
