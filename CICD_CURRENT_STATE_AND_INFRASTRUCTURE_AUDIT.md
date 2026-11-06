@@ -147,3 +147,4 @@ All resources have been audited directly against the active Azure subscription v
 | **Deployment Automation** | Manual CLI commands (`az containerapp update`) | Automated, zero-downtime deployment via GitHub Actions OIDC / Azure Login |
 | **Post-Deployment Health Checks** | Manual browser testing | Automated HTTP probe on `/health/ready` and frontend root with automatic rollback on failure |
 | **Production Gating** | Open (anyone with local az credentials can push) | Protected GitHub Environment (`production`) with required reviewer approval |
+

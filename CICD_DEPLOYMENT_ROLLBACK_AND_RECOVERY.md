@@ -112,3 +112,4 @@ When a rollback occurs:
 - [ ] Verify that database integrity remains intact and no corrupted records exist.
 - [ ] Create a reproducible test case in `frontend/tests/e2e/` or backend `tests/`.
 - [ ] File a high-priority incident issue before attempting redeployment.
+

@@ -114,3 +114,4 @@ jobs:
           tags: kaizen-frontend:test-dry-run
           build-args: |
             VITE_BUSINESS_API_URL=https://kaizen-wms-backend.graybeach-6b6c99c3.centralindia.azurecontainerapps.io
+

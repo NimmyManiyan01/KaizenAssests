@@ -134,3 +134,4 @@ Runtime Audit Log & Deployment Summary
 | **Step 6** | Hardening & Dockerfile Optimization | `.dockerignore` files | Excludes `.env`, `.git`, test artifacts |
 | **Step 7** | End-to-End Validation | `CICD_PIPELINE_VALIDATION_AND_TEST_REPORT.md` | Verification of full pipeline execution |
 | **Step 8** | Operational Runbook | `CICD_OPERATIONS_RUNBOOK.md` | Complete troubleshooting & operations guide |
+

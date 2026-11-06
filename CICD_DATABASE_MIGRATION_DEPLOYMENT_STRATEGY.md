@@ -87,3 +87,4 @@ In the CD pipeline (`deploy.yml`):
 1. **Reverting Application != Reverting Database**: Reverting a Container App revision to a previous known-good image will **NOT** roll back the database schema.
 2. **Backward-Compatible Schema Preservation**: Because all migrations follow the **Expand** rule, the previous application code revision can safely run against the newly migrated schema.
 3. **No Automatic Down-Migrations**: Automatic `alembic downgrade` is **STRICTLY PROHIBITED** in automated rollback scripts. Destructive schema rollbacks (dropping tables or columns) risk permanent data loss and must require manual Database Administrator review.
+
