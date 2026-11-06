@@ -17,14 +17,31 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import selectinload
 
 from app.common.persistence.models import QuotationMagicLinkModel, SupplierUserModel
 from app.config.settings import get_settings
 from app.database.session import UnitOfWork, get_uow
 from app.logging.logger import get_logger
-from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel
+from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel, UserSessionModel
+
+def _parse_device_summary(user_agent: str | None) -> str:
+    if not user_agent:
+        return "Unknown Device"
+    ua = user_agent
+    if "Mobile" in ua or "Android" in ua or "iPhone" in ua:
+        return "Mobile Device"
+    if "Chrome" in ua:
+        return "Chrome Browser"
+    if "Firefox" in ua:
+        return "Firefox Browser"
+    if "Safari" in ua:
+        return "Safari Browser"
+    if "Edge" in ua:
+        return "Edge Browser"
+    return "Desktop Client"
+
 from app.security.dependencies import CurrentUser, get_current_user
 from app.security.passwords import hash_password, verify_with_legacy
 
@@ -256,6 +273,28 @@ async def dev_login(
         if needs_rehash:
             account.password_hash = hash_password(req_password)
         new_token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+
+        # Insert dedicated multi-session record
+        client_ip = http_request.client.host if http_request and http_request.client else None
+        user_agent = (http_request.headers.get("user-agent") or "")[:512] if http_request else None
+        device_name = _parse_device_summary(user_agent)
+
+        user_session = UserSessionModel(
+            id=uuid.uuid4(),
+            user_id=account.id,
+            user_type="STAFF",
+            token_hash=new_token_hash,
+            client_ip=client_ip,
+            user_agent=user_agent,
+            device_name=device_name,
+            created_at=now,
+            last_activity_at=now,
+            expires_at=now + timedelta(minutes=settings.local_session_lifetime_minutes),
+            is_active=True,
+        )
+        uow.session.add(user_session)
+
+        # Dual-write to legacy CSV for backward compatibility during rolling deploy
         existing_hashes = [h.strip() for h in (account.auth_token_hash or "").split(",") if h.strip()]
         active_hashes = [h for h in existing_hashes if h != new_token_hash][-9:] + [new_token_hash]
         account.auth_token_hash = ",".join(active_hashes)
@@ -322,10 +361,31 @@ async def supplier_login(
     settings = get_settings()
     session_token = secrets.token_urlsafe(48)
     new_token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+    now_utc = datetime.now(timezone.utc)
+
+    client_ip = http_request.client.host if http_request and http_request.client else None
+    user_agent = (http_request.headers.get("user-agent") or "")[:512] if http_request else None
+    device_name = _parse_device_summary(user_agent)
+
+    user_session = UserSessionModel(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        user_type="SUPPLIER",
+        token_hash=new_token_hash,
+        client_ip=client_ip,
+        user_agent=user_agent,
+        device_name=device_name,
+        created_at=now_utc,
+        last_activity_at=now_utc,
+        expires_at=now_utc + timedelta(minutes=settings.local_session_lifetime_minutes),
+        is_active=True,
+    )
+    uow.session.add(user_session)
+
     existing_hashes = [h.strip() for h in (user.auth_token_hash or "").split(",") if h.strip()]
     active_hashes = [h for h in existing_hashes if h != new_token_hash][-9:] + [new_token_hash]
     user.auth_token_hash = ",".join(active_hashes)
-    user.auth_token_expires_at = datetime.now(timezone.utc) + timedelta(
+    user.auth_token_expires_at = now_utc + timedelta(
         minutes=settings.local_session_lifetime_minutes
     )
     await uow.commit()
@@ -438,10 +498,32 @@ async def magic_login(
         )
     session_token = secrets.token_urlsafe(48)
     new_token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+    now_utc = datetime.now(timezone.utc)
+    exp_dt = datetime.fromtimestamp(exp, tz=timezone.utc)
+
+    client_ip = http_request.client.host if http_request and http_request.client else None
+    user_agent = (http_request.headers.get("user-agent") or "")[:512] if http_request else None
+    device_name = _parse_device_summary(user_agent)
+
+    user_session = UserSessionModel(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        user_type="SUPPLIER",
+        token_hash=new_token_hash,
+        client_ip=client_ip,
+        user_agent=user_agent,
+        device_name=device_name,
+        created_at=now_utc,
+        last_activity_at=now_utc,
+        expires_at=exp_dt,
+        is_active=True,
+    )
+    uow.session.add(user_session)
+
     existing_hashes = [h.strip() for h in (user.auth_token_hash or "").split(",") if h.strip()]
     active_hashes = [h for h in existing_hashes if h != new_token_hash][-9:] + [new_token_hash]
     user.auth_token_hash = ",".join(active_hashes)
-    user.auth_token_expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
+    user.auth_token_expires_at = exp_dt
     await uow.commit()
 
     return MagicLoginResponse(
@@ -464,15 +546,32 @@ async def logout(
     user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ) -> dict:
-    """Revoke the persisted local session before the client clears its copy."""
+    """Revoke only the calling session before the client clears its copy."""
+    now_utc = datetime.now(timezone.utc)
+
+    # 1. Revoke caller's specific session in user_session
+    if user.token_hash:
+        await uow.session.execute(
+            update(UserSessionModel)
+            .where(UserSessionModel.token_hash == user.token_hash)
+            .values(is_active=False, revoked_at=now_utc)
+        )
+
+    # 2. Selectively remove ONLY caller's token hash from legacy CSV
     account = (
         await uow.session.execute(
             select(UserAccountModel).where(UserAccountModel.employee_id == user.subject)
         )
     ).scalar_one_or_none()
     if account:
-        account.auth_token_hash = None
-        account.auth_token_expires_at = None
+        if user.token_hash and account.auth_token_hash:
+            remaining = [h.strip() for h in account.auth_token_hash.split(",") if h.strip() and h.strip() != user.token_hash]
+            account.auth_token_hash = ",".join(remaining) if remaining else None
+            if not account.auth_token_hash:
+                account.auth_token_expires_at = None
+        elif not user.token_hash:
+            account.auth_token_hash = None
+            account.auth_token_expires_at = None
         await uow.commit()
         return {"success": True, "username": user.username}
 
@@ -488,10 +587,145 @@ async def logout(
                 )
             ).scalar_one_or_none()
             if supplier_account:
-                supplier_account.auth_token_hash = None
-                supplier_account.auth_token_expires_at = None
+                if user.token_hash and supplier_account.auth_token_hash:
+                    remaining = [h.strip() for h in supplier_account.auth_token_hash.split(",") if h.strip() and h.strip() != user.token_hash]
+                    supplier_account.auth_token_hash = ",".join(remaining) if remaining else None
+                    if not supplier_account.auth_token_hash:
+                        supplier_account.auth_token_expires_at = None
+                elif not user.token_hash:
+                    supplier_account.auth_token_hash = None
+                    supplier_account.auth_token_expires_at = None
                 await uow.commit()
     return {"success": True, "username": user.username}
+
+
+@router.get("/sessions")
+async def list_active_sessions(
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> list[dict]:
+    """List all active sessions for the calling user."""
+    user_id = None
+    account = (
+        await uow.session.execute(
+            select(UserAccountModel.id).where(UserAccountModel.employee_id == user.subject)
+        )
+    ).scalar_one_or_none()
+    if account:
+        user_id = account
+    elif "SUPPLIER" in {r.upper() for r in user.roles}:
+        try:
+            user_id = uuid.UUID(user.subject)
+        except ValueError:
+            pass
+
+    if not user_id:
+        return []
+
+    now_utc = datetime.now(timezone.utc)
+    sessions = (
+        await uow.session.execute(
+            select(UserSessionModel)
+            .where(
+                UserSessionModel.user_id == user_id,
+                UserSessionModel.is_active.is_(True),
+                UserSessionModel.expires_at > now_utc,
+                UserSessionModel.revoked_at.is_(None),
+            )
+            .order_by(UserSessionModel.created_at.desc())
+        )
+    ).scalars().all()
+
+    return [
+        {
+            "id": str(s.id),
+            "device_name": s.device_name or "Unknown Device",
+            "client_ip": s.client_ip or "Unknown IP",
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+            "last_activity_at": s.last_activity_at.isoformat() if s.last_activity_at else None,
+            "expires_at": s.expires_at.isoformat() if s.expires_at else None,
+            "is_current": s.token_hash == user.token_hash,
+        }
+        for s in sessions
+    ]
+
+
+@router.post("/logout-others")
+async def logout_other_sessions(
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> dict:
+    """Revoke all active sessions for the user EXCEPT the calling session."""
+    user_id = None
+    account = (
+        await uow.session.execute(
+            select(UserAccountModel.id).where(UserAccountModel.employee_id == user.subject)
+        )
+    ).scalar_one_or_none()
+    if account:
+        user_id = account
+    elif "SUPPLIER" in {r.upper() for r in user.roles}:
+        try:
+            user_id = uuid.UUID(user.subject)
+        except ValueError:
+            pass
+
+    if user_id and user.token_hash:
+        now_utc = datetime.now(timezone.utc)
+        await uow.session.execute(
+            update(UserSessionModel)
+            .where(
+                UserSessionModel.user_id == user_id,
+                UserSessionModel.token_hash != user.token_hash,
+                UserSessionModel.is_active.is_(True),
+            )
+            .values(is_active=False, revoked_at=now_utc)
+        )
+        if account:
+            acc = await uow.session.get(UserAccountModel, user_id)
+            if acc:
+                acc.auth_token_hash = user.token_hash
+        await uow.commit()
+    return {"success": True, "message": "All other sessions have been logged out"}
+
+
+@router.post("/logout-all")
+async def logout_all_sessions(
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> dict:
+    """Revoke all active sessions for the user across all devices."""
+    user_id = None
+    account = (
+        await uow.session.execute(
+            select(UserAccountModel.id).where(UserAccountModel.employee_id == user.subject)
+        )
+    ).scalar_one_or_none()
+    if account:
+        user_id = account
+    elif "SUPPLIER" in {r.upper() for r in user.roles}:
+        try:
+            user_id = uuid.UUID(user.subject)
+        except ValueError:
+            pass
+
+    if user_id:
+        now_utc = datetime.now(timezone.utc)
+        await uow.session.execute(
+            update(UserSessionModel)
+            .where(
+                UserSessionModel.user_id == user_id,
+                UserSessionModel.is_active.is_(True),
+            )
+            .values(is_active=False, revoked_at=now_utc)
+        )
+        if account:
+            acc = await uow.session.get(UserAccountModel, user_id)
+            if acc:
+                acc.auth_token_hash = None
+                acc.auth_token_expires_at = None
+        await uow.commit()
+    return {"success": True, "message": "All sessions have been logged out"}
 
 
 @router.get("/verify-magic-token")

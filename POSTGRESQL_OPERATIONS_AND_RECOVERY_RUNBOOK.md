@@ -114,3 +114,4 @@ JOIN pg_catalog.pg_locks blocking_locks
 JOIN pg_catalog.pg_stat_activity blocking_activity ON blocking_activity.pid = blocking_locks.pid
 WHERE NOT blocked_locks.granted;
 ```
+

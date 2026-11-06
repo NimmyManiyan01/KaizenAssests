@@ -65,3 +65,4 @@ flowchart TD
 ## 5. Production Readiness Verdict
 
 The Azure PostgreSQL Flexible Server environment is **CERTIFIED PRODUCTION READY** for migration `20261106_standardize_postgresql_schema`.
+

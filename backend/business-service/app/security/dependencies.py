@@ -58,6 +58,8 @@ class CurrentUser:
     roles: list[str]
     permissions: list[str]
     raw_claims: dict
+    session_id: str | None = None
+    token_hash: str | None = None
 
 
 async def _resolve_current_user(
@@ -120,22 +122,39 @@ async def _resolve_current_user(
         from sqlalchemy import select
         from app.common.persistence.models import SupplierUserModel
         from app.database.session import AsyncSessionFactory
-
-        from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel
+        from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel, UserSessionModel
 
         session_token = token.removeprefix("supplier-db-token-")
         token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+        now_utc = datetime.now(timezone.utc)
+        supplier_account = None
+        session_row = None
         async with AsyncSessionFactory() as session:
-            supplier_account = (
-                await session.execute(
-                    select(SupplierUserModel).where(
-                        SupplierUserModel.auth_token_hash.contains(token_hash),
-                        SupplierUserModel.auth_token_expires_at > datetime.now(timezone.utc),
-                    )
+            session_row = (await session.execute(
+                select(UserSessionModel).where(
+                    UserSessionModel.token_hash == token_hash,
+                    UserSessionModel.is_active.is_(True),
+                    UserSessionModel.expires_at > now_utc,
+                    UserSessionModel.revoked_at.is_(None),
                 )
-            ).scalar_one_or_none()
-            if supplier_account and token_hash not in [h.strip() for h in (supplier_account.auth_token_hash or "").split(",") if h.strip()]:
-                supplier_account = None
+            )).scalar_one_or_none()
+
+            if session_row is not None:
+                supplier_account = (await session.execute(
+                    select(SupplierUserModel).where(SupplierUserModel.id == session_row.user_id)
+                )).scalar_one_or_none()
+            else:
+                supplier_account = (
+                    await session.execute(
+                        select(SupplierUserModel).where(
+                            SupplierUserModel.auth_token_hash.contains(token_hash),
+                            SupplierUserModel.auth_token_expires_at > now_utc,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if supplier_account and token_hash not in [h.strip() for h in (supplier_account.auth_token_hash or "").split(",") if h.strip()]:
+                    supplier_account = None
+
             managed_account = None
             if supplier_account is not None:
                 managed_account = (await session.execute(
@@ -153,6 +172,8 @@ async def _resolve_current_user(
             roles=["SUPPLIER"],
             permissions=_supplier_material_permissions(managed_account.page_permissions or {}) if managed_account else [],
             raw_claims={"supplier_id": str(supplier_account.supplier_id)},
+            session_id=str(session_row.id) if session_row else None,
+            token_hash=token_hash,
         )
 
     if settings.environment.lower() in ("local", "dev", "test", "development"):
@@ -169,22 +190,45 @@ async def _resolve_current_user(
             from sqlalchemy import select
             from sqlalchemy.orm import selectinload
             from app.database.session import AsyncSessionFactory
-            from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel
+            from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel, UserSessionModel
 
             token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+            now_utc = datetime.now(timezone.utc)
+            account = None
+            session_row = None
             async with AsyncSessionFactory() as session:
-                result = await session.execute(
-                    select(UserAccountModel)
-                    .options(selectinload(UserAccountModel.warehouse))
-                    .where(
-                        UserAccountModel.auth_token_hash.contains(token_hash),
-                        UserAccountModel.status == "ACTIVE",
-                        UserAccountModel.auth_token_expires_at > datetime.now(timezone.utc),
+                session_row = (await session.execute(
+                    select(UserSessionModel).where(
+                        UserSessionModel.token_hash == token_hash,
+                        UserSessionModel.is_active.is_(True),
+                        UserSessionModel.expires_at > now_utc,
+                        UserSessionModel.revoked_at.is_(None),
                     )
-                )
-                account = result.scalar_one_or_none()
-                if account and token_hash not in [h.strip() for h in (account.auth_token_hash or "").split(",") if h.strip()]:
-                    account = None
+                )).scalar_one_or_none()
+
+                if session_row is not None:
+                    result = await session.execute(
+                        select(UserAccountModel)
+                        .options(selectinload(UserAccountModel.warehouse))
+                        .where(
+                            UserAccountModel.id == session_row.user_id,
+                            UserAccountModel.status == "ACTIVE",
+                        )
+                    )
+                    account = result.scalar_one_or_none()
+                else:
+                    result = await session.execute(
+                        select(UserAccountModel)
+                        .options(selectinload(UserAccountModel.warehouse))
+                        .where(
+                            UserAccountModel.auth_token_hash.contains(token_hash),
+                            UserAccountModel.status == "ACTIVE",
+                            UserAccountModel.auth_token_expires_at > now_utc,
+                        )
+                    )
+                    account = result.scalar_one_or_none()
+                    if account and token_hash not in [h.strip() for h in (account.auth_token_hash or "").split(",") if h.strip()]:
+                        account = None
             if account:
                 role_key = account.role.strip().upper().replace(" ", "_")
                 role = {
@@ -225,6 +269,8 @@ async def _resolve_current_user(
                     roles=[role],
                     permissions=perms,
                     raw_claims=claims,
+                    session_id=str(session_row.id) if session_row else None,
+                    token_hash=token_hash,
                 )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or invalid")
         if token == "mock-jwt-supplier-token" and settings.environment.lower() == "test":

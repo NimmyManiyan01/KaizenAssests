@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import desc, func, or_, select
+from sqlalchemy.exc import IntegrityError
 
 from app.common.persistence.models import AsnModel, FinishedGoodsRequestModel, SupplierAddressModel, SupplierContactModel, SupplierModel, SupplierUserModel
 from app.database.session import UnitOfWork, get_uow
@@ -499,6 +500,14 @@ async def create_user(
         )
         if sup_dup.first():
             raise HTTPException(status_code=409, detail="Supplier username already exists")
+
+        contact_dup = await uow.session.execute(
+            select(SupplierContactModel.id).where(
+                func.lower(SupplierContactModel.primary_email) == payload.email.strip().lower()
+            )
+        )
+        if contact_dup.first():
+            raise HTTPException(status_code=409, detail="Supplier contact email already exists")
 
     account = UserAccountModel(
         employee_id=generate_employee_id(),

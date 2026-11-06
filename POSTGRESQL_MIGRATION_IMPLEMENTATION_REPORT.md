@@ -52,3 +52,4 @@ This report details the implementation of migration revision `20261106_standardi
 - **File Modified**: `backend/business-service/app/main.py`
 - **Change**: Removed redundant `ALTER TABLE supplier ADD COLUMN IF NOT EXISTS ...` and `ALTER TABLE supplier ALTER COLUMN category TYPE JSON ...` statements from application lifespan startup.
 - **Safety Benefit**: Eliminates `ACCESS EXCLUSIVE` table locking risk during horizontal container autoscaling or rolling deployments.
+
