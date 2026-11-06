@@ -86,22 +86,9 @@ async def lifespan(app: FastAPI):
                     )
                     await connection.commit()
 
-                supplier_exists = await connection.scalar(text("SELECT to_regclass('public.supplier')"))
-                if supplier_exists is not None:
-                    await connection.execute(text("ALTER TABLE supplier ADD COLUMN IF NOT EXISTS payment_terms VARCHAR(128)"))
-                    await connection.execute(text("ALTER TABLE supplier ADD COLUMN IF NOT EXISTS credit_period_days INTEGER"))
-                    await connection.execute(text("ALTER TABLE supplier ADD COLUMN IF NOT EXISTS updated_by VARCHAR(64)"))
-                    await connection.execute(text("ALTER TABLE supplier ALTER COLUMN category DROP NOT NULL"))
-                    try:
-                        await connection.execute(text(
-                            "ALTER TABLE supplier ALTER COLUMN category TYPE JSON "
-                            "USING (CASE WHEN category IS NULL OR TRIM(category::text) = '' THEN '[]'::json "
-                            "WHEN category::text LIKE '[%' THEN category::json "
-                            "ELSE json_build_array(category) END)"
-                        ))
-                    except Exception as cat_err:
-                        logger.debug("Category column JSON conversion note: %s", cat_err)
-                    await connection.commit()
+                # Supplier schema is version-controlled via Alembic migrations
+                # (20261106_supplier_profile_fields & 20261106_standardize_postgresql_schema).
+                # Runtime DDL is retired to prevent ACCESS EXCLUSIVE locking during multi-pod boot.
     except Exception as exc:
         logger.debug("Database preflight check note: %s", exc)
 
