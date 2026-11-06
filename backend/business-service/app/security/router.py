@@ -312,7 +312,6 @@ async def dev_login(
             "PROCUREMENT_OFFICER": "PROCUREMENT",
             "WAREHOUSE_MANAGER": "WAREHOUSE_MANAGER",
             "WAREHOUSE_OPERATOR": "WAREHOUSE_OPERATOR",
-            "WAREHOUSE_OPERATOR": "WAREHOUSE_OPERATOR",
         }.get(role_key, role_key)
 
         return {

@@ -1,9 +1,12 @@
 from __future__ import annotations
 from decimal import Decimal
 
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator

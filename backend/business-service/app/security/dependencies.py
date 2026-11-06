@@ -238,7 +238,6 @@ async def _resolve_current_user(
                     "PROCUREMENT_OFFICER": "PROCUREMENT",
                     "WAREHOUSE_MANAGER": "WAREHOUSE_MANAGER",
                     "WAREHOUSE_OPERATOR": "WAREHOUSE_OPERATOR",
-                    "WAREHOUSE_OPERATOR": "WAREHOUSE_OPERATOR",
                 }.get(role_key, role_key)
 
                 perms = []
@@ -458,7 +457,7 @@ async def _resolve_current_user(
                         claims["full_name"] = mgr.full_name
                         if mgr.warehouse:
                             claims["warehouse_code"] = mgr.warehouse.warehouse_code
-            except Exception as e:
+            except Exception:
                 pass
 
             if "warehouse_code" not in claims:
