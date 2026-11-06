@@ -517,13 +517,13 @@ async def create_user(
     if role == "SUPPLIER":
         supplier_id = uuid.uuid4()
         supplier_code = f"SUP-{account.employee_id.removeprefix('EMP-')}"
-        now_dt = datetime.now(timezone.utc)
+        now_dt = datetime.now()
         supplier = SupplierModel(
             id=supplier_id,
             supplier_name=payload.full_name.strip(),
             registered_company_name=f"{payload.full_name.strip()} ({account.employee_id})",
             vendor_type="MANUFACTURER",
-            category=[],
+            category=["GENERAL"],
             industry="GENERAL",
             gstin=f"AUTO-{uuid.uuid4().hex[:12].upper()}",
             supplier_code=supplier_code,
@@ -541,6 +541,14 @@ async def create_user(
                 username=account.username,
                 password_hash=account.password_hash,
                 must_change_password=False,
+            )
+        )
+        uow.session.add(
+            SupplierContactModel(
+                id=uuid.uuid4(),
+                supplier_id=supplier_id,
+                primary_contact_name=payload.full_name.strip(),
+                primary_email=payload.email.strip().lower(),
             )
         )
     try:
