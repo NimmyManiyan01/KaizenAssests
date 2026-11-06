@@ -34,13 +34,21 @@ Azure Resource Manager (ARM)
         └─ 5. Authenticates deployment commands scoped to `rg-kaizenx-dev`
 ```
 
-### 2.1 Required OIDC Federated Credentials
+### 2.1 Configured OIDC Federated Credentials (Provisioned)
+- **App Registration Display Name**: `kaizen-github-actions-sp`
+- **Application (Client) ID**: `e242f246-fd44-4ca8-a2c5-d968ea003d84`
+- **Object ID**: `98d6b0f3-f7e7-43b9-a750-d6964d70eca6`
+- **Directory (Tenant) ID**: `cb612dec-8566-4f0d-ae8a-60635202a1c8`
+- **Subscription ID**: `15374487-4b97-4ad7-bad4-8dd4505ec4a8`
 - **Issuer**: `https://token.actions.githubusercontent.com`
-- **Subject Identifier (Production)**:
-  `repo:Vardhan158/KaizenAssests:ref:refs/heads/main`
-- **Subject Identifier (Pull Requests)**:
-  `repo:Vardhan158/KaizenAssests:pull_request`
-- **Audience**: `api://AzureADTokenExchange`
+- **Audiences**: `api://AzureADTokenExchange`
+- **Configured Subjects**:
+  1. `repo:Vardhan158/KaizenAssests:ref:refs/heads/main`
+  2. `repo:Vardhan158/KaizenAssests:environment:production`
+  3. `repo:Vardhan158/KaizenAssests:pull_request`
+  4. `repo:NimmyManiyan01/KaizenAssests:ref:refs/heads/main`
+  5. `repo:NimmyManiyan01/KaizenAssests:environment:production`
+  6. `repo:NimmyManiyan01/KaizenAssests:pull_request`
 
 ---
 
@@ -93,3 +101,4 @@ The following secrets and environment variables must be configured in GitHub (Re
      id-token: write   # Required for requesting the OIDC JWT token
      contents: read    # Read-only access to repository code
    ```
+
