@@ -54,3 +54,4 @@ export function setJourneyProgress(rawProgress: number, overview = 1) {
 
   journeyStore.taglineIndex = tIndex;
 }
+
