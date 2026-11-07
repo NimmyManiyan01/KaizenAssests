@@ -3,10 +3,11 @@ import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 import type { JourneyStage } from "./data/journeyStages";
 import { supplierJourney } from "./supplierJourney";
+import { journeyStore } from "./journeyStore";
 
 interface JourneyCameraProps {
   stages: JourneyStage[];
-  scrollProgress: number; // 0 to 1
+  scrollProgress?: number;
   overviewProgress?: number;
   supplierProgress?: number;
   mouseOffset: { x: number; y: number };
@@ -60,7 +61,9 @@ export function JourneyCamera({
   useFrame((_, delta) => {
     if (!keyframes || keyframes.length < 2) return;
 
-    const p = clamp(scrollProgress, 0, 1);
+    const p = clamp(scrollProgress !== undefined ? scrollProgress : journeyStore.scrollProgress, 0, 1);
+    const effectiveOverview = overviewProgress !== undefined ? overviewProgress : journeyStore.overviewProgress;
+    const effectiveSupplier = supplierProgress !== undefined ? supplierProgress : journeyStore.supplierProgress;
 
     // Find the bounding keyframe segment
     let idx = 0;
@@ -94,13 +97,13 @@ export function JourneyCamera({
     const easeInOutCubic = (val: number) =>
       val < 0.5 ? 4 * val * val * val : 1 - Math.pow(-2 * val + 2, 3) / 2;
 
-    const approach = easeInOutCubic(clamp(overviewProgress, 0, 1));
+    const approach = easeInOutCubic(clamp(effectiveOverview, 0, 1));
 
     desiredPos.lerp(warehouseFrontPos, 1 - approach);
     desiredTarget.lerp(warehouseFrontTarget, 1 - approach);
     // Hold the security checkpoint in view until the ASN document is revealed.
-    const supplierWeight = 1 - smoothstep(0.85, 1, supplierProgress);
-    const supplier = supplierJourney(supplierProgress);
+    const supplierWeight = 1 - smoothstep(0.85, 1, effectiveSupplier);
+    const supplier = supplierJourney(effectiveSupplier);
     const cameraDistance = size.width < 768 ? 24 : 17;
     desiredPos.lerp(
       scratch.front.set(supplier.truck.x - 11, 12, supplier.truck.z + cameraDistance),
@@ -232,7 +235,7 @@ export function JourneyCamera({
       );
     }
 
-    const pointerSmoothing = 1 - Math.exp(-12 * Math.min(delta, 0.1));
+    const pointerSmoothing = 1 - Math.exp(-18 * Math.min(delta, 0.1));
     pointer.current.x += (mouseOffset.x - pointer.current.x) * pointerSmoothing;
     pointer.current.y += (mouseOffset.y - pointer.current.y) * pointerSmoothing;
 
@@ -240,7 +243,7 @@ export function JourneyCamera({
     desiredPos.x += pointer.current.x * 0.45 * approach;
     desiredPos.y += pointer.current.y * 0.35 * approach;
 
-    const smoothing = 1 - Math.exp(-12 * Math.min(delta, 0.1));
+    const smoothing = 1 - Math.exp(-18 * Math.min(delta, 0.1));
     if (!initialized.current) {
       camera.position.copy(desiredPos);
       currentLookAt.current.copy(desiredTarget);

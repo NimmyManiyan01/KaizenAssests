@@ -4,6 +4,7 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { JOURNEY_STAGES, type JourneyStage } from "./data/journeyStages";
 import { JourneyCanvas } from "./JourneyCanvas";
 import { api } from "@/lib/api-client";
+import { journeyStore, setJourneyProgress } from "./journeyStore";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -29,16 +30,20 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
 
   const [mounted, setMounted] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [scrollProgress, setScrollProgress] = useState(0);
-  const [overviewProgress, setOverviewProgress] = useState(0);
+  const [taglineIndex, setTaglineIndex] = useState(0);
+  const [showPutawayHud, setShowPutawayHud] = useState(false);
+  const [putawayStored, setPutawayStored] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playSpeed, setPlaySpeed] = useState(1);
   const [isFreeOrbit, setIsFreeOrbit] = useState(false);
 
+  const activeIndexRef = useRef(0);
+  const taglineIndexRef = useRef(0);
+  const showPutawayHudRef = useRef(false);
+  const putawayStoredRef = useRef(false);
+
   const mouseOffset = useRef({ x: 0, y: 0 }).current;
   const targetProgress = useRef(0);
-  const displayedProgress = useRef(0);
-  const wakeScrollRef = useRef<(() => void) | null>(null);
 
   const introTweenRef = useRef<gsap.core.Tween | null>(null);
   const overviewRef = useRef({ val: 0 });
@@ -127,7 +132,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
         gateExits: count(exits),
       });
     };
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
       (window as any).requestIdleCallback(() => void loadSnapshot());
     } else {
       setTimeout(() => void loadSnapshot(), 1200);
@@ -175,18 +180,6 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
     [stages, liveSnapshot],
   );
 
-  const taglineIndex = useMemo(() => {
-    const p = Math.max(0, (scrollProgress - 0.12) / 0.88);
-    if (p < 0.12) return 0;
-    if (p < 0.25) return 1;
-    if (p < 0.38) return 2;
-    if (p < 0.55) return 3;
-    if (p < 0.68) return 4;
-    if (p < 0.78) return 5;
-    if (p < 0.9) return 6;
-    return 7;
-  }, [scrollProgress]);
-
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -201,7 +194,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
       delay: 0.8,
       ease: "power2.inOut",
       onUpdate: () => {
-        setOverviewProgress(overviewRef.current.val);
+        setJourneyProgress(0, overviewRef.current.val);
       },
     });
 
@@ -221,50 +214,13 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
     return () => window.removeEventListener("mousemove", move);
   }, [mounted, mouseOffset]);
 
-  // Native-refresh scroll damping
-  useEffect(() => {
-    if (!mounted) return;
-    let frame: number | null = null;
-    let previousTime = 0;
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const tick = (time: number) => {
-      const delta = previousTime ? Math.min((time - previousTime) / 1000, 0.05) : 1 / 120;
-      previousTime = time;
-      const target = targetProgress.current;
-      const current = displayedProgress.current;
-      const next = reducedMotion
-        ? target
-        : current + (target - current) * (1 - Math.exp(-20 * delta));
-      const settled = Math.abs(target - next) < 0.00001;
-      displayedProgress.current = settled ? target : next;
-      setScrollProgress(displayedProgress.current);
-      const nextIndex = Math.min(
-        stages.length - 1,
-        Math.max(0, Math.round(displayedProgress.current * (stages.length - 1))),
-      );
-      setActiveIndex((currentIndex) => (currentIndex === nextIndex ? currentIndex : nextIndex));
-      frame = settled ? null : requestAnimationFrame(tick);
-    };
-    wakeScrollRef.current = () => {
-      if (frame === null) {
-        previousTime = 0;
-        frame = requestAnimationFrame(tick);
-      }
-    };
-    wakeScrollRef.current();
-    return () => {
-      if (frame !== null) cancelAnimationFrame(frame);
-      wakeScrollRef.current = null;
-    };
-  }, [mounted, stages.length]);
-
   // Smooth continuous Play animation loop
   useEffect(() => {
     if (!isPlaying || !mounted) return;
 
     introTweenRef.current?.kill();
     overviewRef.current.val = 1;
-    setOverviewProgress(1);
+    setJourneyProgress(targetProgress.current, 1);
 
     let frame: number | null = null;
     let lastTime = performance.now();
@@ -283,7 +239,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
 
       targetProgress.current = nextProgress;
 
-      // Synchronize document scroll position without abrupt behavior:"smooth"
+      // Synchronize document scroll position without abrupt behavior
       const trigger = scrollTriggerRef.current;
       if (trigger) {
         const targetFraction =
@@ -292,7 +248,6 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
         window.scrollTo(0, targetScroll);
       }
 
-      wakeScrollRef.current?.();
       frame = requestAnimationFrame(playTick);
     };
 
@@ -320,21 +275,43 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
             introTweenRef.current.kill();
           }
 
-          if (rawProgress <= OVERVIEW_SCROLL_FRACTION) {
-            const op = rawProgress / OVERVIEW_SCROLL_FRACTION;
-            overviewRef.current.val = op;
-            setOverviewProgress(op);
-          } else {
-            overviewRef.current.val = 1;
-            setOverviewProgress(1);
+          const op =
+            rawProgress <= OVERVIEW_SCROLL_FRACTION
+              ? rawProgress / OVERVIEW_SCROLL_FRACTION
+              : 1;
+          overviewRef.current.val = op;
+
+          // Update shared GPU animation store without triggering React state cascade
+          setJourneyProgress(rawProgress, op);
+
+          // Update discrete active index ONLY when crossing stage boundaries
+          const nextIndex = Math.min(
+            stages.length - 1,
+            Math.max(0, Math.round(journeyStore.scrollProgress * (stages.length - 1))),
+          );
+          if (nextIndex !== activeIndexRef.current) {
+            activeIndexRef.current = nextIndex;
+            setActiveIndex(nextIndex);
           }
 
-          const p = Math.max(
-            0,
-            (rawProgress - OVERVIEW_SCROLL_FRACTION) / (1 - OVERVIEW_SCROLL_FRACTION),
-          );
-          targetProgress.current = p;
-          wakeScrollRef.current?.();
+          // Update discrete tagline index ONLY when passing tagline thresholds
+          if (journeyStore.taglineIndex !== taglineIndexRef.current) {
+            taglineIndexRef.current = journeyStore.taglineIndex;
+            setTaglineIndex(journeyStore.taglineIndex);
+          }
+
+          // Update discrete Putaway HUD visibility (Phase 4)
+          const sp = journeyStore.scrollProgress;
+          const showHud = sp >= 0.365 && sp <= 0.44;
+          if (showHud !== showPutawayHudRef.current) {
+            showPutawayHudRef.current = showHud;
+            setShowPutawayHud(showHud);
+          }
+          const stored = sp >= 0.39;
+          if (stored !== putawayStoredRef.current) {
+            putawayStoredRef.current = stored;
+            setPutawayStored(stored);
+          }
         },
       });
 
@@ -350,12 +327,12 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
     const replay = () => {
       introTweenRef.current?.kill();
       targetProgress.current = 0;
-      displayedProgress.current = 0;
       overviewRef.current.val = 0;
-      setScrollProgress(0);
-      setOverviewProgress(0);
+      setJourneyProgress(0, 0);
       setActiveIndex(0);
-      wakeScrollRef.current?.();
+      setTaglineIndex(0);
+      setShowPutawayHud(false);
+      setPutawayStored(false);
       requestAnimationFrame(() => {
         ScrollTrigger.refresh();
       });
@@ -372,7 +349,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
 
       introTweenRef.current?.kill();
       overviewRef.current.val = 1;
-      setOverviewProgress(1);
+      setJourneyProgress(journeyStore.progress, 1);
 
       const targetFraction =
         OVERVIEW_SCROLL_FRACTION + (index / (stages.length - 1)) * (1 - OVERVIEW_SCROLL_FRACTION);
@@ -388,7 +365,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
 
   const handleToggleTopView = useCallback(() => {
     introTweenRef.current?.kill();
-    const targetVal = overviewProgress < 0.5 ? 1 : 0;
+    const targetVal = overviewRef.current.val < 0.5 ? 1 : 0;
 
     if (targetVal === 0 && window.scrollY > 80) {
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -399,10 +376,10 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
       duration: 2.2,
       ease: "power2.inOut",
       onUpdate: () => {
-        setOverviewProgress(overviewRef.current.val);
+        setJourneyProgress(journeyStore.progress, overviewRef.current.val);
       },
     });
-  }, [overviewProgress]);
+  }, []);
 
   const handleTogglePlay = useCallback(() => {
     setIsPlaying((prev) => !prev);
@@ -431,8 +408,6 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
         <JourneyCanvas
           stages={liveStages}
           activeIndex={activeIndex}
-          scrollProgress={scrollProgress}
-          overviewProgress={overviewProgress}
           selectedAsn={asnRecords.find((asn) => String(asn.id || asn.asn_number) === selectedAsnId)}
           mouseOffset={mouseOffset}
           onSelectStage={handleSelectStage}
@@ -443,26 +418,30 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
           <div className="size-8 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
         </div>
       )}
-      {/* Cinematic tagline overlay replaces the operational landing HUD. */}
-      {false ? (
-        <div className="pointer-events-none absolute inset-x-0 top-24 sm:top-28 text-center transition-all duration-500">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-950/70 border border-cyan-500/40 backdrop-blur-md mb-2.5 shadow-[0_0_15px_rgba(6,182,212,0.3)]">
-            <span className="size-2 rounded-full bg-cyan-400 animate-pulse" />
-            <span className="font-mono text-[11px] font-bold tracking-[0.2em] text-cyan-300 uppercase">
-              FACILITY FRONT • FULL PERSPECTIVE
-            </span>
-          </div>
-          <h2 className="text-2xl sm:text-4xl font-black text-white tracking-tight drop-shadow-[0_2px_16px_rgba(0,0,0,0.8)]">
-            Logistics Terminal & Inbound Gate
-          </h2>
-          <p className="mt-1.5 text-xs sm:text-sm text-slate-300 max-w-md mx-auto drop-shadow font-medium px-4">
-            Full view of warehouse front facade, security gate, and inbound approach
-          </p>
-        </div>
-      ) : null}
 
+      {/* Putaway Verification Tag (Moved from 3D Drei Html to Native 2D DOM HUD for 60fps performance) */}
+      {showPutawayHud && (
+        <div className="pointer-events-none absolute bottom-6 left-4 max-w-[calc(100vw-2rem)] bg-slate-950/90 border border-emerald-500/70 px-4 py-3 rounded shadow-xl shadow-emerald-500/20 backdrop-blur z-30 text-left sm:bottom-8 sm:left-8 animate-in fade-in duration-300">
+          <div className="flex items-center justify-center gap-1.5 font-mono text-[10px] text-emerald-400 font-bold tracking-wider">
+            <span
+              className={`w-2 h-2 rounded-full ${putawayStored ? "bg-emerald-400" : "bg-cyan-400 animate-pulse"}`}
+            />
+            {putawayStored
+              ? "BIN AISLE-04-B1 : STORED ✓"
+              : "PUTAWAY : SLOTTING BIN..."}
+          </div>
+          <div className="text-[9px] font-mono text-slate-400 mt-0.5">
+            PLT-77291 • RACK-B-08 • TIER 01
+            {putawayStored && (
+              <div className="mt-1 text-emerald-300">INVENTORY UPDATED / AVAILABLE</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Cinematic Tagline Overlay */}
       <div
-        hidden={scrollProgress < 0.12}
+        hidden={taglineIndex === 0 && journeyStore.scrollProgress < 0.12}
         className="pointer-events-none absolute inset-x-0 top-[17%] z-30 flex -translate-y-1/2 justify-center px-6 text-center"
       >
         <p
