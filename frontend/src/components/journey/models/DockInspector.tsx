@@ -6,22 +6,27 @@ interface DockInspectorProps {
   position?: [number, number, number];
   rotation?: [number, number, number];
   inspectionProgress?: number; // 0 to 1
+  inspectionProgressRef?: React.MutableRefObject<number>;
 }
 
 export function DockInspector({
   position = [0, 0, 0],
   rotation = [0, 0, 0],
   inspectionProgress = 0,
+  inspectionProgressRef,
 }: DockInspectorProps) {
   const scannerArmRef = useRef<THREE.Group>(null);
   const headRef = useRef<THREE.Group>(null);
+  const scannerLaserRef = useRef<THREE.Group>(null);
+  const scannerDiodeMatRef = useRef<THREE.MeshStandardMaterial>(null);
 
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime();
+    const progress = inspectionProgressRef ? inspectionProgressRef.current : inspectionProgress;
 
     // Subtle human idling / scanning head motion
     if (headRef.current) {
-      if (inspectionProgress > 0 && inspectionProgress < 1) {
+      if (progress > 0 && progress < 1) {
         // Scanning back and forth across pallet cartons
         headRef.current.rotation.y = Math.sin(t * 3.5) * 0.22;
         headRef.current.rotation.x = 0.12 + Math.sin(t * 2.0) * 0.08;
@@ -33,11 +38,11 @@ export function DockInspector({
 
     // Handheld scanner aiming gesture
     if (scannerArmRef.current) {
-      if (inspectionProgress > 0 && inspectionProgress < 1) {
+      if (progress > 0 && progress < 1) {
         // Arm raised aiming scanner at pallet
         scannerArmRef.current.rotation.x = -0.75 + Math.sin(t * 4.0) * 0.12;
         scannerArmRef.current.rotation.z = -0.15;
-      } else if (inspectionProgress >= 1) {
+      } else if (progress >= 1) {
         // Inspection complete: Arm lowered with tablet checked
         scannerArmRef.current.rotation.x = -0.25;
         scannerArmRef.current.rotation.z = -0.05;
@@ -46,10 +51,21 @@ export function DockInspector({
         scannerArmRef.current.rotation.x = -0.35 + Math.sin(t * 1.5) * 0.05;
       }
     }
+
+    const isScanning = progress > 0.1 && progress < 0.95;
+    const isApproved = progress >= 0.95;
+    if (scannerLaserRef.current) {
+      scannerLaserRef.current.visible = isScanning;
+    }
+    if (scannerDiodeMatRef.current) {
+      const col = isScanning ? "#22d3ee" : isApproved ? "#22c55e" : "#ef4444";
+      scannerDiodeMatRef.current.color.set(col);
+      scannerDiodeMatRef.current.emissive.set(col);
+    }
   });
 
-  const isScanning = inspectionProgress > 0.1 && inspectionProgress < 0.95;
-  const isApproved = inspectionProgress >= 0.95;
+  const isScanningInitial = inspectionProgress > 0.1 && inspectionProgress < 0.95;
+  const isApprovedInitial = inspectionProgress >= 0.95;
 
   return (
     <group position={position} rotation={rotation}>
@@ -221,22 +237,21 @@ export function DockInspector({
             <mesh position={[0, 0.04, 0.07]}>
               <boxGeometry args={[0.05, 0.05, 0.03]} />
               <meshStandardMaterial
-                color={isScanning ? "#22d3ee" : isApproved ? "#22c55e" : "#ef4444"}
-                emissive={isScanning ? "#22d3ee" : isApproved ? "#22c55e" : "#ef4444"}
+                ref={scannerDiodeMatRef}
+                color={isScanningInitial ? "#22d3ee" : isApprovedInitial ? "#22c55e" : "#ef4444"}
+                emissive={isScanningInitial ? "#22d3ee" : isApprovedInitial ? "#22c55e" : "#ef4444"}
                 emissiveIntensity={4}
               />
             </mesh>
 
             {/* Active Barcode Laser Scan Beam Sweeping toward Pallet */}
-            {isScanning && (
-              <group position={[0, 0.04, 0.1]}>
-                <mesh position={[0, 0, 0.8]} rotation={[Math.PI / 2, 0, 0]}>
-                  <cylinderGeometry args={[0.008, 0.04, 1.6, 8]} />
-                  <meshBasicMaterial color="#22d3ee" transparent opacity={0.65} />
-                </mesh>
-                <pointLight color="#22d3ee" intensity={2.5} distance={3.5} />
-              </group>
-            )}
+            <group ref={scannerLaserRef} position={[0, 0.04, 0.1]} visible={isScanningInitial}>
+              <mesh position={[0, 0, 0.8]} rotation={[Math.PI / 2, 0, 0]}>
+                <cylinderGeometry args={[0.008, 0.04, 1.6, 8]} />
+                <meshBasicMaterial color="#22d3ee" transparent opacity={0.65} />
+              </mesh>
+              <pointLight color="#22d3ee" intensity={2.5} distance={3.5} />
+            </group>
           </group>
         </group>
       </group>

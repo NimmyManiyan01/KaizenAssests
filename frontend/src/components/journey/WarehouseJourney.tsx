@@ -441,7 +441,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
 
       {/* Cinematic Tagline Overlay */}
       <div
-        hidden={taglineIndex === 0 && journeyStore.scrollProgress < 0.12}
+
         className="pointer-events-none absolute inset-x-0 top-[17%] z-30 flex -translate-y-1/2 justify-center px-6 text-center"
       >
         <p

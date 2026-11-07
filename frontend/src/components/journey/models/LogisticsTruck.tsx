@@ -1,3 +1,6 @@
+import { useRef } from "react";
+import * as THREE from "three";
+import { useFrame } from "@react-three/fiber";
 import { RoundedBox } from "@react-three/drei";
 
 interface LogisticsTruckProps {
@@ -7,6 +10,11 @@ interface LogisticsTruckProps {
   doorsOpenProgress?: number;
   wheelRotation?: number;
   isReversing?: boolean;
+  animRef?: React.MutableRefObject<{
+    doorsOpenProgress: number;
+    wheelRotation: number;
+    isReversing: boolean;
+  }>;
 }
 
 type Vector = [number, number, number];
@@ -71,9 +79,9 @@ function Lamp({
   );
 }
 
-function Wheel({ position, spin, side }: { position: Vector; spin: number; side: number }) {
+function Wheel({ position, spin, side, groupRef }: { position: Vector; spin: number; side: number; groupRef?: (el: THREE.Group | null) => void }) {
   return (
-    <group position={position} rotation={[spin, 0, 0]}>
+    <group ref={groupRef} position={position} rotation={[spin, 0, 0]}>
       <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
         <cylinderGeometry args={[0.49, 0.49, 0.34, 32]} />
         <meshStandardMaterial color="#171b20" roughness={0.94} />
@@ -116,7 +124,24 @@ export function LogisticsTruck({
   doorsOpenProgress = 0,
   wheelRotation = 0,
   isReversing = false,
+  animRef,
 }: LogisticsTruckProps) {
+  const leftDoorRef = useRef<THREE.Group>(null);
+  const rightDoorRef = useRef<THREE.Group>(null);
+  const wheelsRef = useRef<(THREE.Group | null)[]>([]);
+
+  useFrame(() => {
+    if (!animRef?.current) return;
+    const { doorsOpenProgress: dop, wheelRotation: wr } = animRef.current;
+    const angle = Math.max(0, Math.min(1, dop)) * 2.2;
+    if (leftDoorRef.current) leftDoorRef.current.rotation.y = -angle;
+    if (rightDoorRef.current) rightDoorRef.current.rotation.y = angle;
+    for (let i = 0; i < wheelsRef.current.length; i++) {
+      const w = wheelsRef.current[i];
+      if (w) w.rotation.x = wr;
+    }
+  });
+
   const doorAngle = Math.max(0, Math.min(1, doorsOpenProgress)) * 2.2;
   return (
     <group position={position} rotation={rotation} scale={scale}>
@@ -128,7 +153,15 @@ export function LogisticsTruck({
         <group key={z}>
           <Panel position={[0, 0.49, z]} size={[2.25, 0.15, 0.16]} color="#252b30" />
           {[-1, 1].map((side) => (
-            <Wheel key={side} position={[side * 1.12, 0.49, z]} side={side} spin={wheelRotation} />
+            <Wheel
+              key={side}
+              position={[side * 1.12, 0.49, z]}
+              side={side}
+              spin={wheelRotation}
+              groupRef={(el) => {
+                if (el && !wheelsRef.current.includes(el)) wheelsRef.current.push(el);
+              }}
+            />
           ))}
         </group>
       ))}
@@ -277,7 +310,11 @@ export function LogisticsTruck({
               color="#ffac42"
             />
           ))}
-          <group position={[side * 1.14, 1.98, -4.83]} rotation={[0, side * doorAngle, 0]}>
+          <group
+            ref={side === -1 ? leftDoorRef : rightDoorRef}
+            position={[side * 1.14, 1.98, -4.83]}
+            rotation={[0, side * doorAngle, 0]}
+          >
             <Panel position={[-side * 0.555, 0, 0]} size={[1.1, 2.05, 0.075]} color="#d1dae1" />
             {[-0.34, -0.79].map((offset) => (
               <Panel

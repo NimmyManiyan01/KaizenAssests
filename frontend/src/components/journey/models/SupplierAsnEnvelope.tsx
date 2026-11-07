@@ -1,8 +1,8 @@
 import { Html, Text } from "@react-three/drei";
 import { supplierJourney } from "../supplierJourney";
-import type { GroupProps } from "@react-three/fiber";
+import type { ComponentProps } from "react";
 
-interface SupplierAsnEnvelopeProps extends GroupProps {
+interface SupplierAsnEnvelopeProps extends ComponentProps<"group"> {
   progress: number;
   asn?: any;
 }

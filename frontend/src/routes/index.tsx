@@ -96,12 +96,35 @@ function HomePage() {
       <main className="w-full">
         <Suspense
           fallback={
-            <section className="relative flex h-screen w-full items-center justify-center overflow-hidden bg-[#e7e9e5]">
-              <div className="text-center">
-                <div className="mx-auto mb-4 size-8 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-300">
-                  Loading logistics journey…
+            <section className="relative flex min-h-screen w-full flex-col items-center justify-center overflow-hidden bg-[#e7e9e5] px-6 text-center select-none">
+              <div
+                className="absolute inset-0 opacity-20 pointer-events-none"
+                style={{
+                  backgroundImage: "radial-gradient(circle at 1px 1px, #0891b2 1px, transparent 0)",
+                  backgroundSize: "32px 32px",
+                }}
+              />
+              <div className="relative z-10 max-w-4xl space-y-6">
+                <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-widest text-cyan-800 shadow-sm">
+                  <span className="size-2 rounded-full bg-cyan-500 animate-pulse" />
+                  Autonomous Logistics Twin • 60 FPS
+                </div>
+                <h1 className="text-4xl sm:text-6xl font-black tracking-tight text-slate-900">
+                  CONTINUOUS 3D LOGISTICS INTELLIGENCE
+                </h1>
+                <p className="max-w-2xl mx-auto text-base sm:text-lg font-medium text-slate-600">
+                  From security gate arrival and dock inspection to automated forklift putaway,
+                  robotic assembly, and vehicle exit clearance.
                 </p>
+                <div className="pt-4 flex flex-col items-center gap-3">
+                  <div className="flex items-center gap-2 font-mono text-xs font-bold tracking-wider text-cyan-700">
+                    <div className="size-4 animate-spin rounded-full border-2 border-cyan-600 border-t-transparent" />
+                    INITIALIZING 3D WAREHOUSE TWIN…
+                  </div>
+                  <div className="h-1.5 w-48 overflow-hidden rounded-full bg-slate-300">
+                    <div className="h-full w-2/3 animate-pulse rounded-full bg-cyan-600" />
+                  </div>
+                </div>
               </div>
             </section>
           }

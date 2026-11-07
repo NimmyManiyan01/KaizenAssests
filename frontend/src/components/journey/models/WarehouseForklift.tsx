@@ -6,12 +6,14 @@ interface WarehouseForkliftProps {
   position?: [number, number, number];
   rotation?: [number, number, number];
   forkLiftProgress?: number; // 0 to 1 (fork height)
+  liftProgressRef?: React.MutableRefObject<number>;
 }
 
 export function WarehouseForklift({
   position = [0, 0, 0],
   rotation = [0, 0, 0],
   forkLiftProgress = 0,
+  liftProgressRef,
 }: WarehouseForkliftProps) {
   const forksCarriageRef = useRef<THREE.Group>(null);
   const innerMastRef = useRef<THREE.Group>(null);
@@ -23,18 +25,19 @@ export function WarehouseForklift({
   // Synchronized kinematic elevation & dynamic safety strobe
   useFrame(({ clock }) => {
     // 1. Carriage vertical elevation (Y: 0.15 to Y: 2.8) - exact height required for pallet pickup
-    const carriageY = 0.15 + forkLiftProgress * 2.65;
+    const lift = liftProgressRef ? liftProgressRef.current : forkLiftProgress;
+    const carriageY = 0.15 + lift * 2.65;
     if (forksCarriageRef.current) {
       forksCarriageRef.current.position.y = carriageY;
     }
 
     // 2. Telescopic inner mast elevation (realistic 2-stage duplex mast behavior)
     if (innerMastRef.current) {
-      innerMastRef.current.position.y = 1.5 + Math.max(0, forkLiftProgress - 0.25) * 1.35;
+      innerMastRef.current.position.y = 1.5 + Math.max(0, lift - 0.25) * 1.35;
     }
 
     // 3. Hydraulic lift cylinder chrome rod extension
-    const pistonScale = 1 + forkLiftProgress * 1.6;
+    const pistonScale = 1 + lift * 1.6;
     if (leftPistonRef.current) leftPistonRef.current.scale.y = pistonScale;
     if (rightPistonRef.current) rightPistonRef.current.scale.y = pistonScale;
 

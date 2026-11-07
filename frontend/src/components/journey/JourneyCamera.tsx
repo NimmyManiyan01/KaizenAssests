@@ -57,23 +57,35 @@ export function JourneyCamera({
   );
   const pointer = useRef({ x: 0, y: 0 });
   const currentLookAt = useRef(new THREE.Vector3(0.8, 1.8, 23.0));
+  const cameraProgress = useRef(0);
 
   useFrame((_, delta) => {
     if (!keyframes || keyframes.length < 2) return;
 
-    const p = clamp(scrollProgress !== undefined ? scrollProgress : journeyStore.scrollProgress, 0, 1);
+    const targetP = clamp(scrollProgress !== undefined ? scrollProgress : journeyStore.scrollProgress, 0, 1);
+    if (!initialized.current) {
+      cameraProgress.current = targetP;
+    } else {
+      const dp = Math.abs(targetP - cameraProgress.current);
+      const adaptiveStiffness = 24 + Math.min(56, dp * 160);
+      const progressSmoothing = 1 - Math.exp(-adaptiveStiffness * Math.min(delta, 0.1));
+      cameraProgress.current += (targetP - cameraProgress.current) * progressSmoothing;
+    }
+    const p = cameraProgress.current;
     const effectiveOverview = overviewProgress !== undefined ? overviewProgress : journeyStore.overviewProgress;
     const effectiveSupplier = supplierProgress !== undefined ? supplierProgress : journeyStore.supplierProgress;
 
     // Find the bounding keyframe segment
     let idx = 0;
     for (let i = 0; i < keyframes.length - 1; i++) {
-      if (p >= keyframes[i].p && p <= keyframes[i + 1].p) {
+      const curr = keyframes[i];
+      const next = keyframes[i + 1];
+      if (curr && next && p >= curr.p && p <= next.p) {
         idx = i;
         break;
       }
     }
-    const k1 = keyframes[idx];
+    const k1 = keyframes[idx] || keyframes[0]!;
     const k2 = keyframes[idx + 1] || k1;
     const t = k2.p > k1.p ? smoothstep(k1.p, k2.p, p) : 0;
 
@@ -243,7 +255,7 @@ export function JourneyCamera({
     desiredPos.x += pointer.current.x * 0.45 * approach;
     desiredPos.y += pointer.current.y * 0.35 * approach;
 
-    const smoothing = 1 - Math.exp(-18 * Math.min(delta, 0.1));
+    const smoothing = 1 - Math.exp(-32 * Math.min(delta, 0.1));
     if (!initialized.current) {
       camera.position.copy(desiredPos);
       currentLookAt.current.copy(desiredTarget);

@@ -1,28 +1,48 @@
-import QRCode from "qrcode";
-import { useEffect, useState } from "react";
 import { CanvasTexture, NearestFilter, SRGBColorSpace } from "three";
+
+// Shared singleton QR canvas texture to eliminate GPU ReadPixels stalls
+let sharedQrTexture: CanvasTexture | null = null;
+export function getSharedQrTexture(): CanvasTexture | null {
+  if (typeof document === "undefined") return null;
+  if (!sharedQrTexture) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, 128, 128);
+      ctx.fillStyle = "#0f172a";
+      // Position detection markers
+      const marker = (x: number, y: number) => {
+        ctx.fillRect(x, y, 28, 28);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(x + 4, y + 4, 20, 20);
+        ctx.fillStyle = "#0f172a";
+        ctx.fillRect(x + 8, y + 8, 12, 12);
+      };
+      marker(8, 8);
+      marker(92, 8);
+      marker(8, 92);
+      // Synchronous industrial matrix barcode pattern
+      for (let r = 0; r < 14; r++) {
+        for (let c = 0; c < 14; c++) {
+          if ((r * 11 + c * 17) % 3 === 0) {
+            ctx.fillRect(40 + c * 3.5, 12 + r * 7, 3, 3);
+          }
+        }
+      }
+      sharedQrTexture = new CanvasTexture(canvas);
+      sharedQrTexture.colorSpace = SRGBColorSpace;
+      sharedQrTexture.magFilter = NearestFilter;
+    }
+  }
+  return sharedQrTexture;
+}
 
 // These labels belong to the illustrative landing-page pallet, not stock records.
 function BoxQrLabels({ bx, bz }: { bx: number; bz: number }) {
-  const [texture, setTexture] = useState<CanvasTexture | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    let generated: CanvasTexture | undefined;
-    const canvas = document.createElement("canvas");
-    void QRCode.toCanvas(canvas, "DEMO:QR-MAT-DOCK-02-PLT-77291", { width: 256, margin: 4 }).then(
-      () => {
-        if (cancelled) return;
-        generated = new CanvasTexture(canvas);
-        generated.colorSpace = SRGBColorSpace;
-        generated.magFilter = NearestFilter;
-        setTexture(generated);
-      },
-    );
-    return () => {
-      cancelled = true;
-      generated?.dispose();
-    };
-  }, []);
+  const texture = getSharedQrTexture();
   if (!texture) return null;
   return (
     <>

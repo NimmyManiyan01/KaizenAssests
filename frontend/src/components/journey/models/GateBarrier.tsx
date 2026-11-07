@@ -1,3 +1,6 @@
+import { useRef } from "react";
+import * as THREE from "three";
+import { useFrame } from "@react-three/fiber";
 import { SecurityRoom } from "./SecurityRoom";
 
 interface GateBarrierProps {
@@ -6,6 +9,7 @@ interface GateBarrierProps {
   barrierOpenProgress?: number; // 0 (closed) to 1 (fully open)
   securitySide?: "left" | "right";
   gateType?: "entry" | "exit";
+  openProgressRef?: React.MutableRefObject<number>;
 }
 
 export function GateBarrier({
@@ -14,8 +18,24 @@ export function GateBarrier({
   barrierOpenProgress = 0,
   securitySide = "right",
   gateType = "entry",
+  openProgressRef,
 }: GateBarrierProps) {
+  const armRef = useRef<THREE.Group>(null);
+  const lightMatRef = useRef<THREE.MeshStandardMaterial>(null);
   const opening = Math.max(0, Math.min(1, barrierOpenProgress));
+
+  useFrame(() => {
+    if (!openProgressRef) return;
+    const openVal = Math.max(0, Math.min(1, openProgressRef.current));
+    if (armRef.current) {
+      armRef.current.rotation.z = -openVal * 1.5;
+    }
+    if (lightMatRef.current) {
+      const isGreen = openVal > 0.95;
+      lightMatRef.current.color.set(isGreen ? "#22c55e" : "#ef4444");
+      lightMatRef.current.emissive.set(isGreen ? "#22c55e" : "#ef4444");
+    }
+  });
 
   return (
     <group position={position} rotation={rotation}>
@@ -48,14 +68,15 @@ export function GateBarrier({
         <mesh position={[0, 0.82, 0]}>
           <cylinderGeometry args={[0.12, 0.12, 0.15, 12]} />
           <meshStandardMaterial
-            color={opening > 0.95 ? "#22c35e" : "#ef4444"}
+            ref={lightMatRef}
+            color={opening > 0.95 ? "#22c55e" : "#ef4444"}
             emissive={opening > 0.95 ? "#22c55e" : "#ef4444"}
             emissiveIntensity={2}
           />
         </mesh>
 
         {/* ─── ROTATING BOOM BARRIER ARM ─── */}
-        <group position={[-0.26, 0.5, 0]} rotation={[0, 0, -opening * 1.5]}>
+        <group ref={armRef} position={[-0.26, 0.5, 0]} rotation={[0, 0, -opening * 1.5]}>
           {/* Main Arm (Red/White Safety Striped) */}
           <mesh position={[-2.4, 0, 0]} castShadow>
             <boxGeometry args={[4.8, 0.12, 0.08]} />
