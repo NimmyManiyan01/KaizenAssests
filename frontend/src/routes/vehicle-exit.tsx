@@ -65,7 +65,7 @@ export const Route = createFileRoute("/vehicle-exit")({
       "ADMIN",
       "SUPERUSER",
     ]),
-  head: () => ({ meta: [{ title: "Vehicle Exit · Outbound Gate Security · KaizenAssests" }] }),
+  head: () => ({ meta: [{ title: "Vehicle Exit · Outbound Gate Security · WareHub" }] }),
   component: VehicleExit,
 });
 

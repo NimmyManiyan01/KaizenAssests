@@ -3191,7 +3191,7 @@ function GrnPageWorkflow() {
         <body>
           <div class="header">
             <div>
-              <div class="brand">KAIZENASSESTS • GOODS RECEIPT NOTE</div>
+              <div class="brand">WAREHUB • GOODS RECEIPT NOTE</div>
               <p style="margin:2px 0 0;font-size:11px;color:#64748b;">Official Material Inbound Quality & Stock Entry Certificate</p>
             </div>
             <div class="tag">GRN NO: ${grnNum}</div>
@@ -7358,7 +7358,7 @@ function GrnPageWorkflow() {
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
                 Publishes the damage return in the supplier application for {header.supplier_name}{" "}
-                to review. and alerts the internal Procurement team in KaizenAssests.
+                to review. and alerts the internal Procurement team in WareHub.
               </DialogDescription>
             </DialogHeader>
 

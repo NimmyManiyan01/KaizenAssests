@@ -48,7 +48,7 @@ import {
 export const Route = createFileRoute("/dock-management")({
   head: () => ({
     meta: [
-      { title: "Dock Management · KaizenAssests" },
+      { title: "Dock Management · WareHub" },
       {
         name: "description",
         content:

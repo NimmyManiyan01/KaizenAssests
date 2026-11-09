@@ -630,8 +630,8 @@ export function AppShell({
                   />
                 </div>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold tracking-tight">KaizenAssests</p>
-                  <p className="truncate text-[11px] text-muted-foreground">Pune DC - Plant 1200</p>
+                  <p className="truncate text-sm font-bold tracking-tight">WareHub</p>
+                  <p className="truncate text-[10px] text-muted-foreground font-medium">Powered by Kaizentrix Global Solutions</p>
                 </div>
               </div>
               <button
@@ -719,10 +719,10 @@ export function AppShell({
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold tracking-wider uppercase text-sidebar-foreground">
-                    KaizenAssests
+                    WareHub
                   </p>
-                  <p className="truncate text-[10px] font-mono text-sidebar-foreground/80 font-semibold">
-                    Pune DC · Plant 1200
+                  <p className="truncate text-[9.5px] text-sidebar-foreground/80 font-medium leading-tight">
+                    Powered by Kaizentrix Global Solutions
                   </p>
                 </div>
               </div>

@@ -37,7 +37,7 @@ import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/assembly-dashboard")({
   beforeLoad: () => requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER"]),
-  head: () => ({ meta: [{ title: "Assembly Dashboard · KaizenAssests" }] }),
+  head: () => ({ meta: [{ title: "Assembly Dashboard · WareHub" }] }),
   component: AssemblyDashboard,
 });
 

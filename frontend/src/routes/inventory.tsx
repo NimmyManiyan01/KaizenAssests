@@ -64,7 +64,7 @@ import warehouseHero from "@/assets/warehouse-operations-hero.png";
 export const Route = createFileRoute("/inventory")({
   head: () => ({
     meta: [
-      { title: "Warehouse Module · KaizenAssests" },
+      { title: "Warehouse Module · WareHub" },
       {
         name: "description",
         content:

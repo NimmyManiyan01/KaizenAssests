@@ -40,7 +40,7 @@ import type { AssemblyMaterialConsumptionSummary, AssemblyMaterialQrVerification
 
 export const Route = createFileRoute("/assembly/production")({
   beforeLoad: () => requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER"]),
-  head: () => ({ meta: [{ title: "Production · KaizenAssests" }] }),
+  head: () => ({ meta: [{ title: "Production · WareHub" }] }),
   component: AssemblyProductionPage,
 });
 

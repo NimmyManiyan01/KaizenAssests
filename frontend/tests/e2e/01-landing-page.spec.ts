@@ -6,8 +6,8 @@ test.describe('Module 01: Landing Page & Three.js Canvas Experience', () => {
     expect(res?.status()).toBe(200);
 
     // Verify brand title and text
-    await expect(page).toHaveTitle(/Kaizen/i);
-    const brand = page.getByText('KaizenAssests').first();
+    await expect(page).toHaveTitle(/WareHub/i);
+    const brand = page.getByText('WareHub').first();
     await expect(brand).toBeVisible();
 
     // Verify Sign In CTA

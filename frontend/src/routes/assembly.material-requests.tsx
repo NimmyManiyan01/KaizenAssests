@@ -48,7 +48,7 @@ import { cn, generateProductSKU } from "@/lib/utils";
 
 export const Route = createFileRoute("/assembly/material-requests")({
   beforeLoad: () => requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER"]),
-  head: () => ({ meta: [{ title: "Material Requests · KaizenAssests" }] }),
+  head: () => ({ meta: [{ title: "Material Requests · WareHub" }] }),
   component: AssemblyMaterialRequestsPage,
 });
 

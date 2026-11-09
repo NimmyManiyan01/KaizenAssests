@@ -29,7 +29,7 @@ import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
 
 export const Route = createFileRoute("/vehicle-queue")({
-  head: () => ({ meta: [{ title: "Inbound Arrivals · KaizenAssests" }] }),
+  head: () => ({ meta: [{ title: "Inbound Arrivals · WareHub" }] }),
   component: InboundArrivals,
 });
 

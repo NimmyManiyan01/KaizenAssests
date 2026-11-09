@@ -17,8 +17,8 @@ test.describe('Phase 0: Reconnaissance & Infrastructure Verification', () => {
     console.log(`[Recon] Landing page loaded in ${loadTime}ms with HTTP ${response?.status()}`);
 
     // Verify Title & Brand
-    await expect(page).toHaveTitle(/Kaizen/i);
-    const brandElement = page.getByText('KaizenAssests').first();
+    await expect(page).toHaveTitle(/WareHub/i);
+    const brandElement = page.getByText('WareHub').first();
     await expect(brandElement).toBeVisible({ timeout: 15000 });
 
     // Verify Sign In CTA

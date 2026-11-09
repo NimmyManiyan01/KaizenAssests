@@ -100,7 +100,7 @@ export async function printOriginalMaterialQrs(materials: Material[], warning = 
   try {
     popup.opener = null;
     const doc = popup.document;
-    doc.title = "KAIZENX - Original Material QRs";
+    doc.title = "WareHub - Original Material QRs";
     doc.body.textContent = "Preparing original material QR labels...";
     const urls = await Promise.all(materials.map(renderOriginalMaterialQr));
     if (popup.closed) throw new Error("The print window was closed. Please try again.");
@@ -128,7 +128,7 @@ export async function printOriginalMaterialQrs(materials: Material[], warning = 
       const card = doc.createElement("section");
       card.className = "label";
       const heading = doc.createElement("h1");
-      heading.textContent = "KAIZENX — ORIGINAL MATERIAL QR";
+      heading.textContent = "WAREHUB — ORIGINAL MATERIAL QR";
       card.appendChild(heading);
       for (const [label, value] of [
         ["Material Name", material.material_name],

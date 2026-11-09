@@ -262,8 +262,8 @@ export function SecureAssistant() {
       <button
         type="button"
         suppressHydrationWarning
-        aria-label="Open KaizenAssests assistant"
-        title="KaizenAssests Assistant"
+        aria-label="Open WareHub assistant"
+        title="WareHub Assistant"
         onClick={() => setOpen(true)}
         className="fixed bottom-5 right-5 z-40 grid size-12 place-items-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white shadow-lg shadow-blue-900/20 transition duration-200 hover:-translate-y-0.5 hover:shadow-xl"
       >
@@ -276,7 +276,7 @@ export function SecureAssistant() {
         >
           <section
             role="dialog"
-            aria-label="KaizenAssests Assistant"
+            aria-label="WareHub Assistant"
             onClick={(event) => event.stopPropagation()}
             className="absolute bottom-4 right-4 flex h-[min(690px,calc(100vh-32px))] w-[min(440px,calc(100vw-32px))] flex-col overflow-hidden rounded-[26px] border border-blue-100 bg-white shadow-[0_24px_80px_-24px_rgba(15,23,42,0.45)]"
           >
@@ -286,7 +286,7 @@ export function SecureAssistant() {
                   <Bot className="size-5" />
                 </span>
                 <div>
-                  <p className="text-sm font-bold tracking-tight">KaizenAssests Assistant</p>
+                  <p className="text-sm font-bold tracking-tight">WareHub Assistant</p>
                   <p className="flex items-center gap-1.5 text-[11px] text-blue-100">
                     <span className="size-1.5 rounded-full bg-emerald-300" />
                     {module.label} workspace · Read-only help

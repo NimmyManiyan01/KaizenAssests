@@ -39,7 +39,7 @@ import { isValidInspectorName, parseNonNegativeNumber } from "@/lib/input-valida
 export const Route = createFileRoute("/assembly/quality")({
   beforeLoad: () =>
     requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER", "QUALITY", "QC"]),
-  head: () => ({ meta: [{ title: "Quality Inspection · KaizenAssests" }] }),
+  head: () => ({ meta: [{ title: "Quality Inspection · WareHub" }] }),
   component: AssemblyQualityPage,
 });
 

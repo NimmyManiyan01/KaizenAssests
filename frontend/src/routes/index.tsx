@@ -15,6 +15,9 @@ const WarehouseJourney = lazy(() =>
 );
 
 export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [{ title: "WareHub" }],
+  }),
   beforeLoad: () => {
     // Landing page is public and must never trigger redirects to /login
     return;
@@ -45,6 +48,7 @@ function HomePage() {
   };
 
   const scrollToTop = () => {
+    window.dispatchEvent(new Event("warehub:replay-journey"));
     window.dispatchEvent(new Event("kaizenassests:replay-journey"));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -56,7 +60,7 @@ function HomePage() {
     >
       {/* Top Floating Glass Header */}
       <header
-        className={`fixed top-0 left-0 right-0 z-50 border-b backdrop-blur-xl transition-all duration-300 ${isDarkMode ? "border-white/10 bg-slate-950/75" : isScrolled ? "border-slate-200/70 bg-white/70" : "border-transparent bg-white/25"}`}
+        className={`fixed top-0 left-0 right-0 z-50 border-b backdrop-blur-xl transition-all duration-300 ${isDarkMode ? "border-white/10 bg-slate-950/75" : isScrolled ? "border-slate-800/80 bg-slate-950/80 shadow-lg" : "border-transparent bg-slate-950/35"}`}
       >
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2.5 sm:px-6 sm:py-3">
           <button
@@ -68,16 +72,19 @@ function HomePage() {
               <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-cyan-500/20 to-indigo-500/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 blur-sm -z-10" />
               <img
                 src={logoUrl}
-                alt="Kaizentrix Logo"
+                alt="GTVP Logo"
                 className="h-8 w-auto object-contain drop-shadow-[0_2px_8px_rgba(6,182,212,0.45)]"
               />
             </div>
             <div className="flex flex-col">
               <div className="flex items-center gap-1.5">
-                <span className="text-base font-black tracking-wider uppercase bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 dark:from-cyan-300 dark:via-blue-400 dark:to-indigo-300 bg-clip-text text-transparent">
-                  KaizenAssests
+                <span className="text-base font-black tracking-wider uppercase text-white drop-shadow-[0_2px_8px_rgba(6,182,212,0.6)]">
+                  Ware<span className="bg-gradient-to-r from-cyan-200 to-cyan-400 bg-clip-text text-transparent">Hub</span>
                 </span>
               </div>
+              <span className="text-[10px] font-bold text-cyan-200 drop-shadow-[0_1px_4px_rgba(0,0,0,0.8)] tracking-wide">
+                Powered by Kaizentrix Global Solutions
+              </span>
             </div>
           </button>
 
@@ -184,7 +191,7 @@ function HomePage() {
         className={`border-t py-10 text-center text-xs transition-colors duration-300 relative z-10 ${isDarkMode ? "border-white/10 bg-slate-950 text-slate-500" : "border-slate-200 bg-slate-50 text-slate-600"}`}
       >
         <div className="mx-auto max-w-7xl px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p>© 2026 Kaizentrix Global Solutions. KaizenAssests Enterprise Logistics OS.</p>
+          <p>© 2026 Kaizentrix Global Solutions. WareHub Enterprise Logistics OS.</p>
           <p className="font-mono text-cyan-600 dark:text-cyan-500/60">
             Continuous 3D Logistics Lifecycle • Gate to Exit
           </p>

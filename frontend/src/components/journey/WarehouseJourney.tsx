@@ -337,8 +337,12 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
         ScrollTrigger.refresh();
       });
     };
+    window.addEventListener("warehub:replay-journey", replay);
     window.addEventListener("kaizenassests:replay-journey", replay);
-    return () => window.removeEventListener("kaizenassests:replay-journey", replay);
+    return () => {
+      window.removeEventListener("warehub:replay-journey", replay);
+      window.removeEventListener("kaizenassests:replay-journey", replay);
+    };
   }, []);
 
   // Jump to specific stage

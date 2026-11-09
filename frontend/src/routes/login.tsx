@@ -23,8 +23,12 @@ import {
   isAuthenticated,
 } from "@/lib/auth-utils";
 import hero from "@/assets/login-warehouse.png";
+import logoUrl from "@/assets/Logo.png";
 
 export const Route = createFileRoute("/login")({
+  head: () => ({
+    meta: [{ title: "WareHub" }],
+  }),
   beforeLoad: () => {
     if (typeof window !== "undefined" && isAuthenticated())
       throw redirect({ to: getDefaultRouteForUser(getUserInfo()) as any });
@@ -114,16 +118,20 @@ function LoginPage() {
     >
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,#f7faffea_0%,#f1f6ffcf_23%,#e8f3ff78_34%,transparent_45%),linear-gradient(112deg,transparent_56%,#edf4ffb8_66%,#f5f8ffd0_100%)]" />
       <section className="static z-10 min-h-0 p-0">
-        <header className="relative flex items-center gap-2.5 min-[1000px]:absolute min-[1000px]:top-[4%] min-[1000px]:left-[4%] min-[1000px]:gap-[.7vw]">
-          <div className="text-[#1268ff] [&_svg]:size-11 [&_svg]:stroke-[2.3] min-[1000px]:[&_svg]:size-[2.7vw]">
-            <Warehouse aria-hidden="true" />
+        <header className="relative flex items-center gap-3 min-[1000px]:absolute min-[1000px]:top-[4%] min-[1000px]:left-[4%] min-[1000px]:gap-[.7vw]">
+          <div className="relative flex h-11 w-16 shrink-0 items-center justify-center rounded-xl bg-white p-1 shadow-sm border border-[#dae4f3] min-[1000px]:h-[2.9vw] min-[1000px]:w-[4.2vw] min-[1000px]:rounded-[.7vw]">
+            <img
+              src={logoUrl}
+              alt="GTVP Logo"
+              className="h-full w-full object-contain"
+            />
           </div>
           <div>
             <div className="text-[26px] leading-[1.15] font-black tracking-[-.06vw] min-[1000px]:text-[1.6vw]">
-              KaizenAssets
+              WareHub
             </div>
-            <div className="mt-[.25vw] ml-0.5 text-[9px] font-bold tracking-[3px] text-[#637694] min-[1000px]:text-[.6vw] min-[1000px]:tracking-[.2vw]">
-              INDUSTRIAL SYSTEMS
+            <div className="mt-[.25vw] ml-0.5 text-[9px] font-bold tracking-[1.5px] text-[#637694] uppercase min-[1000px]:text-[.6vw] min-[1000px]:tracking-[.15vw]">
+              Powered by Kaizentrix Global Solutions
             </div>
           </div>
         </header>
@@ -192,7 +200,7 @@ function LoginPage() {
             Staff Login
           </h2>
           <p className="m-0 text-[15px] leading-[1.35] text-[#65789b] max-[999px]:[&_br]:hidden min-[1000px]:text-[.96vw]">
-            Enter your credentials to access the KaizenAssets
+            Enter your credentials to access the WareHub
             <br />
             management console.
           </p>

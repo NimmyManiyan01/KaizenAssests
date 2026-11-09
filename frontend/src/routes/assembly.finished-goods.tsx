@@ -50,7 +50,7 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/assembly/finished-goods")({
   beforeLoad: () =>
     requireRole(["ASSEMBLY_MANAGER", "ASSEMBLY", "ADMIN", "SUPERUSER", "WAREHOUSE_OPERATOR", "QUALITY"]),
-  head: () => ({ meta: [{ title: "Finished Goods · KaizenAssests" }] }),
+  head: () => ({ meta: [{ title: "Finished Goods · WareHub" }] }),
   component: AssemblyFinishedGoodsPage,
 });
 
@@ -1269,7 +1269,7 @@ function AssemblyFinishedGoodsPage() {
                 <div ref={printRef} className="space-y-3 rounded-2xl border-2 border-dashed border-border bg-card p-5 text-card-foreground shadow-sm">
                   <div className="border-b-2 border-border pb-2 text-center">
                     <span className="text-[10px] font-black uppercase tracking-widest text-primary">
-                      KaizenAssests Assembly Execution
+                      WareHub Assembly Execution
                     </span>
                     <h3 className="text-sm font-black text-foreground uppercase tracking-wide mt-0.5">
                       Finished Good Batch Label
