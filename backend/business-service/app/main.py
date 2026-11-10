@@ -74,6 +74,12 @@ async def lifespan(app: FastAPI):
                 raise RuntimeError("Run scripts/migrate_single_warehouse.py before starting this version of the service")
             if connection.dialect.name == "postgresql":
                 from sqlalchemy import text
+                try:
+                    await connection.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+                    await connection.commit()
+                except Exception as e:
+                    logger.debug("Note creating pgcrypto extension: %s", e)
+
                 seq_exists = await connection.scalar(text("SELECT to_regclass('public.fg_transport_main_number')"))
                 if seq_exists is not None:
                     await connection.execute(

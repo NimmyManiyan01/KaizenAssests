@@ -224,14 +224,16 @@ async def _lock_warehouse_stock(
     warehouse_id: str,
 ) -> tuple[MaterialStockModel | None, MaterialModel]:
     stock_query = select(MaterialStockModel).where(
-        MaterialStockModel.material_code == material_code,
-        MaterialStockModel.warehouse_id == warehouse_id,
+        func.upper(func.trim(MaterialStockModel.material_code)) == material_code.strip().upper(),
+        func.upper(func.trim(MaterialStockModel.warehouse_id)) == warehouse_id.strip().upper(),
     ).with_for_update()
     rows = (await session.execute(stock_query)).scalars().all()
     if len(rows) > 1:
         raise HTTPException(status_code=409, detail="Material has multiple warehouse stock records; select a material variant before putaway")
     if rows:
-        material = await session.scalar(select(MaterialModel).where(MaterialModel.material_code == material_code))
+        material = await session.scalar(
+            select(MaterialModel).where(func.upper(func.trim(MaterialModel.material_code)) == material_code.strip().upper())
+        )
         if material is None:
             raise HTTPException(status_code=409, detail=f"Material master '{material_code}' was not found")
         return rows[0], material
@@ -239,7 +241,7 @@ async def _lock_warehouse_stock(
     # The material master is the lock target when its stock row does not yet
     # exist, serializing first receipts of that material in this warehouse.
     material = await session.scalar(
-        select(MaterialModel).where(MaterialModel.material_code == material_code).with_for_update()
+        select(MaterialModel).where(func.upper(func.trim(MaterialModel.material_code)) == material_code.strip().upper()).with_for_update()
     )
     if material is None:
         raise HTTPException(status_code=409, detail=f"Material master '{material_code}' was not found")
@@ -2963,44 +2965,63 @@ async def execute_putaway(
     target_zone = await uow.session.get(WarehouseZoneModel, target_bin.zone_id) if target_bin.zone_id else None
     target_warehouse = await uow.session.get(WarehouseModel, target_bin.warehouse_ref_id) if target_bin.warehouse_ref_id else None
 
-    # A physical operator may only confirm into the bin assigned on the task.
-    # This makes an incorrect scan a safe exception instead of silently moving
-    # stock to a different location.
-    resolved_task: PutawayTaskModel | None = None
-    if request.task_id:
-        resolved_task = await uow.session.scalar(
+    # Step 2b: Resolve and lock PutawayTaskModel EARLY
+    batch_number = (request.batch_number or grn_info.get("batch_lot_number") or "UNTRACKED").strip()
+    task_id = request.task_id or (uuid.UUID(str(grn_info["putaway_task_id"])) if grn_info.get("putaway_task_id") else None)
+    task: PutawayTaskModel | None = None
+    if task_id:
+        task = await uow.session.scalar(
             select(PutawayTaskModel)
-            .where(PutawayTaskModel.id == request.task_id)
+            .where(PutawayTaskModel.id == task_id)
             .with_for_update()
             .execution_options(populate_existing=True)
         )
-        if resolved_task is None:
+        if task is None:
             raise HTTPException(status_code=404, detail="Putaway task was not found")
-        # When the scanned QR resolved an exact batch task, use that task even
-        # if the UI supplied the grouped/material-level task id.
         qr_task_id = grn_info.get("putaway_task_id")
-        if qr_task_id and str(resolved_task.id) != str(qr_task_id):
+        if qr_task_id and str(task.id) != str(qr_task_id):
             exact_task = await uow.session.get(PutawayTaskModel, uuid.UUID(str(qr_task_id)))
             if exact_task is not None:
-                resolved_task = exact_task
+                task = exact_task
     elif grn_info.get("putaway_task_id"):
-        resolved_task = await uow.session.scalar(
+        task = await uow.session.scalar(
             select(PutawayTaskModel)
-            .where(PutawayTaskModel.id == uuid.UUID(grn_info["putaway_task_id"]))
+            .where(PutawayTaskModel.id == uuid.UUID(str(grn_info["putaway_task_id"])))
             .with_for_update()
             .execution_options(populate_existing=True)
         )
+    elif grn_id:
+        task_query = select(PutawayTaskModel).where(
+            PutawayTaskModel.grn_id == grn_id,
+            func.upper(func.trim(PutawayTaskModel.item_code)) == item_code.strip().upper(),
+        )
+        if batch_number != "UNTRACKED":
+            task_query = task_query.where(
+                func.upper(func.trim(PutawayTaskModel.batch_number)) == batch_number.strip().upper()
+            )
+        task_query = task_query.order_by(PutawayTaskModel.created_at.desc())
+        t_res = await uow.session.execute(task_query.with_for_update())
+        task = t_res.scalars().first()
 
-    if resolved_task and (
-        resolved_task.item_code.strip().upper() != item_code.strip().upper()
-        or (resolved_task.grn_id and grn_id and resolved_task.grn_id != grn_id)
+    if task is None:
+        raise HTTPException(status_code=409, detail="No active putaway task is linked to this material batch")
+
+    if task.batch_number:
+        batch_number = task.batch_number
+
+    if (
+        task.item_code.strip().upper() != item_code.strip().upper()
+        or (task.grn_id and grn_id and task.grn_id != grn_id)
         or (
-            resolved_task.batch_number
+            task.batch_number
             and grn_info.get("batch_lot_number")
-            and resolved_task.batch_number.strip().upper() != grn_info["batch_lot_number"].strip().upper()
+            and task.batch_number.strip().upper() != grn_info["batch_lot_number"].strip().upper()
         )
     ):
         raise HTTPException(status_code=422, detail="Scanned GRN material batch does not match the selected putaway task")
+
+    if task.status in {"CANCELLED", "PUTAWAY_COMPLETED", "COMPLETED"}:
+        raise HTTPException(status_code=409, detail=f"Putaway task is {task.status.lower()} and cannot be confirmed")
 
     # The task lock above serializes partial receipts. Recheck the key after
     # acquiring it so a retry sent concurrently with the first commit returns
@@ -3038,22 +3059,19 @@ async def execute_putaway(
     target_zone = await uow.session.get(WarehouseZoneModel, target_bin.zone_id) if target_bin.zone_id else None
     target_warehouse = await uow.session.get(WarehouseModel, target_bin.warehouse_ref_id) if target_bin.warehouse_ref_id else None
 
-    if resolved_task:
-        if resolved_task.status in {"CANCELLED", "PUTAWAY_COMPLETED", "COMPLETED"}:
-            raise HTTPException(status_code=409, detail=f"Putaway task is {resolved_task.status.lower()} and cannot be confirmed")
-        expected_bin_id = resolved_task.destination_bin_id
-        expected_bin_code = (resolved_task.destination_bin_code or resolved_task.destination_bin or "").upper()
-        if (expected_bin_id and target_bin.id != expected_bin_id) or (expected_bin_code and target_bin.bin_code.upper() != expected_bin_code):
-            expected = resolved_task.destination_bin_code or resolved_task.destination_bin or str(expected_bin_id)
-            raise HTTPException(
-                status_code=422,
-                detail=f"WRONG LOCATION. Expected {expected}; scanned {target_bin.bin_code}. Move material to the assigned location.",
-            )
-        if request.quantity > resolved_task.quantity:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Putaway quantity ({request.quantity}) exceeds remaining task quantity ({resolved_task.quantity} {resolved_task.uom}).",
-            )
+    expected_bin_id = task.destination_bin_id
+    expected_bin_code = (task.destination_bin_code or task.destination_bin or "").upper()
+    if (expected_bin_id and target_bin.id != expected_bin_id) or (expected_bin_code and target_bin.bin_code.upper() != expected_bin_code):
+        expected = task.destination_bin_code or task.destination_bin or str(expected_bin_id)
+        raise HTTPException(
+            status_code=422,
+            detail=f"WRONG LOCATION. Expected {expected}; scanned {target_bin.bin_code}. Move material to the assigned location.",
+        )
+    if request.quantity > task.quantity:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Putaway quantity ({request.quantity}) exceeds remaining task quantity ({task.quantity} {task.uom}).",
+        )
 
     await validate_grn_putaway_quantity(uow.session, grn_id, item_code, request.quantity)
 
@@ -3087,10 +3105,11 @@ async def execute_putaway(
     if (target_bin.status or "").upper() not in ("ACTIVE", "AVAILABLE", "OCCUPIED", "PARTIALLY_OCCUPIED"):
         raise HTTPException(status_code=409, detail=f"Target Bin '{target_bin.bin_code}' is {target_bin.status} and cannot receive material")
     await validate_rack_capacity(uow.session, target_bin, request.quantity, uom)
-    if target_bin.occupied_quantity + request.quantity > target_bin.capacity:
+    bin_occ = target_bin.occupied_quantity or Decimal("0")
+    if bin_occ + request.quantity > target_bin.capacity:
         raise HTTPException(
             status_code=409,
-            detail=f"Target Bin '{target_bin.bin_code}' has insufficient capacity (Capacity: {target_bin.capacity}, Occupied: {target_bin.occupied_quantity}, Requested: {request.quantity})",
+            detail=f"Target Bin '{target_bin.bin_code}' has insufficient capacity (Capacity: {target_bin.capacity}, Occupied: {bin_occ}, Requested: {request.quantity})",
         )
 
     # Step 3: Resolve or provision StorageLocationModel
@@ -3118,6 +3137,7 @@ async def execute_putaway(
 
     if location is None:
         location = StorageLocationModel(
+            id=uuid.uuid4(),
             location_code=loc_code,
             warehouse_id=warehouse_id,
             warehouse_ref_id=target_bin.warehouse_ref_id,
@@ -3127,7 +3147,7 @@ async def execute_putaway(
             rack=target_rack,
             bin=target_bcode,
             capacity=target_bin.capacity,
-            occupied_quantity=target_bin.occupied_quantity,
+            occupied_quantity=target_bin.occupied_quantity or Decimal("0"),
             active=True,
         )
         uow.session.add(location)
@@ -3160,112 +3180,92 @@ async def execute_putaway(
         await uow.session.flush()
 
     completed_at = datetime.datetime.now(datetime.timezone.utc)
-    available_before = stock.available_quantity
-    stock.on_hand_quantity = stock.on_hand_quantity + request.quantity
-    stock.available_quantity = stock.available_quantity + request.quantity
+    available_before = stock.available_quantity or Decimal("0")
+    stock.on_hand_quantity = (stock.on_hand_quantity or Decimal("0")) + request.quantity
+    stock.available_quantity = (stock.available_quantity or Decimal("0")) + request.quantity
     stock.updated_at = completed_at.replace(tzinfo=None)
 
-    target_bin.occupied_quantity = target_bin.occupied_quantity + request.quantity
+    target_bin.occupied_quantity = (target_bin.occupied_quantity or Decimal("0")) + request.quantity
     target_bin.status = "OCCUPIED" if target_bin.occupied_quantity >= target_bin.capacity else "PARTIALLY_OCCUPIED"
-    location.occupied_quantity = location.occupied_quantity + request.quantity
+    location.occupied_quantity = (location.occupied_quantity or Decimal("0")) + request.quantity
 
     # Step 5: Update the exact material, batch, and location balance.
-    batch_number = (resolved_task.batch_number if resolved_task else grn_info.get("batch_lot_number")) or "UNTRACKED"
     bal_res = await uow.session.execute(
         select(InventoryLocationBalanceModel).where(
-            InventoryLocationBalanceModel.material_code == item_code,
+            func.upper(func.trim(InventoryLocationBalanceModel.material_code)) == item_code.strip().upper(),
             InventoryLocationBalanceModel.storage_location_id == location.id,
-            InventoryLocationBalanceModel.batch_number == batch_number,
+            func.upper(func.trim(InventoryLocationBalanceModel.batch_number)) == batch_number.strip().upper(),
         ).with_for_update()
     )
     balance = bal_res.scalars().first()
     if balance is None:
         balance = InventoryLocationBalanceModel(
+            id=uuid.uuid4(),
             material_code=item_code,
             batch_number=batch_number,
-            material_name=mat_name,
+            material_name=(mat_name or item_code)[:256],
             warehouse_id=warehouse_id,
             storage_location_id=location.id,
-            quantity=0,
-            available_quantity=0,
+            quantity=Decimal("0.0"),
+            available_quantity=Decimal("0.0"),
             uom=uom,
-            last_grn_number=grn_number,
+            last_putaway_task_id=task.id,
+            last_grn_number=grn_number or (task.grn_number if task else "N/A"),
             updated_at=completed_at,
         )
         uow.session.add(balance)
 
-    balance.quantity = balance.quantity + request.quantity
-    balance.available_quantity = balance.available_quantity + request.quantity
-    balance.last_grn_number = grn_number
+    balance.quantity = (balance.quantity or Decimal("0")) + request.quantity
+    balance.available_quantity = (balance.available_quantity or Decimal("0")) + request.quantity
+    balance.last_putaway_task_id = task.id
+    balance.last_grn_number = grn_number or (task.grn_number if task else "N/A")
     balance.updated_at = completed_at
 
-    # Step 6: Update PutawayTaskModel if present
-    task_id = request.task_id or (uuid.UUID(grn_info["putaway_task_id"]) if grn_info.get("putaway_task_id") else None)
-    task: PutawayTaskModel | None = resolved_task
-    if task is None and task_id:
-        task = resolved_task or await uow.session.get(PutawayTaskModel, task_id)
-    elif grn_id:
-        task_query = select(PutawayTaskModel).where(
-                PutawayTaskModel.grn_id == grn_id,
-                func.upper(PutawayTaskModel.item_code) == item_code.upper(),
-            )
-        if batch_number != "UNTRACKED":
-            task_query = task_query.where(func.upper(PutawayTaskModel.batch_number) == batch_number.upper())
-        t_res = await uow.session.execute(task_query.with_for_update())
-        task = t_res.scalars().first()
-
-    if task is None:
-        raise HTTPException(status_code=409, detail="No active putaway task is linked to this material batch")
+    # Step 6: Update PutawayTaskModel
+    task.destination_warehouse_ref_id = target_bin.warehouse_ref_id
+    task.destination_zone_id = target_bin.zone_id
+    task.destination_zone = target_zone.zone_code if target_zone else None
+    task.destination_bin_id = target_bin.id
+    task.destination_bin = target_bin.bin_code
+    task.destination_bin_code = target_bin.bin_code
+    task.destination_location_id = location.id
 
     remaining_available = max(Decimal("0"), available_qty - request.quantity)
     is_completed = remaining_available <= 0
 
-    if task:
-        balance.last_putaway_task_id = task.id
-        task.destination_warehouse_ref_id = target_bin.warehouse_ref_id
-        task.destination_zone_id = target_bin.zone_id
-        task.destination_zone = target_zone.zone_code if target_zone else None
-        task.destination_bin_id = target_bin.id
-        task.destination_bin = target_bin.bin_code
-        task.destination_bin_code = target_bin.bin_code
-        task.destination_location_id = location.id
-
-        if is_completed or task.quantity <= request.quantity:
-            task.placement_metadata = {**(task.placement_metadata or {}), "putaway_quantity": float(request.quantity if task.quantity <= request.quantity else task.quantity)}
-            task.quantity = Decimal("0")
-            task.status = "COMPLETED"
-            task.completed_by = user.username
-            task.completed_at = completed_at
-        else:
-            task.quantity = task.quantity - request.quantity
-            task.status = "PARTIALLY_COMPLETED"
-            task.started_by = task.started_by or user.username
-            task.started_at = task.started_at or completed_at
-            if target_bin.occupied_quantity >= target_bin.capacity:
-                # The assigned bin became full during a partial confirmation.
-                # Release the unplaced remainder so it can be assigned to a
-                # different rack instead of leaving it attached to a full bin.
-                assignment_rows = await uow.session.execute(
-                    select(PutawayLocationAssignmentModel).where(
-                        PutawayLocationAssignmentModel.putaway_task_id == task.id,
-                        PutawayLocationAssignmentModel.destination_bin_id == target_bin.id,
-                    )
+    if is_completed or task.quantity <= request.quantity:
+        task.placement_metadata = {**(task.placement_metadata or {}), "putaway_quantity": float(request.quantity if task.quantity <= request.quantity else task.quantity)}
+        task.quantity = Decimal("0")
+        task.status = "COMPLETED"
+        task.completed_by = (user.username or user.subject or "SYSTEM")[:128]
+        task.completed_at = completed_at
+    else:
+        task.quantity = task.quantity - request.quantity
+        task.status = "PARTIALLY_COMPLETED"
+        task.started_by = task.started_by or (user.username or user.subject or "SYSTEM")[:128]
+        task.started_at = task.started_at or completed_at
+        if (target_bin.occupied_quantity or 0) >= target_bin.capacity:
+            assignment_rows = await uow.session.execute(
+                select(PutawayLocationAssignmentModel).where(
+                    PutawayLocationAssignmentModel.putaway_task_id == task.id,
+                    PutawayLocationAssignmentModel.destination_bin_id == target_bin.id,
                 )
-                for assignment in assignment_rows.scalars().all():
-                    await uow.session.delete(assignment)
-                task.destination_zone_id = None
-                task.destination_zone = None
-                task.destination_bin_id = None
-                task.destination_bin = None
-                task.destination_bin_code = None
-                task.destination_location_id = None
+            )
+            for assignment in assignment_rows.scalars().all():
+                await uow.session.delete(assignment)
+            task.destination_zone_id = None
+            task.destination_zone = None
+            task.destination_bin_id = None
+            task.destination_bin = None
+            task.destination_bin_code = None
+            task.destination_location_id = None
 
     # Step 7: Update HandlingUnitModel if present
     if grn_info.get("handling_unit_id"):
         try:
             hu = await uow.session.get(HandlingUnitModel, uuid.UUID(grn_info["handling_unit_id"]))
             if hu:
-                hu.current_location = f"{target_zone.zone_code if target_zone else 'WAREHOUSE_OPERATOR'} / {target_bin.bin_code}"
+                hu.current_location = f"{target_zone.zone_code if target_zone else 'WAREHOUSE_OPERATOR'} / {target_bin.bin_code}"[:128]
                 if is_completed:
                     hu.status = "STORED"
                 hu.updated_at = completed_at
@@ -3276,51 +3276,53 @@ async def execute_putaway(
     material_scan_record = request.grn_qr_code[:64]
     location_scan_record = target_bin.bin_code[:64]
     dest_loc_str = location.location_code
-    src_loc_str = grn_info.get("current_location") or "RECEIVING_DOCK"
+    src_loc_str = (grn_info.get("current_location") or "RECEIVING_DOCK")[:128]
 
     uow.session.add(
         PutawayMovementModel(
+            id=uuid.uuid4(),
             confirmation_id=confirmation_id,
             confirmation_hash=confirmation_hash if confirmation_id else None,
             putaway_task_id=task.id,
             material_scan=material_scan_record,
             location_scan=location_scan_record,
-            material_code=item_code,
-            material_name=mat_name,
+            material_code=item_code[:64],
+            material_name=(mat_name or item_code)[:256],
             source_location=src_loc_str,
-            destination_location=dest_loc_str,
-            batch_lot=batch_number,
+            destination_location=dest_loc_str[:128],
+            batch_lot=(batch_number or "UNTRACKED")[:128],
             confirmed_quantity=request.quantity,
-            uom=uom,
+            uom=uom[:32],
             inventory_available_before=available_before,
             inventory_available_after=stock.available_quantity,
-            confirmed_by=user.username,
+            confirmed_by=(user.username or user.subject or "SYSTEM")[:128],
             confirmed_at=completed_at,
         )
     )
 
     uow.session.add(
         InventoryMovementHistoryModel(
+            id=uuid.uuid4(),
             movement_type="PUTAWAY",
-            material_code=item_code,
-            material_name=mat_name,
-            material_qr=material_scan_record,
+            material_code=item_code[:64],
+            material_name=(mat_name or item_code)[:256],
+            material_qr=material_scan_record[:128],
             grn_number=grn_number,
-            batch_lot=grn_info.get("batch_lot_number"),
+            batch_lot=(grn_info.get("batch_lot_number") or batch_number),
             from_location=src_loc_str,
-            to_location=dest_loc_str,
+            to_location=dest_loc_str[:128],
             from_bin_id=None,
             to_bin_id=target_bin.id,
             quantity=request.quantity,
-            uom=uom,
+            uom=uom[:32],
             stock_before=available_before,
             stock_after=stock.available_quantity,
-            performed_by=user.username,
-            user_role=",".join(user.roles or [])[:64],
-            warehouse_id=warehouse_id,
+            performed_by=(user.username or user.subject or "SYSTEM")[:128],
+            user_role=",".join(user.roles or [])[:64] if user.roles else "OPERATOR",
+            warehouse_id=warehouse_id[:64],
             warehouse_ref_id=target_bin.warehouse_ref_id,
             warehouse_code=target_warehouse.warehouse_code if target_warehouse else None,
-            reference_document=task.task_number,
+            reference_document=task.task_number[:128] if task and task.task_number else None,
             remarks=f"Putaway confirmed via GRN QR into Bin {target_bin.bin_code}",
             performed_at=completed_at,
         )

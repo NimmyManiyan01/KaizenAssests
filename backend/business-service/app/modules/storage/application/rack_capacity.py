@@ -98,6 +98,10 @@ def _install_sqlite(c):
 
 
 def _install_postgres(c):
+    try:
+        c.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+    except Exception:
+        pass
     c.exec_driver_sql("""CREATE OR REPLACE FUNCTION maintain_rack_occupancy() RETURNS trigger AS $$
     DECLARE old_rack uuid; new_rack uuid; remaining numeric;
     BEGIN
@@ -110,16 +114,16 @@ def _install_postgres(c):
         IF NEW.quantity < 0 OR NEW.available_quantity < 0 OR NEW.available_quantity > NEW.quantity THEN RAISE EXCEPTION 'Rack inventory quantity cannot be negative or over-available'; END IF;
         IF new_rack IS NOT NULL AND (TG_OP='INSERT' OR NEW.quantity>OLD.quantity OR NEW.storage_location_id<>OLD.storage_location_id) AND (upper(NEW.uom)<>'PCS' OR NEW.quantity<>trunc(NEW.quantity)) THEN RAISE EXCEPTION 'Rack capacity requires whole PCS quantities'; END IF;
       END IF;
-      PERFORM id FROM warehouse_rack WHERE id IN (old_rack,new_rack) ORDER BY id FOR UPDATE;
+      PERFORM id FROM warehouse_rack WHERE (old_rack IS NOT NULL AND id=old_rack) OR (new_rack IS NOT NULL AND id=new_rack) ORDER BY id FOR UPDATE;
       IF old_rack IS NOT NULL THEN
-        UPDATE warehouse_rack SET occupied_quantity=occupied_quantity-OLD.quantity WHERE id=old_rack;
-        IF OLD.quantity<>0 THEN INSERT INTO rack_occupancy_event(id,rack_id,balance_id,quantity_delta,reason,actor) VALUES(gen_random_uuid(),old_rack,OLD.id::text,-OLD.quantity,'Stock balance '||lower(TG_OP),coalesce(nullif(current_setting('app.actor',true),''),current_user)); END IF;
+        UPDATE warehouse_rack SET occupied_quantity=coalesce(occupied_quantity, 0)-OLD.quantity WHERE id=old_rack;
+        IF OLD.quantity<>0 THEN INSERT INTO rack_occupancy_event(id,rack_id,balance_id,quantity_delta,reason,actor) VALUES(gen_random_uuid(),old_rack,OLD.id::text,-OLD.quantity,'Stock balance '||lower(TG_OP),coalesce(nullif(current_setting('app.actor',true),''),cast(current_user as varchar(128)))); END IF;
       END IF;
       IF new_rack IS NOT NULL THEN
-        SELECT maximum_capacity-occupied_quantity INTO remaining FROM warehouse_rack WHERE id=new_rack;
+        SELECT maximum_capacity-coalesce(occupied_quantity, 0) INTO remaining FROM warehouse_rack WHERE id=new_rack;
         IF NEW.quantity>remaining THEN RAISE EXCEPTION 'Rack capacity exceeded. Only % PCS can be stored.',remaining; END IF;
-        UPDATE warehouse_rack SET occupied_quantity=occupied_quantity+NEW.quantity WHERE id=new_rack;
-        IF NEW.quantity<>0 THEN INSERT INTO rack_occupancy_event(id,rack_id,balance_id,quantity_delta,reason,actor) VALUES(gen_random_uuid(),new_rack,NEW.id::text,NEW.quantity,'Stock balance '||lower(TG_OP),coalesce(nullif(current_setting('app.actor',true),''),current_user)); END IF;
+        UPDATE warehouse_rack SET occupied_quantity=coalesce(occupied_quantity, 0)+NEW.quantity WHERE id=new_rack;
+        IF NEW.quantity<>0 THEN INSERT INTO rack_occupancy_event(id,rack_id,balance_id,quantity_delta,reason,actor) VALUES(gen_random_uuid(),new_rack,NEW.id::text,NEW.quantity,'Stock balance '||lower(TG_OP),coalesce(nullif(current_setting('app.actor',true),''),cast(current_user as varchar(128)))); END IF;
       END IF;
       IF TG_OP='DELETE' THEN RETURN OLD; END IF;
       RETURN NEW;

@@ -69,20 +69,29 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(IntegrityError)
     async def handle_integrity_error(request: Request, exc: IntegrityError):
-        logger.warning("Database integrity constraint violation: %s", exc)
+        orig_msg = str(getattr(exc, "orig", exc))
+        logger.warning("Database integrity constraint violation during %s: %s", request.url.path, orig_msg)
+        first_line = orig_msg.splitlines()[0] if orig_msg else "Database constraint violation or unique conflict occurred."
         return JSONResponse(
             status_code=409,
-            content=_error_body("Database constraint violation or unique conflict occurred."),
+            content=_error_body(f"Database constraint violation: {first_line}"),
             headers=_cors_headers(request),
         )
 
     @app.exception_handler(DBAPIError)
     async def handle_rack_database_rule(request: Request, exc: DBAPIError):
-        message = str(exc.orig)
+        message = str(getattr(exc, "orig", exc))
         match = re.search(r"Rack capacity exceeded\.[^\n]*|Rack capacity requires whole PCS quantities|Rack inventory quantity cannot be negative or over-available", message)
         if match:
             return JSONResponse(status_code=409, content=_error_body(match.group(0)), headers=_cors_headers(request))
-        logger.exception("Database operation failed")
+        if "violates not-null constraint" in message or "violates unique constraint" in message or "violates foreign key constraint" in message or "check constraint" in message:
+            first_line = message.splitlines()[0]
+            logger.warning("Database constraint violation during %s: %s", request.url.path, first_line)
+            return JSONResponse(status_code=409, content=_error_body(f"Database constraint violation: {first_line}"), headers=_cors_headers(request))
+        if "RAISE EXCEPTION" in message or "ERROR:" in message:
+            first_line = message.splitlines()[0].replace("ERROR: ", "").strip()
+            return JSONResponse(status_code=409, content=_error_body(first_line), headers=_cors_headers(request))
+        logger.exception("Database operation failed during %s: %s", request.url.path, message)
         return JSONResponse(status_code=500, content=_error_body("Internal server error"), headers=_cors_headers(request))
 
     @app.exception_handler(Exception)
