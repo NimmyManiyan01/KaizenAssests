@@ -214,6 +214,15 @@ def upgrade() -> None:
             except Exception:
                 pass
 
+    # 5. Align material_stock columns
+    if inspector.has_table("material_stock"):
+        cols = {c["name"] for c in inspector.get_columns("material_stock")}
+        if "location_id" not in cols:
+            try:
+                op.add_column("material_stock", sa.Column("location_id", sa.UUID(), nullable=True))
+            except Exception:
+                pass
+
     # 3. Update maintain_rack_occupancy function in PostgreSQL
     if bind.dialect.name == "postgresql":
         try:

@@ -263,6 +263,19 @@ async def lifespan(app: FastAPI):
                     except Exception as e:
                         logger.debug("Note aligning inventory_movement_history columns: %s", e)
 
+                if "material_stock" in tables:
+                    try:
+                        ms_cols = await connection.run_sync(
+                            lambda conn: {c["name"] for c in inspect(conn).get_columns("material_stock")}
+                        )
+                        if "location_id" not in ms_cols:
+                            await connection.execute(
+                                text('ALTER TABLE material_stock ADD COLUMN location_id UUID')
+                            )
+                            await connection.commit()
+                    except Exception as e:
+                        logger.debug("Note aligning material_stock columns: %s", e)
+
                 if "inventory_location_balance" in tables and "warehouse_rack" in tables:
                     try:
                         from app.modules.storage.application.rack_capacity import _install_postgres

@@ -3169,6 +3169,7 @@ async def execute_putaway(
             id=uuid.uuid4(),
             material_id=material.id,
             material_code=item_code,
+            location_id=location.id,
             on_hand_quantity=Decimal("0.0"),
             allocated_quantity=Decimal("0.0"),
             available_quantity=Decimal("0.0"),
@@ -3183,6 +3184,7 @@ async def execute_putaway(
     available_before = stock.available_quantity or Decimal("0")
     stock.on_hand_quantity = (stock.on_hand_quantity or Decimal("0")) + request.quantity
     stock.available_quantity = (stock.available_quantity or Decimal("0")) + request.quantity
+    stock.location_id = location.id
     stock.updated_at = completed_at.replace(tzinfo=None)
 
     target_bin.occupied_quantity = (target_bin.occupied_quantity or Decimal("0")) + request.quantity

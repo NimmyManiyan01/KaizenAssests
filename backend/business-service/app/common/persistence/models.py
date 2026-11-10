@@ -564,7 +564,7 @@ class MaterialStockModel(Base):
     )
     material_code: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     variant_code: Mapped[Optional[str]] = mapped_column(String(128), index=True, nullable=True)
-    location_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    location_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, nullable=True)
     warehouse_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, default="Main Warehouse")
     on_hand_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
     allocated_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0.0"))
