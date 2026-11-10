@@ -610,7 +610,7 @@ async def create_batches_for_line(
     )
     line_obj = res_line.scalar_one_or_none()
 
-    qr_resp = None
+    qr_by_batch: dict = {}
     if line_obj:
         qr_result = await uow.session.execute(
             select(GrnBatchQrModel).where(GrnBatchQrModel.batch_id.in_([b.id for b in created_batches]))

@@ -23,7 +23,8 @@ from typing import Optional
 import uuid
 
 from datetime import datetime, timezone
-from sqlalchemy import bindparam, func, insert, or_, select, text
+from sqlalchemy import and_, bindparam, func, insert, or_, select, text
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -1608,6 +1609,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
             raise ValueError(f"GRN Line not found: {grn_line_id}")
 
         now = datetime.now(timezone.utc)
+        clean_item_code = (line.item_code or "").strip()
 
         approved_qty = line.quality_approved_quantity if (line.quality_approved_quantity is not None and line.quality_approved_quantity > Decimal("0")) else line.good_quantity
         if approved_qty <= Decimal("0"):
@@ -1615,6 +1617,7 @@ class SqlAlchemyGrnRepository(GrnRepository):
 
         if not batch_quantities or any(q <= Decimal("0") for q in batch_quantities):
             raise ValueError("Batch quantities must be greater than zero")
+
         existing_batches = await self._session.execute(
             select(GrnBatchModel)
             .where(GrnBatchModel.grn_line_id == grn_line_id)
@@ -1623,9 +1626,15 @@ class SqlAlchemyGrnRepository(GrnRepository):
         )
         persisted_batches = list(existing_batches.scalars().all())
         if persisted_batches:
-            # Batch creation is idempotent. A retry returns the original
-            # records instead of generating another set of LOT identifiers.
-            return persisted_batches
+            if [b.batch_quantity for b in persisted_batches] == batch_quantities:
+                # Batch creation is idempotent. A retry returns the original
+                # records instead of generating another set of LOT identifiers.
+                return persisted_batches
+            # User adjusted batch allocations: supersede previous batches so new ones take effect
+            for b in persisted_batches:
+                b.superseded = True
+            await self._session.flush()
+
         if sum(batch_quantities, Decimal("0")) != approved_qty:
             raise ValueError("Total batch quantity must equal the QC-accepted quantity")
 
@@ -1635,45 +1644,10 @@ class SqlAlchemyGrnRepository(GrnRepository):
         )
         wh_name = wh_res.scalar_one_or_none() or "Main Warehouse"
 
-        # 1. Reuse the material-level QR if present. Batch QRs below are
-        # intentionally one-per-batch and may share the same item_code.
-        qr_res = await self._session.execute(
-            select(GrnBatchQrModel)
-            .where(GrnBatchQrModel.item_code == line.item_code)
-            .order_by(GrnBatchQrModel.generated_at.asc())
-        )
-        # Older data may contain more than one material QR for the same item
-        # code. Reuse the first deterministic record instead of failing with
-        # MultipleResultsFound during an otherwise idempotent batch retry.
-        qr = qr_res.scalars().first()
-        if not qr:
-            qr_payload = "\n".join([
-                f"Material Code: {line.item_code}",
-                f"Material Name: {line.material_name or line.item_code}",
-                f"Material Category: {line.material_category or 'Raw Materials'}",
-                f"Material Variant Code: {line.variant_code or f'{line.item_code}-V001'}",
-                f"Batch: BATCH-{line.item_code}-001",
-                "Size: 25 mm × 3 m",
-                "Color: White",
-                f"Warehouse: {wh_name}",
-                "Grade: ISI",
-                f"UOM: {line.uom or 'PCS'}",
-                "Inspection Status: COMPLETED",
-                f"Batch Quantity: {approved_qty} {line.uom or 'PCS'}",
-            ])
-            qr = GrnBatchQrModel(
-                id=uuid.uuid4(),
-                item_code=line.item_code,
-                qr_code=f"QR-MAT-{line.item_code}",
-                qr_payload=qr_payload,
-                generated_at=now,
-            )
-            self._session.add(qr)
-            await self._session.flush()
-
+        # 1. Create primary batch records
         created_batches: list[GrnBatchModel] = []
         for idx, qty in enumerate(batch_quantities, 1):
-            batch_num = f"LOT-{line.item_code}-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+            batch_num = f"LOT-{clean_item_code}-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
             batch = GrnBatchModel(
                 id=uuid.uuid4(),
                 grn_line_id=grn_line_id,
@@ -1686,15 +1660,17 @@ class SqlAlchemyGrnRepository(GrnRepository):
             created_batches.append(batch)
 
         await self._session.flush()
+
+        # 2. Create batch-level QRs (one per batch)
         for batch in created_batches:
             self._session.add(GrnBatchQrModel(
                 id=uuid.uuid4(),
                 batch_id=batch.id,
-                item_code=line.item_code,
+                item_code=clean_item_code,
                 qr_code=f"QR-BATCH-{batch.batch_number}",
                 qr_payload=(
-                    f"Material Code: {line.item_code}\n"
-                    f"Material Name: {line.material_name or line.item_code}\n"
+                    f"Material Code: {clean_item_code}\n"
+                    f"Material Name: {line.material_name or clean_item_code}\n"
                     f"GRN ID: {line.grn_id}\n"
                     f"Batch: {batch.batch_number}\n"
                     f"Batch Quantity: {batch.batch_quantity} {line.uom or 'PCS'}\n"
@@ -1703,6 +1679,67 @@ class SqlAlchemyGrnRepository(GrnRepository):
                 generated_at=now,
             ))
         await self._session.flush()
+
+        # 3. Create or reuse material-level QR safely without blocking batch completion
+        mat_qr_code = f"QR-MAT-{clean_item_code}"
+        qr_res = await self._session.execute(
+            select(GrnBatchQrModel)
+            .where(
+                or_(
+                    and_(
+                        func.upper(func.trim(GrnBatchQrModel.item_code)) == clean_item_code.upper(),
+                        GrnBatchQrModel.batch_id.is_(None),
+                    ),
+                    GrnBatchQrModel.qr_code == mat_qr_code,
+                )
+            )
+            .order_by(GrnBatchQrModel.generated_at.asc())
+        )
+        qr = qr_res.scalars().first()
+        if not qr:
+            qr_payload = "\n".join([
+                f"Material Code: {clean_item_code}",
+                f"Material Name: {line.material_name or clean_item_code}",
+                f"Material Category: {line.material_category or 'Raw Materials'}",
+                f"Material Variant Code: {line.variant_code or f'{clean_item_code}-V001'}",
+                f"Batch: BATCH-{clean_item_code}-001",
+                "Size: 25 mm × 3 m",
+                "Color: White",
+                f"Warehouse: {wh_name}",
+                "Grade: ISI",
+                f"UOM: {line.uom or 'PCS'}",
+                "Inspection Status: COMPLETED",
+                f"Batch Quantity: {approved_qty} {line.uom or 'PCS'}",
+            ])
+            try:
+                savepoint = await self._session.begin_nested()
+                qr = GrnBatchQrModel(
+                    id=uuid.uuid4(),
+                    batch_id=None,
+                    item_code=clean_item_code,
+                    qr_code=mat_qr_code,
+                    qr_payload=qr_payload,
+                    generated_at=now,
+                )
+                self._session.add(qr)
+                await self._session.flush()
+            except (IntegrityError, DBAPIError):
+                await savepoint.rollback()
+                try:
+                    savepoint2 = await self._session.begin_nested()
+                    qr = GrnBatchQrModel(
+                        id=uuid.uuid4(),
+                        batch_id=created_batches[0].id if created_batches else None,
+                        item_code=clean_item_code,
+                        qr_code=f"{mat_qr_code}-{uuid.uuid4().hex[:4].upper()}",
+                        qr_payload=qr_payload,
+                        generated_at=now,
+                    )
+                    self._session.add(qr)
+                    await self._session.flush()
+                except Exception:
+                    await savepoint2.rollback()
+
         return created_batches
 
     async def create_or_get_damage_lots_for_grn(

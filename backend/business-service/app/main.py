@@ -86,6 +86,15 @@ async def lifespan(app: FastAPI):
                     )
                     await connection.commit()
 
+                if "grn_batch_qr" in tables:
+                    try:
+                        await connection.execute(
+                            text("ALTER TABLE grn_batch_qr ALTER COLUMN batch_id DROP NOT NULL")
+                        )
+                        await connection.commit()
+                    except Exception as e:
+                        logger.debug("Note dropping not-null on grn_batch_qr.batch_id: %s", e)
+
                 # Supplier schema is version-controlled via Alembic migrations
                 # (20261106_supplier_profile_fields & 20261106_standardize_postgresql_schema).
                 # Runtime DDL is retired to prevent ACCESS EXCLUSIVE locking during multi-pod boot.

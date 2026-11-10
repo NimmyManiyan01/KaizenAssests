@@ -677,7 +677,6 @@ class GrnBatchModel(Base):
         nullable=False,
     )
     superseded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false", index=True)
-    superseded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false", index=True)
 
     # --------------------------------------------------------
     # Audit Information
