@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 import uuid
@@ -9,8 +10,10 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
+
+logger = logging.getLogger(__name__)
 
 from app.database.session import UnitOfWork, get_uow
 from app.modules.warehouse.infrastructure.persistence.models import (
