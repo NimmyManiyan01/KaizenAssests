@@ -54,6 +54,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
@@ -209,6 +219,8 @@ function SimpleWarehouseModule() {
   const [newBinRows, setNewBinRows] = useState<[{ rack: string; position: string; capacity: string; bin_code: string }]>([{ rack: "", position: "", capacity: "", bin_code: "" }]);
   const [viewBinQrModal, setViewBinQrModal] = useState<any>(null);
   const [binQrImage, setBinQrImage] = useState<string | null>(null);
+  const [deleteZoneTarget, setDeleteZoneTarget] = useState<any | null>(null);
+  const [isDeletingZone, setIsDeletingZone] = useState(false);
 
   // Submitting States
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -2531,21 +2543,8 @@ function SimpleWarehouseModule() {
                             <Button
                               size="sm"
                               variant="outline"
-                              disabled={isSubmitting}
-                              onClick={async () => {
-                                if (window.confirm(`Delete empty zone ${zone.zone_code}?`)) {
-                                  try {
-                                    setIsSubmitting(true);
-                                    await api.deleteZone(zone.id);
-                                    toast.success(`Zone ${zone.zone_code} deleted.`);
-                                    await fetchData(true);
-                                  } catch (err: any) {
-                                    toast.error(err.message || "Failed to delete zone");
-                                  } finally {
-                                    setIsSubmitting(false);
-                                  }
-                                }
-                              }}
+                              disabled={isSubmitting || isDeletingZone}
+                              onClick={() => setDeleteZoneTarget(zone)}
                               className="h-8 px-2 text-xs text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 dark:border-rose-900"
                               title="Delete empty zone"
                             >
@@ -3594,6 +3593,53 @@ function SimpleWarehouseModule() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Zone Confirmation Dialog (Centered Modal) */}
+      <AlertDialog
+        open={Boolean(deleteZoneTarget)}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingZone) setDeleteZoneTarget(null);
+        }}
+      >
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-rose-600">
+              <Trash2 className="h-5 w-5" /> Delete Zone {deleteZoneTarget?.zone_code}?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-sm text-slate-600 dark:text-slate-400">
+              Are you sure you want to delete empty zone{" "}
+              <strong className="text-slate-900 dark:text-slate-100">
+                {deleteZoneTarget?.zone_code}
+              </strong>
+              ? This action cannot be undone. Zones with active racks or inventory cannot be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingZone}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isDeletingZone}
+              className="bg-rose-600 text-white hover:bg-rose-700 focus:ring-rose-600"
+              onClick={async (e) => {
+                e.preventDefault();
+                if (!deleteZoneTarget) return;
+                try {
+                  setIsDeletingZone(true);
+                  await api.deleteZone(deleteZoneTarget.id);
+                  toast.success(`Zone ${deleteZoneTarget.zone_code} deleted.`);
+                  setDeleteZoneTarget(null);
+                  await fetchData(true);
+                } catch (err: any) {
+                  toast.error(err.message || "Failed to delete zone");
+                } finally {
+                  setIsDeletingZone(false);
+                }
+              }}
+            >
+              {isDeletingZone ? "Deleting…" : "Delete Zone"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppShell>
   );
 }
