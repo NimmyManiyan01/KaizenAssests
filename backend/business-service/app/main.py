@@ -132,6 +132,13 @@ async def lifespan(app: FastAPI):
                                 text('ALTER TABLE putaway_location_assignment ADD COLUMN destination_warehouse_ref_id UUID REFERENCES warehouse_configuration(id) ON DELETE SET NULL')
                             )
                             await connection.commit()
+                        # Drop legacy foreign keys pointing to old store_* tables
+                        for fk_name in ["fk_putaway_location_assignment_destination_store_id", "fk_putaway_location_assignment_destination_zone_id", "fk_putaway_location_assignment_destination_bin_id"]:
+                            try:
+                                await connection.execute(text(f'ALTER TABLE putaway_location_assignment DROP CONSTRAINT IF EXISTS {fk_name}'))
+                                await connection.commit()
+                            except Exception:
+                                pass
                     except Exception as e:
                         logger.debug("Note aligning putaway_location_assignment columns: %s", e)
 
@@ -161,8 +168,100 @@ async def lifespan(app: FastAPI):
                                 text('ALTER TABLE putaway_task ADD COLUMN destination_bin_code VARCHAR(128)')
                             )
                             await connection.commit()
+                        if "destination_location_id" not in pt_cols:
+                            await connection.execute(
+                                text('ALTER TABLE putaway_task ADD COLUMN destination_location_id UUID REFERENCES storage_location(id) ON DELETE SET NULL')
+                            )
+                            await connection.commit()
+                        if "destination_zone_id" not in pt_cols:
+                            await connection.execute(
+                                text('ALTER TABLE putaway_task ADD COLUMN destination_zone_id UUID REFERENCES warehouse_zone(id) ON DELETE SET NULL')
+                            )
+                            await connection.commit()
+
+                        # Drop legacy foreign keys pointing to old store_* tables
+                        for fk_name in ["fk_putaway_task_destination_store_id", "fk_putaway_task_destination_zone_id", "fk_putaway_task_destination_bin_id"]:
+                            try:
+                                await connection.execute(text(f'ALTER TABLE putaway_task DROP CONSTRAINT IF EXISTS {fk_name}'))
+                                await connection.commit()
+                            except Exception:
+                                pass
                     except Exception as e:
                         logger.debug("Note aligning putaway_task columns: %s", e)
+
+                if "storage_location" in tables:
+                    try:
+                        sl_cols = await connection.run_sync(
+                            lambda conn: {c["name"] for c in inspect(conn).get_columns("storage_location")}
+                        )
+                        if "store_id" in sl_cols and "warehouse_ref_id" not in sl_cols:
+                            await connection.execute(
+                                text('ALTER TABLE storage_location RENAME COLUMN store_id TO warehouse_ref_id')
+                            )
+                            await connection.commit()
+                        elif "warehouse_ref_id" not in sl_cols:
+                            await connection.execute(
+                                text('ALTER TABLE storage_location ADD COLUMN warehouse_ref_id UUID REFERENCES warehouse_configuration(id) ON DELETE SET NULL')
+                            )
+                            await connection.commit()
+
+                        if "zone_id" not in sl_cols:
+                            await connection.execute(
+                                text('ALTER TABLE storage_location ADD COLUMN zone_id UUID REFERENCES warehouse_zone(id) ON DELETE SET NULL')
+                            )
+                            await connection.commit()
+                        if "bin_id" not in sl_cols:
+                            await connection.execute(
+                                text('ALTER TABLE storage_location ADD COLUMN bin_id UUID REFERENCES warehouse_bin(id) ON DELETE SET NULL')
+                            )
+                            await connection.commit()
+
+                        # Drop legacy foreign keys pointing to old store_* tables
+                        for fk_name in ["fk_storage_location_store_id", "fk_storage_location_zone_id", "fk_storage_location_bin_id"]:
+                            try:
+                                await connection.execute(text(f'ALTER TABLE storage_location DROP CONSTRAINT IF EXISTS {fk_name}'))
+                                await connection.commit()
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        logger.debug("Note aligning storage_location columns: %s", e)
+
+                if "inventory_movement_history" in tables:
+                    try:
+                        imh_cols = await connection.run_sync(
+                            lambda conn: {c["name"] for c in inspect(conn).get_columns("inventory_movement_history")}
+                        )
+                        if "store_id" in imh_cols and "warehouse_ref_id" not in imh_cols:
+                            await connection.execute(
+                                text('ALTER TABLE inventory_movement_history RENAME COLUMN store_id TO warehouse_ref_id')
+                            )
+                            await connection.commit()
+                        elif "warehouse_ref_id" not in imh_cols:
+                            await connection.execute(
+                                text('ALTER TABLE inventory_movement_history ADD COLUMN warehouse_ref_id UUID REFERENCES warehouse_configuration(id) ON DELETE SET NULL')
+                            )
+                            await connection.commit()
+
+                        if "store_code" in imh_cols and "warehouse_code" not in imh_cols:
+                            await connection.execute(
+                                text('ALTER TABLE inventory_movement_history RENAME COLUMN store_code TO warehouse_code')
+                            )
+                            await connection.commit()
+                        elif "warehouse_code" not in imh_cols:
+                            await connection.execute(
+                                text('ALTER TABLE inventory_movement_history ADD COLUMN warehouse_code VARCHAR(64)')
+                            )
+                            await connection.commit()
+
+                        # Drop legacy foreign keys pointing to old store_* tables
+                        for fk_name in ["fk_inventory_movement_history_store_id", "fk_inventory_movement_history_from_bin_id", "fk_inventory_movement_history_to_bin_id"]:
+                            try:
+                                await connection.execute(text(f'ALTER TABLE inventory_movement_history DROP CONSTRAINT IF EXISTS {fk_name}'))
+                                await connection.commit()
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        logger.debug("Note aligning inventory_movement_history columns: %s", e)
 
                 if "inventory_location_balance" in tables and "warehouse_rack" in tables:
                     try:

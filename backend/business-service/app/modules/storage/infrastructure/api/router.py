@@ -2967,7 +2967,7 @@ async def execute_putaway(
 
     # Step 2b: Resolve and lock PutawayTaskModel EARLY
     batch_number = (request.batch_number or grn_info.get("batch_lot_number") or "UNTRACKED").strip()
-    task_id = request.task_id or (uuid.UUID(str(grn_info["putaway_task_id"])) if grn_info.get("putaway_task_id") else None)
+    task_id = _parse_uuid(request.task_id) or _parse_uuid(grn_info.get("putaway_task_id"))
     task: PutawayTaskModel | None = None
     if task_id:
         task = await uow.session.scalar(
@@ -2978,15 +2978,15 @@ async def execute_putaway(
         )
         if task is None:
             raise HTTPException(status_code=404, detail="Putaway task was not found")
-        qr_task_id = grn_info.get("putaway_task_id")
-        if qr_task_id and str(task.id) != str(qr_task_id):
-            exact_task = await uow.session.get(PutawayTaskModel, uuid.UUID(str(qr_task_id)))
+        qr_task_id = _parse_uuid(grn_info.get("putaway_task_id"))
+        if qr_task_id and task.id != qr_task_id:
+            exact_task = await uow.session.get(PutawayTaskModel, qr_task_id)
             if exact_task is not None:
                 task = exact_task
-    elif grn_info.get("putaway_task_id"):
+    elif _parse_uuid(grn_info.get("putaway_task_id")):
         task = await uow.session.scalar(
             select(PutawayTaskModel)
-            .where(PutawayTaskModel.id == uuid.UUID(str(grn_info["putaway_task_id"])))
+            .where(PutawayTaskModel.id == _parse_uuid(grn_info["putaway_task_id"]))
             .with_for_update()
             .execution_options(populate_existing=True)
         )
@@ -3125,10 +3125,10 @@ async def execute_putaway(
                 StorageLocationModel.bin_id == target_bin.id,
                 func.upper(StorageLocationModel.location_code) == loc_code.upper(),
                 and_(
-                    StorageLocationModel.warehouse_id == warehouse_id,
-                    StorageLocationModel.zone == zone_code,
-                    StorageLocationModel.rack == target_rack,
-                    StorageLocationModel.bin == target_bcode,
+                    func.upper(func.trim(StorageLocationModel.warehouse_id)) == warehouse_id.strip().upper(),
+                    func.upper(func.trim(StorageLocationModel.zone)) == zone_code.strip().upper(),
+                    func.upper(func.trim(StorageLocationModel.rack)) == target_rack.strip().upper(),
+                    func.upper(func.trim(StorageLocationModel.bin)) == target_bcode.strip().upper(),
                 ),
             )
         ).with_for_update()

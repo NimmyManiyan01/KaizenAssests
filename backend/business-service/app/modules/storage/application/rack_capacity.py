@@ -107,10 +107,10 @@ def _install_postgres(c):
     BEGIN
       IF TG_OP='UPDATE' AND NEW.quantity=OLD.quantity AND NEW.storage_location_id=OLD.storage_location_id THEN RETURN NEW; END IF;
       IF TG_OP <> 'INSERT' THEN
-        SELECT r.id INTO old_rack FROM warehouse_rack r JOIN warehouse_bin b ON b.zone_id=r.zone_id AND upper(b.rack)=r.rack_code JOIN storage_location l ON l.bin_id=b.id WHERE l.id=OLD.storage_location_id;
+        SELECT r.id INTO old_rack FROM warehouse_rack r JOIN warehouse_bin b ON b.zone_id=r.zone_id AND upper(b.rack)=upper(r.rack_code) JOIN storage_location l ON l.bin_id=b.id WHERE l.id=OLD.storage_location_id;
       END IF;
       IF TG_OP <> 'DELETE' THEN
-        SELECT r.id INTO new_rack FROM warehouse_rack r JOIN warehouse_bin b ON b.zone_id=r.zone_id AND upper(b.rack)=r.rack_code JOIN storage_location l ON l.bin_id=b.id WHERE l.id=NEW.storage_location_id;
+        SELECT r.id INTO new_rack FROM warehouse_rack r JOIN warehouse_bin b ON b.zone_id=r.zone_id AND upper(b.rack)=upper(r.rack_code) JOIN storage_location l ON l.bin_id=b.id WHERE l.id=NEW.storage_location_id;
         IF NEW.quantity < 0 OR NEW.available_quantity < 0 OR NEW.available_quantity > NEW.quantity THEN RAISE EXCEPTION 'Rack inventory quantity cannot be negative or over-available'; END IF;
         IF new_rack IS NOT NULL AND (TG_OP='INSERT' OR NEW.quantity>OLD.quantity OR NEW.storage_location_id<>OLD.storage_location_id) AND (upper(NEW.uom)<>'PCS' OR NEW.quantity<>trunc(NEW.quantity)) THEN RAISE EXCEPTION 'Rack capacity requires whole PCS quantities'; END IF;
       END IF;

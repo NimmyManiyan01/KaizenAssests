@@ -91,14 +91,17 @@ def register_exception_handlers(app: FastAPI) -> None:
         if "RAISE EXCEPTION" in message or "ERROR:" in message:
             first_line = message.splitlines()[0].replace("ERROR: ", "").strip()
             return JSONResponse(status_code=409, content=_error_body(first_line), headers=_cors_headers(request))
+        first_line = message.splitlines()[0] if message else "Database operation failed"
         logger.exception("Database operation failed during %s: %s", request.url.path, message)
-        return JSONResponse(status_code=500, content=_error_body("Internal server error"), headers=_cors_headers(request))
+        return JSONResponse(status_code=500, content=_error_body(f"Database error: {first_line}"), headers=_cors_headers(request))
 
     @app.exception_handler(Exception)
     async def handle_unexpected(request: Request, exc: Exception):
         logger.exception("Unhandled exception", extra={"extra_fields": {"path": str(request.url)}})
+        err_msg = str(exc) or exc.__class__.__name__
+        first_line = err_msg.splitlines()[0] if err_msg else "Internal server error"
         return JSONResponse(
             status_code=500,
-            content=_error_body("Internal server error"),
+            content=_error_body(f"Internal server error: {first_line}"),
             headers=_cors_headers(request),
         )
