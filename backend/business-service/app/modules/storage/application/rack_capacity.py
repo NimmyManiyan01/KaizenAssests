@@ -88,11 +88,11 @@ def _install_sqlite(c):
             parts.append(f"SELECT CASE WHEN ({changed}) AND {_rack('NEW')} IS NOT NULL AND (upper(NEW.uom) <> 'PCS' OR NEW.quantity <> CAST(NEW.quantity AS INTEGER)) THEN RAISE(ABORT, 'Rack capacity requires whole PCS quantities') END;")
         if operation != "INSERT":
             parts += [f"UPDATE warehouse_rack SET occupied_quantity=occupied_quantity-OLD.quantity WHERE id={_rack('OLD')};",
-                f"INSERT INTO rack_occupancy_event(rack_id,balance_id,quantity_delta,reason,actor) SELECT id,OLD.id,-OLD.quantity,'Stock balance {operation.lower()}','inventory_transaction' FROM warehouse_rack WHERE id={_rack('OLD')} AND OLD.quantity <> 0;"]
+                f"INSERT INTO rack_occupancy_event(id,rack_id,balance_id,quantity_delta,reason,actor) SELECT lower(hex(randomblob(16))),id,OLD.id,-OLD.quantity,'Stock balance {operation.lower()}','inventory_transaction' FROM warehouse_rack WHERE id={_rack('OLD')} AND OLD.quantity <> 0;"]
         if operation != "DELETE":
             parts += [f"SELECT CASE WHEN EXISTS(SELECT 1 FROM warehouse_rack WHERE id={_rack('NEW')} AND occupied_quantity+NEW.quantity>maximum_capacity) THEN RAISE(ABORT, 'Rack capacity exceeded. Refresh available capacity and reduce the quantity.') END;",
                 f"UPDATE warehouse_rack SET occupied_quantity=occupied_quantity+NEW.quantity WHERE id={_rack('NEW')};",
-                f"INSERT INTO rack_occupancy_event(rack_id,balance_id,quantity_delta,reason,actor) SELECT id,NEW.id,NEW.quantity,'Stock balance {operation.lower()}','inventory_transaction' FROM warehouse_rack WHERE id={_rack('NEW')} AND NEW.quantity <> 0;"]
+                f"INSERT INTO rack_occupancy_event(id,rack_id,balance_id,quantity_delta,reason,actor) SELECT lower(hex(randomblob(16))),id,NEW.id,NEW.quantity,'Stock balance {operation.lower()}','inventory_transaction' FROM warehouse_rack WHERE id={_rack('NEW')} AND NEW.quantity <> 0;"]
         when = " WHEN NEW.quantity <> OLD.quantity OR NEW.storage_location_id <> OLD.storage_location_id" if operation == "UPDATE" else ""
         c.exec_driver_sql(f"CREATE TRIGGER {name} AFTER {operation} ON inventory_location_balance{when} BEGIN " + " ".join(parts) + " END")
 
@@ -113,13 +113,13 @@ def _install_postgres(c):
       PERFORM id FROM warehouse_rack WHERE id IN (old_rack,new_rack) ORDER BY id FOR UPDATE;
       IF old_rack IS NOT NULL THEN
         UPDATE warehouse_rack SET occupied_quantity=occupied_quantity-OLD.quantity WHERE id=old_rack;
-        IF OLD.quantity<>0 THEN INSERT INTO rack_occupancy_event(rack_id,balance_id,quantity_delta,reason,actor) VALUES(old_rack,OLD.id::text,-OLD.quantity,'Stock balance '||lower(TG_OP),coalesce(nullif(current_setting('app.actor',true),''),current_user)); END IF;
+        IF OLD.quantity<>0 THEN INSERT INTO rack_occupancy_event(id,rack_id,balance_id,quantity_delta,reason,actor) VALUES(gen_random_uuid(),old_rack,OLD.id::text,-OLD.quantity,'Stock balance '||lower(TG_OP),coalesce(nullif(current_setting('app.actor',true),''),current_user)); END IF;
       END IF;
       IF new_rack IS NOT NULL THEN
         SELECT maximum_capacity-occupied_quantity INTO remaining FROM warehouse_rack WHERE id=new_rack;
         IF NEW.quantity>remaining THEN RAISE EXCEPTION 'Rack capacity exceeded. Only % PCS can be stored.',remaining; END IF;
         UPDATE warehouse_rack SET occupied_quantity=occupied_quantity+NEW.quantity WHERE id=new_rack;
-        IF NEW.quantity<>0 THEN INSERT INTO rack_occupancy_event(rack_id,balance_id,quantity_delta,reason,actor) VALUES(new_rack,NEW.id::text,NEW.quantity,'Stock balance '||lower(TG_OP),coalesce(nullif(current_setting('app.actor',true),''),current_user)); END IF;
+        IF NEW.quantity<>0 THEN INSERT INTO rack_occupancy_event(id,rack_id,balance_id,quantity_delta,reason,actor) VALUES(gen_random_uuid(),new_rack,NEW.id::text,NEW.quantity,'Stock balance '||lower(TG_OP),coalesce(nullif(current_setting('app.actor',true),''),current_user)); END IF;
       END IF;
       IF TG_OP='DELETE' THEN RETURN OLD; END IF;
       RETURN NEW;
@@ -154,9 +154,13 @@ async def validate_rack_capacity(session, bin_model, quantity, uom=None):
         for location in locations:
             location.occupied_quantity = totals.get(location.id, Decimal("0"))
             location.capacity = bin_model.capacity
-    if quantity <= 0 or quantity != quantity.to_integral_value() or (uom and uom.upper() != "PCS"):
+    try:
+        qty_dec = Decimal(str(quantity if quantity is not None else 0))
+    except Exception:
+        raise HTTPException(422, "Invalid quantity")
+    if qty_dec <= 0 or qty_dec != qty_dec.to_integral_value() or (uom and str(uom).strip().upper() != "PCS"):
         raise HTTPException(422, "Rack capacity requires positive whole PCS quantities")
-    remaining = Decimal(rack.maximum_capacity) - rack.occupied_quantity
-    if quantity > remaining:
+    remaining = Decimal(rack.maximum_capacity) - Decimal(rack.occupied_quantity or 0)
+    if qty_dec > remaining:
         raise HTTPException(409, f"Rack capacity exceeded. Only {remaining.normalize():f} PCS can be stored.")
     return rack

@@ -111,6 +111,61 @@ async def lifespan(app: FastAPI):
                     except Exception as e:
                         logger.debug("Note setting default on rack_occupancy_event.id: %s", e)
 
+                if "putaway_location_assignment" in tables:
+                    try:
+                        pla_cols = await connection.run_sync(
+                            lambda conn: {c["name"] for c in inspect(conn).get_columns("putaway_location_assignment")}
+                        )
+                        if "destination_store_id" in pla_cols and "destination_warehouse_ref_id" not in pla_cols:
+                            await connection.execute(
+                                text('ALTER TABLE putaway_location_assignment RENAME COLUMN destination_store_id TO destination_warehouse_ref_id')
+                            )
+                            await connection.commit()
+                        elif "destination_warehouse_ref_id" not in pla_cols:
+                            await connection.execute(
+                                text('ALTER TABLE putaway_location_assignment ADD COLUMN destination_warehouse_ref_id UUID REFERENCES warehouse_configuration(id) ON DELETE SET NULL')
+                            )
+                            await connection.commit()
+                    except Exception as e:
+                        logger.debug("Note aligning putaway_location_assignment columns: %s", e)
+
+                if "putaway_task" in tables:
+                    try:
+                        pt_cols = await connection.run_sync(
+                            lambda conn: {c["name"] for c in inspect(conn).get_columns("putaway_task")}
+                        )
+                        if "destination_store_id" in pt_cols and "destination_warehouse_ref_id" not in pt_cols:
+                            await connection.execute(
+                                text('ALTER TABLE putaway_task RENAME COLUMN destination_store_id TO destination_warehouse_ref_id')
+                            )
+                            await connection.commit()
+                        elif "destination_warehouse_ref_id" not in pt_cols:
+                            await connection.execute(
+                                text('ALTER TABLE putaway_task ADD COLUMN destination_warehouse_ref_id UUID REFERENCES warehouse_configuration(id) ON DELETE SET NULL')
+                            )
+                            await connection.commit()
+
+                        if "destination_bin_id" not in pt_cols:
+                            await connection.execute(
+                                text('ALTER TABLE putaway_task ADD COLUMN destination_bin_id UUID REFERENCES warehouse_bin(id) ON DELETE SET NULL')
+                            )
+                            await connection.commit()
+                        if "destination_bin_code" not in pt_cols:
+                            await connection.execute(
+                                text('ALTER TABLE putaway_task ADD COLUMN destination_bin_code VARCHAR(128)')
+                            )
+                            await connection.commit()
+                    except Exception as e:
+                        logger.debug("Note aligning putaway_task columns: %s", e)
+
+                if "inventory_location_balance" in tables and "warehouse_rack" in tables:
+                    try:
+                        from app.modules.storage.application.rack_capacity import _install_postgres
+                        await connection.run_sync(_install_postgres)
+                        await connection.commit()
+                    except Exception as e:
+                        logger.debug("Note reinstalling postgres rack trigger: %s", e)
+
                 # Supplier schema is version-controlled via Alembic migrations
                 # (20261106_supplier_profile_fields & 20261106_standardize_postgresql_schema).
                 # Runtime DDL is retired to prevent ACCESS EXCLUSIVE locking during multi-pod boot.

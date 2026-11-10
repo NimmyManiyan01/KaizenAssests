@@ -11,7 +11,7 @@ from typing import List
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from sqlalchemy import CheckConstraint, Integer, func
+from sqlalchemy import CheckConstraint, Integer, func, text
 
 from app.database.base import Base, GUID
 
@@ -213,7 +213,7 @@ class WarehouseRackModel(Base):
 
 class RackOccupancyEventModel(Base):
     __tablename__ = "rack_occupancy_event"
-    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()"))
     rack_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("warehouse_rack.id", ondelete="RESTRICT"), nullable=False, index=True)
     balance_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     quantity_delta: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)

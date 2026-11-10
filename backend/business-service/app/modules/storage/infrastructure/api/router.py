@@ -875,9 +875,10 @@ async def list_putaway_tasks(
         for grn in grns_for_reconciliation:
             reconciled_grn_ids.add(grn.id)
             if grn.grn_number:
-                reconciled_grn_numbers[grn.id] = grn.grn_number.strip().upper()
+                reconciled_grn_numbers[grn.id] = (grn.grn_number or "").strip().upper()
             for line in grn.lines:
-                item_key = (grn.id, line.item_code.strip().upper())
+                item_code_val = (line.item_code or "").strip().upper()
+                item_key = (grn.id, item_code_val)
                 approved = line.quality_approved_quantity or line.good_quantity or Decimal("0")
                 # Zero-quantity ASN balance lines remain visible in the GRN
                 # audit, but they were not received and must never enter the
@@ -887,7 +888,7 @@ async def list_putaway_tasks(
                 canonical_grn_materials.add(item_key)
                 remaining = approved
                 allowed: set[str] = set()
-                for batch in sorted(line.batches, key=lambda item: item.created_at):
+                for batch in sorted(line.batches, key=lambda item: (item.created_at.timestamp() if getattr(item, 'created_at', None) else 0.0)):
                     batch_number = str(batch.batch_number or "").strip().upper()
                     quantity = batch.batch_quantity or Decimal("0")
                     if batch.superseded or not batch_number or batch_number in allowed or remaining <= Decimal("0"):
@@ -904,7 +905,8 @@ async def list_putaway_tasks(
     # eligible for normal putaway.
     if canonical_batches:
         for task in raw_tasks:
-            item_key = (task.grn_id, task.item_code.upper())
+            t_item = (task.item_code or "").strip().upper()
+            item_key = (task.grn_id, t_item)
             allowed = canonical_batches.get(item_key)
             if not allowed:
                 continue
@@ -918,19 +920,23 @@ async def list_putaway_tasks(
         # order, and the QC-approved quantity above.
         for grn in grns_for_reconciliation if grn_ids else []:
             for line in grn.lines:
-                allowed = canonical_batches.get((grn.id, line.item_code.upper()))
+                l_code = (line.item_code or "").strip().upper()
+                allowed = canonical_batches.get((grn.id, l_code))
                 if not allowed:
                     continue
                 for batch in line.batches:
                     if str(batch.batch_number or "").strip().upper() not in allowed:
                         batch.superseded = True
-        await uow.session.flush()
+        try:
+            await uow.session.flush()
+        except Exception as exc:
+            logger.warning("Putaway task reconciliation flush skipped: %s", exc)
 
     # A GRN batch is the unit of normal putaway. Older completion paths could
     # also leave a second line-level task for the same GRN/material. Prefer
     # the persisted batch tasks and expose each batch only once.
     batch_keys = {
-        (task.grn_id, task.item_code.upper(), str(task.batch_number).strip().upper())
+        (task.grn_id, (task.item_code or "").strip().upper(), str(task.batch_number).strip().upper())
         for task in raw_tasks
         if task.grn_id and task.batch_number and str(task.batch_number).strip()
     }
@@ -940,7 +946,8 @@ async def list_putaway_tasks(
     for task in raw_tasks:
         if task.status in {"CANCELLED", "VOID"}:
             continue
-        item_key = (task.grn_id, task.item_code.strip().upper())
+        t_item = (task.item_code or "").strip().upper()
+        item_key = (task.grn_id, t_item)
         canonical_grn_number = reconciled_grn_numbers.get(task.grn_id)
         task_grn_number = str(task.grn_number or "").strip().upper()
         # Never render a legacy task beneath a different GRN number than the
@@ -959,7 +966,7 @@ async def list_putaway_tasks(
             continue
         if not batch and item_key in batch_materials:
             continue
-        key = (task.grn_id, task.item_code.upper(), batch)
+        key = (task.grn_id, t_item, batch)
         if key in seen_keys:
             continue
         seen_keys.add(key)
@@ -1141,7 +1148,7 @@ async def list_inventory_location_balances(
             )
         target_warehouse_ref_id = user_warehouse_ref_id
     else:
-        target_warehouse_ref_id = uuid.UUID(warehouse_ref_id) if warehouse_ref_id else None
+        target_warehouse_ref_id = _parse_uuid(warehouse_ref_id) if warehouse_ref_id else None
 
     query = (
         select(InventoryLocationBalanceModel, StorageLocationModel)
@@ -1340,13 +1347,30 @@ async def assign_storage_location(
         select(PutawayTaskModel).where(PutawayTaskModel.id == task.id).with_for_update()
     )
     task = locked_task or task
-    assigned_total = await uow.session.scalar(
-        select(func.coalesce(func.sum(PutawayLocationAssignmentModel.quantity), 0)).where(
-            PutawayLocationAssignmentModel.putaway_task_id == task.id
+    confirmed_total = await uow.session.scalar(
+        select(func.coalesce(func.sum(PutawayMovementModel.confirmed_quantity), 0)).where(
+            PutawayMovementModel.putaway_task_id == task.id
         )
-    )
+    ) or Decimal("0")
+    if confirmed_total == Decimal("0"):
+        # No physical putaways have occurred yet for this task. Re-assignment replaces previous unconfirmed assignments.
+        existing_assignments = (await uow.session.scalars(
+            select(PutawayLocationAssignmentModel).where(PutawayLocationAssignmentModel.putaway_task_id == task.id)
+        )).all()
+        for ea in existing_assignments:
+            await uow.session.delete(ea)
+        await uow.session.flush()
+        assigned_total = Decimal("0")
+    else:
+        assigned_total = await uow.session.scalar(
+            select(func.coalesce(func.sum(PutawayLocationAssignmentModel.quantity), 0)).where(
+                PutawayLocationAssignmentModel.putaway_task_id == task.id
+            )
+        )
     remaining_quantity = Decimal(str(task.quantity or 0)) - Decimal(str(assigned_total or 0))
     requested_quantity = Decimal(str(request.quantity if request.quantity is not None else remaining_quantity))
+    if requested_quantity <= 0:
+        requested_quantity = remaining_quantity
     if requested_quantity <= 0:
         raise HTTPException(status_code=422, detail="Assignment quantity must be greater than zero")
     if requested_quantity > remaining_quantity:
@@ -1406,11 +1430,21 @@ async def assign_storage_location(
             if location is None:
                 b_code = bin_obj.bin_code if bin_obj else "B01"
                 r_code = bin_obj.rack if bin_obj and bin_obj.rack else "R01"
-                loc_code = f"LOC-{warehouse.warehouse_code}-{zone.zone_code}-{b_code}"
+                loc_code = f"LOC-{warehouse.warehouse_code}-{zone.zone_code}-{b_code}"[:64]
                 exist_res = await uow.session.execute(
-                    select(StorageLocationModel).where(StorageLocationModel.location_code == loc_code)
+                    select(StorageLocationModel).where(
+                        or_(
+                            StorageLocationModel.location_code == loc_code,
+                            and_(
+                                StorageLocationModel.warehouse_id == task.warehouse_id,
+                                StorageLocationModel.zone == zone.zone_code,
+                                StorageLocationModel.rack == r_code,
+                                StorageLocationModel.bin == b_code,
+                            ),
+                        )
+                    )
                 )
-                location = exist_res.scalar_one_or_none()
+                location = exist_res.scalars().first()
                 if location is None:
                     location = StorageLocationModel(
                         location_code=loc_code,
@@ -1679,7 +1713,7 @@ async def complete_putaway(
                 | (HandlingUnitModel.item_code == raw_scan),
             ).with_for_update()
         )
-        handling_unit = hu_result.scalar_one_or_none()
+        handling_unit = hu_result.scalars().first()
 
     afg_match = False
     if getattr(task, "finished_goods_id", None):
@@ -1732,7 +1766,7 @@ async def complete_putaway(
         bq = await uow.session.execute(
             select(WarehouseBinModel).where(func.upper(WarehouseBinModel.bin_code) == scanned_bin_code.strip().upper())
         )
-        target_bin = bq.scalar_one_or_none()
+        target_bin = bq.scalars().first()
 
     if target_bin is not None:
         target_zone = await uow.session.get(WarehouseZoneModel, target_bin.zone_id)
@@ -1754,7 +1788,7 @@ async def complete_putaway(
             zq = await uow.session.execute(
                 select(WarehouseZoneModel).where(func.upper(WarehouseZoneModel.zone_code) == scanned_zone_code.strip().upper())
             )
-            target_zone = zq.scalar_one_or_none()
+            target_zone = zq.scalars().first()
 
         # Step C: Check if scanned value matches StorageLocationModel directly
         if target_zone is None:
@@ -1763,7 +1797,7 @@ async def complete_putaway(
                     func.upper(StorageLocationModel.location_code) == request.location_scan.strip().upper()
                 )
             )
-            matched_loc = loc_match.scalar_one_or_none()
+            matched_loc = loc_match.scalars().first()
             if matched_loc:
                 if target_bin is None and matched_loc.bin_id:
                     target_bin = await uow.session.get(WarehouseBinModel, matched_loc.bin_id)
@@ -1773,7 +1807,7 @@ async def complete_putaway(
                     zq = await uow.session.execute(
                         select(WarehouseZoneModel).where(func.upper(WarehouseZoneModel.zone_code) == matched_loc.zone.strip().upper())
                     )
-                    target_zone = zq.scalar_one_or_none()
+                    target_zone = zq.scalars().first()
 
         if target_zone is None and not (scanned_bin_code or scanned_zone_code or scanned_bin_id or scanned_zone_id) and task.destination_zone_id:
             target_zone = await uow.session.get(WarehouseZoneModel, task.destination_zone_id)
@@ -1893,27 +1927,32 @@ async def complete_putaway(
         loc_res = await uow.session.execute(
             select(StorageLocationModel).where(StorageLocationModel.id == task.destination_location_id).with_for_update()
         )
-        location = loc_res.scalar_one_or_none()
+        location = loc_res.scalars().first()
 
     if location is None:
         warehouse = await uow.session.get(WarehouseModel, target_zone.warehouse_ref_id)
         warehouse_code = warehouse.warehouse_code if warehouse else "WAREHOUSE_OPERATOR"
-        loc_code = f"LOC-{warehouse_code}-{target_zone.zone_code}-{target_bin.bin_code}"
+        r_code = target_bin.rack or "R01"
+        b_code = target_bin.bin_code
+        loc_code = f"LOC-{warehouse_code}-{target_zone.zone_code}-{b_code}"[:64]
         loc_res = await uow.session.execute(
             select(StorageLocationModel).where(
                 or_(
                     StorageLocationModel.bin_id == target_bin.id,
                     func.upper(StorageLocationModel.location_code) == loc_code.upper(),
                     StorageLocationModel.location_code == loc_code,
+                    and_(
+                        StorageLocationModel.warehouse_id == task.warehouse_id,
+                        StorageLocationModel.zone == target_zone.zone_code,
+                        StorageLocationModel.rack == r_code,
+                        StorageLocationModel.bin == b_code,
+                    ),
                 )
             ).with_for_update()
         )
         location = loc_res.scalars().first()
 
     if location is None:
-        warehouse = await uow.session.get(WarehouseModel, target_zone.warehouse_ref_id)
-        warehouse_code = warehouse.warehouse_code if warehouse else "WAREHOUSE_OPERATOR"
-        loc_code = f"LOC-{warehouse_code}-{target_zone.zone_code}-{target_bin.bin_code}"
         location = StorageLocationModel(
             location_code=loc_code,
             warehouse_id=task.warehouse_id,
@@ -1921,13 +1960,22 @@ async def complete_putaway(
             zone_id=target_zone.id,
             bin_id=target_bin.id,
             zone=target_zone.zone_code,
-            rack=target_bin.rack or "R01",
-            bin=target_bin.bin_code,
+            rack=r_code,
+            bin=b_code,
             capacity=target_bin.capacity,
             occupied_quantity=target_bin.occupied_quantity,
             active=True,
         )
         uow.session.add(location)
+        await uow.session.flush()
+    else:
+        if not location.bin_id:
+            location.bin_id = target_bin.id
+        if not location.warehouse_ref_id and target_zone.warehouse_ref_id:
+            location.warehouse_ref_id = target_zone.warehouse_ref_id
+        if not location.zone_id and target_zone.id:
+            location.zone_id = target_zone.id
+        location.active = True
         await uow.session.flush()
 
     if not location.active:
@@ -2090,7 +2138,7 @@ async def complete_putaway(
             stock_before=available_before,
             stock_after=stock.available,
             performed_by=user.username,
-            user_role=",".join(user.roles or []),
+            user_role=",".join(user.roles or [])[:64],
             warehouse_id=task.warehouse_id,
             warehouse_ref_id=target_zone.warehouse_ref_id if target_zone else None,
             warehouse_code=target_warehouse.warehouse_code if target_warehouse else None,
@@ -2386,7 +2434,7 @@ async def resolve_grn_qr(
         if batch_obj:
             batch_number = batch_obj.batch_number
             res_line = await uow.session.execute(select(GrnLineModel).where(GrnLineModel.id == batch_obj.grn_line_id))
-            line_obj = res_line.scalar_one_or_none()
+            line_obj = res_line.scalars().first()
             if line_obj:
                 item_code = line_obj.item_code
                 grn_obj = await uow.session.get(GrnModel, line_obj.grn_id)
@@ -2422,7 +2470,7 @@ async def resolve_grn_qr(
 
     if grn_number:
         res_grn = await uow.session.execute(select(GrnModel).where(func.upper(GrnModel.grn_number) == grn_number.upper()))
-        grn = res_grn.scalar_one_or_none()
+        grn = res_grn.scalars().first()
 
     if grn and item_code:
         res_line = await uow.session.execute(
@@ -2452,7 +2500,7 @@ async def resolve_grn_qr(
                 grn = await uow.session.get(GrnModel, active_task.grn_id)
             elif grn_number:
                 res_grn = await uow.session.execute(select(GrnModel).where(func.upper(GrnModel.grn_number) == grn_number.upper()))
-                grn = res_grn.scalar_one_or_none()
+                grn = res_grn.scalars().first()
             if grn:
                 res_line = await uow.session.execute(
                     select(GrnLineModel).where(GrnLineModel.grn_id == grn.id, func.upper(GrnLineModel.item_code) == item_code.upper())
@@ -2709,7 +2757,7 @@ async def resolve_bin_qr(
             func.upper(WarehouseBinModel.qr_identifier) == raw_scan.upper()
         )
     )
-    bin_obj = qr_result.scalar_one_or_none()
+    bin_obj = qr_result.scalars().first()
 
     # Step 1: Check JSON
     if bin_obj is None and ((raw_scan.startswith("{") and raw_scan.endswith("}")) or (raw_scan.startswith('"{') and raw_scan.endswith('}"'))):
@@ -2726,7 +2774,7 @@ async def resolve_bin_qr(
                         pass
                 if not bin_obj and bin_code:
                     bq = await uow.session.execute(select(WarehouseBinModel).where(func.upper(WarehouseBinModel.bin_code) == bin_code.strip().upper()))
-                    bin_obj = bq.scalar_one_or_none()
+                    bin_obj = bq.scalars().first()
         except Exception:
             pass
 
@@ -2762,7 +2810,7 @@ async def resolve_bin_qr(
                 func.upper(StorageLocationModel.location_code) == raw_scan.upper()
             )
         )
-        loc = loc_res.scalar_one_or_none()
+        loc = loc_res.scalars().first()
         if loc and loc.bin_id:
             bin_obj = await uow.session.get(WarehouseBinModel, loc.bin_id)
 
@@ -3046,18 +3094,29 @@ async def execute_putaway(
         )
 
     # Step 3: Resolve or provision StorageLocationModel
+    warehouse_code = target_warehouse.warehouse_code if target_warehouse else "WAREHOUSE_OPERATOR"
+    zone_code = target_zone.zone_code if target_zone else "ZONE"
+    target_rack = target_bin.rack or "R01"
+    target_bcode = target_bin.bin_code
+    loc_code = f"LOC-{warehouse_code}-{zone_code}-{target_bcode}"[:64]
+
     loc_res = await uow.session.execute(
         select(StorageLocationModel).where(
-            StorageLocationModel.bin_id == target_bin.id,
-            StorageLocationModel.active.is_(True),
+            or_(
+                StorageLocationModel.bin_id == target_bin.id,
+                func.upper(StorageLocationModel.location_code) == loc_code.upper(),
+                and_(
+                    StorageLocationModel.warehouse_id == warehouse_id,
+                    StorageLocationModel.zone == zone_code,
+                    StorageLocationModel.rack == target_rack,
+                    StorageLocationModel.bin == target_bcode,
+                ),
+            )
         ).with_for_update()
     )
     location = loc_res.scalars().first()
 
     if location is None:
-        warehouse_code = target_warehouse.warehouse_code if target_warehouse else "WAREHOUSE_OPERATOR"
-        zone_code = target_zone.zone_code if target_zone else "ZONE"
-        loc_code = f"LOC-{warehouse_code}-{zone_code}-{target_bin.bin_code}"
         location = StorageLocationModel(
             location_code=loc_code,
             warehouse_id=warehouse_id,
@@ -3065,13 +3124,22 @@ async def execute_putaway(
             zone_id=target_bin.zone_id,
             bin_id=target_bin.id,
             zone=zone_code,
-            rack=target_bin.rack or "R01",
-            bin=target_bin.bin_code,
+            rack=target_rack,
+            bin=target_bcode,
             capacity=target_bin.capacity,
             occupied_quantity=target_bin.occupied_quantity,
             active=True,
         )
         uow.session.add(location)
+        await uow.session.flush()
+    else:
+        if not location.bin_id:
+            location.bin_id = target_bin.id
+        if not location.warehouse_ref_id and target_bin.warehouse_ref_id:
+            location.warehouse_ref_id = target_bin.warehouse_ref_id
+        if not location.zone_id and target_bin.zone_id:
+            location.zone_id = target_bin.zone_id
+        location.active = True
         await uow.session.flush()
 
     # Step 4: Update MaterialStockModel
@@ -3110,7 +3178,7 @@ async def execute_putaway(
             InventoryLocationBalanceModel.batch_number == batch_number,
         ).with_for_update()
     )
-    balance = bal_res.scalar_one_or_none()
+    balance = bal_res.scalars().first()
     if balance is None:
         balance = InventoryLocationBalanceModel(
             material_code=item_code,
@@ -3248,7 +3316,7 @@ async def execute_putaway(
             stock_before=available_before,
             stock_after=stock.available_quantity,
             performed_by=user.username,
-            user_role=",".join(user.roles or []),
+            user_role=",".join(user.roles or [])[:64],
             warehouse_id=warehouse_id,
             warehouse_ref_id=target_bin.warehouse_ref_id,
             warehouse_code=target_warehouse.warehouse_code if target_warehouse else None,
