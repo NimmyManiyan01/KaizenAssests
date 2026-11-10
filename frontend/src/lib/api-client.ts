@@ -2436,6 +2436,12 @@ export const api = {
       body: JSON.stringify({ status }),
     });
   },
+
+  async deleteZone(zoneId: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/v1/zones/${encodeURIComponent(zoneId)}`, {
+      method: "DELETE",
+    });
+  },
   async createWarehouseManager(data: {
     full_name: string;
     employee_id: string;

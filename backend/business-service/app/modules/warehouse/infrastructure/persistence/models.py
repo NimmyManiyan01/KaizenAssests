@@ -213,9 +213,9 @@ class WarehouseRackModel(Base):
 
 class RackOccupancyEventModel(Base):
     __tablename__ = "rack_occupancy_event"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     rack_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("warehouse_rack.id", ondelete="RESTRICT"), nullable=False, index=True)
-    balance_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    balance_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     quantity_delta: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     reason: Mapped[str] = mapped_column(String(1000), nullable=False)
     actor: Mapped[str] = mapped_column(String(128), nullable=False)

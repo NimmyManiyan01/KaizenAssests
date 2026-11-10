@@ -95,6 +95,22 @@ async def lifespan(app: FastAPI):
                     except Exception as e:
                         logger.debug("Note dropping not-null on grn_batch_qr.batch_id: %s", e)
 
+                if "rack_occupancy_event" in tables:
+                    try:
+                        await connection.execute(
+                            text("ALTER TABLE rack_occupancy_event ALTER COLUMN balance_id DROP NOT NULL")
+                        )
+                        await connection.commit()
+                    except Exception as e:
+                        logger.debug("Note dropping not-null on rack_occupancy_event.balance_id: %s", e)
+                    try:
+                        await connection.execute(
+                            text("ALTER TABLE rack_occupancy_event ALTER COLUMN id SET DEFAULT gen_random_uuid()")
+                        )
+                        await connection.commit()
+                    except Exception as e:
+                        logger.debug("Note setting default on rack_occupancy_event.id: %s", e)
+
                 # Supplier schema is version-controlled via Alembic migrations
                 # (20261106_supplier_profile_fields & 20261106_standardize_postgresql_schema).
                 # Runtime DDL is retired to prevent ACCESS EXCLUSIVE locking during multi-pod boot.

@@ -30,6 +30,7 @@ import {
   Printer,
   Truck,
   ArrowRight,
+  Trash2,
 } from "lucide-react";
 import { AssemblyRequisitionsPanel } from "@/components/wms/assembly-requisitions-panel";
 import { AppShell } from "@/components/wms/app-shell";
@@ -1245,6 +1246,7 @@ function SimpleWarehouseModule() {
         await api.createBin(newBinForm.zone_id, {
           bin_code: normalizedBinCode,
           bin_name: normalizedBinCode,
+          rack: normalizedRack,
           capacity: Number(row.capacity),
           qr_identifier: `QR-${normalizedBinCode}`,
         });
@@ -2525,6 +2527,31 @@ function SimpleWarehouseModule() {
                           <Badge variant="outline" className="text-[10px]">
                             {zone.status || "ACTIVE"}
                           </Badge>
+                          {rackCount === 0 && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={isSubmitting}
+                              onClick={async () => {
+                                if (window.confirm(`Delete empty zone ${zone.zone_code}?`)) {
+                                  try {
+                                    setIsSubmitting(true);
+                                    await api.deleteZone(zone.id);
+                                    toast.success(`Zone ${zone.zone_code} deleted.`);
+                                    await fetchData(true);
+                                  } catch (err: any) {
+                                    toast.error(err.message || "Failed to delete zone");
+                                  } finally {
+                                    setIsSubmitting(false);
+                                  }
+                                }
+                              }}
+                              className="h-8 px-2 text-xs text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 dark:border-rose-900"
+                              title="Delete empty zone"
+                            >
+                              <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete Zone
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             disabled={isSubmitting || String(zone.status || "ACTIVE").toUpperCase() !== "ACTIVE"}

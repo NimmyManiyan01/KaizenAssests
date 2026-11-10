@@ -36,11 +36,11 @@ def install_rack_capacity(connection):
         if "rack_occupancy_event" not in tables:
             connection.execute(text("""
                 CREATE TABLE IF NOT EXISTS rack_occupancy_event (
-                    id UUID NOT NULL,
+                    id UUID NOT NULL DEFAULT gen_random_uuid(),
                     rack_id UUID NOT NULL,
-                    balance_id VARCHAR(64) NOT NULL,
+                    balance_id VARCHAR(64),
                     quantity_delta NUMERIC(18, 4) NOT NULL,
-                    reason VARCHAR(128) NOT NULL,
+                    reason VARCHAR(1000) NOT NULL,
                     actor VARCHAR(128) NOT NULL,
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
                     CONSTRAINT pk_rack_occupancy_event PRIMARY KEY (id)

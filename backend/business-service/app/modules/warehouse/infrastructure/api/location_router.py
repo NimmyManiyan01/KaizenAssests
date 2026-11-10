@@ -449,6 +449,33 @@ async def update_zone(
     return _zone_response(zone, bins_count or 0)
 
 
+@zone_router.delete("/{zone_id}")
+async def delete_zone(
+    zone_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow),
+) -> dict:
+    _require_location_write(user)
+    zone = await _get_zone(uow, zone_id)
+    has_bins = await uow.session.scalar(
+        select(func.count(WarehouseBinModel.id)).where(WarehouseBinModel.zone_id == zone.id)
+    )
+    if has_bins and has_bins > 0:
+        raise HTTPException(status_code=409, detail="Cannot delete zone containing bins. Remove bins/racks first.")
+    has_racks = await uow.session.scalar(
+        select(func.count(WarehouseRackModel.id)).where(WarehouseRackModel.zone_id == zone.id)
+    )
+    if has_racks and has_racks > 0:
+        raise HTTPException(status_code=409, detail="Cannot delete zone containing racks. Remove racks first.")
+    await uow.session.delete(zone)
+    try:
+        await uow.session.flush()
+    except IntegrityError as exc:
+        await uow.rollback()
+        raise HTTPException(status_code=409, detail="This zone is referenced by existing records and cannot be deleted.") from exc
+    return {"id": zone_id, "deleted": True}
+
+
 @zone_router.get("/{zone_id}/bins")
 async def list_zone_bins(
     zone_id: str,
@@ -476,7 +503,18 @@ async def _next_rack_code(session, zone_id):
     codes = list((await session.execute(select(WarehouseRackModel.rack_code).where(WarehouseRackModel.zone_id == zone_id))).scalars().all())
     codes.extend((await session.execute(select(WarehouseBinModel.rack).where(WarehouseBinModel.zone_id == zone_id))).scalars().all())
     sequences = [int(match.group(1)) for code in codes if (match := re.fullmatch(r"RACK-(\d+)", str(code).upper()))]
-    return f"RACK-{max(sequences, default=0) + 1:03d}"
+    max_seq = max(sequences, default=0)
+    while True:
+        max_seq += 1
+        candidate_rack = f"RACK-{max_seq:03d}"
+        exists_rack = await session.scalar(
+            select(WarehouseRackModel.id).where(
+                WarehouseRackModel.zone_id == zone_id,
+                WarehouseRackModel.rack_code == candidate_rack,
+            )
+        )
+        if not exists_rack:
+            return candidate_rack
 
 
 @zone_router.get("/{zone_id}/bins/next-code")
@@ -494,7 +532,23 @@ async def next_bin_code(
         match = re.search(r"(?:-BIN-|BIN-)(\d+)$", str(code).upper())
         if match:
             max_sequence = max(max_sequence, int(match.group(1)))
-    return {"suggested_bin_code": f"{zone.zone_code}-BIN-{max_sequence + 1:03d}", "suggested_rack_code": await _next_rack_code(uow.session, zone.id)}
+    suggested_seq = max_sequence + 1
+    while True:
+        candidate_code = f"{zone.zone_code}-BIN-{suggested_seq:03d}"
+        candidate_qr = f"QR-{candidate_code}"
+        conflict = await uow.session.scalar(
+            select(WarehouseBinModel.id).where(
+                or_(
+                    func.upper(WarehouseBinModel.bin_code) == candidate_code.upper(),
+                    func.upper(WarehouseBinModel.qr_identifier) == candidate_qr.upper(),
+                )
+            )
+        )
+        if not conflict:
+            break
+        suggested_seq += 1
+
+    return {"suggested_bin_code": candidate_code, "suggested_rack_code": await _next_rack_code(uow.session, zone.id)}
 
 
 @zone_router.post("/{zone_id}/bins", status_code=status.HTTP_201_CREATED)
@@ -523,17 +577,33 @@ async def create_zone_bin(
     existing_rack = await uow.session.scalar(select(WarehouseRackModel).where(
         WarehouseRackModel.zone_id == zone.id, WarehouseRackModel.rack_code == payload.rack))
     if existing_rack:
-        raise HTTPException(409, "This rack already exists in the zone. Use Add Material to put away stock.")
-    rack = WarehouseRackModel(zone_id=zone.id, rack_code=payload.rack, maximum_capacity=payload.capacity, occupied_quantity=0)
-    uow.session.add(rack)
-    await uow.session.flush()
-    uow.session.add(RackOccupancyEventModel(rack_id=rack.id, quantity_delta=0,
-        reason=f"Rack created; maximum capacity {payload.capacity} PCS", actor=user.username))
+        has_bins = await uow.session.scalar(
+            select(func.count(WarehouseBinModel.id)).where(
+                WarehouseBinModel.zone_id == zone.id,
+                func.upper(WarehouseBinModel.rack) == payload.rack.upper(),
+            )
+        )
+        if has_bins and has_bins > 0:
+            raise HTTPException(409, "This rack already exists in the zone. Use Add Material to put away stock.")
+        rack = existing_rack
+        rack.maximum_capacity = payload.capacity
+    else:
+        rack = WarehouseRackModel(id=uuid.uuid4(), zone_id=zone.id, rack_code=payload.rack, maximum_capacity=payload.capacity, occupied_quantity=0)
+        uow.session.add(rack)
+        await uow.session.flush()
+        uow.session.add(RackOccupancyEventModel(
+            id=uuid.uuid4(),
+            rack_id=rack.id,
+            balance_id="INITIAL_SETUP",
+            quantity_delta=Decimal("0.0"),
+            reason=f"Rack created; maximum capacity {payload.capacity} PCS",
+            actor=user.username,
+        ))
 
     duplicate_code = await uow.session.scalar(
         select(WarehouseBinModel.id).where(
             WarehouseBinModel.warehouse_ref_id == zone.warehouse_ref_id,
-            func.upper(WarehouseBinModel.bin_code) == payload.bin_code,
+            func.upper(WarehouseBinModel.bin_code) == payload.bin_code.upper(),
         )
     )
     if duplicate_code:
@@ -541,21 +611,22 @@ async def create_zone_bin(
     duplicate_position = await uow.session.scalar(
         select(WarehouseBinModel.id).where(
             WarehouseBinModel.zone_id == zone.id,
-            func.upper(WarehouseBinModel.rack) == payload.rack,
-            func.upper(WarehouseBinModel.position) == payload.position,
+            func.upper(WarehouseBinModel.rack) == payload.rack.upper(),
+            func.upper(WarehouseBinModel.position) == (payload.position or "").upper(),
         )
     )
-    if duplicate_position:
+    if duplicate_position and payload.position:
         raise HTTPException(status_code=409, detail="This rack and shelf/position already has a bin")
 
-    qr_identifier = f"QR-{payload.bin_code}"
+    qr_identifier = payload.qr_identifier or f"QR-{payload.bin_code}"
     duplicate_qr = await uow.session.scalar(
         select(WarehouseBinModel.id).where(func.upper(WarehouseBinModel.qr_identifier) == qr_identifier.upper())
     )
     if duplicate_qr:
-        raise HTTPException(status_code=409, detail="QR identifier already belongs to another bin")
+        raise HTTPException(status_code=409, detail=f"QR identifier '{qr_identifier}' already belongs to another bin")
 
     bin_model = WarehouseBinModel(
+        id=uuid.uuid4(),
         warehouse_ref_id=zone.warehouse_ref_id,
         zone_id=zone.id,
         bin_code=payload.bin_code,
@@ -573,7 +644,16 @@ async def create_zone_bin(
         await uow.session.flush()
     except IntegrityError as exc:
         await uow.rollback()
-        raise HTTPException(status_code=409, detail="Bin code or QR identifier already exists") from exc
+        logger.exception("IntegrityError while creating bin '%s' in zone '%s': %s", payload.bin_code, zone.zone_code, exc)
+        detail_msg = "Database constraint violation occurred while creating bin."
+        orig_msg = str(getattr(exc, "orig", exc)).lower()
+        if "qr_identifier" in orig_msg:
+            detail_msg = f"QR identifier '{qr_identifier}' already exists."
+        elif "bin_code" in orig_msg:
+            detail_msg = f"Bin code '{payload.bin_code}' already exists."
+        elif "rack" in orig_msg:
+            detail_msg = f"Rack '{payload.rack}' already exists in this zone."
+        raise HTTPException(status_code=409, detail=detail_msg) from exc
     return _bin_response(bin_model)
 
 
@@ -666,7 +746,7 @@ async def update_rack_capacity(zone_id: str, rack_id: str, payload: RackCapacity
         func.upper(WarehouseBinModel.rack) == rack.rack_code).with_for_update())).all()
     for bin_model in bins:
         bin_model.capacity = payload.maximum_capacity
-    uow.session.add(RackOccupancyEventModel(rack_id=rack.id, quantity_delta=0, actor=user.username,
+    uow.session.add(RackOccupancyEventModel(id=uuid.uuid4(), rack_id=rack.id, balance_id="CAPACITY_UPDATE", quantity_delta=Decimal("0.0"), actor=user.username,
         reason=(f"Capacity {before} -> {payload.maximum_capacity} PCS" + (f": {payload.reason}" if payload.reason else ""))[:1000]))
     await uow.session.flush()
     return _rack_response(rack)
@@ -726,7 +806,7 @@ async def empty_rack(zone_id: str, rack_id: str, payload: EmptyRackRequest,
         await perform_takeaway(TakeawayRequest(bin_scan=item["bin_code"], material_scan=item["material_code"],
             batch_number=item["batch_number"], quantity=Decimal(str(item["quantity"])),
             remarks="Authorized empty rack adjustment: " + payload.reason.strip(), reference_document="RACK_ADJUSTMENT"), user, uow)
-    uow.session.add(RackOccupancyEventModel(rack_id=rack.id, quantity_delta=0, actor=user.username,
+    uow.session.add(RackOccupancyEventModel(id=uuid.uuid4(), rack_id=rack.id, balance_id="EMPTY_RACK", quantity_delta=Decimal("0.0"), actor=user.username,
         reason=("Authorized empty rack adjustment: " + payload.reason.strip())[:1000]))
     await uow.session.flush()
     return await rack_materials(zone_id, rack_id, user, uow)
@@ -795,7 +875,7 @@ async def move_rack_material(zone_id: str, rack_id: str, payload: RackMoveReques
         result = await perform_takeaway(TakeawayRequest(bin_scan=source.qr_identifier,
             material_scan=item["material_qr"], batch_number=item["batch_number"], quantity=payload.quantity,
             remarks=payload.reason, reference_document="RACK_PICK"), user, uow)
-    uow.session.add(RackOccupancyEventModel(rack_id=uuid.UUID(rack_id), quantity_delta=0,
+    uow.session.add(RackOccupancyEventModel(id=uuid.uuid4(), rack_id=uuid.UUID(rack_id), balance_id="STOCK_MOVE", quantity_delta=Decimal("0.0"),
         actor=user.username, reason=f"{'Transfer' if payload.destination_scan else 'Pick'} {payload.quantity} PCS; {item['material_code']}; {item['batch_number']}; QR {item['material_qr']}: {payload.reason}"[:1000]))
     await uow.session.flush()
     return result
