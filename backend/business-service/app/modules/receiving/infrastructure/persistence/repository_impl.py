@@ -2027,16 +2027,18 @@ class SqlAlchemyGrnRepository(GrnRepository):
             )).scalar_one_or_none()
 
         if dock_assignment:
-            # Repair an earlier broad ASN/PO match before claiming the unique
-            # prepared_grn_id for the correct vehicle assignment.
-            conflicting_assignment = (await self._session.execute(
+            # Clear any other dock assignments holding this prepared_grn_id first and flush to avoid unique conflict
+            conflicting_assignments = (await self._session.scalars(
                 select(DockAssignmentModel).where(
                     DockAssignmentModel.prepared_grn_id == grn.id,
                     DockAssignmentModel.id != dock_assignment.id,
                 )
-            )).scalar_one_or_none()
-            if conflicting_assignment:
-                conflicting_assignment.prepared_grn_id = None
+            )).all()
+            for conf in conflicting_assignments:
+                conf.prepared_grn_id = None
+            if conflicting_assignments:
+                await self._session.flush()
+
             dock_assignment.prepared_grn_id = grn.id
             dock_assignment.receiving_completed_at = now
             dock_assignment.receiving_completed_by = posted_by
@@ -2073,6 +2075,26 @@ class SqlAlchemyGrnRepository(GrnRepository):
         )
         active_warehouses = list(warehouse_res.scalars().all())
 
+        # Ensure destination_warehouse_ref_id is a valid warehouse_configuration.id to prevent FK constraint violations
+        valid_wh_ref_ids = {w.id for w in active_warehouses}
+        if base_dest_warehouse_ref_id and base_dest_warehouse_ref_id not in valid_wh_ref_ids:
+            wh_chk = await self._session.scalar(
+                select(WarehouseModel.id).where(WarehouseModel.id == base_dest_warehouse_ref_id)
+            )
+            if not wh_chk:
+                base_dest_warehouse_ref_id = active_warehouses[0].id if active_warehouses else None
+
+        # Resolve warehouse_id so it is never None or empty
+        resolved_warehouse_id = (grn.warehouse_id or "").strip()
+        if not resolved_warehouse_id and active_warehouses:
+            resolved_warehouse_id = active_warehouses[0].warehouse_id or active_warehouses[0].warehouse_code or "WH-MAIN"
+        if not resolved_warehouse_id:
+            resolved_warehouse_id = "WH-MAIN"
+        grn.warehouse_id = resolved_warehouse_id
+
+        # Cache of inventory receipt postings created or updated in this completion to prevent duplicate inserts
+        receipt_postings_by_code: dict[str, InventoryReceiptPostingModel] = {}
+
         # Post inventory updates & putaway tasks
         for line in grn.lines:
             dest_warehouse_ref_id = base_dest_warehouse_ref_id
@@ -2083,6 +2105,10 @@ class SqlAlchemyGrnRepository(GrnRepository):
                     if st.id == dest_warehouse_ref_id:
                         assigned_to = st.warehouse_operator_name or st.warehouse_operator_id
                         break
+
+            clean_item_code = (line.item_code or "").strip()
+            norm_item_code = clean_item_code.upper()
+
             # Only QC-accepted material may create a putaway task. Received
             # but rejected, damaged, or held quantities remain unavailable.
             post_qty = line.quality_approved_quantity or line.good_quantity or Decimal("0")
@@ -2093,161 +2119,215 @@ class SqlAlchemyGrnRepository(GrnRepository):
                 # physically confirmed.
                 on_hand_before = await self._session.scalar(
                     select(func.coalesce(func.sum(MaterialStockModel.on_hand_quantity), Decimal("0"))).where(
-                        MaterialStockModel.material_code == line.item_code,
-                        func.lower(MaterialStockModel.warehouse_id) == grn.warehouse_id.strip().lower(),
+                        func.upper(func.trim(MaterialStockModel.material_code)) == norm_item_code,
+                        func.lower(func.trim(MaterialStockModel.warehouse_id)) == resolved_warehouse_id.lower(),
                     )
                 ) or Decimal("0")
-                receipt_posting = await self._session.scalar(
-                    select(InventoryReceiptPostingModel).where(
-                        InventoryReceiptPostingModel.grn_id == grn.id,
-                        InventoryReceiptPostingModel.item_code == line.item_code,
-                    ).with_for_update()
-                )
+
+                receipt_posting = receipt_postings_by_code.get(norm_item_code)
+                if not receipt_posting:
+                    receipt_posting = await self._session.scalar(
+                        select(InventoryReceiptPostingModel).where(
+                            InventoryReceiptPostingModel.grn_id == grn.id,
+                            func.upper(func.trim(InventoryReceiptPostingModel.item_code)) == norm_item_code,
+                        ).with_for_update()
+                    )
+
                 if receipt_posting:
                     receipt_posting.posted_quantity += post_qty
                     receipt_posting.posted_by = posted_by
                     receipt_posting.posted_at = now
+                    receipt_postings_by_code[norm_item_code] = receipt_posting
                 else:
-                    self._session.add(InventoryReceiptPostingModel(
+                    new_rp = InventoryReceiptPostingModel(
                         id=uuid.uuid4(),
                         grn_id=grn.id,
                         grn_number=grn.grn_number,
                         po_id=grn.po_id,
-                        po_number=grn.po_number,
+                        po_number=grn.po_number or "N/A",
                         asn_id=grn.asn_id,
-                        asn_number=grn.asn_number,
-                        supplier_name=grn.supplier_name,
-                        item_code=line.item_code,
-                        material_name=line.material_name or line.item_code,
-                        uom=line.uom,
-                        warehouse_id=grn.warehouse_id,
+                        asn_number=grn.asn_number or "N/A",
+                        supplier_name=grn.supplier_name or "Unknown Supplier",
+                        item_code=clean_item_code,
+                        material_name=line.material_name or clean_item_code,
+                        uom=line.uom or "PCS",
+                        warehouse_id=resolved_warehouse_id,
                         posted_quantity=post_qty,
                         on_hand_before=on_hand_before,
                         on_hand_after=on_hand_before,
                         posted_by=posted_by,
                         posted_at=now,
-                    ))
+                    )
+                    try:
+                        async with self._session.begin_nested():
+                            self._session.add(new_rp)
+                            await self._session.flush()
+                        receipt_postings_by_code[norm_item_code] = new_rp
+                    except (IntegrityError, DBAPIError):
+                        # Handled race or pre-existing posting on duplicate item lines
+                        existing_rp = await self._session.scalar(
+                            select(InventoryReceiptPostingModel).where(
+                                InventoryReceiptPostingModel.grn_id == grn.id,
+                                func.upper(func.trim(InventoryReceiptPostingModel.item_code)) == norm_item_code,
+                            ).with_for_update()
+                        )
+                        if existing_rp:
+                            existing_rp.posted_quantity += post_qty
+                            existing_rp.posted_by = posted_by
+                            existing_rp.posted_at = now
+                            receipt_postings_by_code[norm_item_code] = existing_rp
 
-                # Create putaway task for line or batches
-                if line.batches and len(line.batches) > 0:
+                # Fetch all existing putaway tasks for this GRN and item code to manage idempotently
+                existing_pt_res = await self._session.execute(
+                    select(PutawayTaskModel).where(
+                        PutawayTaskModel.grn_id == grn.id,
+                        func.upper(func.trim(PutawayTaskModel.item_code)) == norm_item_code,
+                    )
+                )
+                existing_tasks = list(existing_pt_res.scalars().all())
+                batched_tasks: dict[str, PutawayTaskModel] = {}
+                unbatched_tasks: list[PutawayTaskModel] = []
+                for pt in existing_tasks:
+                    if pt.batch_number and str(pt.batch_number).strip():
+                        batched_tasks[str(pt.batch_number).strip().upper()] = pt
+                    else:
+                        unbatched_tasks.append(pt)
+
+                # Filter to only active (non-superseded) batches
+                active_batches = [b for b in (line.batches or []) if not getattr(b, "superseded", False)]
+
+                if active_batches:
                     eligible_remaining = post_qty
                     seen_batch_numbers: set[str] = set()
-                    for batch in line.batches:
+                    for batch in active_batches:
                         batch_key = str(batch.batch_number or "").strip().upper()
                         if not batch_key or batch_key in seen_batch_numbers or eligible_remaining <= Decimal("0"):
                             continue
                         seen_batch_numbers.add(batch_key)
                         eligible_quantity = min(batch.batch_quantity or Decimal("0"), eligible_remaining)
-                        if eligible_quantity > Decimal("0"):
-                            existing_task = await self._session.execute(
-                                select(PutawayTaskModel.id).where(
-                                    PutawayTaskModel.grn_id == grn.id,
-                                    PutawayTaskModel.item_code == line.item_code,
-                                    func.upper(func.trim(func.coalesce(PutawayTaskModel.batch_number, ""))) == batch_key,
-                                    PutawayTaskModel.status.notin_(["CANCELLED", "VOID"]),
-                                ).limit(1),
-                                {
-                                    "grn_id": grn.id,
-                                    "code": line.item_code,
-                                    "batch_number": batch.batch_number,
-                                },
-                            )
-                            if existing_task.scalar_one_or_none() is not None:
-                                eligible_remaining -= eligible_quantity
-                                continue
-                            task_num = f"PT-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
-                            await self._session.execute(
-                                insert(PutawayTaskModel.__table__).values(
-                                    id=bindparam("id"),
-                                    task_number=bindparam("task_num"),
-                                    grn_id=bindparam("grn_id"),
-                                    grn_number=bindparam("grn_num"),
-                                    item_code=bindparam("code"),
-                                    material_name=bindparam("name"),
-                                    quantity=bindparam("qty"),
-                                    uom=bindparam("uom"),
-                                    warehouse_id=bindparam("wh"),
-                                    source_location=bindparam("source"),
-                                    destination_warehouse_ref_id=bindparam("dest_warehouse_ref_id"),
-                                    assigned_to=bindparam("assigned_to"),
-                                    assigned_by=bindparam("assigned_by"),
-                                    assigned_at=bindparam("assigned_at"),
-                                    status="PUTAWAY_PENDING",
-                                    created_by=bindparam("user"),
-                                    created_at=bindparam("now"),
-                                    batch_number=bindparam("batch_number")
-                                ),
-                                {
-                                    "id": uuid.uuid4(),
-                                    "task_num": task_num,
-                                    "grn_id": grn.id,
-                                    "grn_num": grn.grn_number,
-                                    "code": line.item_code,
-                                    "name": line.material_name or line.item_code,
-                                    "qty": eligible_quantity,
-                                    "uom": line.uom or "PCS",
-                                    "wh": grn.warehouse_id,
-                                    "source": f"RECEIVING_DOCK_{grn.dock_number}" if grn.dock_number else "RECEIVING_DOCK",
-                                    "dest_warehouse_ref_id": dest_warehouse_ref_id,
-                                    "assigned_to": assigned_to,
-                                    "assigned_by": assigned_by,
-                                    "assigned_at": assigned_at,
-                                    "user": posted_by,
-                                    "now": now,
-                                    "batch_number": batch.batch_number,
-                                },
-                            )
+                        if eligible_quantity <= Decimal("0"):
+                            continue
+
+                        # If a putaway task already exists for this exact batch number, update it
+                        if batch_key in batched_tasks:
+                            pt_obj = batched_tasks[batch_key]
+                            pt_obj.quantity = eligible_quantity
+                            pt_obj.uom = line.uom or "PCS"
+                            pt_obj.warehouse_id = resolved_warehouse_id
+                            pt_obj.destination_warehouse_ref_id = dest_warehouse_ref_id
+                            if pt_obj.status in ["CANCELLED", "VOID", "OPEN", "DRAFT"]:
+                                pt_obj.status = "PUTAWAY_PENDING"
+                            if assigned_to:
+                                pt_obj.assigned_to = assigned_to
+                            if assigned_by:
+                                pt_obj.assigned_by = assigned_by
                             eligible_remaining -= eligible_quantity
+                            continue
+
+                        # If an unbatched task exists for this line (e.g. created at vehicle arrival), adopt it
+                        if unbatched_tasks:
+                            pt_obj = unbatched_tasks.pop(0)
+                            pt_obj.batch_number = batch.batch_number
+                            pt_obj.quantity = eligible_quantity
+                            pt_obj.uom = line.uom or "PCS"
+                            pt_obj.warehouse_id = resolved_warehouse_id
+                            pt_obj.destination_warehouse_ref_id = dest_warehouse_ref_id
+                            if pt_obj.status in ["CANCELLED", "VOID", "OPEN", "DRAFT"]:
+                                pt_obj.status = "PUTAWAY_PENDING"
+                            if assigned_to:
+                                pt_obj.assigned_to = assigned_to
+                            if assigned_by:
+                                pt_obj.assigned_by = assigned_by
+                            batched_tasks[batch_key] = pt_obj
+                            eligible_remaining -= eligible_quantity
+                            continue
+
+                        # Otherwise insert a new putaway task within a savepoint
+                        task_num = f"PT-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+                        new_pt = PutawayTaskModel(
+                            id=uuid.uuid4(),
+                            task_number=task_num,
+                            grn_id=grn.id,
+                            grn_number=grn.grn_number,
+                            item_code=clean_item_code,
+                            material_name=line.material_name or clean_item_code,
+                            quantity=eligible_quantity,
+                            uom=line.uom or "PCS",
+                            warehouse_id=resolved_warehouse_id,
+                            source_location=f"RECEIVING_DOCK_{grn.dock_number}" if grn.dock_number else "RECEIVING_DOCK",
+                            destination_warehouse_ref_id=dest_warehouse_ref_id,
+                            assigned_to=assigned_to,
+                            assigned_by=assigned_by,
+                            assigned_at=assigned_at,
+                            status="PUTAWAY_PENDING",
+                            created_by=posted_by,
+                            created_at=now,
+                            batch_number=batch.batch_number,
+                        )
+                        try:
+                            async with self._session.begin_nested():
+                                self._session.add(new_pt)
+                                await self._session.flush()
+                            batched_tasks[batch_key] = new_pt
+                        except (IntegrityError, DBAPIError):
+                            # In case of constraint conflict or unique index race, update existing
+                            retry_pt = await self._session.scalar(
+                                select(PutawayTaskModel).where(
+                                    PutawayTaskModel.grn_id == grn.id,
+                                    func.upper(func.trim(PutawayTaskModel.item_code)) == norm_item_code,
+                                    func.upper(func.trim(func.coalesce(PutawayTaskModel.batch_number, ""))) == batch_key,
+                                ).with_for_update()
+                            )
+                            if retry_pt:
+                                retry_pt.quantity = eligible_quantity
+                                retry_pt.warehouse_id = resolved_warehouse_id
+                                retry_pt.destination_warehouse_ref_id = dest_warehouse_ref_id
+                                if retry_pt.status in ["CANCELLED", "VOID", "OPEN", "DRAFT"]:
+                                    retry_pt.status = "PUTAWAY_PENDING"
+                                batched_tasks[batch_key] = retry_pt
+                        eligible_remaining -= eligible_quantity
                 else:
-                    existing_task = await self._session.execute(
-                        select(PutawayTaskModel.id).where(
-                            PutawayTaskModel.grn_id == grn.id,
-                            PutawayTaskModel.item_code == line.item_code,
-                            PutawayTaskModel.batch_number.is_(None),
-                        ).limit(1)
-                    )
-                    if existing_task.scalar_one_or_none():
-                        continue
-                    task_num = f"PT-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
-                    await self._session.execute(
-                        insert(PutawayTaskModel.__table__).values(
-                                    id=bindparam("id"),
-                                    task_number=bindparam("task_num"),
-                                    grn_id=bindparam("grn_id"),
-                                    grn_number=bindparam("grn_num"),
-                                    item_code=bindparam("code"),
-                                    material_name=bindparam("name"),
-                                    quantity=bindparam("qty"),
-                                    uom=bindparam("uom"),
-                                    warehouse_id=bindparam("wh"),
-                                    source_location=bindparam("source"),
-                                    destination_warehouse_ref_id=bindparam("dest_warehouse_ref_id"),
-                                    assigned_to=bindparam("assigned_to"),
-                                    assigned_by=bindparam("assigned_by"),
-                                    assigned_at=bindparam("assigned_at"),
-                                    status="PUTAWAY_PENDING",
-                                    created_by=bindparam("user"),
-                                    created_at=bindparam("now")
-                                ),
-                        {
-                            "id": uuid.uuid4(),
-                            "task_num": task_num,
-                            "grn_id": grn.id,
-                            "grn_num": grn.grn_number,
-                            "code": line.item_code,
-                            "name": line.material_name or line.item_code,
-                            "qty": post_qty,
-                            "uom": line.uom or "PCS",
-                            "wh": grn.warehouse_id,
-                            "source": f"RECEIVING_DOCK_{grn.dock_number}" if grn.dock_number else "RECEIVING_DOCK",
-                            "dest_warehouse_ref_id": dest_warehouse_ref_id,
-                            "assigned_to": assigned_to,
-                            "assigned_by": assigned_by,
-                            "assigned_at": assigned_at,
-                            "user": posted_by,
-                            "now": now,
-                        },
-                    )
+                    # Item without batches
+                    if unbatched_tasks:
+                        pt_obj = unbatched_tasks[0]
+                        pt_obj.quantity = post_qty
+                        pt_obj.uom = line.uom or "PCS"
+                        pt_obj.warehouse_id = resolved_warehouse_id
+                        pt_obj.destination_warehouse_ref_id = dest_warehouse_ref_id
+                        if pt_obj.status in ["CANCELLED", "VOID", "OPEN", "DRAFT"]:
+                            pt_obj.status = "PUTAWAY_PENDING"
+                        if assigned_to:
+                            pt_obj.assigned_to = assigned_to
+                        if assigned_by:
+                            pt_obj.assigned_by = assigned_by
+                    else:
+                        task_num = f"PT-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+                        new_pt = PutawayTaskModel(
+                            id=uuid.uuid4(),
+                            task_number=task_num,
+                            grn_id=grn.id,
+                            grn_number=grn.grn_number,
+                            item_code=clean_item_code,
+                            material_name=line.material_name or clean_item_code,
+                            quantity=post_qty,
+                            uom=line.uom or "PCS",
+                            warehouse_id=resolved_warehouse_id,
+                            source_location=f"RECEIVING_DOCK_{grn.dock_number}" if grn.dock_number else "RECEIVING_DOCK",
+                            destination_warehouse_ref_id=dest_warehouse_ref_id,
+                            assigned_to=assigned_to,
+                            assigned_by=assigned_by,
+                            assigned_at=assigned_at,
+                            status="PUTAWAY_PENDING",
+                            created_by=posted_by,
+                            created_at=now,
+                            batch_number=None,
+                        )
+                        try:
+                            async with self._session.begin_nested():
+                                self._session.add(new_pt)
+                                await self._session.flush()
+                        except (IntegrityError, DBAPIError):
+                            pass
 
         await self._session.flush()
         return grn

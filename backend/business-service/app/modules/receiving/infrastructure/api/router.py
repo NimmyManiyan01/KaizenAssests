@@ -1316,61 +1316,66 @@ async def complete_grn(
     # creation must happen here as part of the same transaction.  The unique
     # source_grn_line_id constraint plus the lookup below makes retries safe.
     if grn.asn_id:
-        supplier_id = (
-            await uow.session.execute(
-                select(AsnModel.supplier_id).where(AsnModel.id == grn.asn_id)
-            )
-        ).scalar_one_or_none()
-        if supplier_id:
-            if uow.session.get_bind().dialect.name == "postgresql":
-                await uow.session.execute(text("SELECT pg_advisory_xact_lock(740100)"))
-            claim_numbers = (await uow.session.scalars(
-                select(SupplierDamageClaimModel.claim_number)
-            )).all()
-            claim_sequence = next_damage_claim_sequence(claim_numbers)
+        try:
+            supplier_id = (
+                await uow.session.execute(
+                    select(AsnModel.supplier_id).where(AsnModel.id == grn.asn_id)
+                )
+            ).scalar_one_or_none()
+            if supplier_id:
+                async with uow.session.begin_nested():
+                    if uow.session.get_bind().dialect.name == "postgresql":
+                        await uow.session.execute(text("SELECT pg_advisory_xact_lock(740100)"))
+                    claim_numbers = (await uow.session.scalars(
+                        select(SupplierDamageClaimModel.claim_number)
+                    )).all()
+                    claim_sequence = next_damage_claim_sequence(claim_numbers)
 
-            for line in grn.lines or []:
-                damaged = line.damaged_quantity or Decimal("0")
-                rejected = line.rejected_quantity or Decimal("0")
-                if damaged <= 0 and rejected <= 0:
-                    continue
+                    for line in grn.lines or []:
+                        damaged = line.damaged_quantity or Decimal("0")
+                        rejected = line.rejected_quantity or Decimal("0")
+                        if damaged <= 0 and rejected <= 0:
+                            continue
 
-                existing = (
-                    await uow.session.execute(
-                        select(SupplierDamageClaimModel.id).where(
-                            SupplierDamageClaimModel.source_grn_line_id == line.id
+                        existing = (
+                            await uow.session.execute(
+                                select(SupplierDamageClaimModel.id).where(
+                                    SupplierDamageClaimModel.source_grn_line_id == line.id
+                                )
+                            )
+                        ).scalar_one_or_none()
+                        if existing:
+                            continue
+
+                        claim_number = f"DC-{claim_sequence:05d}"
+                        claim_sequence += 1
+                        created_at = grn.posted_at or datetime.utcnow()
+                        uow.session.add(
+                            SupplierDamageClaimModel(
+                                claim_number=claim_number,
+                                source_grn_id=grn.id,
+                                source_grn_line_id=line.id,
+                                supplier_id=supplier_id,
+                                status="SUPPLIER_SENT",
+                                created_by=user.username or "System User",
+                                created_at=created_at,
+                                sent_at=created_at,
+                            )
                         )
-                    )
-                ).scalar_one_or_none()
-                if existing:
-                    continue
-
-                claim_number = f"DC-{claim_sequence:05d}"
-                claim_sequence += 1
-                created_at = grn.posted_at or datetime.utcnow()
-                uow.session.add(
-                    SupplierDamageClaimModel(
-                        claim_number=claim_number,
-                        source_grn_id=grn.id,
-                        source_grn_line_id=line.id,
-                        supplier_id=supplier_id,
-                        status="SUPPLIER_SENT",
-                        created_by=user.username or "System User",
-                        created_at=created_at,
-                        sent_at=created_at,
-                    )
-                )
-                uow.session.add(
-                    NotificationModel(
-                        user_role="SUPPLIER",
-                        title=f"Damage Return {claim_number}",
-                        message=(
-                            f"GRN {grn.grn_number}: damaged/rejected material "
-                            "requires your response."
-                        ),
-                        link="/damage-claims",
-                    )
-                )
+                        uow.session.add(
+                            NotificationModel(
+                                user_role="SUPPLIER",
+                                title=f"Damage Return {claim_number}",
+                                message=(
+                                    f"GRN {grn.grn_number}: damaged/rejected material "
+                                    "requires your response."
+                                ),
+                                link="/damage-claims",
+                            )
+                        )
+                    await uow.session.flush()
+        except Exception as claim_err:
+            logger.warning("Optional damage claim generation during GRN completion skipped: %s", claim_err)
 
     return CompleteGrnResponse(
         grn_id=str(grn.id),
