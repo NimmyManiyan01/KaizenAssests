@@ -29,10 +29,12 @@ import {
   Upload,
   Printer,
   Truck,
+  ArrowLeft,
   ArrowRight,
   Trash2,
 } from "lucide-react";
 import { AssemblyRequisitionsPanel } from "@/components/wms/assembly-requisitions-panel";
+import { WarehousePickHistoryTable } from "@/components/wms/warehouse-pick-history-table";
 import { AppShell } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -190,7 +192,9 @@ function SimpleWarehouseModule() {
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState("");
   const [pickupToConfirm, setPickupToConfirm] = useState<any>(null);
-  const [showPickupHistory, setShowPickupHistory] = useState(false);
+  const [pickingViewMode, setPickingViewMode] = useState<"queue" | "history">(
+    searchParams?.view === "history" ? "history" : "queue",
+  );
   const [pickupFifoAlert, setPickupFifoAlert] = useState("");
   const [pickupConfirmation, setPickupConfirmation] = useState({
     material_scan: "",
@@ -1556,10 +1560,10 @@ function SimpleWarehouseModule() {
                 data-pickup-history="true"
                 variant="outline"
                 size="sm"
-                onClick={() => setShowPickupHistory(true)}
+                onClick={() => setPickingViewMode((prev) => (prev === "history" ? "queue" : "history"))}
                 className="gap-2 border-primary bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground"
               >
-                <History className="size-4" /> History
+                <History className="size-4" /> {pickingViewMode === "history" ? "Active Queue" : "History"}
                 <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] text-primary-foreground">
                   {pickupTasks.filter((task) => ["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())).length}
                 </span>
@@ -2247,143 +2251,262 @@ function SimpleWarehouseModule() {
           <TabsContent value="picking" className="assembly-picking-overview space-y-4 mt-4">
             <div className="grid gap-4 sm:grid-cols-3">
               {[
-                { label: "Requests to review", value: pendingRequestsCount, Icon: ClipboardList, tone: "blue" },
-                { label: "Picks in progress", value: pendingPickingCount, Icon: ListOrdered, tone: "amber" },
-                { label: "Completed picks", value: pickupTasks.filter((task) => ["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())).length, Icon: CheckCircle2, tone: "green" },
-              ].map(({ label, value, Icon, tone }) => (
-                <div key={label} className="inventory-stock-summary" data-tone={tone}>
+                { label: "Requests to review", value: pendingRequestsCount, Icon: ClipboardList, tone: "blue", action: () => setPickingViewMode("queue") },
+                { label: "Picks in progress", value: pendingPickingCount, Icon: ListOrdered, tone: "amber", action: () => setPickingViewMode("queue") },
+                { label: "Completed picks", value: pickupTasks.filter((task) => ["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())).length, Icon: CheckCircle2, tone: "green", action: () => setPickingViewMode("history") },
+              ].map(({ label, value, Icon, tone, action }) => (
+                <div
+                  key={label}
+                  role="button"
+                  tabIndex={0}
+                  onClick={action}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      action();
+                    }
+                  }}
+                  className="inventory-stock-summary cursor-pointer transition-all hover:scale-[1.01] hover:shadow-md"
+                  data-tone={tone}
+                >
                   <div className="inventory-stock-summary-icon"><Icon className="size-6" /></div>
                   <div><p className="text-sm font-medium text-muted-foreground">{label}</p><p className="mt-1 text-2xl font-bold tabular-nums">{value}</p></div>
                 </div>
               ))}
             </div>
-            <AssemblyRequisitionsPanel
-              refreshKey={requisitionRefreshKey}
-              showRefresh={false}
-              pickupTasks={pickupTasks}
-              onConfirmPick={(task) => {
-                setPickupFifoAlert("");
-                setPickupQrVerified({ material: false, rack: false });
-                setPickupQrError("");
-                setPickupConfirmation({
-                  material_scan: "",
-                  zone_scan: "",
-                  quantity: String(Math.max(0, Number(task.requested_quantity || 0) - Number(task.picked_quantity || 0))),
-                });
-                setPickupToConfirm(task);
-              }}
-              onUpdated={() => fetchData(true)}
-            />
-            <Card className="warehouse-picking-queue overflow-x-auto border-violet-200 bg-gradient-to-br from-violet-50/80 via-white to-indigo-50/50 p-5 shadow-sm dark:border-violet-900/60 dark:bg-violet-950/20">
-              <h3 className="mb-4 text-sm font-bold uppercase tracking-wider text-slate-900 dark:text-slate-100">
-                Warehouse picking queue <InformationTooltip help="pickRemaining" />
-              </h3>
-              <table className="w-full min-w-[1040px] table-fixed text-left text-sm">
-                <colgroup><col className="w-[15%]" /><col className="w-[15%]" /><col className="w-[14%]" /><col className="w-[24%]" /><col className="w-[10%]" /><col className="w-[12%]" /><col className="w-[10%]" /></colgroup>
-                <thead>
-                  <tr className="border-b border-violet-200 bg-violet-100/70 text-violet-950 uppercase dark:border-violet-900 dark:bg-violet-950/50 dark:text-violet-100">
-                    <th className="py-2.5 px-3">Task No</th>
-                    <th className="py-2.5 px-3">Assembly Order</th>
-                    <th className="py-2.5 px-3">Material</th>
-                    <th className="py-2.5 px-3">Pick Location</th>
-                    <th className="py-2.5 px-3">Quantity</th>
-                    <th className="py-2.5 px-3">Status<InformationTooltip help="workflowStatus" /></th>
-                    <th className="py-2.5 px-3 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {pickupTasks.filter((task) => !["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())).length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="text-center py-6 text-slate-500">
-                        No pick tasks in queue. Approve a Material Request to generate pick tasks.
-                      </td>
-                    </tr>
-                  ) : (
-                    pickupTasks.filter((task) => !["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())).map((p) => (
-                      <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
-                        <td className="py-3 px-3 font-semibold text-indigo-600">
-                          <button
-                            type="button"
-                            className="underline underline-offset-2"
-                            onClick={() => { setPickupFifoAlert(""); setPickupQrVerified({ material: false, rack: false }); setPickupQrError(""); setPickupConfirmation({ material_scan: "", zone_scan: "", quantity: String(Math.max(0, Number(p.requested_quantity || 0) - Number(p.picked_quantity || 0))) }); setPickupToConfirm(p); }}
-                          >
-                            {p.task_number || p.id}
-                          </button>
-                        </td>
-                        <td className="py-3 px-3 text-slate-600">
-                          {p.assembly_order_number || p.assembly_order || "-"}
-                        </td>
-                        <td className="py-3 px-3 font-medium">
-                          {p.material_name || p.material_code}
-                        </td>
-                        <td className="py-3 px-3">
-                          <Badge variant="outline" className="bg-slate-50 font-mono text-[10px]">
-                            {p.pick_location || "—"}
-                          </Badge>
-                        </td>
-                        <td className="py-3 px-3 font-bold">
-                          {p.quantity ?? "—"} {p.uom || ""}
-                        </td>
-                        <td className="py-3 px-3">
-                          <Badge
-                            className={cn(
-                              "text-[10px] font-bold uppercase",
-                              p.status === "COMPLETED"
-                                ? "bg-emerald-500/15 text-emerald-700"
-                                : "bg-indigo-500/15 text-indigo-700",
-                            )}
-                          >
-                            {p.status || "—"}
-                          </Badge>
-                        </td>
-                        <td className="py-3 px-3 text-right">
-                          {p.status !== "COMPLETED" && (
-                            <Button
-                              size="sm"
-                              onClick={() => { setPickupFifoAlert(""); setPickupQrVerified({ material: false, rack: false }); setPickupQrError(""); setPickupConfirmation({ material_scan: "", zone_scan: "", quantity: String(Math.max(0, Number(p.requested_quantity || 0) - Number(p.picked_quantity || 0))) }); setPickupToConfirm(p); }}
-                              className="h-7 text-xs bg-indigo-600 hover:bg-indigo-700 text-white"
-                            >
-                              Confirm Pick
-                            </Button>
-                          )}
-                        </td>
-                      </tr>
-                    ))
+            {/* View Switcher: Active Picking Queue vs Pick History */}
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-card p-3 shadow-xs">
+              <div className="inline-flex rounded-xl bg-muted/60 p-1 border border-border/50">
+                <button
+                  type="button"
+                  onClick={() => setPickingViewMode("queue")}
+                  className={cn(
+                    "flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold transition-all",
+                    pickingViewMode === "queue"
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
                   )}
-                </tbody>
-              </table>
-            </Card>
-            <Dialog open={showPickupHistory} onOpenChange={setShowPickupHistory}>
-              <DialogContent className="w-[calc(100vw-2rem)] max-h-[85dvh] max-w-5xl overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2"><History className="size-5 text-primary" /> Warehouse pick history</DialogTitle>
-                  <DialogDescription>Completed assembly material picks and their confirmation details.</DialogDescription>
-                </DialogHeader>
-                <div className="overflow-x-auto rounded-lg border">
-                  <table className="w-full min-w-[850px] text-left text-sm">
-                    <thead className="border-b bg-muted/50 text-xs uppercase text-muted-foreground">
-                      <tr><th className="px-3 py-3">Task No</th><th className="px-3">Assembly Request</th><th className="px-3">Material</th><th className="px-3">Pick Location</th><th className="px-3">Picked Quantity</th><th className="px-3">Confirmed By</th><th className="px-3">Confirmed At</th></tr>
+                >
+                  <ListOrdered className="size-3.5" />
+                  Active Picking Queue
+                  <span
+                    className={cn(
+                      "rounded-full px-2 py-0.5 text-[10px] font-black",
+                      pickingViewMode === "queue"
+                        ? "bg-white/20 text-white"
+                        : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {pendingPickingCount}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPickingViewMode("history")}
+                  className={cn(
+                    "flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold transition-all",
+                    pickingViewMode === "history"
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <History className="size-3.5" />
+                  Completed Pick History
+                  <span
+                    className={cn(
+                      "rounded-full px-2 py-0.5 text-[10px] font-black",
+                      pickingViewMode === "history"
+                        ? "bg-white/20 text-white"
+                        : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {pickupTasks.filter((task) => ["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())).length}
+                  </span>
+                </button>
+              </div>
+              {pickingViewMode === "history" && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setPickingViewMode("queue")}
+                  className="text-xs font-bold text-primary gap-1.5"
+                >
+                  <ArrowLeft className="size-3.5" /> Back to Active Queue
+                </Button>
+              )}
+            </div>
+
+            {/* View Content */}
+            {pickingViewMode === "history" ? (
+              <WarehousePickHistoryTable
+                tasks={pickupTasks.filter((task) =>
+                  ["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase()),
+                )}
+                onBackToQueue={() => setPickingViewMode("queue")}
+              />
+            ) : (
+              <>
+                <AssemblyRequisitionsPanel
+                  refreshKey={requisitionRefreshKey}
+                  showRefresh={false}
+                  pickupTasks={pickupTasks}
+                  onConfirmPick={(task) => {
+                    setPickupFifoAlert("");
+                    setPickupQrVerified({ material: false, rack: false });
+                    setPickupQrError("");
+                    setPickupConfirmation({
+                      material_scan: "",
+                      zone_scan: "",
+                      quantity: String(
+                        Math.max(
+                          0,
+                          Number(task.requested_quantity || 0) - Number(task.picked_quantity || 0),
+                        ),
+                      ),
+                    });
+                    setPickupToConfirm(task);
+                  }}
+                  onUpdated={() => fetchData(true)}
+                />
+                <Card className="warehouse-picking-queue overflow-x-auto border-violet-200 bg-gradient-to-br from-violet-50/80 via-white to-indigo-50/50 p-5 shadow-sm dark:border-violet-900/60 dark:bg-violet-950/20">
+                  <h3 className="mb-4 text-sm font-bold uppercase tracking-wider text-slate-900 dark:text-slate-100">
+                    Warehouse picking queue <InformationTooltip help="pickRemaining" />
+                  </h3>
+                  <table className="w-full min-w-[1040px] table-fixed text-left text-sm">
+                    <colgroup>
+                      <col className="w-[15%]" />
+                      <col className="w-[15%]" />
+                      <col className="w-[14%]" />
+                      <col className="w-[24%]" />
+                      <col className="w-[10%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[10%]" />
+                    </colgroup>
+                    <thead>
+                      <tr className="border-b border-violet-200 bg-violet-100/70 text-violet-950 uppercase dark:border-violet-900 dark:bg-violet-950/50 dark:text-violet-100">
+                        <th className="py-2.5 px-3">Task No</th>
+                        <th className="py-2.5 px-3">Assembly Order</th>
+                        <th className="py-2.5 px-3">Material</th>
+                        <th className="py-2.5 px-3">Pick Location</th>
+                        <th className="py-2.5 px-3">Quantity</th>
+                        <th className="py-2.5 px-3">
+                          Status<InformationTooltip help="workflowStatus" />
+                        </th>
+                        <th className="py-2.5 px-3 text-right">Action</th>
+                      </tr>
                     </thead>
-                    <tbody className="divide-y">
-                      {pickupTasks.filter((task) => ["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())).map((task) => (
-                        <tr key={task.id}>
-                          <td className="px-3 py-3 font-semibold text-primary">{task.task_number || task.id}</td>
-                          <td className="px-3">{task.assembly_order_number || task.assembly_order || "—"}</td>
-                          <td className="px-3"><span className="font-medium">{task.material_name || task.material_code || "—"}</span>{task.material_name && task.material_code && <span className="block text-xs text-muted-foreground">{task.material_code}</span>}</td>
-                          <td className="px-3 font-mono text-xs">{task.pick_location || "—"}</td>
-                          <td className="px-3 font-semibold">{task.picked_quantity ?? task.quantity ?? "—"} {task.uom || ""}</td>
-                          <td className="px-3">{task.confirmation?.confirmed_by || "—"}</td>
-                          <td className="px-3 text-xs text-muted-foreground">{formatApiDateTime(task.confirmation?.confirmed_at)}</td>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {pickupTasks.filter(
+                        (task) =>
+                          !["COMPLETED", "PICKED", "ISSUED"].includes(
+                            String(task.status || "").toUpperCase(),
+                          ),
+                      ).length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="text-center py-6 text-slate-500">
+                            No pick tasks in queue. Approve a Material Request to generate pick tasks.
+                          </td>
                         </tr>
-                      ))}
+                      ) : (
+                        pickupTasks
+                          .filter(
+                            (task) =>
+                              !["COMPLETED", "PICKED", "ISSUED"].includes(
+                                String(task.status || "").toUpperCase(),
+                              ),
+                          )
+                          .map((p) => (
+                            <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
+                              <td className="py-3 px-3 font-semibold text-indigo-600">
+                                <button
+                                  type="button"
+                                  className="underline underline-offset-2"
+                                  onClick={() => {
+                                    setPickupFifoAlert("");
+                                    setPickupQrVerified({ material: false, rack: false });
+                                    setPickupQrError("");
+                                    setPickupConfirmation({
+                                      material_scan: "",
+                                      zone_scan: "",
+                                      quantity: String(
+                                        Math.max(
+                                          0,
+                                          Number(p.requested_quantity || 0) -
+                                            Number(p.picked_quantity || 0),
+                                        ),
+                                      ),
+                                    });
+                                    setPickupToConfirm(p);
+                                  }}
+                                >
+                                  {p.task_number || p.id}
+                                </button>
+                              </td>
+                              <td className="py-3 px-3 text-slate-600">
+                                {p.assembly_order_number || p.assembly_order || "-"}
+                              </td>
+                              <td className="py-3 px-3 font-medium">
+                                {p.material_name || p.material_code}
+                              </td>
+                              <td className="py-3 px-3">
+                                <Badge
+                                  variant="outline"
+                                  className="bg-slate-50 font-mono text-[10px]"
+                                >
+                                  {p.pick_location || "—"}
+                                </Badge>
+                              </td>
+                              <td className="py-3 px-3 font-bold">
+                                {p.quantity ?? "—"} {p.uom || ""}
+                              </td>
+                              <td className="py-3 px-3">
+                                <Badge
+                                  className={cn(
+                                    "text-[10px] font-bold uppercase",
+                                    p.status === "COMPLETED"
+                                      ? "bg-emerald-500/15 text-emerald-700"
+                                      : "bg-indigo-500/15 text-indigo-700",
+                                  )}
+                                >
+                                  {p.status || "—"}
+                                </Badge>
+                              </td>
+                              <td className="py-3 px-3 text-right">
+                                {p.status !== "COMPLETED" && (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => {
+                                      setPickupFifoAlert("");
+                                      setPickupQrVerified({ material: false, rack: false });
+                                      setPickupQrError("");
+                                      setPickupConfirmation({
+                                        material_scan: "",
+                                        zone_scan: "",
+                                        quantity: String(
+                                          Math.max(
+                                            0,
+                                            Number(p.requested_quantity || 0) -
+                                              Number(p.picked_quantity || 0),
+                                          ),
+                                        ),
+                                      });
+                                      setPickupToConfirm(p);
+                                    }}
+                                    className="h-7 text-xs bg-indigo-600 hover:bg-indigo-700 text-white"
+                                  >
+                                    Confirm Pick
+                                  </Button>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                      )}
                     </tbody>
                   </table>
-                  {!pickupTasks.some((task) => ["COMPLETED", "PICKED", "ISSUED"].includes(String(task.status || "").toUpperCase())) && (
-                    <p className="p-8 text-center text-sm text-muted-foreground">No completed picks have been recorded yet.</p>
-                  )}
-                </div>
-              </DialogContent>
-            </Dialog>
+                </Card>
+              </>
+            )}
           </TabsContent>
 
           {/* ========================================================================= */}
