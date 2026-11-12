@@ -4,6 +4,7 @@ export const Route = createFileRoute("/warehouse-dashboard")({
   beforeLoad: () => {
     throw redirect({
       to: "/inventory",
+      search: { tab: "dashboard" },
       replace: true,
     });
   },

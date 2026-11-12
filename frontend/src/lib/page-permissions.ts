@@ -21,6 +21,21 @@ export const ROLE_PAGES: Record<string, PermissionPage[]> = {
     { key: "/inventory?tab=locations", label: "Locations" },
     { key: "/dock-management", label: "Dock Allocation" },
   ],
+  WAREHOUSE: [
+    { key: "/inventory?tab=dashboard", label: "Dashboard" },
+    { key: "/inventory?tab=putaway", label: "Putaway" },
+    { key: "/inventory?tab=inventory", label: "Inventory" },
+    { key: "/inventory?tab=picking", label: "Requisitions & Picking" },
+    { key: "/inventory?tab=locations", label: "Locations" },
+    { key: "/dock-management", label: "Dock Allocation" },
+  ],
+  WAREHOUSE_OPERATOR: [
+    { key: "/inventory?tab=dashboard", label: "Dashboard" },
+    { key: "/inventory?tab=putaway", label: "Putaway" },
+    { key: "/inventory?tab=inventory", label: "Inventory" },
+    { key: "/inventory?tab=picking", label: "Requisitions & Picking" },
+    { key: "/inventory?tab=locations", label: "Locations" },
+  ],
   GATE_SECURITY: [
     { key: "/gate-dashboard", label: "Dashboard" },
     { key: "/vehicle-queue", label: "Vehicle Entry & Exit" },
@@ -69,7 +84,7 @@ for (const pages of Object.values(ROLE_PAGES)) {
 
 export function permissionKeyForLocation(pathname: string, search = ""): string {
   const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
-  const tab = params.get("tab");
+  const tab = params.get("tab") || (pathname === "/inventory" ? "dashboard" : "");
   return tab ? `${pathname}?tab=${tab}` : pathname;
 }
 
@@ -84,6 +99,23 @@ export function getPageAccess(
   const key = permissionKeyForLocation(pathname, search);
   const exactAccess = permissions[key] ?? permissions[pathname];
   if (exactAccess) return exactAccess;
+
+  // Inventory routes: accessing /inventory or /inventory?tab=dashboard aliases to dashboard access
+  if (pathname === "/inventory") {
+    const dashboardAccess = permissions["/inventory?tab=dashboard"] ?? permissions["/inventory"];
+    if (dashboardAccess) return dashboardAccess;
+    const anyInventory = Object.entries(permissions).find(([k]) => k.startsWith("/inventory?tab="));
+    if (anyInventory) return anyInventory[1];
+  }
+
+  // If checking /warehouse-dashboard, alias to /inventory?tab=dashboard
+  if (pathname === "/warehouse-dashboard") {
+    const whAccess =
+      permissions["/inventory?tab=dashboard"] ??
+      permissions["/warehouse-dashboard"] ??
+      permissions["/inventory"];
+    if (whAccess) return whAccess;
+  }
 
   // A permission for a route section also covers its nested screens. For
   // example, /supplier/asns must authorize /supplier/asns/new.

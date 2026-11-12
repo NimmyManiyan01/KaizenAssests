@@ -93,10 +93,10 @@ function getUserRoleLabel(user: UserInfo | null): string {
   ) {
     return "GRN / Operations Manager";
   }
-  if (roles.includes("WAREHOUSE_OPERATOR")) {
-    return "Warehouse Operator";
+  if (roles.includes("WAREHOUSE") || roles.includes("WAREHOUSE_MANAGER")) {
+    return "Warehouse Manager";
   }
-  if (roles.includes("WAREHOUSE_OPERATOR") || roles.includes("WAREHOUSE_OPERATOR")) {
+  if (roles.includes("WAREHOUSE_OPERATOR")) {
     return "Warehouse Operator";
   }
   if (roles.includes("ASSEMBLY") || roles.includes("ASSEMBLY_MANAGER")) {
@@ -310,9 +310,9 @@ function getStrictRoleNav(user: { username?: string; roles?: string[] } | null):
     return gateSecurityNav;
   if (hasUserRole(user, "QUALITY") || hasUserRole(user, "QC")) return qualityNav;
   if (hasUserRole(user, "ASSEMBLY") || hasUserRole(user, "ASSEMBLY_MANAGER")) return assemblyNav;
-  if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "WAREHOUSE_OPERATOR"))
+  if (hasUserRole(user, "WAREHOUSE") || hasUserRole(user, "WAREHOUSE_MANAGER"))
     return warehouseManagerNav;
-  if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "WAREHOUSE_OPERATOR"))
+  if (hasUserRole(user, "WAREHOUSE_OPERATOR"))
     return warehouseOperatorNav;
   if (isDispatchSession(user)) return dispatchNav;
   if (isGrnSession(user)) return grnNav;
@@ -325,10 +325,10 @@ function getRoleLabel(user: { username?: string; roles?: string[] } | null): str
   if (hasUserRole(user, "QUALITY") || hasUserRole(user, "QC")) return "Quality Inspector";
   if (hasUserRole(user, "ASSEMBLY") || hasUserRole(user, "ASSEMBLY_MANAGER"))
     return "Assembly Manager";
-  if (hasUserRole(user, "WAREHOUSE_OPERATOR")) return "Warehouse Operator";
-  if (hasUserRole(user, "WAREHOUSE_OPERATOR") || hasUserRole(user, "WAREHOUSE_OPERATOR"))
+  if (hasUserRole(user, "WAREHOUSE") || hasUserRole(user, "WAREHOUSE_MANAGER"))
+    return "Warehouse Manager";
+  if (hasUserRole(user, "WAREHOUSE_OPERATOR"))
     return "Warehouse Operator";
-  if (hasUserRole(user, "WAREHOUSE_OPERATOR")) return "Warehouse Operator";
   if (isDispatchSession(user)) return "Dispatch Manager";
   if (isGrnSession(user)) return "GRN / Operations Manager";
   return "Operations Manager";
@@ -461,7 +461,10 @@ export function AppShell({
     path === "/dispatch-picking-packing" ||
     path === "/dispatch-loading";
   const isWarehouseUser =
-    mounted && (user?.roles?.includes("WAREHOUSE_OPERATOR") || user?.roles?.includes("WAREHOUSE_OPERATOR"));
+    mounted &&
+    (user?.roles?.includes("WAREHOUSE") ||
+      user?.roles?.includes("WAREHOUSE_MANAGER") ||
+      user?.roles?.includes("WAREHOUSE_OPERATOR"));
   const isGrnRoute = path === "/grn" || path.startsWith("/grn");
   const isSupplierRoute =
     path === "/supplier-dashboard" ||

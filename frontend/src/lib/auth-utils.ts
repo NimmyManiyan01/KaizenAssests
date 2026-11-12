@@ -162,11 +162,9 @@ export function getRequiredRolesForPath(pathname: string): string[] | null {
       "WAREHOUSE",
       "WAREHOUSE_MANAGER",
       "WAREHOUSE_OPERATOR",
-      "WAREHOUSE_OPERATOR",
       "ADMIN",
       "SUPERUSER",
     ];
-  if (pathname === "/inventory") return ["WAREHOUSE_OPERATOR", "ADMIN", "SUPERUSER"];
   return null;
 }
 
@@ -269,9 +267,13 @@ export function getDefaultRouteForUser(user = getUserInfo()): string {
 
   if (
     roles.includes("WAREHOUSE") ||
-    roles.includes("WAREHOUSE_MANAGER")
+    roles.includes("WAREHOUSE_MANAGER") ||
+    roles.includes("WAREHOUSE_OPERATOR")
   ) {
-    const target = permittedDefault("/warehouse-dashboard");
+    const target =
+      permittedDefault("/inventory?tab=dashboard") ||
+      permittedDefault("/inventory") ||
+      permittedDefault("/warehouse-dashboard");
     if (target) return target;
   }
   if (roles.includes("GATE_SECURITY")) {
@@ -290,14 +292,16 @@ export function getDefaultRouteForUser(user = getUserInfo()): string {
     const target = permittedDefault("/assembly-dashboard");
     if (target) return target;
   }
-  if (roles.includes("WAREHOUSE_OPERATOR") || roles.includes("WAREHOUSE_OPERATOR")) {
-    const target = permittedDefault("/inventory?tab=dashboard");
-    if (target) return target;
+
+  // If permissions exist, prefer an operational page over /reports
+  if (permissions && Object.keys(permissions).length > 0) {
+    const preferred = Object.keys(permissions).find((key) => key !== "/reports");
+    if (preferred) return preferred;
+    const assignedPage = Object.keys(permissions)[0];
+    if (assignedPage) return assignedPage;
   }
 
-  const assignedPage = Object.keys(permissions || {})[0];
-  if (assignedPage) return assignedPage;
-  return "/inventory";
+  return "/inventory?tab=dashboard";
 }
 
 export function requireAuth() {
@@ -318,6 +322,6 @@ export function requireRole(roles: string[] | string) {
   if (!hasRole(roles)) {
     // If they are authenticated but don't have the role, send them to their primary dashboard
     const user = getUserInfo();
-    redirectToDefault(user, window.location.pathname, window.location.search);
+    throw redirect({ to: getDefaultRouteForUser(user) as any });
   }
 }
