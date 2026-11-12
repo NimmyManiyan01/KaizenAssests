@@ -180,19 +180,17 @@ function InboundArrivals() {
   const [vehicleTypeInput, setVehicleTypeInput] = useState("Container Truck");
   const [driverNameInput, setDriverNameInput] = useState("");
   const [driverMobileInput, setDriverMobileInput] = useState("");
-  const [transporterInput, setTransporterInput] = useState("VRL Logistics Ltd");
+  const [transporterInput, setTransporterInput] = useState("");
   const [driverIdTypeInput, setDriverIdTypeInput] = useState("Driving Licence");
-  const [driverIdRefInput, setDriverIdRefInput] = useState("DL-2026-90812");
+  const [driverIdRefInput, setDriverIdRefInput] = useState("");
   const [entryGateInput, setEntryGateInput] = useState("Main Gate – 01");
 
   // FR-02 Section C: Invoice & Supporting Documents
-  const [invoiceNoInput, setInvoiceNoInput] = useState("INV-2026-9901");
-  const [invoiceDateInput, setInvoiceDateInput] = useState("2026-10-07");
-  const [challanNoInput, setChallanNoInput] = useState("DC-2026-4412");
-  const [ewayNoInput, setEwayNoInput] = useState("EWAY-8812-4091");
-  const [uploadedInvoiceFile, setUploadedInvoiceFile] = useState<string | null>(
-    "invoice_copy_inv9901.pdf",
-  );
+  const [invoiceNoInput, setInvoiceNoInput] = useState("");
+  const [invoiceDateInput, setInvoiceDateInput] = useState("");
+  const [challanNoInput, setChallanNoInput] = useState("");
+  const [ewayNoInput, setEwayNoInput] = useState("");
+  const [uploadedInvoiceFile, setUploadedInvoiceFile] = useState<string | null>(null);
   const [asnDocumentFile, setAsnDocumentFile] = useState<File | null>(null);
   // Do not seed this with a demo filename: the gate pass must require a real
   // photo captured/uploaded during the current registration.
@@ -216,6 +214,7 @@ function InboundArrivals() {
         api.getInboundArrivals(true),
         api.getDocks(),
       ]);
+      arrivalsRef.current = arrivalRows;
       setArrivals(arrivalRows);
       setDocks(dockRows);
     } catch (error) {
@@ -384,6 +383,60 @@ function InboundArrivals() {
     asnCameraStreamRef.current?.getTracks().forEach((track) => track.stop());
     asnCameraStreamRef.current = null;
     setAsnCameraOpen(false);
+  };
+
+  const resetGateEntryForm = () => {
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    asnCameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
+    asnCameraStreamRef.current = null;
+    if (vehiclePhotoPreview) URL.revokeObjectURL(vehiclePhotoPreview);
+    if (asnDocumentPreview) URL.revokeObjectURL(asnDocumentPreview);
+
+    setSelectedSupplier("");
+    setSelectedAsn("");
+    setAsnTransportEntries([]);
+    setSelectedTransportIndex(-1);
+    setAutoExpectedDate("");
+    setDeliveryType("");
+    setRemarksText("");
+    setAsnMaterials([]);
+    setVehicleNumberInput("");
+    setVehicleTypeInput("Container Truck");
+    setDriverNameInput("");
+    setDriverMobileInput("");
+    setTransporterInput("");
+    setDriverIdTypeInput("Driving Licence");
+    setDriverIdRefInput("");
+    setEntryGateInput("Main Gate – 01");
+    setInvoiceNoInput("");
+    setInvoiceDateInput("");
+    setChallanNoInput("");
+    setEwayNoInput("");
+    setUploadedInvoiceFile(null);
+    setAsnDocumentFile(null);
+    setAsnDocumentPreview(null);
+    setUploadedVehiclePhoto(null);
+    setVehiclePhotoPreview(null);
+    setVehiclePhotoBlob(null);
+    setCameraOpen(false);
+    setAsnCameraOpen(false);
+  };
+
+  const openFreshGateEntryForm = () => {
+    if (submittingWebEntry) return;
+    resetGateEntryForm();
+    setIsNewRegistrationModalOpen(true);
+  };
+
+  const handleGateEntryModalOpenChange = (open: boolean) => {
+    if (open) {
+      openFreshGateEntryForm();
+      return;
+    }
+    if (submittingWebEntry) return;
+    resetGateEntryForm();
+    setIsNewRegistrationModalOpen(false);
   };
 
   const captureAsnDocument = () => {
@@ -609,7 +662,7 @@ function InboundArrivals() {
         <div className="gate-entry-actions flex flex-wrap justify-end gap-2">
           <Button
             className="rounded-xl font-bold shadow-sm"
-            onClick={() => setIsNewRegistrationModalOpen(true)}
+            onClick={openFreshGateEntryForm}
           >
             <PlusCircle className="mr-2 size-4" /> New Gate Entry
           </Button>
@@ -662,17 +715,17 @@ function InboundArrivals() {
             </p>
           </div>
         ) : (
-          <div className="overflow-hidden bg-card">
+          <div className="mx-4 mt-4 overflow-x-auto rounded-xl border border-border bg-card">
             <table aria-label="Vehicle entries and exits" className="w-full min-w-0 table-fixed text-left text-sm [&_th]:align-middle [&_td]:align-middle">
               <colgroup>
                 <col className="w-[11%]" />
-                <col className="w-[10%]" />
+                <col className="w-[11%]" />
                 <col className="w-[12%]" />
                 <col className="w-[16%]" />
-                <col className="w-[12%]" />
-                <col className="w-[10%]" />
                 <col className="w-[13%]" />
-                <col className="w-[16%]" />
+                <col className="w-[12%]" />
+                <col className="w-[11%]" />
+                <col className="w-[14%]" />
               </colgroup>
               <thead className="border-b bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground [&_th]:font-semibold">
                 <tr>
@@ -711,7 +764,7 @@ function InboundArrivals() {
             </table>
           </div>
         )}
-        <div className="flex flex-col gap-3 border-t px-4 py-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+        <div className="mx-4 mb-4 mt-3 flex flex-col gap-3 rounded-xl border border-border px-4 py-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <p>
             Showing {firstVisibleArrival}–{lastVisibleArrival} of {filteredArrivals.length} arrivals
           </p>
@@ -834,7 +887,7 @@ function InboundArrivals() {
       </Dialog>
 
       {/* FR-02 New Gate Entry Registration Modal */}
-      <Dialog open={isNewRegistrationModalOpen} onOpenChange={setIsNewRegistrationModalOpen}>
+      <Dialog open={isNewRegistrationModalOpen} onOpenChange={handleGateEntryModalOpenChange}>
         <DialogContent className="max-w-2xl rounded-2xl bg-card p-6 shadow-2xl">
           <form
             onSubmit={(e) => {
@@ -877,8 +930,6 @@ function InboundArrivals() {
               api
                 .createGateEntry(formData)
                 .then(async (createdEntry) => {
-                  setSubmittingWebEntry(false);
-                  setIsNewRegistrationModalOpen(false);
                   const savedEntry = createdEntry?.data || createdEntry?.gate_entry || createdEntry;
                   let gatePassId =
                     savedEntry?.gate_entry_number ||
@@ -903,11 +954,16 @@ function InboundArrivals() {
                       "Gate entry was created but no persisted gate-pass number was returned.",
                     );
                   }
+                  const submittedSupplier = selectedSupplier;
+                  const submittedAsn = selectedAsn;
+                  await load(true);
+                  resetGateEntryForm();
+                  setIsNewRegistrationModalOpen(false);
                   setGeneratedGatePass(gatePassId);
                   toast.success("Web Gate Entry Registered Successfully ✓", {
-                    description: `Gate Pass: ${gatePassId}\nSupplier: ${selectedSupplier}\nASN: ${selectedAsn}`,
+                    description: `Gate Pass: ${gatePassId}\nSupplier: ${submittedSupplier}\nASN: ${submittedAsn}`,
                   });
-                  void load();
+                  setSubmittingWebEntry(false);
                 })
                 .catch((error) => {
                   setSubmittingWebEntry(false);
@@ -1273,7 +1329,7 @@ function InboundArrivals() {
                     type="text"
                     value={driverIdRefInput}
                     onChange={(e) => setDriverIdRefInput(e.target.value)}
-                    placeholder="e.g. DL-2026-90812"
+                    placeholder="Enter driver ID reference"
                     className="h-9 w-full rounded-xl border bg-background px-3 font-mono text-xs focus:ring-1 focus:ring-primary"
                   />
                 </div>
@@ -1307,7 +1363,7 @@ function InboundArrivals() {
                     required
                     value={invoiceNoInput}
                     onChange={(e) => setInvoiceNoInput(e.target.value)}
-                    placeholder="e.g. INV-2026-9901"
+                    placeholder="Enter invoice number"
                     className="h-9 w-full rounded-xl border bg-background px-3 font-mono font-bold text-xs focus:ring-1 focus:ring-primary"
                   />
                 </div>
@@ -1333,7 +1389,7 @@ function InboundArrivals() {
                     type="text"
                     value={challanNoInput}
                     onChange={(e) => setChallanNoInput(e.target.value)}
-                    placeholder="e.g. DC-2026-4412"
+                    placeholder="Enter delivery challan number"
                     className="h-9 w-full rounded-xl border bg-background px-3 font-mono text-xs focus:ring-1 focus:ring-primary"
                   />
                 </div>
@@ -1346,7 +1402,7 @@ function InboundArrivals() {
                     type="text"
                     value={ewayNoInput}
                     onChange={(e) => setEwayNoInput(e.target.value)}
-                    placeholder="e.g. EWAY-8812-4091"
+                    placeholder="Enter e-way bill number"
                     className="h-9 w-full rounded-xl border bg-background px-3 font-mono text-xs focus:ring-1 focus:ring-primary"
                   />
                 </div>
@@ -1412,14 +1468,31 @@ function InboundArrivals() {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    <tr>
-                      <td className="px-3 py-2 font-bold">
-                        Stainless Steel Sheet 304 (MAT-SS-304-001)
-                      </td>
-                      <td className="px-3 py-2 text-right font-semibold">500</td>
-                      <td className="px-3 py-2 text-right font-bold text-emerald-600">500</td>
-                      <td className="px-3 py-2 text-right font-mono">KG</td>
-                    </tr>
+                    {asnMaterials.length > 0 ? (
+                      asnMaterials.map((item, idx) => (
+                        <tr key={item.item_code || item.material_code || idx}>
+                          <td className="px-3 py-2 font-bold">
+                            {item.material_name || item.material_description || item.item_code || item.material_code || "Material"}
+                            {(item.material_code || item.item_code) ? ` (${item.material_code || item.item_code})` : ""}
+                          </td>
+                          <td className="px-3 py-2 text-right font-semibold">
+                            {item.ordered_quantity ?? item.po_quantity ?? "—"}
+                          </td>
+                          <td className="px-3 py-2 text-right font-bold text-emerald-600">
+                            {item.shipped_quantity ?? item.quantity ?? "—"}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono">
+                            {item.uom || item.unit_of_measure || "PCS"}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">
+                          Select an ASN to view shipment line items.
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -1437,7 +1510,7 @@ function InboundArrivals() {
                 type="button"
                 variant="outline"
                 className="rounded-xl"
-                onClick={() => setIsNewRegistrationModalOpen(false)}
+                onClick={() => handleGateEntryModalOpenChange(false)}
               >
                 Cancel
               </Button>
@@ -1471,7 +1544,10 @@ function InboundArrivals() {
           </div>
           <h2 className="mt-4 text-xl font-black text-primary">Gate Pass Generated</h2>
           <p className="mt-2 text-xs text-muted-foreground">Show this pass at the security gate.</p>
-          <div className="mt-4 rounded-xl border bg-muted/40 p-4 font-mono text-2xl font-black tracking-wider text-primary">
+          <div
+            className="mt-4 rounded-xl border border-emerald-800/30 bg-emerald-50 p-4 font-mono text-2xl font-black tracking-wider text-emerald-900"
+            style={{ textShadow: "0 1px 0 #ffffff, 0 2px 2px rgba(6, 78, 59, 0.35)" }}
+          >
             {generatedGatePass}
           </div>
           <div className="mt-5 flex gap-2">
@@ -1567,8 +1643,13 @@ function ArrivalRows({
             {arrival.asn_number}
           </button>
         </td>
-        <td className="whitespace-nowrap px-2 py-3 font-mono text-xs font-semibold text-primary sm:px-3">
-          {arrival.gate_entry_number || "—"}
+        <td className="whitespace-nowrap px-2 py-3 sm:px-3">
+          <span
+            className="font-mono text-xs font-black tracking-wide text-emerald-900"
+            style={{ textShadow: "0 1px 0 #ffffff, 0 2px 2px rgba(6, 78, 59, 0.38)" }}
+          >
+            {arrival.gate_entry_number || "—"}
+          </span>
         </td>
         <td className="break-words px-2 py-3 font-medium leading-5 sm:px-3">{displaySupplierName(arrival.supplier_name) || "—"}</td>
         <td className="px-2 py-3 sm:px-3">

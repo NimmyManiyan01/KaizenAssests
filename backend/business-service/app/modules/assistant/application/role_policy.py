@@ -96,7 +96,7 @@ ROLE_SUGGESTIONS = {
         "Show available inventory",
     ),
     "SUPPLIER": (
-        "Show my purchase orders", "Show my inbound ASN status",
+        "Show my inbound ASN status",
         "Explain ASN creation", "Explain damaged material claims",
         "Explain finished goods pickup",
     ),

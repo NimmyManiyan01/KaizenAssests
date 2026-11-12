@@ -403,7 +403,6 @@ function AssemblyFinishedGoodsPage() {
           <StatCard compact label="Produced" value={items.reduce((sum, item) => sum + Number((item as any).produced_quantity ?? item.quantity ?? 0), 0).toLocaleString()} delta="Total manufactured quantity" icon={Factory} tone="teal" />
           <StatCard compact label="Available" value={items.reduce((sum, item) => sum + Number((item as any).available_quantity ?? item.quantity ?? 0), 0).toLocaleString()} delta="Ready for customer dispatch" icon={PackageCheck} tone="success" />
         </div>
-        <FgLoading />
         {/* Main Work Center Table Card */}
         <div className="min-w-0 rounded-2xl border border-border/70 bg-card p-5 shadow-soft space-y-4">
           {/* Header & Controls */}
@@ -473,8 +472,8 @@ function AssemblyFinishedGoodsPage() {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-border/70">
-              <table className="w-full min-w-[980px] table-fixed text-left text-sm [&_th]:align-middle [&_td]:align-middle [&_td]:tabular-nums">
-                <colgroup><col className="w-[26%]" /><col className="w-[13%]" /><col className="w-[13%]" /><col className="w-[13%]" /><col className="w-[20%]" /><col className="w-[15%]" /></colgroup>
+              <table className="w-full min-w-[1080px] table-fixed border-collapse text-left text-sm [&_th]:align-middle [&_td]:align-middle [&_td]:tabular-nums [&_th+th]:border-l [&_td+td]:border-l [&_th+th]:border-border/70 [&_td+td]:border-border/70">
+                <colgroup><col className="w-[25%]" /><col className="w-[13%]" /><col className="w-[13%]" /><col className="w-[13%]" /><col className="w-[22%]" /><col className="w-[14%]" /></colgroup>
                 <thead className="bg-muted/50">
                   <tr className="border-b border-border/70 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     <th scope="col" className="py-3 px-4">
@@ -493,7 +492,7 @@ function AssemblyFinishedGoodsPage() {
                       Status
                       <InformationTooltip help="finishedGoods" />
                     </th>
-                    <th scope="col" className="py-3 px-4 text-right">
+                    <th scope="col" className="py-3 px-4 text-center">
                       Actions
                     </th>
                   </tr>
@@ -501,16 +500,8 @@ function AssemblyFinishedGoodsPage() {
                 <tbody className="divide-y divide-border/40">
                   {pagedRows.map((fg) => {
                     const available = Number(fg.available_quantity ?? fg.quantity ?? 0);
-                    const reserved = Number(fg.reserved_quantity ?? 0);
-                    const dispatched = Number(fg.dispatched_quantity ?? 0);
                     const productStatus =
-                      fg.status === "OUT_OF_STOCK"
-                        ? "OUT OF STOCK"
-                        : fg.status === "AVAILABLE"
-                        ? "AVAILABLE"
-                        : available > 0
-                        ? "AVAILABLE"
-                        : "OUT OF STOCK";
+                      available > 0 ? "AVAILABLE" : "OUT OF STOCK";
                     return (
                     <tr key={fg.id} className="group hover:bg-muted/40 transition-colors">
                       {/* Product */}
@@ -538,27 +529,22 @@ function AssemblyFinishedGoodsPage() {
                       ))}
 
                       {/* Status */}
-                      <td className="py-3.5 px-4 whitespace-nowrap">
+                      <td className="px-4 py-3.5">
                         <span
                           className={cn(
-                            "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold",
+                            "inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-semibold",
                             available > 0
                               ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                              : reserved > 0
-                              ? "border-blue-500/25 bg-blue-500/10 text-blue-700 dark:text-blue-300"
-                              : dispatched > 0
-                              ? "border-slate-500/25 bg-slate-500/10 text-slate-700 dark:text-slate-300"
                               : "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300",
                           )}
                         >
                           {productStatus}
                         </span>
-                        {((fg.batches || [fg]) as any[]).filter(b => b.main_fg_id).map(b => <p key={b.id} className="mt-1 text-[11px]">FG ID: {b.main_fg_id} ? {b.dispatch_status} ({b.dispatched_sections}/8)</p>)}
                       </td>
 
                       {/* Label Actions */}
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-2">
+                      <td className="px-3 py-3.5 text-center whitespace-nowrap">
+                        <div className="flex items-center justify-center">
                           <Button
                             variant="outline"
                             size="sm"
@@ -588,6 +574,30 @@ function AssemblyFinishedGoodsPage() {
             </nav>
           </div>}
         </div>
+
+        <FgLoading
+          onVerifyFgQr={(visit) => {
+            const visitIds = [visit.fg_id, visit.main_fg_id].filter(Boolean).map(String);
+            const matchingBatch = items
+              .flatMap((item) => ((item as any).batches || [item]) as AssemblyFinishedGoodItem[])
+              .find((batch) =>
+                [batch.id, (batch as any).main_fg_id]
+                  .filter(Boolean)
+                  .map(String)
+                  .some((id) => visitIds.includes(id)),
+              );
+            const target =
+              matchingBatch ||
+              ({
+                ...visit,
+                id: visit.fg_id || visit.main_fg_id,
+                batch_number: visit.batch_number || visit.main_fg_id || visit.fg_id,
+              } as AssemblyFinishedGoodItem);
+            setScannedQr("");
+            setScanError(null);
+            setScanFg(target);
+          }}
+        />
 
         {/* ========================================================================= */}
         <Dialog open={!!detailsFg} onOpenChange={(open) => !open && setDetailsFg(null)}>
@@ -689,27 +699,6 @@ function AssemblyFinishedGoodsPage() {
                           </td>
                           <td className="px-4 py-4">
                             <div className="ml-auto grid max-w-56 gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-8 w-full justify-start rounded-xl text-xs gap-1.5 border-blue-200 text-blue-700 hover:bg-blue-50"
-                                onClick={() => setTraceabilityFg(batch)}
-                              >
-                                <Layers3 className="size-3.5" />
-                                Material Traceability
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-8 w-full justify-start rounded-xl text-xs gap-1.5"
-                                onClick={() => {
-                                  setScannedQr("");
-                                  setScanError(null);
-                                  setScanFg(batch);
-                                }}
-                              >
-                                <QrCode className="size-3.5" /> Scan FG QR
-                              </Button>
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -1259,7 +1248,10 @@ function AssemblyFinishedGoodsPage() {
               </div>
             ) : selectedFg ? (
               <div className="space-y-6">
-                <FgSections sections={(selectedFg as any).sections} />
+                <FgSections
+                  sections={(selectedFg as any).sections}
+                  showVerification={false}
+                />
                 {/* Visual Label Preview */}
                 <section className="mx-auto max-w-xl space-y-3">
                   <div className="flex items-center justify-between gap-3">

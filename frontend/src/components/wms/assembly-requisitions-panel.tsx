@@ -72,8 +72,11 @@ export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefre
 
   return (
     <section className="assembly-requisitions-panel space-y-4" aria-label="Assembly requisitions">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-transparent px-5 py-5 shadow-sm">
-        <h2 className="flex items-center gap-2 text-lg font-bold"><ClipboardList className="size-5" />Assembly Requisitions</h2>
+      <div className="assembly-requisitions-heading flex min-h-16 flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-3 shadow-sm dark:border-blue-900/60 dark:bg-slate-900">
+        <h2 className="flex items-center gap-3 text-lg font-bold text-slate-950 dark:text-white">
+          <ClipboardList className="size-6 shrink-0 self-center text-primary" aria-hidden="true" />
+          <span>Assembly Requisitions</span>
+        </h2>
         {showRefresh && <Button data-refresh-control="true" size="icon" variant="outline" onClick={() => void refresh()} aria-label="Refresh Assembly requisitions">
           <RefreshCw className="size-4" /></Button>}
       </div>
@@ -127,10 +130,11 @@ export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefre
             return (
               <Card key={id} className="rounded-lg border-border/60 bg-white shadow-none dark:border-slate-700 dark:bg-slate-900">
                 <CardContent className="space-y-3 p-5">
+                  <div className="space-y-4 rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 to-sky-100 p-5 text-[#082b4c] shadow-sm">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h2 className="font-semibold text-slate-900 dark:text-slate-100">{request.requisition_number}</h2>
-                      <p className="text-xs text-muted-foreground">
+                      <h2 className="text-xl font-bold text-[#082b4c]">{request.requisition_number}</h2>
+                      <p className="mt-1 text-xs font-medium text-[#315675]">
                         {[request.department, request.requested_by ? `Requested by ${request.requested_by}` : "", request.required_date].filter(Boolean).join(" · ")}
                       </p>
                     </div>
@@ -139,8 +143,8 @@ export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefre
                     </span>
                   </div>
                   {productionQuantity > 0 && firstItem && (
-                    <div className="text-xs leading-relaxed text-muted-foreground">
-                      <span className="font-semibold text-blue-900 dark:text-blue-200">BOM calculation: </span>
+                    <div className="rounded-xl border border-blue-200 bg-white/75 px-4 py-3 text-xs leading-relaxed text-[#153a5a]">
+                      <span className="font-semibold text-[#082b4c]">BOM calculation: </span>
                       {request.product_name || "Finished good"} × {productionQuantity}{" "}
                       {request.uom || "PCS"}
                       {" → "}
@@ -152,13 +156,13 @@ export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefre
                     </div>
                   )}
                   {status === "ISSUED" && !request.issue_transaction_exists && (
-                    <p className="text-xs text-amber-600">
+                    <p className="text-xs text-amber-800">
                       Issue status requires a persisted warehouse issue transaction; this request is
                       awaiting verification.
                     </p>
                   )}
                   {status === "ISSUED" && request.issue_transaction && (
-                    <p className="text-xs text-emerald-700">
+                    <p className="text-xs text-emerald-800">
                       Issued under {request.issue_transaction.issue_number} by{" "}
                       {request.issue_transaction.issued_by || "Warehouse"}
                       {request.issue_transaction.issued_at
@@ -175,11 +179,12 @@ export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefre
                           item.required_quantity ?? item.requested_quantity ?? item.quantity ?? 0,
                         ),
                     ) && (
-                      <p className="text-xs font-semibold text-emerald-700">
+                      <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-800">
                         Materials Received — Ready for Production. Warehouse stock is tracked
                         separately.
                       </p>
                     )}
+                  </div>
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[650px] table-fixed text-left text-sm">
                       <colgroup><col className="w-[48%]" /><col className="w-[20%]" /><col className="w-[20%]" /><col className="w-[12%]" /></colgroup>

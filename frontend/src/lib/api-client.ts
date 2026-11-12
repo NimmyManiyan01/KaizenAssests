@@ -138,7 +138,11 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   }
 
   // Deduplicate and cache eligible GET requests
-  const isCachable = method === "GET" && !options.signal && !url.includes("nocache");
+  const isCachable =
+    method === "GET" &&
+    options.cache !== "no-store" &&
+    !options.signal &&
+    !url.includes("nocache");
   if (isCachable) {
     const cached = metadataCache.get(url);
     if (cached && cached.expiresAt > Date.now()) {
@@ -460,7 +464,7 @@ export const api = {
   },
 
   async getDocks(
-    statusOrParams?: string | { dock_type?: string; status?: string; direction?: string },
+    statusOrParams?: string | { dock_type?: string; status?: string; direction?: string; include_inactive?: boolean },
     type?: string,
   ): Promise<any[]> {
     const query = new URLSearchParams();
@@ -471,12 +475,29 @@ export const api = {
         query.set("status", statusOrParams.status);
       if (statusOrParams.direction && statusOrParams.direction !== "ALL")
         query.set("direction", statusOrParams.direction);
+      if (statusOrParams.include_inactive) query.set("include_inactive", "true");
     } else {
       if (statusOrParams && statusOrParams !== "ALL") query.set("status", statusOrParams);
       if (type && type !== "ALL") query.set("dock_type", type);
     }
     const qStr = query.toString() ? `?${query.toString()}` : "";
-    return request<any[]>(`${BUSINESS_API_URL}/api/v1/warehouse/docks${qStr}`);
+    return request<any[]>(`${BUSINESS_API_URL}/api/v1/warehouse/docks${qStr}`, {
+      cache: "no-store",
+    });
+  },
+  async getManagedDocks(): Promise<any[]> {
+    try {
+      return await request<any[]>(
+        `${BUSINESS_API_URL}/api/v1/warehouse/dock-management/registry`,
+        { cache: "no-store" },
+      );
+    } catch (error) {
+      if ((error as Error & { status?: number })?.status !== 404) throw error;
+      // Rolling deployments can briefly pair the new frontend with the prior
+      // backend. That backend already supports the complete registry through
+      // include_inactive, so preserve management availability during rollout.
+      return this.getDocks({ include_inactive: true });
+    }
   },
   async getDockHistory(): Promise<any[]> {
     return request<any[]>(`${BUSINESS_API_URL}/api/v1/warehouse/dock-history`);
@@ -652,6 +673,16 @@ export const api = {
     return request<void>(
       BUSINESS_API_URL + "/api/v1/warehouse/docks/" + encodeURIComponent(dockId),
       { method: "DELETE" },
+    );
+  },
+  async updateDockActivation(dockId: string, active: boolean, reason?: string): Promise<any> {
+    return request<any>(
+      `${BUSINESS_API_URL}/api/v1/warehouse/docks/${encodeURIComponent(dockId)}/activation`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active, reason }),
+      },
     );
   },
   async updateDockStatus(dockId: string, status: string, reason?: string): Promise<any> {

@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
-import { Eye, History, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
+import { ArrowRight, Eye, History, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
@@ -121,22 +121,67 @@ function Page() {
             const f = forms[c.id] || {};
             const s = c.shipment;
             const details = (
-              <Card key={c.id} className="supplier-module-page rounded-xl border-border bg-card p-3 shadow-sm sm:p-4">
+              <Card key={c.id} className="damage-claim-card supplier-module-page rounded-xl border-border bg-card p-3 shadow-sm sm:p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h3 className="font-mono text-base font-semibold text-foreground">
                       {c.claim_number || "Claim —"}
                     </h3>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {c.po_number || "—"} · {c.material || "Material not specified"} · Damaged{" "}
-                      {c.damaged_quantity ?? "—"} {c.uom || ""} · Rejected{" "}
-                      {c.rejected_quantity ?? "—"} {c.uom || ""}
-                    </p>
+                    <p className="mt-1 text-sm text-muted-foreground">{c.material || "Material not specified"}</p>
+
                   </div>
                   <StatusBadge status={c.status} />
                 </div>
+                <dl className="claim-quantity-summary">
+                  <div><dt>Damaged quantity</dt><dd className="text-destructive">{c.damaged_quantity ?? "Not recorded"} {c.uom || ""}</dd></div>
+                  <div><dt>Rejected quantity</dt><dd>{c.rejected_quantity ?? "Not recorded"} {c.uom || ""}</dd></div>
+                </dl>
+                <div className="claim-information-layout">
+                <section className="claim-shipment-section">
+                  <h4 className="mb-3 text-sm">Original shipment</h4>
+                <div className="claim-shipment-details grid gap-4 text-sm sm:grid-cols-2">
+                  <div>
+                    <span className="text-muted-foreground">Original GRN</span>
+                    <p className="font-medium">{c.grn_number || "—"}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Original ASN</span>
+                    <p className="font-medium">{c.asn_number || "Not recorded"}</p>
+                    {c.asn_status && <p className="text-xs text-muted-foreground">{c.asn_status.replaceAll("_", " ")}{c.asn_shipment_date ? ` | Shipped ${new Date(c.asn_shipment_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}` : ""}</p>}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Inbound vehicle</span>
+                    <p className="font-mono font-medium">{c.vehicle_number || "Not recorded"}</p>
+                    {c.inbound_exited_at && <p className="text-xs text-muted-foreground">Gate exit recorded {new Date(c.inbound_exited_at).toLocaleString()}</p>}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Inbound gate pass</span>
+                    <p className="font-medium">{c.gate_entry_number || "Not recorded"}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Inbound driver</span>
+                    <p className="font-medium">{c.driver_name || "Not recorded"}{c.driver_contact ? ` | ${c.driver_contact}` : ""}</p>
+                  </div>
+                  {!roles.includes("SUPPLIER") && <>
+                  <div>
+                    <span className="text-muted-foreground">Response</span>
+                    <p className="font-medium">
+                      {c.response?.replaceAll("_", " ") || "No response yet"}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Resolution</span>
+                    <p className="font-medium">{c.resolution?.replaceAll("_", " ") || "—"}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Quarantine</span>
+                    <p className="font-medium text-warning-foreground">Original goods retained</p>
+                  </div>
+                  </>}
+                </div>
+                </section>
                 {(c.damage_reason || c.remarks || c.photos?.length) && (
-                  <div className="mt-3 rounded-lg border border-border bg-muted/30 p-3">
+                  <div className="claim-evidence rounded-lg border border-border bg-muted/30 p-3">
                     <p className="text-sm font-semibold text-foreground">Damage evidence</p>
                     {c.damage_reason && (
                       <p className="mt-2 text-sm">
@@ -169,55 +214,15 @@ function Page() {
                     )}
                   </div>
                 )}
-                <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
-                  <div>
-                    <span className="text-muted-foreground">Original GRN</span>
-                    <p className="font-medium">{c.grn_number || "—"}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Original ASN</span>
-                    <p className="font-medium">{c.asn_number || "Not recorded"}</p>
-                    {c.asn_status && <p className="text-xs text-muted-foreground">{c.asn_status.replaceAll("_", " ")}{c.asn_shipment_date ? ` ? Shipped ${c.asn_shipment_date}` : ""}</p>}
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Inbound vehicle</span>
-                    <p className="font-mono font-medium">{c.vehicle_number || "Not recorded"}</p>
-                    {c.inbound_exited_at && <p className="text-xs text-muted-foreground">Gate exit recorded {new Date(c.inbound_exited_at).toLocaleString()}</p>}
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Inbound gate pass</span>
-                    <p className="font-medium">{c.gate_entry_number || "Not recorded"}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Inbound driver</span>
-                    <p className="font-medium">{c.driver_name || "Not recorded"}{c.driver_contact ? ` ? ${c.driver_contact}` : ""}</p>
-                  </div>
-                  {!roles.includes("SUPPLIER") && <>
-                  <div>
-                    <span className="text-muted-foreground">Response</span>
-                    <p className="font-medium">
-                      {c.response?.replaceAll("_", " ") || "No response yet"}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Resolution</span>
-                    <p className="font-medium">{c.resolution?.replaceAll("_", " ") || "—"}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Quarantine</span>
-                    <p className="font-medium text-warning-foreground">Original goods retained</p>
-                  </div>
-                  </>}
                 </div>
                 {!roles.includes("SUPPLIER") && showHistory && c.response && <div className="mt-3 rounded-lg bg-muted/30 p-3 text-sm">
                   {c.responded_at && <p><span className="text-muted-foreground">Responded: </span>{new Date(c.responded_at).toLocaleString()}</p>}
                   <p><span className="text-muted-foreground">Supplier remarks: </span>{c.supplier_remarks || "No remarks"}</p>
                   <p className="mt-1"><span className="text-muted-foreground">Return required: </span>{c.return_required ? "Yes" : "No"}</p>
                 </div>}
-                {has("SUPPLIER") &&
-                  ["REPLACEMENT", "RETURN_REPLACEMENT"].includes(c.resolution) &&
-                  !s && (
-                    <div className="mt-3 flex justify-end border-t pt-3">
+                {roles.includes("SUPPLIER") && !s && !showHistory && (
+                    <div className="claim-replacement-footer mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+                      <div><p className="text-sm">Arrange a replacement delivery</p><p className="mt-1 text-xs text-muted-foreground">Create an ASN with the replacement material and shipment details.</p></div>
                       <Button
                         type="button"
                         className={actionButtonClass}
@@ -225,7 +230,7 @@ function Page() {
                         onClick={() => void navigate({ to: "/supplier/asns/new", search: { open: "create" } as any })}
                       >
                         {busy === c.id && <Loader2 className="size-4 animate-spin" />}
-                        Send Replacement
+                        Replacement <ArrowRight className="ml-2 size-4" aria-hidden="true" />
                       </Button>
                     </div>
                   )}

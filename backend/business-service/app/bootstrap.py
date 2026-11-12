@@ -14,6 +14,8 @@ from app.config.settings import get_settings
 from app.database.session import AsyncSessionFactory
 from app.logging.logger import get_logger
 from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel, WarehouseModel
+from app.modules.dock.infrastructure.persistence.models import DockMasterModel
+from app.modules.gate.infrastructure.persistence.models import DockModel
 from app.security.passwords import hash_password
 
 logger = get_logger(__name__)
@@ -54,6 +56,54 @@ async def bootstrap_system_data() -> None:
             else:
                 logger.debug("Bootstrap: Primary warehouse '%s' already exists", warehouse.warehouse_code)
 
+            # The first receiving dock is a protected operational baseline.
+            # Restore legacy soft-deleted RM-01 records instead of creating a
+            # duplicate, and keep the gate-side dock status synchronized.
+            default_dock = (
+                await session.execute(
+                    select(DockMasterModel).where(func.upper(DockMasterModel.dock_code) == "RM-01")
+                )
+            ).scalar_one_or_none()
+            restored_default_dock = default_dock is not None and not default_dock.is_active
+            if default_dock is None:
+                default_dock = DockMasterModel(
+                    dock_code="RM-01",
+                    dock_name="Raw Material Dock 01",
+                    dock_type="RAW_MATERIAL",
+                    direction="INBOUND",
+                    location="Main Logistics Warehouse",
+                    description="Default inbound receiving dock",
+                    status="AVAILABLE",
+                    is_active=True,
+                    warehouse_ref_id=warehouse.id,
+                )
+                session.add(default_dock)
+                logger.info("Bootstrap: Created protected default receiving dock RM-01")
+            elif restored_default_dock:
+                default_dock.is_active = True
+                default_dock.status = "AVAILABLE"
+                if default_dock.warehouse_ref_id is None:
+                    default_dock.warehouse_ref_id = warehouse.id
+                logger.info("Bootstrap: Restored protected default receiving dock RM-01")
+
+            gate_default_dock = (
+                await session.execute(
+                    select(DockModel).where(func.upper(DockModel.dock_number) == "RM-01")
+                )
+            ).scalar_one_or_none()
+            if gate_default_dock is None:
+                session.add(
+                    DockModel(
+                        dock_number="RM-01",
+                        warehouse_id=warehouse.warehouse_code,
+                        dock_type="RAW_MATERIAL",
+                        capacity=1,
+                        status="AVAILABLE",
+                    )
+                )
+            elif restored_default_dock:
+                gate_default_dock.status = "AVAILABLE"
+
             # 2. Check if an administrator user already exists
             admin_stmt = select(UserAccountModel).where(
                 or_(
@@ -80,7 +130,6 @@ async def bootstrap_system_data() -> None:
                     failed_login_attempts=0,
                 )
                 session.add(admin_account)
-                await session.commit()
                 logger.info(
                     "Bootstrap: Seeded default administrator '%s' (%s) with role SUPER_ADMIN",
                     admin_account.username,
@@ -88,6 +137,8 @@ async def bootstrap_system_data() -> None:
                 )
             else:
                 logger.debug("Bootstrap: Administrator account '%s' already exists", existing_admin.username)
+
+            await session.commit()
 
     except Exception as exc:
         logger.warning("Bootstrap: System data bootstrap encountered an issue: %s", exc)

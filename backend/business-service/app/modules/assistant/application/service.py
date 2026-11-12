@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 import re
 from typing import Any, Dict, Optional
 
@@ -259,9 +260,10 @@ class AssistantService:
             else:
                 identifier = next(
                     (item.get(k) for k in (
+                        *(("asn_number",) if label == "ASN" else ()),
                         "po_number", "task_number", "gate_entry_number", "asn_number",
                         "order_number", "dispatch_number",
-                    ) if item.get(k)),
+                    ) if item.get(k) and str(item.get(k)).upper() not in ("N/A", "NONE", "NULL")),
                     None,
                 )
                 details = []
@@ -278,6 +280,18 @@ class AssistantService:
                 ):
                     value = item.get(key)
                     if value not in (None, "", "[RESTRICTED_FINANCIAL_FIELD]"):
+                        if key == "status":
+                            value = str(value).replace("_", " ").capitalize()
+                        elif key in ("scheduled_date", "shipment_date", "expected_arrival_at", "required_date"):
+                            try:
+                                parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                                value = parsed.strftime("%d %b %Y")
+                                if parsed.hour or parsed.minute:
+                                    value += parsed.strftime(", %H:%M")
+                                    if parsed.tzinfo is not None:
+                                        value += parsed.strftime(" %z")
+                            except (ValueError, TypeError):
+                                pass
                         details.append(f"{title} {value}")
                 title = f"{identifier}: " if identifier else ""
                 lines.append(f"• {title}{'; '.join(details) or 'record found'}.")

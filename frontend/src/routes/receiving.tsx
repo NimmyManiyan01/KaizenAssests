@@ -1,11 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -22,8 +23,10 @@ import {
   FileCheck2,
   FileText,
   Filter,
+  Loader2,
   PackageCheck,
   QrCode,
+  RefreshCw,
   ScanLine,
   Search,
   ShieldCheck,
@@ -51,18 +54,18 @@ type ReceivingStatus =
   | "QC_HOLD";
 
 const statusLabels: Record<ReceivingStatus, string> = {
-  PENDING_RECEIVING: "Gate Entry (8)",
-  AT_DOCK: "At Dock (4)",
-  UNLOADING: "Unloading (3)",
+  PENDING_RECEIVING: "Gate Entry",
+  AT_DOCK: "At Dock",
+  UNLOADING: "Unloading",
   UNLOADING_COMPLETED: "Unloaded",
-  QC_PENDING: "QC Pending (6)",
+  QC_PENDING: "QC Pending",
   QC_IN_PROGRESS: "QC In Progress",
   QC_COMPLETED: "QC Completed",
   GRN_DRAFT: "GRN Draft",
-  GRN_REVIEW: "GRN Pending (5)",
+  GRN_REVIEW: "GRN Pending",
   GRN_POSTED: "GRN Posted",
-  READY_FOR_PUTAWAY: "Ready for Putaway (9)",
-  QC_HOLD: "QC Hold (2)",
+  READY_FOR_PUTAWAY: "Ready for Putaway",
+  QC_HOLD: "QC Hold",
 };
 
 interface InboundRecord {
@@ -95,134 +98,181 @@ interface InboundRecord {
   lrDate: string;
   transporterName: string;
   driverName: string;
+  rawArrival?: any;
 }
 
-const INITIAL_RECORDS: InboundRecord[] = [
-  {
-    id: "rec-1",
-    gatePassNo: "GP-BLR-0048",
-    vehicleNo: "KA 01 AB 4582",
-    supplierName: "Bharat Electronics Components Pvt. Ltd.",
-    supplierCode: "SUP-IND-1042",
-    poNo: "PO-2026-008741",
-    asnNo: "ASN-2026-004582",
-    dockNo: "D-04",
-    warehouseName: "Raw Material Warehouse",
-    zoneName: "Inbound Receiving Bay",
-    status: "AT_DOCK",
-    entryTime: "07 Oct 2026 • 09:52 AM",
-    securityOfficer: "Rajesh Kumar (Security)",
-    assignedOperator: "Ramesh Kumar (Operator)",
-    assignedInspector: "Priya Sharma (QC Inspector)",
-    expectedQty: 500,
-    receivedQty: 495,
-    damagedQty: 5,
-    acceptedQty: 490,
-    rejectedQty: 5,
-    invoiceNo: "INV-2026-9901",
-    invoiceDate: "2026-10-07",
-    invoiceAmount: "₹ 2,45,000.00",
-    ewayNo: "EWAY-8812-4091",
-    ewayValidUntil: "2026-10-10",
-    lrNo: "LR-2026-9921",
-    lrDate: "2026-10-05",
-    transporterName: "VRL Logistics Ltd",
-    driverName: "Suresh Gowda (+91 98450 12345)",
-  },
-  {
-    id: "rec-2",
-    gatePassNo: "GP-BLR-0049",
-    vehicleNo: "KA 05 MN 7821",
-    supplierName: "SteelTech Heavy Precision Alloys",
-    supplierCode: "SUP-IND-2098",
-    poNo: "PO-8755",
-    asnNo: "ASN-2026-009912",
-    dockNo: "D-02",
-    warehouseName: "Raw Material Warehouse",
-    zoneName: "Heavy Metals Dock",
-    status: "UNLOADING",
-    entryTime: "07 Oct 2026 • 11:15 AM",
-    securityOfficer: "Rajesh Kumar (Security)",
-    assignedOperator: "Amit Joshi (Operator)",
-    assignedInspector: "Neha Kulkarni (QC Inspector)",
-    expectedQty: 1000,
-    receivedQty: 950,
-    damagedQty: 10,
-    acceptedQty: 940,
-    rejectedQty: 10,
-    invoiceNo: "INV-ST-8810",
-    invoiceDate: "2026-10-06",
-    invoiceAmount: "₹ 5,80,000.00",
-    ewayNo: "EWAY-9912-3301",
-    ewayValidUntil: "2026-10-12",
-    lrNo: "LR-ST-4412",
-    lrDate: "2026-10-06",
-    transporterName: "TCI Freight",
-    driverName: "Anand Murthy (+91 97312 34567)",
-  },
-  {
-    id: "rec-3",
-    gatePassNo: "GP-BLR-0050",
-    vehicleNo: "KA 09 EF 5544",
-    supplierName: "Mysore Electricals Ltd",
-    supplierCode: "SUP-IND-3055",
-    poNo: "PO-8790",
-    asnNo: "ASN-2026-003310",
-    dockNo: "D-01",
-    warehouseName: "Electrical Spares Warehouse",
-    zoneName: "Components Receiving",
-    status: "QC_PENDING",
-    entryTime: "07 Oct 2026 • 09:30 AM",
-    securityOfficer: "Rajesh Kumar (Security)",
-    assignedOperator: "Ramesh Kumar (Operator)",
-    assignedInspector: "Priya Sharma (QC Inspector)",
-    expectedQty: 250,
-    receivedQty: 250,
-    damagedQty: 0,
-    acceptedQty: 250,
-    rejectedQty: 0,
-    invoiceNo: "INV-ME-1092",
-    invoiceDate: "2026-10-05",
-    invoiceAmount: "₹ 1,12,500.00",
-    ewayNo: "EWAY-7721-0021",
-    ewayValidUntil: "2026-10-09",
-    lrNo: "LR-ME-1102",
-    lrDate: "2026-10-05",
-    transporterName: "GATI KWE",
-    driverName: "Vijay Kumar (+91 98800 11223)",
-  },
-];
+function mapArrivalToRecord(arrival: any): InboundRecord {
+  let status: ReceivingStatus = "PENDING_RECEIVING";
+  const rawStatus = (arrival.status || "").toUpperCase();
+  if (["AT_DOCK", "DOCK_ASSIGNED", "OCCUPIED", "MOVING_TO_DOCK"].includes(rawStatus)) {
+    status = "AT_DOCK";
+  } else if (["UNLOADING", "UNLOADING_IN_PROGRESS"].includes(rawStatus)) {
+    status = "UNLOADING";
+  } else if (["UNLOADED", "UNLOADING_COMPLETED"].includes(rawStatus)) {
+    status = "UNLOADING_COMPLETED";
+  } else if (["QC_PENDING", "QUALITY_INSPECTION_REQUIRED"].includes(rawStatus)) {
+    status = "QC_PENDING";
+  } else if (["QC_IN_PROGRESS"].includes(rawStatus)) {
+    status = "QC_IN_PROGRESS";
+  } else if (["QC_HOLD", "QUALITY_FAILED"].includes(rawStatus)) {
+    status = "QC_HOLD";
+  } else if (["QC_COMPLETED", "QUALITY_PASSED"].includes(rawStatus)) {
+    status = "QC_COMPLETED";
+  } else if (["GRN_DRAFT"].includes(rawStatus)) {
+    status = "GRN_DRAFT";
+  } else if (["GRN_REVIEW", "GRN_PENDING"].includes(rawStatus)) {
+    status = "GRN_REVIEW";
+  } else if (["GRN_POSTED", "RECEIVING_COMPLETED", "COMPLETED"].includes(rawStatus)) {
+    status = "GRN_POSTED";
+  } else if (["READY_FOR_PUTAWAY"].includes(rawStatus)) {
+    status = "READY_FOR_PUTAWAY";
+  } else {
+    status = "PENDING_RECEIVING";
+  }
+
+  const materials = Array.isArray(arrival.expected_materials) ? arrival.expected_materials : [];
+  const expectedQty = materials.reduce(
+    (acc: number, m: any) => acc + Number(m.po_quantity || m.quantity || 0),
+    0,
+  );
+  const receivedQty = materials.reduce(
+    (acc: number, m: any) => acc + Number(m.received_quantity || 0),
+    0,
+  );
+  const damagedQty = materials.reduce(
+    (acc: number, m: any) => acc + Number(m.damaged_quantity || 0),
+    0,
+  );
+  const acceptedQty = materials.reduce(
+    (acc: number, m: any) => acc + Number(m.good_quantity || 0),
+    0,
+  );
+  const rejectedQty = materials.reduce(
+    (acc: number, m: any) => acc + Number(m.rejected_quantity || 0),
+    0,
+  );
+
+  const formatTime = (ts?: string) => {
+    if (!ts) return "—";
+    const d = new Date(ts);
+    return Number.isNaN(d.getTime())
+      ? ts
+      : d.toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
+  };
+
+  return {
+    id: String(arrival.id || arrival.gate_pass_number || arrival.gate_entry_no || Math.random()),
+    gatePassNo: arrival.gate_pass_number || arrival.gate_entry_no || "—",
+    vehicleNo: arrival.vehicle_number || "—",
+    supplierName: arrival.supplier_name || arrival.vendor || "—",
+    supplierCode: arrival.supplier_code || "—",
+    poNo: arrival.po_number || "—",
+    asnNo: arrival.asn_number || "—",
+    dockNo: arrival.dock_number || arrival.assigned_dock_id || "Unassigned",
+    warehouseName: arrival.assigned_warehouse_name || arrival.warehouse_name || "Raw Material Warehouse",
+    zoneName: arrival.zone || "Inbound Receiving Bay",
+    status,
+    entryTime: formatTime(arrival.facility_entry_at || arrival.entry_time),
+    securityOfficer: arrival.security_officer_name || arrival.security_officer || "Security Officer",
+    assignedOperator: arrival.unloading_started_by || arrival.assigned_by || "Warehouse Operator",
+    assignedInspector: arrival.quality_inspected_by || "Quality Inspector",
+    expectedQty,
+    receivedQty,
+    damagedQty,
+    acceptedQty,
+    rejectedQty,
+    invoiceNo: arrival.invoice_number || "—",
+    invoiceDate: arrival.invoice_date || "—",
+    invoiceAmount: arrival.invoice_amount || "—",
+    ewayNo: arrival.eway_bill_number || "—",
+    ewayValidUntil: arrival.eway_bill_valid_until || "—",
+    lrNo: arrival.lr_number || "—",
+    lrDate: arrival.lr_date || "—",
+    transporterName: arrival.transporter_name || arrival.shipment?.transporter || "—",
+    driverName: arrival.driver_name
+      ? `${arrival.driver_name}${arrival.driver_phone ? ` (${arrival.driver_phone})` : ""}`
+      : "—",
+    rawArrival: arrival,
+  };
+}
 
 function ReceivingControlCenter() {
-  const [records, setRecords] = useState<InboundRecord[]>(INITIAL_RECORDS);
-  const [selectedRecord, setSelectedRecord] = useState<InboundRecord | null>(INITIAL_RECORDS[0] ?? null);
+  const [records, setRecords] = useState<InboundRecord[]>([]);
+  const [selectedRecord, setSelectedRecord] = useState<InboundRecord | null>(null);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("ALL");
   const [activeTab, setActiveTab] = useState("overview");
 
   // Operators & Inspectors
-  const [assignedOp, setAssignedOp] = useState("Ramesh Kumar (Warehouse Operator)");
-  const [assignedQc, setAssignedQc] = useState("Priya Sharma (Incoming Quality Inspector)");
+  const [assignedOp, setAssignedOp] = useState("Lead Warehouse Operator");
+  const [assignedQc, setAssignedQc] = useState("Incoming Quality Inspector");
+
+  const loadData = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
+    try {
+      const arrivals = await api.getInboundArrivals(true);
+      const mapped = Array.isArray(arrivals) ? arrivals.map(mapArrivalToRecord) : [];
+      setRecords(mapped);
+      setSelectedRecord((prev) => {
+        if (!prev) return mapped[0] ?? null;
+        const found = mapped.find((r) => r.id === prev.id);
+        return found ?? mapped[0] ?? null;
+      });
+    } catch (error) {
+      if (!quiet) {
+        toast.error("Unable to load receiving monitor data", {
+          description: error instanceof Error ? error.message : "Please check backend connection.",
+        });
+      }
+    } finally {
+      if (!quiet) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadData();
+    const interval = window.setInterval(() => void loadData(true), 10_000);
+    return () => window.clearInterval(interval);
+  }, [loadData]);
 
   const handleAssignOperator = (opName: string) => {
     setAssignedOp(opName);
     if (selectedRecord) {
       setSelectedRecord({ ...selectedRecord, assignedOperator: opName });
+      toast.success(`Operator Notification Sent: ${opName}`, {
+        description: `New Receiving Assignment: Vehicle ${selectedRecord.vehicleNo} at Dock ${selectedRecord.dockNo}`,
+      });
     }
-    toast.success(`Operator Notification Sent: ${opName}`, {
-      description: "New Receiving Assignment: Vehicle KA 01 AB 4582 at Dock D-04",
-    });
   };
 
   const handleAssignInspector = (qcName: string) => {
     setAssignedQc(qcName);
     if (selectedRecord) {
       setSelectedRecord({ ...selectedRecord, assignedInspector: qcName });
+      toast.success(`Quality Inspector Notification Sent: ${qcName}`, {
+        description: `Material Ready for Inspection: Gate Pass ${selectedRecord.gatePassNo} at Dock ${selectedRecord.dockNo}`,
+      });
     }
-    toast.success(`Quality Inspector Notification Sent: ${qcName}`, {
-      description: "Material Ready for Inspection: RCV-BLR-0048 at Dock D-04",
-    });
   };
+
+  const stageCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      PENDING_RECEIVING: 0,
+      AT_DOCK: 0,
+      UNLOADING: 0,
+      QC_PENDING: 0,
+      QC_HOLD: 0,
+      GRN_REVIEW: 0,
+      READY_FOR_PUTAWAY: 0,
+    };
+    for (const r of records) {
+      if (counts[r.status] !== undefined) {
+        counts[r.status]++;
+      }
+    }
+    return counts;
+  }, [records]);
 
   const filteredRecords = records.filter((r) => {
     if (stageFilter !== "ALL" && r.status !== stageFilter) return false;
@@ -237,6 +287,111 @@ function ReceivingControlCenter() {
     );
   });
 
+  const timelineEvents = useMemo(() => {
+    if (!selectedRecord) return [];
+    const raw = selectedRecord.rawArrival || {};
+    const events: { time: string; actor: string; event: string }[] = [];
+
+    const fmt = (iso?: string) => {
+      if (!iso) return "";
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime())
+        ? iso
+        : d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    };
+
+    if (raw.facility_entry_at || (selectedRecord.entryTime && selectedRecord.entryTime !== "—")) {
+      events.push({
+        time: fmt(raw.facility_entry_at) || selectedRecord.entryTime,
+        actor: selectedRecord.securityOfficer || "Gate Security",
+        event: `Gate Entry Completed (${selectedRecord.gatePassNo})`,
+      });
+    }
+
+    if (raw.assigned_at || (selectedRecord.dockNo && selectedRecord.dockNo !== "Unassigned")) {
+      events.push({
+        time: fmt(raw.assigned_at) || "Dock Phase",
+        actor: raw.assigned_by || "Warehouse Operations",
+        event: `Dock ${selectedRecord.dockNo} Assigned`,
+      });
+    }
+
+    if (
+      raw.dock_arrival_at ||
+      ["AT_DOCK", "UNLOADING", "UNLOADING_COMPLETED", "QC_PENDING", "QC_IN_PROGRESS", "QC_COMPLETED", "GRN_DRAFT", "GRN_REVIEW", "GRN_POSTED", "READY_FOR_PUTAWAY"].includes(selectedRecord.status)
+    ) {
+      events.push({
+        time: fmt(raw.dock_arrival_at) || "Dock Phase",
+        actor: raw.dock_checked_in_by || selectedRecord.assignedOperator || "Dock Operator",
+        event: `Vehicle Arrived at Dock ${selectedRecord.dockNo}`,
+      });
+    }
+
+    if (
+      raw.unloading_started_at ||
+      ["UNLOADING", "UNLOADING_COMPLETED", "QC_PENDING", "QC_IN_PROGRESS", "QC_COMPLETED", "GRN_DRAFT", "GRN_REVIEW", "GRN_POSTED", "READY_FOR_PUTAWAY"].includes(selectedRecord.status)
+    ) {
+      events.push({
+        time: fmt(raw.unloading_started_at) || "Receiving",
+        actor: raw.unloading_started_by || selectedRecord.assignedOperator || "Warehouse Operator",
+        event: selectedRecord.receivedQty > 0
+          ? `Unloading In Progress (${selectedRecord.receivedQty} Qty Recorded)`
+          : "Unloading In Progress",
+      });
+    }
+
+    if (
+      raw.receiving_completed_at ||
+      ["UNLOADING_COMPLETED", "QC_PENDING", "QC_IN_PROGRESS", "QC_COMPLETED", "GRN_DRAFT", "GRN_REVIEW", "GRN_POSTED", "READY_FOR_PUTAWAY"].includes(selectedRecord.status)
+    ) {
+      events.push({
+        time: fmt(raw.receiving_completed_at) || "Receiving",
+        actor: raw.receiving_completed_by || selectedRecord.assignedOperator || "Warehouse Operator",
+        event: `Unloading Completed (${selectedRecord.receivedQty || selectedRecord.expectedQty} Qty Received)`,
+      });
+    }
+
+    if (
+      raw.quality_inspected_at ||
+      ["QC_PENDING", "QC_IN_PROGRESS", "QC_COMPLETED", "QC_HOLD", "GRN_DRAFT", "GRN_REVIEW", "GRN_POSTED", "READY_FOR_PUTAWAY"].includes(selectedRecord.status)
+    ) {
+      events.push({
+        time: fmt(raw.quality_inspected_at) || "QC Inspection",
+        actor: raw.quality_inspected_by || selectedRecord.assignedInspector || "QC Inspector",
+        event:
+          selectedRecord.status === "QC_HOLD"
+            ? `QC Hold: Quality Issues Flagged (${selectedRecord.rejectedQty || 0} Rejected)`
+            : selectedRecord.acceptedQty > 0
+            ? `QC Inspection Completed (${selectedRecord.acceptedQty} Accepted / ${selectedRecord.rejectedQty || 0} Rejected)`
+            : "QC Inspection In Progress",
+      });
+    }
+
+    if (
+      raw.prepared_grn_id ||
+      ["GRN_DRAFT", "GRN_REVIEW", "GRN_POSTED", "READY_FOR_PUTAWAY"].includes(selectedRecord.status)
+    ) {
+      events.push({
+        time: "GRN Stage",
+        actor: "Warehouse Operator",
+        event:
+          selectedRecord.status === "GRN_POSTED" || selectedRecord.status === "READY_FOR_PUTAWAY"
+            ? `GRN Posted (${raw.prepared_grn_id || "GRN Completed"})`
+            : "GRN Review / Preparation In Progress",
+      });
+    }
+
+    if (selectedRecord.status === "READY_FOR_PUTAWAY") {
+      events.push({
+        time: "Putaway Ready",
+        actor: "Warehouse System",
+        event: "Material Handling Unit QR Labels Generated & Ready for Bin Putaway",
+      });
+    }
+
+    return events;
+  }, [selectedRecord]);
+
   return (
     <AppShell
       title="Warehouse Manager Receiving Monitor"
@@ -249,59 +404,71 @@ function ReceivingControlCenter() {
             <h2 className="text-xs font-black uppercase tracking-widest text-primary">
               RECEIVING STAGE MONITOR (SECTION 41)
             </h2>
-            {stageFilter !== "ALL" && (
+            <div className="flex items-center gap-2">
               <Button
                 size="sm"
-                variant="ghost"
-                onClick={() => setStageFilter("ALL")}
-                className="h-7 text-xs text-primary font-bold"
+                variant="outline"
+                onClick={() => void loadData()}
+                disabled={loading}
+                className="h-7 text-xs font-bold gap-1 rounded-lg"
               >
-                Clear Filter (Showing All)
+                <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+                Refresh
               </Button>
-            )}
+              {stageFilter !== "ALL" && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setStageFilter("ALL")}
+                  className="h-7 text-xs text-primary font-bold"
+                >
+                  Clear Filter (Showing All)
+                </Button>
+              )}
+            </div>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
             {[
               {
                 label: "GATE ENTRY",
-                count: 8,
+                count: stageCounts.PENDING_RECEIVING || 0,
                 filter: "PENDING_RECEIVING",
                 color: "text-slate-700 bg-slate-500/10 border-slate-500/30",
               },
               {
                 label: "AT DOCK",
-                count: 4,
+                count: stageCounts.AT_DOCK || 0,
                 filter: "AT_DOCK",
                 color: "text-emerald-600 bg-emerald-500/10 border-emerald-500/30",
               },
               {
                 label: "UNLOADING",
-                count: 3,
+                count: stageCounts.UNLOADING || 0,
                 filter: "UNLOADING",
                 color: "text-sky-600 bg-sky-500/10 border-sky-500/30",
               },
               {
                 label: "QC PENDING",
-                count: 6,
+                count: stageCounts.QC_PENDING || 0,
                 filter: "QC_PENDING",
                 color: "text-amber-600 bg-amber-500/10 border-amber-500/30",
               },
               {
                 label: "QC HOLD",
-                count: 2,
+                count: stageCounts.QC_HOLD || 0,
                 filter: "QC_HOLD",
                 color: "text-red-600 bg-red-500/10 border-red-500/30",
               },
               {
                 label: "GRN PENDING",
-                count: 5,
+                count: stageCounts.GRN_REVIEW || 0,
                 filter: "GRN_REVIEW",
                 color: "text-purple-600 bg-purple-500/10 border-purple-500/30",
               },
               {
                 label: "READY FOR PUTAWAY",
-                count: 9,
+                count: stageCounts.READY_FOR_PUTAWAY || 0,
                 filter: "READY_FOR_PUTAWAY",
                 color: "text-emerald-700 bg-emerald-500/20 border-emerald-500/50",
               },
@@ -322,11 +489,13 @@ function ReceivingControlCenter() {
           </div>
         </div>
 
-        {/* Section 41 & 43 - Main Table */}
-        <Card className="rounded-2xl border-border/50 shadow-soft">
-          <CardHeader className="flex flex-row items-center justify-between">
+        {/* Inbound Vehicles List */}
+        <Card className="rounded-2xl border-border/60 shadow-sm overflow-hidden bg-card">
+          <CardHeader className="flex flex-row items-center justify-between border-b bg-muted/20 pb-4">
             <div>
-              <CardTitle className="text-base font-bold">INBOUND RECEIVING TRANSACTIONS</CardTitle>
+              <CardTitle className="text-base font-black flex items-center gap-2">
+                <Truck className="size-4 text-primary" /> Active Inbound Receiving Queue
+              </CardTitle>
               <CardDescription>
                 Live inbound vehicles, assigned docks, and stage progression
               </CardDescription>
@@ -359,38 +528,53 @@ function ReceivingControlCenter() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
-                  {filteredRecords.map((r) => (
-                    <tr
-                      key={r.id}
-                      className={cn(
-                        "hover:bg-muted/30 transition-colors cursor-pointer",
-                        selectedRecord?.id === r.id && "bg-primary/5",
-                      )}
-                      onClick={() => setSelectedRecord(r)}
-                    >
-                      <td className="px-4 py-3 font-mono font-bold text-primary">{r.gatePassNo}</td>
-                      <td className="px-4 py-3 font-bold">{r.vehicleNo}</td>
-                      <td className="px-4 py-3 font-medium">{r.supplierName}</td>
-                      <td className="px-4 py-3 font-semibold">{r.poNo}</td>
-                      <td className="px-4 py-3 font-bold text-emerald-600 dark:text-emerald-400">
-                        {r.dockNo}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge className="rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-400 border border-sky-500/30">
-                          {statusLabels[r.status] || r.status}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 text-xs font-bold text-primary"
-                        >
-                          Open Record <ArrowRight className="ml-1 size-3.5" />
-                        </Button>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                        <Loader2 className="mx-auto size-5 animate-spin mb-2 text-primary" />
+                        Loading inbound shipments...
                       </td>
                     </tr>
-                  ))}
+                  ) : filteredRecords.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                        No inbound receiving records found.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredRecords.map((r) => (
+                      <tr
+                        key={r.id}
+                        className={cn(
+                          "hover:bg-muted/30 transition-colors cursor-pointer",
+                          selectedRecord?.id === r.id && "bg-primary/5",
+                        )}
+                        onClick={() => setSelectedRecord(r)}
+                      >
+                        <td className="px-4 py-3 font-mono font-bold text-primary">{r.gatePassNo}</td>
+                        <td className="px-4 py-3 font-bold">{r.vehicleNo}</td>
+                        <td className="px-4 py-3 font-medium">{r.supplierName}</td>
+                        <td className="px-4 py-3 font-semibold">{r.poNo}</td>
+                        <td className="px-4 py-3 font-bold text-emerald-600 dark:text-emerald-400">
+                          {r.dockNo}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge className="rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-400 border border-sky-500/30">
+                            {statusLabels[r.status] || r.status}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs font-bold text-primary"
+                          >
+                            Open Record <ArrowRight className="ml-1 size-3.5" />
+                          </Button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -398,7 +582,7 @@ function ReceivingControlCenter() {
         </Card>
 
         {/* Detail Page */}
-        {selectedRecord && (
+        {selectedRecord ? (
           <Card className="rounded-2xl border-primary/30 p-6 shadow-xl bg-card">
             {/* Header */}
             <div className="flex flex-wrap items-center justify-between gap-4 border-b pb-4">
@@ -430,7 +614,7 @@ function ReceivingControlCenter() {
                   </p>
                 </div>
                 <Badge className="rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 px-3 py-1 font-bold">
-                  {statusLabels[selectedRecord.status]}
+                  {statusLabels[selectedRecord.status] || selectedRecord.status}
                 </Badge>
               </div>
             </div>
@@ -470,8 +654,8 @@ function ReceivingControlCenter() {
                         <span className="font-bold font-mono">{selectedRecord.gatePassNo}</span>
                       </p>
                       <p className="flex justify-between">
-                        <span className="text-muted-foreground">Gate:</span>{" "}
-                        <span className="font-bold">Main Gate – 01</span>
+                        <span className="text-muted-foreground">Warehouse:</span>{" "}
+                        <span className="font-bold">{selectedRecord.warehouseName}</span>
                       </p>
                       <p className="flex justify-between">
                         <span className="text-muted-foreground">Entry Time:</span>{" "}
@@ -501,7 +685,7 @@ function ReceivingControlCenter() {
                       </p>
                       <p className="flex justify-between">
                         <span className="text-muted-foreground">Expected Qty:</span>{" "}
-                        <span className="font-bold">{selectedRecord.expectedQty} KG</span>
+                        <span className="font-bold">{selectedRecord.expectedQty} PCS</span>
                       </p>
                     </div>
                   </Card>
@@ -521,14 +705,14 @@ function ReceivingControlCenter() {
                           onChange={(e) => handleAssignOperator(e.target.value)}
                           className="h-8 w-full rounded-lg border bg-background px-2 text-xs font-bold"
                         >
-                          <option value="Ramesh Kumar (Warehouse Operator)">
-                            Ramesh Kumar (Warehouse Operator)
+                          <option value="Lead Warehouse Operator">
+                            Lead Warehouse Operator
                           </option>
-                          <option value="Amit Joshi (Warehouse Operator)">
-                            Amit Joshi (Warehouse Operator)
+                          <option value="Dock Receiving Operator">
+                            Dock Receiving Operator
                           </option>
-                          <option value="Suresh Nair (Dock Operator)">
-                            Suresh Nair (Dock Operator)
+                          <option value="Floor Operations Associate">
+                            Floor Operations Associate
                           </option>
                         </select>
                       </div>
@@ -542,14 +726,14 @@ function ReceivingControlCenter() {
                           onChange={(e) => handleAssignInspector(e.target.value)}
                           className="h-8 w-full rounded-lg border bg-background px-2 text-xs font-bold"
                         >
-                          <option value="Priya Sharma (Incoming Quality Inspector)">
-                            Priya Sharma (Incoming Quality Inspector)
+                          <option value="Incoming Quality Inspector">
+                            Incoming Quality Inspector
                           </option>
-                          <option value="Neha Kulkarni (Quality Inspector)">
-                            Neha Kulkarni (Quality Inspector)
+                          <option value="Receiving Quality Analyst">
+                            Receiving Quality Analyst
                           </option>
-                          <option value="Rajesh V (Lead QC Officer)">
-                            Rajesh V (Lead QC Officer)
+                          <option value="Lead QC Officer">
+                            Lead QC Officer
                           </option>
                         </select>
                       </div>
@@ -564,64 +748,28 @@ function ReceivingControlCenter() {
                   <h3 className="text-xs font-black uppercase text-primary mb-4">
                     RECEIVING TIMELINE (SECTION 42)
                   </h3>
-                  <div className="space-y-3 text-xs">
-                    {[
-                      {
-                        time: "09:52 AM",
-                        actor: "Security – Rajesh",
-                        event: "Gate Entry Completed (GP-BLR-20261007-0048)",
-                      },
-                      {
-                        time: "10:01 AM",
-                        actor: "Warehouse Manager – Arun",
-                        event: "Dock D-04 Assigned & Operators Notified",
-                      },
-                      {
-                        time: "10:58 AM",
-                        actor: "Operator – Ramesh",
-                        event: "Vehicle Arrived at Dock D-04",
-                      },
-                      { time: "11:02 AM", actor: "Operator – Ramesh", event: "Unloading Started" },
-                      {
-                        time: "11:37 AM",
-                        actor: "Operator – Ramesh",
-                        event: "Unloading Completed (495 KG Received)",
-                      },
-                      {
-                        time: "11:42 AM",
-                        actor: "Inspector – Priya",
-                        event: "QC Inspection Started",
-                      },
-                      {
-                        time: "12:06 PM",
-                        actor: "Inspector – Priya",
-                        event: "QC Completed (Partially Accepted: 490 KG Accepted / 5 KG Rejected)",
-                      },
-                      {
-                        time: "12:18 PM",
-                        actor: "Warehouse Operator – Suresh",
-                        event: "GRN Posted (GRN-BLR-2026-000184)",
-                      },
-                      {
-                        time: "12:21 PM",
-                        actor: "System",
-                        event: "Material Handling Unit QR Labels Generated (HU-BLR-20261007-00845)",
-                      },
-                    ].map((item, idx) => (
-                      <div key={idx} className="flex items-center gap-3 border-b pb-2">
-                        <div className="grid size-6 place-items-center rounded-full bg-primary/10 text-primary text-[10px] font-black">
-                          {idx + 1}
+                  {timelineEvents.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-muted-foreground">
+                      No timestamped events recorded for this shipment yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-3 text-xs">
+                      {timelineEvents.map((item, idx) => (
+                        <div key={idx} className="flex items-center gap-3 border-b pb-2">
+                          <div className="grid size-6 place-items-center rounded-full bg-primary/10 text-primary text-[10px] font-black">
+                            {idx + 1}
+                          </div>
+                          <span className="font-mono text-xs font-bold text-sky-600 w-24">
+                            {item.time}
+                          </span>
+                          <div className="flex-1">
+                            <p className="font-bold text-foreground">{item.event}</p>
+                            <p className="text-[10px] text-muted-foreground">{item.actor}</p>
+                          </div>
                         </div>
-                        <span className="font-mono text-xs font-bold text-sky-600 w-20">
-                          {item.time}
-                        </span>
-                        <div className="flex-1">
-                          <p className="font-bold text-foreground">{item.event}</p>
-                          <p className="text-[10px] text-muted-foreground">{item.actor}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </Card>
               </TabsContent>
 
@@ -730,6 +878,12 @@ function ReceivingControlCenter() {
               </TabsContent>
             </Tabs>
           </Card>
+        ) : (
+          !loading && (
+            <Card className="rounded-2xl border-dashed p-8 text-center text-sm text-muted-foreground bg-muted/10">
+              No shipment selected. Select an inbound shipment from the queue above to inspect receiving details.
+            </Card>
+          )
         )}
       </div>
     </AppShell>

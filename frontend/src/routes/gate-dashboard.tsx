@@ -51,50 +51,7 @@ function GateDashboard() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const entries = Array.isArray(dashboardData?.gateEntries) ? dashboardData.gateEntries : []; /*
-    {
-      id: "ge-1",
-      gate_pass_number: "GP-BLR-20261008-0048",
-      vehicle_number: "KA 01 AB 4582",
-      supplier_name: "Bharat Electronics Components Pvt. Ltd.",
-      po_number: "PO-2026-008741",
-      asn_number: "ASN-2026-004582",
-      entry_time: "07 Oct 2026 • 10:42 AM",
-      dock_number: "Dock D-04",
-      status: "INSIDE_FACILITY",
-      driver_name: "Suresh Gowda",
-      driver_contact: "+91 98450 12345",
-      invoice_number: "INV-2026-9901",
-    },
-    {
-      id: "ge-2",
-      gate_pass_number: "GP-BLR-20261008-0049",
-      vehicle_number: "KA 05 MN 7821",
-      supplier_name: "SteelTech Heavy Precision Alloys",
-      po_number: "PO-8755",
-      asn_number: "ASN-2026-009912",
-      entry_time: "07 Oct 2026 • 11:15 AM",
-      dock_number: "Dock D-02",
-      status: "AT_DOCK",
-      driver_name: "Anand Murthy",
-      driver_contact: "+91 97312 34567",
-      invoice_number: "INV-ST-8810",
-    },
-    {
-      id: "ge-3",
-      gate_pass_number: "GP-BLR-20261008-0050",
-      vehicle_number: "KA 09 EF 5544",
-      supplier_name: "Mysore Electricals Ltd",
-      po_number: "PO-8790",
-      asn_number: "ASN-2026-003310",
-      entry_time: "07 Oct 2026 • 09:30 AM",
-      dock_number: "Dock D-01",
-      status: "VEHICLE_EXITED",
-      driver_name: "Vijay Kumar",
-      driver_contact: "+91 98800 11223",
-      invoice_number: "INV-ME-1092",
-    },
-  ]; */
+  const entries = Array.isArray(dashboardData?.gateEntries) ? dashboardData.gateEntries : [];
 
   useEffect(() => {
     const query = routeSearch.search?.trim();
@@ -228,9 +185,11 @@ function GateDashboard() {
               />
             </div>
           </CardHeader>
-          <CardContent className="p-0">
+          <CardContent className="px-5 pb-5 pt-0">
+            <div className="overflow-hidden rounded-xl border border-border">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="w-full min-w-[1100px] table-fixed text-left text-xs">
+                <colgroup><col className="w-[11%]" /><col className="w-[11%]" /><col className="w-[13%]" /><col className="w-[18%]" /><col className="w-[10%]" /><col className="w-[13%]" /><col className="w-[12%]" /><col className="w-[12%]" /></colgroup>
                 <thead className="border-b bg-muted/40 font-bold uppercase text-muted-foreground">
                   <tr>
                     <th className="px-4 py-3">ASN Number</th>
@@ -265,14 +224,14 @@ function GateDashboard() {
                           {dockNo}
                         </td>
                         <td className="px-4 py-3">
-                          <StatusBadge status={e.status || "INSIDE_FACILITY"} />
+                          <StatusBadge status={e.status || "—"} />
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
+                          <div className="flex min-w-0 items-center justify-end gap-1.5">
                             <Button
                               size="sm"
                               variant="ghost"
-                              className="h-7 px-2 text-xs font-bold text-primary"
+                              className="h-8 w-full min-w-0 justify-center px-2 text-xs font-bold text-primary"
                               onClick={() => setSelectedDetailsDrawer(e)}
                             >
                               <Eye className="mr-1 size-3.5" /> Details
@@ -293,6 +252,7 @@ function GateDashboard() {
                 <span aria-live="polite">{currentActivityPage} / {activityPageCount}</span>
                 <Button size="sm" variant="outline" disabled={currentActivityPage === activityPageCount} onClick={() => setActivityPage(currentActivityPage + 1)}>Next</Button>
               </nav>
+            </div>
             </div>
           </CardContent>
         </Card>
@@ -325,7 +285,7 @@ function GateDashboard() {
                   <div className="min-w-0">
                     <dt className="text-xs text-muted-foreground">Invoice Number</dt>
                     <dd className="font-semibold text-foreground">
-                      {selectedDetailsDrawer.invoice_number || "INV-2026-9901"}
+                      {selectedDetailsDrawer.invoice_number || "—"}
                     </dd>
                   </div>
                   <div className="min-w-0">
@@ -337,7 +297,7 @@ function GateDashboard() {
                   <div className="min-w-0">
                     <dt className="text-xs text-muted-foreground">Status</dt>
                     <dd className="font-semibold text-foreground">
-                      {selectedDetailsDrawer.status || "INSIDE_FACILITY"}
+                      {selectedDetailsDrawer.status || "—"}
                     </dd>
                   </div>
                   </dl>
@@ -354,8 +314,8 @@ function GateDashboard() {
                   <div className="min-w-0">
                     <dt className="text-xs text-muted-foreground">Driver Name</dt>
                     <dd className="font-semibold text-foreground">
-                      {selectedDetailsDrawer.driver_name || "Suresh Gowda"} (
-                      {selectedDetailsDrawer.driver_contact || "+91 98450 12345"})
+                      {selectedDetailsDrawer.driver_name || "—"}
+                      {selectedDetailsDrawer.driver_contact ? ` (${selectedDetailsDrawer.driver_contact})` : ""}
                     </dd>
                   </div>
                   </dl>

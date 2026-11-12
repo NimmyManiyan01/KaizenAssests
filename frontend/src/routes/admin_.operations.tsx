@@ -146,17 +146,17 @@ function AdminOperationsPage() {
 
   return (
     <AppShell
-      title={<span className="inline-flex items-center gap-3"><span className="inline-flex size-10 items-center justify-center rounded-xl bg-blue-50 text-blue-700 ring-1 ring-blue-100"><Activity className="size-5" aria-hidden="true" /></span><span>Operational Monitoring</span></span>}
+      title={<span className="inline-flex items-center gap-3"><span className="operations-title-icon inline-flex size-10 shrink-0 items-center justify-center rounded-xl border border-white/30 bg-white/15"><Activity className="size-5" aria-hidden="true" /></span><span>Operational Monitoring</span></span>}
       subtitle="Cross-module activity, performance, and shortcuts for daily operations."
       actions={<Button variant="outline" className="h-10 w-10 bg-white px-0" aria-label="Reload operational data" title="Reload operational data" onClick={() => void load()} disabled={loading}><RefreshCw className={loading ? "animate-spin" : ""} /></Button>}
     >
-      <div className="space-y-5 p-4 md:p-6">
+      <div className="operations-workspace space-y-6">
         {loading ? <div className="flex h-56 items-center justify-center text-primary"><Loader2 className="animate-spin" /></div> : <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="operations-kpis grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
             {stats.map(({ label, value, icon: Icon, color }) => <Card key={label} className="border-slate-200 shadow-sm"><CardContent className="flex min-h-24 items-center justify-between gap-3 p-4"><div><p className="text-xs font-medium text-muted-foreground">{label}</p><p className="mt-1 text-2xl font-bold text-slate-900">{value.toLocaleString()}</p></div><span className={`rounded-xl p-3 ${color}`}><Icon className="size-5" /></span></CardContent></Card>)}
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-3">
+          <div className="operations-charts grid gap-5 xl:grid-cols-3">
             <Card className="border-slate-200 shadow-sm xl:col-span-2">
               <CardHeader className="pb-1"><CardTitle className="text-base">Application activity</CardTitle><p className="text-xs text-muted-foreground">API activity and failed requests over the last seven days.</p></CardHeader>
               <CardContent className="h-72 pt-4">
@@ -181,7 +181,7 @@ function AdminOperationsPage() {
 
             <Card className="h-fit border-slate-200 shadow-sm">
               <CardHeader className="pb-0"><CardTitle className="text-base">Request outcomes</CardTitle><p className="text-xs text-muted-foreground">Successful and failed API requests for the last seven days.</p></CardHeader>
-              <CardContent className="h-52">
+              <CardContent className="operations-outcomes-content h-64">
                 {resultSummary.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={resultSummary} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} paddingAngle={3}>{resultSummary.map((entry, index) => <Cell key={entry.name} fill={index === 0 ? chartColors[1] : "#EF5555"} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer> : <div className="flex h-full items-center justify-center text-sm text-muted-foreground">No request outcomes yet.</div>}
                 {resultSummary.length > 0 && <div className="-mt-2 flex justify-center gap-4 text-xs">{resultSummary.map((item, index) => <span key={item.name} className="flex items-center gap-1.5"><i className="size-2 rounded-full" style={{ backgroundColor: index === 0 ? chartColors[1] : "#EF5555" }} />{item.name}: {item.value}</span>)}</div>}
               </CardContent>

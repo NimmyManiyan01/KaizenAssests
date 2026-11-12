@@ -1535,18 +1535,18 @@ function SimpleWarehouseModule() {
     <AppShell activeItem="/inventory">
       <div className="warehouse-module-content space-y-5" data-warehouse-tab={activeTab}>
         {/* Header Title Bar */}
-        <div className="warehouse-module-hero relative isolate flex min-h-[164px] flex-col justify-center gap-4 overflow-hidden rounded-2xl px-6 py-5 md:flex-row md:items-center md:justify-between md:px-8">
+        <div className={` ${activeTab !== "dashboard" ? "app-page-heading" : ""} warehouse-module-hero relative isolate flex min-h-[164px] flex-col justify-center gap-4 overflow-hidden rounded-2xl px-6 py-5 md:flex-row md:items-center md:justify-between md:px-8`}>
           <div aria-hidden="true" className="warehouse-hero-image absolute inset-0 -z-20 bg-cover bg-[center_43%]" style={{ backgroundImage: `url(${warehouseHero})` }} />
           <div aria-hidden="true" className="warehouse-hero-overlay absolute inset-0 -z-10" />
           <div className="relative max-w-3xl text-white">
             <p hidden={activeTab === "putaway" || activeTab === "inventory" || activeTab === "picking" || activeTab === "locations"} className="warehouse-hero-eyebrow text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-200">
               Warehouse Control <span className="px-1 text-blue-300/70">/</span> {pageHeader[activeTab].eyebrow}
             </p>
-            <h1 className="mt-2 flex items-center gap-2.5 text-[25px] font-semibold tracking-tight md:text-[28px]">
-              <PageHeaderIcon className="h-6 w-6 text-[#71b5ff]" />
-              <span className="inline-flex items-center">{pageHeader[activeTab].title}<InformationTooltip help={inventoryHelp[activeTab] ?? "inventory"} placement="title" className="text-blue-100 hover:text-white" /></span>
+            <h1 className="mt-2 flex items-center gap-2.5 text-[25px] font-semibold tracking-tight text-white md:text-[28px]">
+              <PageHeaderIcon className="h-6 w-6 text-white" />
+              <span className="inline-flex items-center text-white">{pageHeader[activeTab].title}<InformationTooltip help={inventoryHelp[activeTab] ?? "inventory"} placement="title" className="text-white hover:text-white" /></span>
             </h1>
-            <p className="mt-1.5 text-sm text-blue-50/85">
+            <p className="mt-1.5 text-sm text-white">
               {pageHeader[activeTab].description}
             </p>
           </div>
@@ -1826,7 +1826,7 @@ function SimpleWarehouseModule() {
               </h3>
               <div className="overflow-x-auto">
               <table className="w-full min-w-[1050px] table-fixed text-left text-sm">
-                <colgroup><col className="w-[14%]" /><col className="w-[15%]" /><col className="w-[8%]" /><col className="w-[12%]" /><col className="w-[18%]" /><col className="w-[13%]" /><col className="w-[20%]" /></colgroup>
+                <colgroup><col className="w-[14%]" /><col className="w-[14%]" /><col className="w-[11%]" /><col className="w-[12%]" /><col className="w-[18%]" /><col className="w-[13%]" /><col className="w-[18%]" /></colgroup>
                 <thead>
                   <tr className="border-b border-sky-200 bg-sky-100/70 text-sky-950 uppercase dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-100">
                     <th className="py-2.5 px-3">GRN / Task No</th>
@@ -1872,7 +1872,7 @@ function SimpleWarehouseModule() {
                               type="button"
                               variant="outline"
                               size="sm"
-                              className="h-8 whitespace-nowrap rounded-lg px-3 text-xs font-medium text-primary"
+                              className="h-8 w-full max-w-full justify-center overflow-hidden whitespace-nowrap rounded-lg px-2 text-xs font-medium text-primary"
                               onClick={() => openPutawayGroup(t)}
                             >
                               {t.batch_count} batch{t.batch_count === 1 ? "" : "es"}
@@ -1881,7 +1881,7 @@ function SimpleWarehouseModule() {
                             "-"
                           )}
                         </td>
-                        <td className="py-3 px-3 font-bold">
+                        <td className="whitespace-nowrap py-3 px-3 font-bold">
                           {t.quantity ?? "—"} {t.uom || ""}
                         </td>
                         <td className="py-3 px-3">
@@ -1993,8 +1993,8 @@ function SimpleWarehouseModule() {
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1000px] table-fixed text-left text-sm">
-                  <colgroup><col className="w-[15%]" /><col className="w-[15%]" /><col className="w-[24%]" /><col className="w-[13%]" /><col className="w-[21%]" /><col className="w-[12%]" /></colgroup>
+                <table className="w-full min-w-[900px] table-fixed text-left text-sm">
+                  <colgroup><col className="w-[14%]" /><col className="w-[15%]" /><col className="w-[15%]" /><col className="w-[12%]" /><col className="w-[27%]" /><col className="w-[17%]" /></colgroup>
                   <thead>
                     <tr className="border-b border-sky-200 bg-sky-100/70 text-sky-950 uppercase dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-100">
                       <th className="py-2.5 px-3">Material Code</th>
@@ -2030,8 +2030,10 @@ function SimpleWarehouseModule() {
                                 ...(item.batch ? String(item.batch).split(",") : []),
                               ].map((batch) => batch.trim()).filter((batch, index, all) => batch && all.indexOf(batch) === index);
                               return batchCodes.length ? (
-                                <button type="button" onClick={() => void openInventoryBatchDetails(item)} aria-label={`View ${batchCodes.length} batch${batchCodes.length === 1 ? "" : "es"}`} className="inline-flex min-w-20 items-center justify-center rounded-full border bg-muted/40 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                                  {batchCodes.length} batch{batchCodes.length === 1 ? "" : "es"}
+                                <button type="button" onClick={() => void openInventoryBatchDetails(item)} aria-label={`View ${batchCodes.length} batch${batchCodes.length === 1 ? "" : "es"}`} className="inventory-batch-count inline-flex min-w-20 items-center justify-center rounded-full border border-primary bg-primary px-2 py-1 text-xs font-semibold text-white hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                                  <span className="inventory-batch-count-label">
+                                    {batchCodes.length} batch{batchCodes.length === 1 ? "" : "es"}
+                                  </span>
                                 </button>
                               ) : "—";
                             })()}
@@ -2044,7 +2046,7 @@ function SimpleWarehouseModule() {
                               {getInventoryDisplayLocation(item)}
                             </Badge>
                           </td>
-                          <td className="sticky right-0 bg-card py-3 px-3 text-center">
+                          <td className="sticky right-0 overflow-hidden bg-card py-3 px-3 text-center">
                             <Button
                               size="sm"
                               variant="outline"
@@ -2129,7 +2131,7 @@ function SimpleWarehouseModule() {
                                   })
                                   .catch(() => undefined);
                               }}
-                              className="h-7 text-xs text-indigo-600"
+                              className="h-8 w-full max-w-full min-w-0 justify-center overflow-hidden whitespace-nowrap px-2 text-xs text-indigo-600"
                             >
                               <Eye className="h-3.5 w-3.5 mr-1" /> View Details
                             </Button>
@@ -3307,19 +3309,40 @@ function SimpleWarehouseModule() {
               </div>
 
               {selectedInventory.inventory_history && (
-                <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
-                  <div className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
+                <div className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+                  <div className="border-b border-slate-200 px-4 py-3 font-bold uppercase tracking-wider text-[11px] text-slate-700 dark:border-slate-700 dark:text-slate-200">
                     Inventory History
                   </div>
-                  <dl className="mt-2 grid grid-cols-[minmax(120px,0.35fr)_minmax(0,1fr)] gap-x-3 gap-y-2">
-                    <dt className="text-muted-foreground">Original GRN</dt><dd className="break-all font-semibold">{selectedInventory.inventory_history.original_grn || "-"}</dd>
-                    <dt className="text-muted-foreground">Batch</dt><dd className="break-all font-mono font-semibold">{selectedInventory.inventory_history.batch_number || "-"}</dd>
-                    <dt className="text-muted-foreground">Previous Rack Location</dt><dd className="break-all font-semibold">{selectedInventory.inventory_history.original_rack || "-"}</dd>
-                    <dt className="text-muted-foreground">Received Quantity</dt><dd className="font-semibold">{selectedInventory.inventory_history.received_quantity} {selectedInventory.uom || ""}</dd>
-                    <dt className="text-muted-foreground">Issued to Assembly</dt><dd className="font-semibold">{selectedInventory.inventory_history.issued_quantity} {selectedInventory.uom || ""}</dd>
-                    <dt className="text-muted-foreground">Remaining Quantity</dt><dd className="font-semibold">{selectedInventory.inventory_history.remaining_quantity} {selectedInventory.uom || ""}</dd>
-                    <dt className="text-muted-foreground">Picking Task</dt><dd className="break-all font-mono font-semibold">{selectedInventory.inventory_history.picking_task || "-"}</dd>
-                  </dl>
+                  <div className="overflow-x-auto">
+                    <table className="inventory-history-table w-full min-w-[520px] border-collapse text-left text-sm">
+                      <thead>
+                        <tr className="bg-primary text-white">
+                          <th className="w-[34%] border-r border-white/40 px-4 py-2.5 font-semibold">Field</th>
+                          <th className="px-4 py-2.5 font-semibold">Details</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                        {[
+                          ["Original GRN", selectedInventory.inventory_history.original_grn || "-", false],
+                          ["Batch", selectedInventory.inventory_history.batch_number || "-", true],
+                          ["Previous Rack Location", selectedInventory.inventory_history.original_rack || "-", false],
+                          ["Received Quantity", `${selectedInventory.inventory_history.received_quantity} ${selectedInventory.uom || ""}`, false],
+                          ["Issued to Assembly", `${selectedInventory.inventory_history.issued_quantity} ${selectedInventory.uom || ""}`, false],
+                          ["Remaining Quantity", `${selectedInventory.inventory_history.remaining_quantity} ${selectedInventory.uom || ""}`, false],
+                          ["Picking Task", selectedInventory.inventory_history.picking_task || "-", true],
+                        ].map(([label, value, mono]) => (
+                          <tr key={String(label)} className="even:bg-slate-50 dark:even:bg-slate-800/50">
+                            <th scope="row" className="border-r border-slate-200 px-4 py-2.5 font-medium text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                              {label}
+                            </th>
+                            <td className={`break-all px-4 py-2.5 font-semibold text-slate-950 dark:text-white ${mono ? "font-mono" : ""}`}>
+                              {value}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
 

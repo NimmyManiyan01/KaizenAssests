@@ -258,14 +258,14 @@ function AdminRoute() {
 
   return (
     <AppShell>
-      <main className="mx-auto w-full max-w-[1600px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
-        <section className="relative min-h-[270px] overflow-hidden rounded-2xl border border-white/70 bg-white/35 shadow-sm backdrop-blur-sm sm:min-h-[300px]">
+      <main className="admin-dashboard-content mx-auto w-full max-w-none space-y-6 px-0 py-2">
+        <section className="relative min-h-[270px] overflow-hidden sm:min-h-[300px]">
           <div aria-hidden="true" className="pointer-events-none absolute inset-0">
             <img src={adminDashboardHero} alt="" className="h-full w-full object-cover object-center opacity-100" style={{ filter: "brightness(0.82) contrast(1.18) saturate(1.08)" }} />
             <div className="absolute inset-0 bg-gradient-to-r from-white/55 via-white/15 to-transparent" />
           </div>
           <div className="relative flex min-h-[270px] flex-col gap-5 p-6 sm:min-h-[300px] sm:p-8 lg:flex-row lg:items-center lg:justify-between">
-            <div className="max-w-2xl">
+            <div className="dashboard-title-card max-w-2xl">
               <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/50 bg-blue-700/65 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-white">
                 <ShieldCheck className="h-4 w-4 text-white" /> System administration
               </div>
@@ -273,7 +273,7 @@ function AdminRoute() {
               <p className="mt-2 max-w-xl text-sm leading-6 text-[#111111] sm:text-base">A live view of people, operational workspaces, and activity across your organization.</p>
               <p className="mt-4 flex items-center gap-2 text-xs text-[#111111]"><Clock3 className="h-3.5 w-3.5 text-[#111111]" />{refreshedAt ? `Updated ${refreshedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Loading current data"}</p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="admin-dashboard-actions flex flex-wrap items-center gap-2">
               <Button variant="outline" className="h-10 w-10 border-white/50 bg-slate-900/35 px-0 text-white hover:bg-slate-900/55 hover:text-white" aria-label="Reload administration data" title="Reload administration data" onClick={() => void load(true)} disabled={loading}><RefreshCw className={`h-4 w-4 text-white ${loading ? "animate-spin" : ""}`} /></Button>
               <Button asChild variant="outline" className="border-white/50 bg-slate-900/35 text-white hover:bg-slate-900/55 hover:text-white"><Link to="/admin/audit"><FileText className="mr-2 h-4 w-4 text-white" />Audit log</Link></Button>
               <Button asChild><Link to="/admin/users"><Users className="mr-2 h-4 w-4" />Manage users<ArrowRight className="ml-2 h-4 w-4" /></Link></Button>

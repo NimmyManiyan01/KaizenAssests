@@ -100,8 +100,11 @@ class DockAllocationService:
         session: AsyncSession,
         dock_type: Optional[str] = None,
         status: Optional[str] = None,
+        include_inactive: bool = False,
     ) -> List[DockMasterModel]:
-        query = select(DockMasterModel).where(DockMasterModel.is_active == True)
+        query = select(DockMasterModel)
+        if not include_inactive:
+            query = query.where(DockMasterModel.is_active == True)
         if dock_type and isinstance(dock_type, str) and dock_type.strip().upper() != "ALL":
             query = query.where(DockMasterModel.dock_type == dock_type.strip().upper())
         if status and isinstance(status, str) and status.strip().upper() != "ALL":

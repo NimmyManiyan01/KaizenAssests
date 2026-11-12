@@ -23,9 +23,19 @@ IST = ZoneInfo("Asia/Kolkata")
 
 def _gate_security_metrics(inbound_entries, pickup_visits) -> dict[str, int]:
     """Count persisted visits across inbound and finished-goods gate workflows."""
+    inactive_inbound_statuses = {
+        "REJECTED", "DENIED_ENTRY", "CANCELLED", "VEHICLE_EXITED",
+        "GATE_EXIT_COMPLETED", "CHECKED_OUT",
+    }
     inbound_exits = sum(
         1 for entry in inbound_entries
-        if (entry.get("status") or "").upper() == "VEHICLE_EXITED" or entry.get("exited_at")
+        if (entry.get("status") or "").upper() in {"VEHICLE_EXITED", "GATE_EXIT_COMPLETED", "CHECKED_OUT"}
+        or entry.get("exited_at")
+    )
+    inbound_inside = sum(
+        1 for entry in inbound_entries
+        if not entry.get("exited_at")
+        and (entry.get("status") or "").upper() not in inactive_inbound_statuses
     )
     pickup_exits = sum(
         1 for visit in pickup_visits
@@ -33,11 +43,12 @@ def _gate_security_metrics(inbound_entries, pickup_visits) -> dict[str, int]:
     )
     pickup_inside = sum(
         1 for visit in pickup_visits
-        if not visit.exited_at and (visit.status or "").upper() == "INSIDE_FACILITY"
+        if not visit.exited_at
+        and (visit.status or "").upper() in {"INSIDE_FACILITY", "READY_FOR_GATE_EXIT"}
     )
     return {
         "totalEntries": len(inbound_entries) + len(pickup_visits),
-        "vehiclesInside": len(inbound_entries) - inbound_exits + pickup_inside,
+        "vehiclesInside": inbound_inside + pickup_inside,
         "totalExits": inbound_exits + pickup_exits,
     }
 

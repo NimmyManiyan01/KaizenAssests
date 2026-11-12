@@ -6,6 +6,7 @@ import { FgQrInput } from "./fg-qr-input";
 import { toast } from "sonner";
 import {
   CheckCircle2,
+  ChevronDown,
   Download,
   Printer,
   QrCode,
@@ -17,7 +18,13 @@ import {
 
 const EMPTY_SECTIONS: any[] = [];
 
-export function FgSections({ sections = EMPTY_SECTIONS }: { sections?: any[] }) {
+export function FgSections({
+  sections = EMPTY_SECTIONS,
+  showVerification = true,
+}: {
+  sections?: any[];
+  showVerification?: boolean;
+}) {
   const [images, setImages] = useState<Record<string, string>>({});
   const [scan, setScan] = useState("");
   useEffect(() => {
@@ -32,9 +39,14 @@ export function FgSections({ sections = EMPTY_SECTIONS }: { sections?: any[] }) 
     };
   }, [sections]);
   if (!sections.length) return null;
+  const totalCount = sections.length;
   const dispatchedCount = sections.filter((section) => section.status === "DISPATCHED").length;
   const sectionStatus =
-    dispatchedCount === 8 ? "FULLY DISPATCHED" : dispatchedCount ? "PARTIALLY DISPATCHED" : "READY";
+    totalCount > 0 && dispatchedCount === totalCount
+      ? "FULLY DISPATCHED"
+      : dispatchedCount
+        ? "PARTIALLY DISPATCHED"
+        : "READY";
   return (
     <section className="overflow-hidden rounded-2xl border border-border/70 bg-card">
       <div className="flex flex-col gap-3 border-b bg-muted/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -52,13 +64,13 @@ export function FgSections({ sections = EMPTY_SECTIONS }: { sections?: any[] }) 
             {sectionStatus}
           </span>
           <span className="text-xs font-medium tabular-nums text-muted-foreground">
-            {dispatchedCount}/8 dispatched
+            {dispatchedCount}/{totalCount} dispatched
           </span>
         </div>
       </div>
 
       <div className="space-y-5 p-5">
-        <div className="rounded-xl border border-border/70 bg-muted/10 p-4">
+        {showVerification && <div className="rounded-xl border border-border/70 bg-muted/10 p-4">
           <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
             <ShieldCheck className="size-4 text-primary" />
             Verify section QR
@@ -84,7 +96,7 @@ export function FgSections({ sections = EMPTY_SECTIONS }: { sections?: any[] }) 
               Verify
             </Button>
           </div>
-        </div>
+        </div>}
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {sections.map((s) => (
@@ -146,13 +158,14 @@ export function FgSections({ sections = EMPTY_SECTIONS }: { sections?: any[] }) 
   );
 }
 
-export function FgLoading() {
+export function FgLoading({ onVerifyFgQr }: { onVerifyFgQr?: (visit: any) => void }) {
   const [visits, setVisits] = useState<any[]>([]);
   const [loadingQrImages, setLoadingQrImages] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [currentScan, setCurrentScan] = useState<Record<string, string>>({});
   const [scans, setScans] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Record<string, string[]>>({});
+  const [expandedVisits, setExpandedVisits] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const load = () =>
     (api?.getFgLoading ? api.getFgLoading() : Promise.resolve([]))
@@ -193,12 +206,15 @@ export function FgLoading() {
           </p>
         </div>
         <Button
-          size="sm"
+          data-refresh-control="true"
+          size="icon"
           variant="outline"
-          className="gap-2 rounded-xl"
+          className="rounded-xl"
+          aria-label="Refresh vehicles"
+          title="Refresh vehicles"
           onClick={() => void load()}
         >
-          <RefreshCw className="size-4" /> Refresh vehicles
+          <RefreshCw className="size-4" />
         </Button>
       </div>
       <div className="space-y-5 p-5">
@@ -219,15 +235,58 @@ export function FgLoading() {
         {visits.map((v) => (
           <div
             key={v.gate_pass_number}
-            className="space-y-6 overflow-hidden rounded-2xl border border-border/70 bg-background p-5 shadow-sm"
+            className="overflow-hidden rounded-2xl border border-border/70 bg-background shadow-sm"
           >
-            <p className="rounded-xl border bg-muted/20 p-4 font-semibold">
-              {v.vehicle_number} · Gate Pass {v.gate_pass_number} · FG {v.main_fg_id || v.fg_id} ·{" "}
-              {v.status}
-            </p>
-            <p className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-              {v.dispatch_status} ({v.dispatched_sections}/8 dispatched)
-            </p>
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-4 bg-muted/20 px-5 py-4 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+              aria-expanded={Boolean(expandedVisits[v.gate_pass_number])}
+              aria-controls={`fg-loading-${v.gate_pass_number}`}
+              onClick={() =>
+                setExpandedVisits((previous) => ({
+                  ...previous,
+                  [v.gate_pass_number]: !previous[v.gate_pass_number],
+                }))
+              }
+            >
+              <span className="min-w-0">
+                <span className="block truncate font-semibold text-foreground">
+                  {v.vehicle_number} · Gate Pass {v.gate_pass_number}
+                </span>
+                <span className="mt-1 block truncate text-xs text-muted-foreground">
+                  FG {v.main_fg_id || v.fg_id} · {v.status} · {v.dispatched_sections}/{v.total_sections ?? (v.sections ? v.sections.length : (v.dispatched_sections || 0))} dispatched
+                </span>
+              </span>
+              <span className="flex shrink-0 items-center gap-3">
+                <span className="hidden rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 sm:inline-flex">
+                  {v.dispatch_status}
+                </span>
+                <ChevronDown
+                  className={`size-5 text-muted-foreground transition-transform ${
+                    expandedVisits[v.gate_pass_number] ? "rotate-180" : ""
+                  }`}
+                  aria-hidden="true"
+                />
+              </span>
+            </button>
+            {expandedVisits[v.gate_pass_number] && (
+            <div id={`fg-loading-${v.gate_pass_number}`} className="space-y-6 border-t border-border/60 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                {v.dispatch_status} ({v.dispatched_sections}/{v.total_sections ?? (v.sections ? v.sections.length : (v.dispatched_sections || 0))} dispatched)
+              </p>
+              {onVerifyFgQr && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="rounded-xl gap-2"
+                  onClick={() => onVerifyFgQr(v)}
+                >
+                  <QrCode className="size-4" /> Verify Finished Goods QR
+                </Button>
+              )}
+            </div>
             {v.status === "READY_FOR_GATE_EXIT" && (
               <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
                 <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-600" />
@@ -318,7 +377,7 @@ export function FgLoading() {
               </div>
             </div>
             {v.status === "INSIDE_FACILITY" && (
-              <div className="rounded-2xl border bg-muted/10 p-4">
+              <div className="rounded-2xl border bg-white p-4 dark:bg-card">
                 <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="flex items-center gap-2 text-sm font-semibold">
@@ -501,6 +560,8 @@ export function FgLoading() {
                   {busy ? "Confirming loading…" : "Confirm loading & ready for Gate Exit"}
                 </Button>
               </div>
+            )}
+            </div>
             )}
           </div>
         ))}

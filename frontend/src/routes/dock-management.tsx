@@ -7,6 +7,8 @@ import {
   Info,
   Loader2,
   Package,
+  Power,
+  PowerOff,
   Plus,
   RefreshCw,
   Search,
@@ -96,6 +98,7 @@ type Dock = {
   description?: string | null;
   status: "AVAILABLE" | "RESERVED" | "OCCUPIED" | "MAINTENANCE";
   is_active: boolean;
+  is_default?: boolean;
   created_at: string;
   updated_at: string;
   warehouse_ref_id?: string | null;
@@ -239,6 +242,7 @@ function DockManagement() {
   const [pendingRequests, setPendingRequests] = useState<AllocationRequest[]>([]);
   const [history, setHistory] = useState<DockHistory[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Filter & tab controls
   const [searchTerm, setSearchTerm] = useState("");
@@ -369,6 +373,7 @@ function DockManagement() {
 
   const [maintenanceConfirmDock, setMaintenanceConfirmDock] = useState<Dock | null>(null);
   const [deleteConfirmDock, setDeleteConfirmDock] = useState<Dock | null>(null);
+  const [activationConfirm, setActivationConfirm] = useState<{ dock: Dock; active: boolean } | null>(null);
 
   const [actionBusy, setActionBusy] = useState(false);
 
@@ -385,28 +390,33 @@ function DockManagement() {
   };
 
   const loadAll = useCallback(async (quiet = false) => {
-    if (!quiet) setLoading(true);
+    if (!quiet) {
+      setLoading(true);
+      setLoadError(null);
+    }
     try {
       const [docksRes, overviewRes, pendingRes, historyRes] = await Promise.all([
-        api.getDocks(),
+        api.getManagedDocks(),
         api.getDockOverviewMetrics().catch(() => null),
         api.getPendingAllocations().catch(() => []),
         api.getDockHistory().catch(() => []),
       ]);
 
       setDocks(docksRes);
+      setLoadError(null);
       setPendingRequests(pendingRes);
       setHistory(historyRes);
       if (overviewRes) {
         setMetrics(overviewRes);
       } else {
-        const avail = docksRes.filter((d: Dock) => d.status === "AVAILABLE").length;
+        const activeDocks = docksRes.filter((d: Dock) => d.is_active);
+        const avail = activeDocks.filter((d: Dock) => d.status === "AVAILABLE").length;
         const occ = docksRes.filter(
-          (d: Dock) => d.status === "OCCUPIED" || d.status === "RESERVED",
+          (d: Dock) => d.is_active && (d.status === "OCCUPIED" || d.status === "RESERVED"),
         ).length;
-        const maint = docksRes.filter((d: Dock) => d.status === "MAINTENANCE").length;
+        const maint = activeDocks.filter((d: Dock) => d.status === "MAINTENANCE").length;
         setMetrics({
-          total_docks: docksRes.length,
+          total_docks: activeDocks.length,
           available_docks: avail,
           occupied_docks: occ,
           reserved_docks: 0,
@@ -429,9 +439,11 @@ function DockManagement() {
         return fresh;
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to load dock registry";
+      setLoadError(message);
       if (!quiet) {
         toast.error("Unable to load dock management data", {
-          description: error instanceof Error ? error.message : undefined,
+          description: message,
         });
       }
     } finally {
@@ -446,6 +458,7 @@ function DockManagement() {
     releaseConfirmDock ||
     editDockModalDock ||
     maintenanceConfirmDock ||
+    activationConfirm ||
     showCreateDock,
   );
 
@@ -553,6 +566,28 @@ function DockManagement() {
     }
   }
 
+  async function handleActivationChange() {
+    if (!activationConfirm) return;
+    const { dock, active } = activationConfirm;
+    setActionBusy(true);
+    try {
+      await api.updateDockActivation(
+        dock.id,
+        active,
+        active ? "Reactivated from Dock Management" : "Deactivated from Dock Management",
+      );
+      toast.success(`Dock ${dock.dock_code} ${active ? "activated" : "deactivated"}`);
+      setActivationConfirm(null);
+      await loadAll(true);
+    } catch (error) {
+      toast.error(`Unable to ${active ? "activate" : "deactivate"} dock`, {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   // Action Handlers
   async function handleAllocateDock(requestToAllocate?: AllocationRequest) {
     let reqId = "";
@@ -578,7 +613,7 @@ function DockManagement() {
 
     // Verify dock availability
     const targetDock = docks.find((d) => d.id === dockId);
-    if (targetDock && targetDock.status !== "AVAILABLE") {
+    if (targetDock && (!targetDock.is_active || targetDock.status !== "AVAILABLE")) {
       toast.error("Selected dock is not Available. Please choose an Available dock.");
       return;
     }
@@ -731,8 +766,12 @@ function DockManagement() {
     return matchesTab && matchesCategory && matchesSearch;
   });
 
-  const warehouseDock = docks.find((dock) => dock.is_active) || docks[0];
   const activeDockCount = docks.filter((dock) => dock.is_active).length;
+  const inactiveDockCount = docks.filter((dock) => !dock.is_active).length;
+  const managedDockList = [...filteredDocks].sort((left, right) => {
+    if (left.is_active !== right.is_active) return left.is_active ? -1 : 1;
+    return left.dock_code.localeCompare(right.dock_code);
+  });
 
   if (mounted && isWarehouseUser && !isWarehouseOrAdmin) {
     return (
@@ -768,7 +807,7 @@ function DockManagement() {
   return (
     <AppShell activeItem="/dock-management">
       <div className="dock-management-workspace space-y-4">
-        <div className="dock-management-header flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="app-page-heading dock-management-header flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <h1 className="flex items-center gap-3"><Warehouse className="size-6 shrink-0 text-primary" />Dock Management<InformationTooltip help="dock" placement="title" /></h1>
             <p className="mt-2 text-sm text-muted-foreground">Allocate approved vehicles and monitor receiving dock availability.</p>
@@ -796,12 +835,59 @@ function DockManagement() {
         </div>
       {loading ? (
         <div className="flex h-64 items-center justify-center gap-2 text-muted-foreground"><Loader2 className="size-6 animate-spin text-primary" /><p className="text-sm">Loading dock status...</p></div>
+      ) : loadError ? (
+        <Card className="rounded-2xl border-red-200 bg-red-50/70 p-8 text-center">
+          <ShieldAlert className="mx-auto size-8 text-red-600" />
+          <h2 className="mt-3 text-lg font-bold text-red-900">Dock registry unavailable</h2>
+          <p className="mt-1 text-sm text-red-700">{loadError}</p>
+          <Button type="button" variant="outline" className="mt-4" onClick={() => void loadAll()}>
+            <RefreshCw className="mr-2 size-4" /> Retry
+          </Button>
+        </Card>
       ) : activeTab === "HISTORY" ? (
-        <Card className="overflow-hidden rounded-2xl p-0 shadow-soft"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b bg-muted/50 text-[11px] uppercase tracking-wide text-muted-foreground font-semibold"><tr><th className="px-4 py-3">Timestamp</th><th className="px-4 py-3">Gate Pass</th><th className="px-4 py-3">Vehicle</th><th className="px-4 py-3">Dock</th><th className="px-4 py-3">Action</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Performed By</th></tr></thead><tbody className="divide-y divide-border/60">{filteredHistory.length ? filteredHistory.map((item) => <tr key={item.id}><td className="px-4 py-3 text-xs">{formatApiDateTime(item.performed_at)}</td><td className="px-4 py-3 font-mono font-semibold text-emerald-700 dark:text-emerald-400">{item.existing_gate_pass_id || "—"}</td><td className="px-4 py-3 font-mono">{item.vehicle_number || "—"}</td><td className="px-4 py-3 font-mono font-semibold">{item.dock_code || "N/A"}</td><td className="px-4 py-3">{item.action}</td><td className="px-4 py-3"><div className="flex flex-wrap items-center gap-2">
-          {item.previous_status && <StatusBadge status={item.previous_status} />}
-          {item.previous_status && <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" aria-label="changed to" />}
-          <StatusBadge status={item.new_status} />
-        </div></td><td className="px-4 py-3">{item.performed_by}</td></tr>) : <tr><td colSpan={7} className="py-12 text-center text-sm text-muted-foreground">No dock activity yet.</td></tr>}</tbody></table></div></Card>
+        <Card className="overflow-hidden rounded-2xl p-0 shadow-soft">
+          <div className="overflow-x-auto">
+            <table className="dock-history-table w-full min-w-[1180px] table-fixed border-collapse text-left text-sm">
+              <colgroup>
+                <col className="w-[16%]" /><col className="w-[10%]" /><col className="w-[14%]" />
+                <col className="w-[8%]" /><col className="w-[18%]" /><col className="w-[24%]" />
+                <col className="w-[10%]" />
+              </colgroup>
+              <thead className="border-b bg-muted/50 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  {[
+                    "Timestamp", "Gate Pass", "Vehicle", "Dock", "Action", "Status", "Performed By",
+                  ].map((heading) => (
+                    <th key={heading} className="whitespace-nowrap border-r border-border/70 px-4 py-3 last:border-r-0">
+                      {heading}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {filteredHistory.length ? filteredHistory.map((item) => (
+                  <tr key={item.id} className="transition-colors hover:bg-muted/30">
+                    <td className="whitespace-nowrap border-r border-border/70 px-4 py-3 text-xs tabular-nums">{formatApiDateTime(item.performed_at)}</td>
+                    <td className="whitespace-nowrap border-r border-border/70 px-4 py-3 font-mono font-semibold text-emerald-700 dark:text-emerald-400">{item.existing_gate_pass_id || "—"}</td>
+                    <td className="whitespace-nowrap border-r border-border/70 px-4 py-3 font-mono">{item.vehicle_number || "—"}</td>
+                    <td className="whitespace-nowrap border-r border-border/70 px-4 py-3 text-center font-mono font-semibold">{item.dock_code || "N/A"}</td>
+                    <td className="border-r border-border/70 px-4 py-3 font-medium">{String(item.action || "—").replaceAll("_", " ")}</td>
+                    <td className="border-r border-border/70 px-4 py-3">
+                      <div className="flex flex-nowrap items-center justify-center gap-2 whitespace-nowrap">
+                        {item.previous_status && <StatusBadge status={item.previous_status} />}
+                        {item.previous_status && <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" aria-label="changed to" />}
+                        <StatusBadge status={item.new_status} />
+                      </div>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 font-medium">{item.performed_by}</td>
+                  </tr>
+                )) : (
+                  <tr><td colSpan={7} className="py-12 text-center text-sm text-muted-foreground">No dock activity yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       ) : (
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-3">
@@ -816,13 +902,26 @@ function DockManagement() {
               </div>
             ))}
           </div>
-          {(docks.length ? filteredDocks : [undefined]).map((warehouseDock) => (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-card px-5 py-4 shadow-sm">
+            <div>
+              <h2 className="text-lg font-bold">Dock registry</h2>
+              <p className="text-sm text-muted-foreground">All configured docks, including inactive records.</p>
+            </div>
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-800">Active {activeDockCount}</span>
+              <span className="rounded-full bg-slate-200 px-3 py-1 text-slate-700">Inactive {inactiveDockCount}</span>
+              <span className="rounded-full bg-blue-100 px-3 py-1 text-blue-800">Total {docks.length}</span>
+            </div>
+          </div>
+          {(docks.length ? managedDockList : [undefined]).map((warehouseDock) => (
           <Card key={warehouseDock?.id || "unconfigured"} className={cn("dock-management-receiving overflow-hidden rounded-3xl border shadow-soft", warehouseDock?.status === "AVAILABLE" ? "border-emerald-200" : warehouseDock?.status === "MAINTENANCE" ? "border-amber-200" : "border-blue-200")}>
             <div className="grid gap-4 p-5 lg:grid-cols-[minmax(0,1fr)_auto_minmax(280px,360px)] lg:items-center">
-              <div className="min-w-0 flex-1 space-y-3"><div className="flex flex-wrap items-center gap-3"><span className={cn("size-3 rounded-full", warehouseDock?.status === "AVAILABLE" ? "bg-emerald-500" : warehouseDock?.status === "MAINTENANCE" ? "bg-amber-500" : "bg-blue-600")} /><span className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">Receiving dock</span><span className={cn("rounded-full px-3 py-1 text-xs font-bold", warehouseDock?.status === "AVAILABLE" ? "bg-emerald-100 text-emerald-800" : warehouseDock?.status === "MAINTENANCE" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800")}>{warehouseDock?.status === "OCCUPIED" || warehouseDock?.status === "RESERVED" ? "ALLOCATED" : warehouseDock?.status || "NOT CONFIGURED"}</span></div><div><h2 className="text-3xl font-black tracking-tight">{warehouseDock?.dock_code || "Receiving dock"}</h2><p className="mt-1 text-sm text-muted-foreground">{warehouseDock?.dock_name || "The warehouse dock has not been configured yet."}</p></div></div>
+              <div className="min-w-0 flex-1 space-y-3"><div className="flex flex-wrap items-center gap-3"><span className={cn("size-3 rounded-full", !warehouseDock?.is_active ? "bg-slate-400" : warehouseDock?.status === "AVAILABLE" ? "bg-emerald-500" : warehouseDock?.status === "MAINTENANCE" ? "bg-amber-500" : "bg-blue-600")} /><span className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">Receiving dock</span><span className={cn("rounded-full px-3 py-1 text-xs font-bold", !warehouseDock?.is_active ? "bg-slate-100 text-slate-700" : warehouseDock?.status === "AVAILABLE" ? "bg-emerald-100 text-emerald-800" : warehouseDock?.status === "MAINTENANCE" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800")}>{!warehouseDock?.is_active ? "INACTIVE" : warehouseDock?.status === "OCCUPIED" || warehouseDock?.status === "RESERVED" ? "ALLOCATED" : warehouseDock?.status || "NOT CONFIGURED"}</span></div><div><h2 className="text-3xl font-black tracking-tight">{warehouseDock?.dock_code || "Receiving dock"}</h2><p className="mt-1 text-sm text-muted-foreground">{warehouseDock?.dock_name || "The warehouse dock has not been configured yet."}</p></div></div>
             <div className="flex shrink-0 items-center gap-2">
               <Button type="button" variant="outline" disabled={actionBusy} onClick={() => warehouseDock ? openEditDock(warehouseDock) : setShowCreateDock(true)} className="gap-2 rounded-xl border-blue-200 bg-white/80 text-blue-800 hover:bg-blue-50 dark:border-blue-900/60 dark:bg-slate-900 dark:text-blue-200 dark:hover:bg-blue-950/40"><SquarePen className="size-4" />{warehouseDock ? "Edit dock" : "Configure dock"}</Button>
-              {warehouseDock && isWarehouseOrAdmin && <Button type="button" variant="outline" disabled={actionBusy || (warehouseDock.is_active && activeDockCount <= 1)} title={warehouseDock.is_active && activeDockCount <= 1 ? "At least one active dock must remain" : undefined} onClick={() => setDeleteConfirmDock(warehouseDock)} className="gap-2 rounded-xl border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950/40"><Trash2 className="size-4" />Delete</Button>}
+              {warehouseDock && warehouseDock.is_default && <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-800">Default dock</span>}
+              {warehouseDock && !warehouseDock.is_default && isWarehouseOrAdmin && <Button type="button" variant="outline" disabled={actionBusy} onClick={() => setActivationConfirm({ dock: warehouseDock, active: !warehouseDock.is_active })} className={cn("gap-2 rounded-xl", warehouseDock.is_active ? "border-amber-200 text-amber-700 hover:bg-amber-50" : "border-emerald-200 text-emerald-700 hover:bg-emerald-50")}>{warehouseDock.is_active ? <PowerOff className="size-4" /> : <Power className="size-4" />}{warehouseDock.is_active ? "Deactivate" : "Activate"}</Button>}
+              {warehouseDock && !warehouseDock.is_default && isWarehouseOrAdmin && <Button type="button" variant="outline" disabled={actionBusy || (warehouseDock.is_active && activeDockCount <= 1)} title={warehouseDock.is_active && activeDockCount <= 1 ? "At least one active dock must remain" : undefined} onClick={() => setDeleteConfirmDock(warehouseDock)} className="gap-2 rounded-xl border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950/40"><Trash2 className="size-4" />Delete</Button>}
             </div>
               <div className="grid min-w-[280px] grid-cols-2 gap-3 rounded-2xl bg-muted/40 p-4 text-sm"><div><p className="text-xs font-semibold uppercase text-muted-foreground">Dock status</p><p className="mt-1 font-bold">{warehouseDock?.status || "Unavailable"}</p></div><div><p className="text-xs font-semibold uppercase text-muted-foreground">Waiting vehicles</p><p className="mt-1 font-bold">{pendingRequests.length}</p></div>{warehouseDock?.current_allocation ? <><div><p className="text-xs font-semibold uppercase text-muted-foreground">Vehicle</p><p className="mt-1 font-mono font-bold">{warehouseDock.current_allocation.vehicle_number}</p></div><div><p className="text-xs font-semibold uppercase text-muted-foreground">Gate pass</p><p className="mt-1 font-mono font-bold">{warehouseDock.current_allocation.existing_gate_pass_id}</p></div></> : <div className="col-span-2 text-xs text-muted-foreground">GRN releases the dock automatically after receiving is complete.</div>}</div>
             </div>
@@ -858,6 +957,37 @@ function DockManagement() {
               }}
             >
               {actionBusy && <Loader2 className="size-4 animate-spin" />} Delete dock
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={Boolean(activationConfirm)}
+        onOpenChange={(open) => !actionBusy && !open && setActivationConfirm(null)}
+      >
+        <AlertDialogContent className="rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {activationConfirm?.active ? "Activate dock?" : "Deactivate dock?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {activationConfirm?.active
+                ? `Activate ${activationConfirm.dock.dock_code} and make it available for vehicle allocation?`
+                : `Deactivate ${activationConfirm?.dock.dock_code}? It will remain visible in Dock Management but cannot receive vehicle allocations.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={actionBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={actionBusy}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleActivationChange();
+              }}
+            >
+              {actionBusy && <Loader2 className="size-4 animate-spin" />}
+              {activationConfirm?.active ? "Activate" : "Deactivate"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1256,14 +1386,14 @@ function DockManagement() {
 
             <div className="space-y-3 py-2 text-xs">
               <Label className="text-xs font-semibold">Select Available Dock:</Label>
-              {docks.filter((d) => d.status === "AVAILABLE").length === 0 ? (
+              {docks.filter((d) => d.is_active && d.status === "AVAILABLE").length === 0 ? (
                 <div className="rounded-xl border border-dashed p-4 text-center text-xs text-rose-600 font-semibold">
                   No docks currently available for allocation.
                 </div>
               ) : (
                 <div className="max-h-52 overflow-y-auto space-y-2 border rounded-xl p-2 bg-muted/20">
                   {docks
-                    .filter((d) => d.status === "AVAILABLE")
+                    .filter((d) => d.is_active && d.status === "AVAILABLE")
                     .map((d) => (
                       <label
                         key={d.id}

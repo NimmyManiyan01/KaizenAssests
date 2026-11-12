@@ -787,7 +787,7 @@ function DispatchOrdersPage() {
                           <Input
                             value={transporter}
                             onChange={(e) => setTransporter(e.target.value)}
-                            placeholder="VRL Logistics"
+                            placeholder="Enter transporter name"
                             className="mt-1.5 rounded-xl text-xs font-semibold"
                           />
                         </div>

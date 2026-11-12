@@ -622,17 +622,16 @@ function FinishedGoodsPickupGatePage() {
               <p className="text-sm">Approved finished-goods dispatch requests will appear here.</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm [&_th:nth-child(2)]:hidden [&_td:nth-child(2)]:hidden">
+            <div className="m-4 overflow-x-auto rounded-xl border border-border">
+              <table className="pickup-requests-table w-full min-w-[1000px] table-fixed text-left text-sm">
+                <colgroup><col className="w-[15%]" /><col className="w-[10%]" /><col className="w-[14%]" /><col className="w-[9%]" /><col className="w-[16%]" /><col className="w-[13%]" /><col className="w-[12%]" /><col className="w-[11%]" /></colgroup>
                 <thead className="border-b bg-muted/40 text-xs uppercase text-muted-foreground">
                   <tr>
                     {[
                       "Request Number",
-                      "Assembly Unit",
                       "Supplier",
                       "Finished Goods",
                       "Quantity",
-                      "Expected Pickup",
                       "Vehicle",
                       "Driver",
                       "Status",
@@ -659,13 +658,11 @@ function FinishedGoodsPickupGatePage() {
                       <td className="px-4 py-3 font-mono font-semibold text-primary">
                         {request.request_number}
                       </td>
-                      <td className="px-4 py-3 font-mono">{request.assembly_unit_code || "—"}</td>
                       <td className="px-4 py-3">{request.supplier_name || "—"}</td>
                       <td className="px-4 py-3">{request.product_name || "—"}</td>
                       <td className="px-4 py-3">
                         {request.quantity} {request.uom}
                       </td>
-                      <td className="px-4 py-3">{request.expected_pickup_date || "—"}</td>
                       <td className="px-4 py-3">
                         {gatePasses.length
                           ? gatePasses.map((pass: any, index: number) => (

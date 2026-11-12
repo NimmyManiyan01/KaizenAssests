@@ -63,7 +63,10 @@
 }
 
 @theme {
-  --color-blue-50: #F4F7FB;
+  /* A small readability lift without scaling the heading hierarchy. */
+  --text-xs: 0.8125rem;
+  --text-sm: 0.9375rem;
+  --color-blue-50: #E4EDF8;
   --color-blue-100: #EAF2F9;
   --color-blue-200: #D6E5F0;
   --color-blue-300: #B3C8D9;
@@ -74,7 +77,7 @@
   --color-blue-800: #073C69;
   --color-blue-900: #092F50;
   --color-blue-950: #07223A;
-  --color-indigo-50: #F4F7FB;
+  --color-indigo-50: #E4EDF8;
   --color-indigo-100: #EAF2F9;
   --color-indigo-200: #D6E5F0;
   --color-indigo-300: #B3C8D9;
@@ -85,7 +88,7 @@
   --color-indigo-800: #073C69;
   --color-indigo-900: #092F50;
   --color-indigo-950: #07223A;
-  --color-violet-50: #F4F7FB;
+  --color-violet-50: #E4EDF8;
   --color-violet-100: #EAF2F9;
   --color-violet-200: #D6E5F0;
   --color-violet-300: #B3C8D9;
@@ -96,7 +99,7 @@
   --color-violet-800: #073C69;
   --color-violet-900: #092F50;
   --color-violet-950: #07223A;
-  --color-purple-50: #F4F7FB;
+  --color-purple-50: #E4EDF8;
   --color-purple-100: #EAF2F9;
   --color-purple-200: #D6E5F0;
   --color-purple-300: #B3C8D9;
@@ -107,7 +110,7 @@
   --color-purple-800: #073C69;
   --color-purple-900: #092F50;
   --color-purple-950: #07223A;
-  --color-sky-50: #F4F7FB;
+  --color-sky-50: #E4EDF8;
   --color-sky-100: #EAF2F9;
   --color-sky-200: #D6E5F0;
   --color-sky-300: #B3C8D9;
@@ -118,7 +121,7 @@
   --color-sky-800: #073C69;
   --color-sky-900: #092F50;
   --color-sky-950: #07223A;
-  --color-cyan-50: #F4F7FB;
+  --color-cyan-50: #E4EDF8;
   --color-cyan-100: #EAF2F9;
   --color-cyan-200: #D6E5F0;
   --color-cyan-300: #B3C8D9;
@@ -129,7 +132,7 @@
   --color-cyan-800: #073C69;
   --color-cyan-900: #092F50;
   --color-cyan-950: #07223A;
-  --color-teal-50: #F4F7FB;
+  --color-teal-50: #E4EDF8;
   --color-teal-100: #EAF2F9;
   --color-teal-200: #D6E5F0;
   --color-teal-300: #B3C8D9;
@@ -166,20 +169,20 @@
 
 :root {
   --primary-dark: #064B87;
-  --primary-blue: #0866B1;
-  --secondary-blue: #3A91C7;
+  --primary-blue: #064B87;
+  --secondary-blue: #075985;
   --silver-blue: #B3C8D9;
-  --success-green: #83BF41;
-  --text-grey: #55585B;
+  --success-green: #285C20;
+  --text-grey: #3F4854;
   --white: #FFFFFF;
   --table-header: #EAF1F8;
   --radius: 0.75rem;
-  --background: #F4F7FB;
-  --foreground: #172B4D;
+  --background: #E4EDF8;
+  --foreground: #10213A;
   --card: var(--white);
-  --card-foreground: #172B4D;
+  --card-foreground: #10213A;
   --popover: var(--white);
-  --popover-foreground: #172B4D;
+  --popover-foreground: #10213A;
   --primary: var(--primary-blue);
   --primary-foreground: var(--white);
   --primary-soft: #EAF3FC;
@@ -192,13 +195,13 @@
   --muted-foreground: var(--text-grey);
   --accent: #EAF3FC;
   --accent-foreground: var(--primary-dark);
-  --destructive: #B42332;
+  --destructive: #951B2B;
   --destructive-foreground: var(--white);
   --danger-soft: #FCF0F1;
   --success: var(--success-green);
   --success-foreground: #203A14;
   --success-soft: #F0F7E8;
-  --warning: #D8A038;
+  --warning: #8A5100;
   --warning-foreground: #684711;
   --warning-soft: #FCF6E9;
   --border: #DFE7F0;
@@ -206,7 +209,7 @@
   --ring: var(--primary-blue);
   --chart-1: var(--primary-blue);
   --chart-2: var(--secondary-blue);
-  --chart-3: var(--silver-blue);
+  --chart-3: #513B86;
   --chart-4: var(--success-green);
   --chart-5: var(--primary-dark);
   --sidebar: #064B87;
@@ -439,9 +442,9 @@ table thead, table thead tr, table thead th {
 
 /* Supplier module presentation: shared visual system across supplier routes. */
 body:has(.supplier-visual-content, .supplier-module-page) {
-  --background: #F4F7FB;
-  --foreground: #172B4D;
-  --muted-foreground: #55585B;
+  --background: #E4EDF8;
+  --foreground: #10213A;
+  --muted-foreground: var(--text-grey);
   --border: #DFE7F0;
   --card: #FFFFFF;
   --primary: #0866B1;
@@ -469,7 +472,7 @@ body:has(.supplier-visual-content, .supplier-module-page) aside nav a[class*="bg
 body:has(.supplier-visual-content, .supplier-module-page) aside nav a:hover svg {
   color: #FFFFFF !important;
 }
-body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4F7FB; }
+body:has(.supplier-visual-content, .supplier-module-page) main { background: #E4EDF8; }
 .supplier-module-header {
   display: flex;
   justify-content: space-between;
@@ -486,7 +489,7 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 }
 .supplier-module-header > div:first-child { flex: 1 1 auto; min-width: 0; margin-right: auto; text-align: left; }
 .supplier-module-header h1 { color: #172B4D; font-size: clamp(26px, 2vw, 34px); font-weight: 700; line-height: 1.2; }
-.supplier-module-header > div:first-child > p { max-width: 760px; margin-top: 7px; color: #55585B; line-height: 1.5; }
+.supplier-module-header > div:first-child > p { max-width: 760px; margin-top: 7px; color: var(--text-grey); line-height: 1.5; }
 .supplier-page-title { justify-content: flex-start; text-align: left; }
 .supplier-page-title-icon { color: #0866B1; }
 .supplier-module-header > fieldset { min-width: max-content; margin-left: auto; }
@@ -502,7 +505,7 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
   gap: 24px;
   margin-bottom: 24px;
   padding: 18px 24px;
-  background-color: #F4F7FB;
+  background-color: #E4EDF8;
   border-radius: 16px;
   overflow: hidden;
 }
@@ -521,7 +524,7 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 }
 .supplier-heading-image > div:first-child { min-width: 0; max-width: 100%; position: relative; z-index: 1; }
 .supplier-heading-image h1 { color: #172B4D; font-size: clamp(28px, 2.25vw, 38px); font-weight: 700; line-height: 1.2; }
-.supplier-heading-image > div:first-child > p { max-width: 480px; color: #55585B; line-height: 1.6; margin-top: 10px; }
+.supplier-heading-image > div:first-child > p { max-width: 480px; color: var(--text-grey); line-height: 1.6; margin-top: 10px; }
 .supplier-heading-image > div:last-child {
   position: relative;
   z-index: 2;
@@ -552,12 +555,16 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
   border: 1px solid #DFE7F0;
   padding-inline: 14px;
 }
-.supplier-heading-image > div:last-child button.supplier-guide-button {
+.supplier-heading-image .supplier-guide-button {
   background: #FFFFFF;
-  border-color: #FFFFFF;
+  border: 1px solid #FFFFFF;
+  border-radius: 12px;
+  min-height: 44px;
+  padding: 10px 14px;
+  box-shadow: 0 4px 14px rgba(6, 75, 135, 0.08);
   color: #0866B1;
 }
-.supplier-heading-image > div:last-child button.supplier-guide-button:hover {
+.supplier-heading-image .supplier-guide-button:hover {
   background: #F4F8FD;
   border-color: #DFE7F0;
   color: #075A9C;
@@ -565,7 +572,7 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 .supplier-visual-content { color: #172B4D; }
 .supplier-visual-content > div:first-child { gap: 16px; }
 .supplier-visual-kpi {
-  --kpi-ink: #0866B1;
+  --kpi-ink: #064B87;
   --kpi-tint: #E1EFFF;
   position: relative;
   display: grid;
@@ -580,8 +587,8 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
   background: #FFFFFF;
   box-shadow: 0 3px 12px rgb(6 75 135 / 0.035);
 }
-.supplier-visual-kpi:nth-child(2) { --kpi-ink: #D98D05; --kpi-tint: #FFF1D2; }
-.supplier-visual-kpi:nth-child(3) { --kpi-ink: #83BF41; --kpi-tint: #EAF5E2; }
+.supplier-visual-kpi:nth-child(2) { --kpi-ink: #8A5100; --kpi-tint: #FFF1D2; }
+.supplier-visual-kpi:nth-child(3) { --kpi-ink: #285C20; --kpi-tint: #EAF5E2; }
 .supplier-visual-kpi::after { content: ""; position: absolute; bottom: 0; left: 0; width: 32%; height: 3px; background: var(--kpi-ink); border-radius: 0 2px 0 0; }
 .supplier-visual-kpi .supplier-kpi-icon { grid-column: 1; grid-row: 1; width: 58px; height: 58px; color: var(--kpi-ink); background: var(--kpi-tint); border-radius: 15px; }
 .supplier-visual-kpi:nth-child(3) .supplier-kpi-icon { color: #36752C; }
@@ -699,7 +706,7 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
   background: #F4F8FD;
 }
 #supplier-asn-help-dialog h2 { color: #172B4D; font-size: 24px; font-weight: 700; line-height: 1.3; }
-#supplier-asn-help-dialog > div:first-child > p { color: #55585B; line-height: 1.6; }
+#supplier-asn-help-dialog > div:first-child > p { color: var(--text-grey); line-height: 1.6; }
 #supplier-asn-help-dialog > div:has(> details) { display: grid; gap: 12px; padding: 22px 28px; }
 #supplier-asn-help-dialog details {
   padding: 0;
@@ -716,7 +723,7 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 #supplier-asn-help-dialog details[open] summary > span:first-child { background: #0866B1; color: #FFFFFF; }
 #supplier-asn-help-dialog summary > span:nth-child(2) { color: #172B4D; font-weight: 600; line-height: 1.45; }
 #supplier-asn-help-dialog summary > svg { color: #557493; }
-#supplier-asn-help-dialog details > div { margin: 0; padding: 0 20px 18px 62px; color: #55585B; line-height: 1.65; }
+#supplier-asn-help-dialog details > div { margin: 0; padding: 0 20px 18px 62px; color: var(--text-grey); line-height: 1.65; }
 #supplier-asn-help-dialog details strong { color: #172B4D; font-weight: 600; }
 #supplier-asn-help-dialog details a { color: #0866B1; margin-top: 10px; font-weight: 600; }
 #supplier-asn-help-dialog details p[class*="bg-sky"] { border: 1px solid #DFE7F0; background: #EAF3FC; color: #064B87; }
@@ -733,7 +740,7 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 #supplier-asn-help-dialog > div[class*="border-t"] button,
 #supplier-asn-help-dialog > div[class*="border-t"] a { height: 44px; border-radius: 12px; }
 #supplier-asn-help-dialog > div[class*="border-t"] button { border-color: #DFE7F0; color: #172B4D; box-shadow: none; }
-#supplier-asn-help-dialog > button { top: 24px; right: 22px; padding: 5px; border-radius: 8px; color: #55585B; }
+#supplier-asn-help-dialog > button { top: 24px; right: 22px; padding: 5px; border-radius: 8px; color: var(--text-grey); }
 #supplier-asn-help-dialog > button:hover { background: #EAF1F8; }
 @media (max-width: 639px) {
   #supplier-asn-help-dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); border-radius: 16px; }
@@ -767,7 +774,7 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 #supplier-material-form-dialog h2 { font-size: 22px; font-weight: 700; line-height: 1.3; color: #172B4D; }
 #supplier-material-form-dialog form { padding: 24px 26px 22px; }
 #supplier-material-form-dialog form > div + div { margin-top: 20px; }
-#supplier-material-form-dialog label { color: #172B4D; font-weight: 600; font-size: 14px; }
+#supplier-material-form-dialog label { color: #172B4D; font-weight: 600; font-size: 15px; }
 #supplier-material-form-dialog input,
 #supplier-material-form-dialog [role="combobox"] {
   width: 100%;
@@ -784,7 +791,7 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 #supplier-material-form-dialog input[readonly],
 #supplier-material-form-dialog input:disabled { background: #EAF3FC; border-color: #D7E5F2; color: #064B87; opacity: 1; }
 #supplier-material-form-dialog input::placeholder { color: #687785; opacity: 1; }
-#supplier-material-form-dialog form p { color: #55585B; line-height: 1.5; margin-top: 7px; }
+#supplier-material-form-dialog form p { color: var(--text-grey); line-height: 1.5; margin-top: 7px; }
 #supplier-material-form-dialog form > div:last-child {
   gap: 12px;
   padding-top: 20px;
@@ -794,7 +801,7 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 #supplier-material-form-dialog form > div:last-child button { min-width: 96px; height: 44px; padding-inline: 18px; border-radius: 11px; box-shadow: none; }
 #supplier-material-form-dialog button[type="submit"] { background: #0866B1; color: #FFFFFF; }
 #supplier-material-form-dialog button[type="submit"]:hover:not(:disabled) { background: #064B87; }
-#supplier-material-form-dialog > button { top: 22px; right: 20px; padding: 5px; border-radius: 8px; color: #55585B; }
+#supplier-material-form-dialog > button { top: 22px; right: 20px; padding: 5px; border-radius: 8px; color: var(--text-grey); }
 #supplier-material-form-dialog > button:hover { background: #EAF1F8; }
 @media (max-width: 639px) {
   #supplier-material-form-dialog { width: calc(100vw - 24px); border-radius: 16px; }
@@ -818,9 +825,9 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 #supplier-transport-dialog > div:first-child { padding: 24px 54px 22px 26px; border-bottom: 1px solid #DFE7F0; background: #F4F8FD; text-align: left; }
 #supplier-transport-dialog h2 { color: #172B4D; font-size: 22px; font-weight: 700; line-height: 1.3; }
 #supplier-transport-dialog form { padding: 22px 26px; }
-#supplier-transport-dialog form > p { color: #55585B; line-height: 1.6; }
+#supplier-transport-dialog form > p { color: var(--text-grey); line-height: 1.6; }
 #supplier-transport-dialog form > div[class*="grid"] { gap: 18px; align-items: start; }
-#supplier-transport-dialog label { display: block; color: #172B4D; font-size: 14px; font-weight: 600; line-height: 1.4; }
+#supplier-transport-dialog label { display: block; color: #172B4D; font-size: 15px; font-weight: 600; line-height: 1.4; }
 #supplier-transport-dialog input,
 #supplier-transport-dialog select {
   height: 44px;
@@ -841,7 +848,7 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 #supplier-transport-dialog button[type="submit"] { background: #0866B1; color: #FFFFFF; }
 #supplier-transport-dialog button[type="submit"]:hover:not(:disabled) { background: #064B87; }
 #supplier-transport-dialog button[type="button"][class*="border"] { border-color: #DFE7F0; }
-#supplier-transport-dialog > button { top: 22px; right: 20px; padding: 5px; border-radius: 8px; color: #55585B; }
+#supplier-transport-dialog > button { top: 22px; right: 20px; padding: 5px; border-radius: 8px; color: var(--text-grey); }
 #supplier-transport-dialog > button:hover { background: #EAF1F8; }
 @media (max-width: 639px) {
   #supplier-transport-dialog { width: calc(100vw - 24px); border-radius: 16px; }
@@ -866,7 +873,7 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 #supplier-create-dispatch-dialog > div:first-child { padding: 24px 54px 22px 26px; border-bottom: 1px solid #DFE7F0; background: #F4F8FD; text-align: left; }
 #supplier-create-dispatch-dialog h2 { color: #172B4D; font-size: 22px; font-weight: 700; line-height: 1.3; }
 #supplier-create-dispatch-dialog form { padding: 22px 26px; }
-#supplier-create-dispatch-dialog label { color: #172B4D; font-size: 14px; font-weight: 600; line-height: 1.4; }
+#supplier-create-dispatch-dialog label { color: #172B4D; font-size: 15px; font-weight: 600; line-height: 1.4; }
 #supplier-create-dispatch-dialog input,
 #supplier-create-dispatch-dialog select { height: 44px; min-width: 0; width: 100%; border: 1px solid #DFE7F0; border-radius: 11px; background: #FFFFFF; color: #172B4D; box-shadow: none; }
 #supplier-create-dispatch-dialog input::placeholder { color: #687785; opacity: 1; }
@@ -874,14 +881,14 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 #supplier-create-dispatch-dialog select:focus-visible { border-color: #0866B1; outline: 2px solid #0866B126; outline-offset: 1px; }
 #supplier-create-dispatch-dialog input[aria-invalid="true"] { border-color: #BC2034; }
 #supplier-create-dispatch-dialog form > div:nth-child(2) { gap: 18px; }
-#supplier-create-dispatch-dialog form > div:nth-child(3) { padding: 18px; border: 1px solid #DFE7F0; border-radius: 12px; background: #F4F7FB; }
+#supplier-create-dispatch-dialog form > div:nth-child(3) { padding: 18px; border: 1px solid #DFE7F0; border-radius: 12px; background: #E4EDF8; }
 #supplier-create-dispatch-dialog h3 { color: #172B4D; font-size: 16px; }
-#supplier-create-dispatch-dialog h3 + p { color: #55585B; line-height: 1.5; }
+#supplier-create-dispatch-dialog h3 + p { color: var(--text-grey); line-height: 1.5; }
 #supplier-create-dispatch-dialog form > div:last-child { gap: 12px; border-top: 1px solid #DFE7F0; padding-top: 20px; }
 #supplier-create-dispatch-dialog form > div:last-child button { height: 44px; min-width: 96px; padding-inline: 20px; border-radius: 11px; box-shadow: none; }
 #supplier-create-dispatch-dialog button[type="submit"] { background: #0866B1; color: #FFFFFF; }
 #supplier-create-dispatch-dialog button[type="submit"]:hover:not(:disabled) { background: #064B87; }
-#supplier-create-dispatch-dialog > button { top: 22px; right: 20px; padding: 5px; border-radius: 8px; color: #55585B; }
+#supplier-create-dispatch-dialog > button { top: 22px; right: 20px; padding: 5px; border-radius: 8px; color: var(--text-grey); }
 #supplier-create-dispatch-dialog > button:hover { background: #EAF1F8; }
 @media (max-width: 639px) {
   #supplier-create-dispatch-dialog { width: calc(100vw - 24px); border-radius: 16px; }
@@ -930,7 +937,7 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 .supplier-header-search > div[class*="top-full"] a > div { gap: 12px; }
 .supplier-header-search > div[class*="top-full"] a > div > span:first-child {
   min-width: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: normal;
   overflow-wrap: anywhere;
@@ -942,11 +949,11 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
   border-radius: 6px;
   background: #EAF3FC;
   color: #064B87;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.2;
 }
-.supplier-header-search > div[class*="top-full"] a > span { color: #55585B; font-size: 12px; line-height: 1.5; }
+.supplier-header-search > div[class*="top-full"] a > span { color: var(--text-grey); font-size: 13px; line-height: 1.5; }
 /* Notification centre cards aligned with the supplier visual theme. */
 .notification-centre-list { gap: 14px; }
 .notification-centre-list .notification-centre-card {
@@ -969,10 +976,10 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 .notification-centre-icon > svg { width: 22px; height: 22px; }
 .notification-centre-heading { flex-wrap: wrap; gap: 8px; min-width: 0; }
 .notification-centre-heading h3 { color: #172B4D; font-size: 15px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
-.notification-centre-heading > span { border-radius: 6px; padding: 3px 8px; font-size: 10px; font-weight: 600; line-height: 1.3; }
-.notification-centre-date { color: #55585B; font-size: 11px; line-height: 1.5; }
+.notification-centre-heading > span { border-radius: 6px; padding: 3px 8px; font-size: 11px; font-weight: 600; line-height: 1.3; }
+.notification-centre-date { color: var(--text-grey); font-size: 12px; line-height: 1.5; }
 .notification-centre-body > div:last-child > div:nth-child(2) > span { border-radius: 6px; padding: 3px 9px; font-weight: 500; }
-.notification-centre-body > div:last-child > p { color: #55585B; font-size: 13px; line-height: 1.6; }
+.notification-centre-body > div:last-child > p { color: var(--text-grey); font-size: 14px; line-height: 1.6; }
 @media (max-width: 639px) {
   .notification-centre-list .notification-centre-card { padding: 16px; border-radius: 12px; }
   .notification-centre-body { gap: 12px; }
@@ -1004,21 +1011,21 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 #supplier-damage-report-dialog > div:first-child > div { min-width: 0; width: 100%; }
 #supplier-damage-report-dialog > div:first-child > div > div { flex-wrap: wrap; gap: 8px; }
 #supplier-damage-report-dialog > div:first-child span { font-weight: 600; letter-spacing: normal; }
-#supplier-damage-report-dialog > div:first-child span:first-child { border-radius: 8px; font-size: 11px; line-height: 1.5; }
+#supplier-damage-report-dialog > div:first-child span:first-child { border-radius: 8px; font-size: 12px; line-height: 1.5; }
 #supplier-damage-report-dialog h2 { margin-top: 14px; color: #172B4D; font-size: 22px; font-weight: 700; line-height: 1.35; }
-#supplier-damage-report-dialog > div:first-child p { margin-top: 6px; color: #55585B; font-size: 12px; line-height: 1.5; }
-#supplier-damage-report-dialog > div:nth-child(2) { padding: 16px 18px; border-color: #DFE7F0; border-radius: 12px; background: #F4F7FB; gap: 16px; }
-#supplier-damage-report-dialog > div:nth-child(2) span:first-child { color: #55585B; font-weight: 600; font-size: 10px; letter-spacing: .04em; }
-#supplier-damage-report-dialog > div:nth-child(2) span:last-child { margin-top: 5px; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+#supplier-damage-report-dialog > div:first-child p { margin-top: 6px; color: var(--text-grey); font-size: 13px; line-height: 1.5; }
+#supplier-damage-report-dialog > div:nth-child(2) { padding: 16px 18px; border-color: #DFE7F0; border-radius: 12px; background: #E4EDF8; gap: 16px; }
+#supplier-damage-report-dialog > div:nth-child(2) span:first-child { color: var(--text-grey); font-weight: 600; font-size: 11px; letter-spacing: .04em; }
+#supplier-damage-report-dialog > div:nth-child(2) span:last-child { margin-top: 5px; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
 #supplier-damage-report-dialog h4 { flex-wrap: wrap; gap: 10px; font-size: 12px; font-weight: 600; letter-spacing: .02em; line-height: 1.5; }
 #supplier-damage-report-dialog div[class*="shadow-xs"] { border-color: #DFE7F0; border-radius: 12px; box-shadow: none; }
 #supplier-damage-report-dialog div[class*="shadow-xs"] > div:first-child { border-color: #DFE7F0; }
 #supplier-damage-report-dialog div[class*="shadow-xs"] > div:first-child > div:first-child > span:first-child { color: #172B4D; font-size: 15px; font-weight: 600; }
-#supplier-damage-report-dialog div[class*="shadow-xs"] > div:first-child > div:first-child > span:last-child { font-size: 12px; line-height: 1.6; }
+#supplier-damage-report-dialog div[class*="shadow-xs"] > div:first-child > div:first-child > span:last-child { font-size: 13px; line-height: 1.6; }
 #supplier-damage-report-dialog > div[class*="border-t"] { justify-content: flex-end; border-color: #DFE7F0; padding-top: 18px; }
-#supplier-damage-report-dialog > div[class*="border-t"] button { height: 44px; min-width: 96px; border-radius: 11px; background: #0866B1; color: #FFFFFF; font-size: 14px; font-weight: 600; box-shadow: none; }
+#supplier-damage-report-dialog > div[class*="border-t"] button { height: 44px; min-width: 96px; border-radius: 11px; background: #0866B1; color: #FFFFFF; font-size: 15px; font-weight: 600; box-shadow: none; }
 #supplier-damage-report-dialog > div[class*="border-t"] button:hover { background: #064B87; }
-#supplier-damage-report-dialog > button { top: 16px; right: 16px; padding: 5px; border-radius: 8px; color: #55585B; }
+#supplier-damage-report-dialog > button { top: 16px; right: 16px; padding: 5px; border-radius: 8px; color: var(--text-grey); }
 #supplier-damage-report-dialog > button:hover { background: #EAF1F8; }
 @media (max-width: 639px) {
   #supplier-damage-report-dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); padding: 16px; gap: 16px; border-radius: 16px; }
@@ -1026,7 +1033,7 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
   #supplier-damage-report-dialog h2 { font-size: 20px; }
   #supplier-damage-report-dialog > div[class*="border-t"] button { width: 100%; }
 }
-.supplier-activity-range-menu [role='option'] { min-height: 36px; border-radius: 7px; font-size: 14px; }
+.supplier-activity-range-menu [role='option'] { min-height: 36px; border-radius: 7px; font-size: 15px; }
 .supplier-activity-range-menu [role='option'][data-highlighted],
 .supplier-activity-range-menu [role='option'][data-state='checked'] { background: #EAF3FC; color: #064B87; }
 
@@ -1046,17 +1053,17 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 }
 #supplier-asn-details-dialog > div:first-child { padding: 24px 54px 22px 26px; border-bottom: 1px solid #DFE7F0; background: #F4F8FD; text-align: left; }
 #supplier-asn-details-dialog h2 { color: #172B4D; font-size: 22px; font-weight: 700; line-height: 1.35; }
-#supplier-asn-details-dialog > div:nth-child(2) { max-height: none; overflow: visible; padding: 22px 26px 26px; gap: 14px; font-size: 13px; }
-#supplier-asn-details-dialog > div:nth-child(2) > div { min-width: 0; padding: 14px 16px; border: 1px solid #DFE7F0; border-radius: 12px; background: #F4F7FB; }
+#supplier-asn-details-dialog > div:nth-child(2) { max-height: none; overflow: visible; padding: 22px 26px 26px; gap: 14px; font-size: 14px; }
+#supplier-asn-details-dialog > div:nth-child(2) > div { min-width: 0; padding: 14px 16px; border: 1px solid #DFE7F0; border-radius: 12px; background: #E4EDF8; }
 #supplier-asn-details-dialog > div:nth-child(2) > div > p:first-child,
-#supplier-asn-details-dialog > div:nth-child(2) > div > div:first-child > p { color: #55585B; font-size: 11px; font-weight: 600; line-height: 1.5; letter-spacing: .02em; }
-#supplier-asn-details-dialog > div:nth-child(2) > div > p:last-child:not(:first-child) { margin-top: 6px; color: #172B4D; font-size: 13px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+#supplier-asn-details-dialog > div:nth-child(2) > div > div:first-child > p { color: var(--text-grey); font-size: 12px; font-weight: 600; line-height: 1.5; letter-spacing: .02em; }
+#supplier-asn-details-dialog > div:nth-child(2) > div > p:last-child:not(:first-child) { margin-top: 6px; color: #172B4D; font-size: 14px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
 #supplier-asn-details-dialog > div:nth-child(2) > div:first-child > p:last-child { color: #0866B1; }
 #supplier-asn-details-dialog > div:nth-child(2) > div:last-child { background: #FFFFFF; }
 #supplier-asn-details-dialog > div:nth-child(2) > div:last-child > div > div { align-items: center; border-color: #DFE7F0; padding-block: 12px; }
 #supplier-asn-details-dialog > div:nth-child(2) > div:last-child > div > div > span:first-child { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
 #supplier-asn-details-dialog > div:nth-child(2) > div:last-child > div > div > span:last-child { flex-shrink: 0; font-weight: 600; }
-#supplier-asn-details-dialog > button { top: 22px; right: 20px; padding: 5px; border-radius: 8px; color: #55585B; }
+#supplier-asn-details-dialog > button { top: 22px; right: 20px; padding: 5px; border-radius: 8px; color: var(--text-grey); }
 #supplier-asn-details-dialog > button:hover { background: #EAF1F8; }
 @media (max-width: 639px) {
   #supplier-asn-details-dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); border-radius: 16px; }
@@ -1080,10 +1087,10 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 }
 #supplier-damage-photo-dialog > div:first-child { gap: 16px; padding: 20px 24px; border-bottom: 1px solid #DFE7F0; background: #F4F8FD; }
 #supplier-damage-photo-dialog h2 { color: #172B4D; font-size: 18px; font-weight: 600; line-height: 1.4; text-transform: none; letter-spacing: normal; }
-#supplier-damage-photo-dialog > div:first-child button { display: grid; width: 32px; height: 32px; flex-shrink: 0; place-items: center; border-radius: 8px; color: #55585B; }
+#supplier-damage-photo-dialog > div:first-child button { display: grid; width: 32px; height: 32px; flex-shrink: 0; place-items: center; border-radius: 8px; color: var(--text-grey); }
 #supplier-damage-photo-dialog > div:first-child button:hover { background: #EAF1F8; color: #064B87; }
 #supplier-damage-photo-dialog > div:first-child button:focus-visible { outline: 2px solid #0866B1; outline-offset: 2px; }
-#supplier-damage-photo-dialog > div:nth-child(2) { margin: 20px; border: 1px solid #DFE7F0; border-radius: 12px; background: #F4F7FB; max-height: 70dvh; }
+#supplier-damage-photo-dialog > div:nth-child(2) { margin: 20px; border: 1px solid #DFE7F0; border-radius: 12px; background: #E4EDF8; max-height: 70dvh; }
 #supplier-damage-photo-dialog img { max-width: 100%; max-height: 70dvh; object-fit: contain; }
 /* The header already contains a labelled close control. */
 #supplier-damage-photo-dialog > button { display: none; }
@@ -1110,25 +1117,25 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 #supplier-create-asn-dialog h2 { padding: 0; border: 0; color: #172B4D; font-size: 21px; font-weight: 700; line-height: 1.4; }
 #supplier-create-asn-dialog form { padding: 22px 26px 24px; }
 #supplier-create-asn-dialog h3 { border-color: #DFE7F0; color: #172B4D; font-size: 15px; font-weight: 600; line-height: 1.5; }
-#supplier-create-asn-dialog label { color: #172B4D; font-size: 14px; font-weight: 600; line-height: 1.4; }
+#supplier-create-asn-dialog label { color: #172B4D; font-size: 15px; font-weight: 600; line-height: 1.4; }
 #supplier-create-asn-dialog input,
-#supplier-create-asn-dialog select { height: 44px; min-width: 0; border: 1px solid #DFE7F0; border-radius: 10px; background: #FFFFFF; color: #172B4D; font-size: 14px; box-shadow: none; }
+#supplier-create-asn-dialog select { height: 44px; min-width: 0; border: 1px solid #DFE7F0; border-radius: 10px; background: #FFFFFF; color: #172B4D; font-size: 15px; box-shadow: none; }
 #supplier-create-asn-dialog input::placeholder { color: #687785; opacity: 1; }
 #supplier-create-asn-dialog input[readonly] { background: #EAF3FC; color: #064B87; }
 #supplier-create-asn-dialog input:focus-visible,
 #supplier-create-asn-dialog select:focus-visible { border-color: #0866B1; outline: 2px solid #0866B126; outline-offset: 1px; }
 #supplier-create-asn-dialog [aria-invalid="true"] { border-color: #BC2034; }
-#supplier-create-asn-dialog form > section:nth-child(2) > div { border-color: #DFE7F0; border-radius: 12px; background: #F4F7FB; padding: 16px 18px; gap: 16px; }
-#supplier-create-asn-dialog form > section:nth-child(2) p:first-child { color: #55585B; font-size: 12px; }
-#supplier-create-asn-dialog form > section:nth-child(2) p:last-child { color: #172B4D; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+#supplier-create-asn-dialog form > section:nth-child(2) > div { border-color: #DFE7F0; border-radius: 12px; background: #E4EDF8; padding: 16px 18px; gap: 16px; }
+#supplier-create-asn-dialog form > section:nth-child(2) p:first-child { color: var(--text-grey); font-size: 13px; }
+#supplier-create-asn-dialog form > section:nth-child(2) p:last-child { color: #172B4D; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 #supplier-create-asn-dialog form > section:nth-child(3) > div:first-child { border-color: #DFE7F0; }
-#supplier-create-asn-dialog form > section:nth-child(3) > div:last-child > div { padding: 16px; border-color: #DFE7F0; border-radius: 12px; background: #F4F7FB; }
+#supplier-create-asn-dialog form > section:nth-child(3) > div:last-child > div { padding: 16px; border-color: #DFE7F0; border-radius: 12px; background: #E4EDF8; }
 #supplier-create-asn-dialog form > div:last-child { padding-top: 20px; border-top: 1px solid #DFE7F0; gap: 12px; }
 #supplier-create-asn-dialog form > div:last-child > div { gap: 12px; }
-#supplier-create-asn-dialog form > div:last-child button { height: 44px; padding-inline: 18px; border-radius: 11px; font-size: 14px; font-weight: 600; box-shadow: none; }
+#supplier-create-asn-dialog form > div:last-child button { height: 44px; padding-inline: 18px; border-radius: 11px; font-size: 15px; font-weight: 600; box-shadow: none; }
 #supplier-create-asn-dialog button[type="submit"] { background: #0866B1; color: #FFFFFF; }
 #supplier-create-asn-dialog button[type="submit"]:hover:not(:disabled) { background: #064B87; }
-#supplier-create-asn-dialog > button { top: 22px; right: 20px; padding: 5px; border-radius: 8px; color: #55585B; }
+#supplier-create-asn-dialog > button { top: 22px; right: 20px; padding: 5px; border-radius: 8px; color: var(--text-grey); }
 #supplier-create-asn-dialog > button:hover { background: #EAF1F8; }
 @media (max-width: 639px) {
   #supplier-create-asn-dialog { width: calc(100vw - 24px); border-radius: 16px; }
@@ -1154,10 +1161,10 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 }
 #supplier-management-asn-details-dialog > div:first-child { padding: 24px 54px 22px 26px; border-bottom: 1px solid #DFE7F0; background: #F4F8FD; text-align: left; }
 #supplier-management-asn-details-dialog h2 { color: #172B4D; font-family: inherit; font-size: 22px; font-weight: 700; line-height: 1.35; }
-#supplier-management-asn-details-dialog > div:nth-child(2) { padding: 22px 26px 24px; gap: 14px; border: 0; border-radius: 0; font-size: 14px; }
-#supplier-management-asn-details-dialog > div:nth-child(2) > div:not([class*="col-span-2"]) { min-width: 0; padding: 14px 16px; border: 1px solid #DFE7F0; border-radius: 12px; background: #F4F7FB; }
-#supplier-management-asn-details-dialog > div:nth-child(2) > div > span:first-child { display: block; color: #55585B; font-size: 12px; font-weight: 500; line-height: 1.5; }
-#supplier-management-asn-details-dialog > div:nth-child(2) > div > p { margin-top: 5px; font-family: inherit; font-size: 14px; font-weight: 600; line-height: 1.5; color: #172B4D; overflow-wrap: anywhere; }
+#supplier-management-asn-details-dialog > div:nth-child(2) { padding: 22px 26px 24px; gap: 14px; border: 0; border-radius: 0; font-size: 15px; }
+#supplier-management-asn-details-dialog > div:nth-child(2) > div:not([class*="col-span-2"]) { min-width: 0; padding: 14px 16px; border: 1px solid #DFE7F0; border-radius: 12px; background: #E4EDF8; }
+#supplier-management-asn-details-dialog > div:nth-child(2) > div > span:first-child { display: block; color: var(--text-grey); font-size: 13px; font-weight: 500; line-height: 1.5; }
+#supplier-management-asn-details-dialog > div:nth-child(2) > div > p { margin-top: 5px; font-family: inherit; font-size: 15px; font-weight: 600; line-height: 1.5; color: #172B4D; overflow-wrap: anywhere; }
 #supplier-management-asn-details-dialog > div:nth-child(2) > div:first-child > p { color: #0866B1; }
 #supplier-management-asn-details-dialog > div:nth-child(2) > div[class*="col-span-2"] { border-color: #DFE7F0; padding-top: 16px; }
 #supplier-management-asn-details-dialog > div:nth-child(2) > div[class*="col-span-2"] span { font-family: inherit; }
@@ -1166,7 +1173,7 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 #supplier-management-asn-details-dialog > div:nth-child(2) > div[class*="col-span-2"] > div > div > span:last-child { flex-shrink: 0; font-weight: 600; }
 #supplier-management-asn-details-dialog > div:nth-child(2) > div:last-child button { height: 44px; padding-inline: 18px; border: 1px solid #DFE7F0; border-radius: 11px; background: #FFFFFF; color: #064B87; font-weight: 600; box-shadow: none; }
 #supplier-management-asn-details-dialog > div:nth-child(2) > div:last-child button:hover { background: #EAF3FC; border-color: #B3C8D9; }
-#supplier-management-asn-details-dialog > button { top: 22px; right: 20px; padding: 5px; border-radius: 8px; color: #55585B; }
+#supplier-management-asn-details-dialog > button { top: 22px; right: 20px; padding: 5px; border-radius: 8px; color: var(--text-grey); }
 #supplier-management-asn-details-dialog > button:hover { background: #EAF1F8; }
 @media (max-width: 639px) {
   #supplier-management-asn-details-dialog { width: calc(100vw - 24px); border-radius: 16px; }
@@ -1178,53 +1185,53 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 .damage-return-select-trigger:hover { border-color: #B3C8D9; }
 .damage-return-select-trigger:focus { border-color: #0866B1; box-shadow: 0 0 0 3px rgb(8 102 177 / 0.10); }
 .damage-return-select-menu { border: 1px solid #DFE7F0; border-radius: 12px; padding: 4px; background: #FFFFFF; color: #172B4D; font-family: var(--font-sans); box-shadow: 0 8px 24px rgb(23 43 77 / 0.10); }
-.damage-return-select-menu [role="option"] { min-height: 36px; border-radius: 7px; font-size: 14px; line-height: 1.5; }
+.damage-return-select-menu [role="option"] { min-height: 36px; border-radius: 7px; font-size: 15px; line-height: 1.5; }
 .damage-return-select-menu [role="option"][data-highlighted],
 .damage-return-select-menu [role="option"][data-state="checked"] { background: #EAF3FC; color: #064B87; }
 #supplier-create-dispatch-dialog [role="combobox"] { height: 44px; width: 100%; min-width: 0; border: 1px solid #DFE7F0; border-radius: 10px; background: #FFFFFF; color: #172B4D; box-shadow: none; }
 #supplier-create-dispatch-dialog [role="combobox"]:hover:not(:disabled) { border-color: #B3C8D9; }
 #supplier-create-dispatch-dialog [role="combobox"]:focus-visible { border-color: #0866B1; outline: 2px solid #0866B126; outline-offset: 1px; }
 .supplier-dispatch-goods-menu { padding: 4px; border: 1px solid #DFE7F0; border-radius: 12px; background: #FFFFFF; color: #172B4D; font-family: var(--font-sans); box-shadow: 0 8px 24px rgb(23 43 77 / 0.10); }
-.supplier-dispatch-goods-menu [role="option"] { min-height: 36px; border-radius: 7px; font-size: 14px; line-height: 1.5; }
+.supplier-dispatch-goods-menu [role="option"] { min-height: 36px; border-radius: 7px; font-size: 15px; line-height: 1.5; }
 .supplier-dispatch-goods-menu [role="option"][data-highlighted],
 .supplier-dispatch-goods-menu [role="option"][data-state="checked"] { background: #EAF3FC; color: #064B87; }
 #supplier-create-asn-dialog [role="combobox"] { height: 44px; min-width: 0; border-color: #DFE7F0; border-radius: 10px; background: #FFFFFF; color: #172B4D; box-shadow: none; }
 #supplier-create-asn-dialog [role="combobox"]:focus-visible { border-color: #0866B1; outline: 2px solid #0866B126; outline-offset: 1px; }
 #supplier-create-asn-dialog [role="combobox"][aria-invalid="true"] { border-color: #BC2034; }
 .supplier-asn-material-menu { padding: 4px; border: 1px solid #DFE7F0; border-radius: 12px; background: #FFFFFF; color: #172B4D; font-family: var(--font-sans); box-shadow: 0 8px 24px rgb(23 43 77 / 0.10); }
-.supplier-asn-material-menu [role="option"] { min-height: 36px; border-radius: 7px; font-size: 14px; line-height: 1.5; }
+.supplier-asn-material-menu [role="option"] { min-height: 36px; border-radius: 7px; font-size: 15px; line-height: 1.5; }
 .supplier-asn-material-menu [role="option"][data-highlighted],
 .supplier-asn-material-menu [role="option"][data-state="checked"] { background: #EAF3FC; color: #064B87; }
 /* Warehouse presentation is isolated from supplier, GRN and other modules. */
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) {
-  --background: #F4F7FB;
-  --foreground: #172B4D;
+  --background: #E4EDF8;
+  --foreground: #10213A;
   --card: #FFFFFF;
-  --card-foreground: #172B4D;
+  --card-foreground: #10213A;
   --primary: #0866B1;
   --primary-foreground: #FFFFFF;
   --muted: #EAF3FC;
-  --muted-foreground: #55585B;
+  --muted-foreground: var(--text-grey);
   --border: #DFE7F0;
   --input: #DFE7F0;
   --sidebar: #064B87;
   --sidebar-primary: #0866B1;
   --sidebar-foreground: #FFFFFF;
   font-family: var(--font-sans);
-  background: #F4F7FB;
+  background: #E4EDF8;
   color: #172B4D;
 }
-:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main { background: #F4F7FB; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main { background: #E4EDF8; }
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) > div > header { background: #FFFFFF; border-color: #DFE7F0; }
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) aside { background: #064B87; color: #FFFFFF; }
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) aside nav a { min-height: 46px; border-radius: 12px; box-shadow: none; }
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) aside nav a[class*="bg-sidebar-primary"] { background: #0866B1; color: #FFFFFF; }
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) aside nav a svg { color: currentColor; }
-.warehouse-module-hero { min-height: 148px; background: #F4F7FB; color: #172B4D; }
+.warehouse-module-hero { min-height: 148px; background: #E4EDF8; color: #172B4D; }
 .warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-module-hero { min-height: 200px; }
 .warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-hero-eyebrow { display: none; }
 .warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-module-hero h1 { margin-top: 0; font-size: clamp(28px, 2.25vw, 38px); font-weight: 700; line-height: 1.2; }
-.warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-module-hero > div:nth-child(3) > p:last-child { margin-top: 10px; font-size: 14px; line-height: 1.6; }
+.warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-module-hero > div:nth-child(3) > p:last-child { margin-top: 10px; font-size: 15px; line-height: 1.6; }
 .warehouse-module-hero .warehouse-hero-image {
   left: 0;
   border-radius: 16px;
@@ -1234,15 +1241,15 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
   opacity: .90;
   mask-image: linear-gradient(90deg, transparent, #000 24%, #000 100%);
 }
-.warehouse-hero-overlay { border-radius: 16px; background: linear-gradient(90deg,#F4F7FBF5 0%,#F4F7FBE6 18%,#F4F7FBB3 34%,#F4F7FB40 60%,#F4F7FB15 100%); }
+.warehouse-hero-overlay { border-radius: 16px; background: linear-gradient(90deg,#E4EDF8F5 0%,#E4EDF8E6 18%,#E4EDF8B3 34%,#E4EDF840 60%,#E4EDF815 100%); }
 .warehouse-module-content:not([data-warehouse-tab="dashboard"]) .warehouse-hero-image,
 .warehouse-module-content:not([data-warehouse-tab="dashboard"]) .warehouse-hero-overlay { display: none; }
 .warehouse-module-hero > div:nth-child(3) { max-width: 600px; color: #172B4D; }
 .warehouse-module-hero h1 { color: #172B4D; font-size: 30px; line-height: 1.2; font-weight: 700; letter-spacing: -.025em; }
 .warehouse-module-hero h1 svg { color: #0866B1; }
-.warehouse-module-hero > div:nth-child(3) > p:first-child { color: #0866B1; font-size: 11px; font-weight: 600; letter-spacing: .12em; }
-.warehouse-module-hero > div:nth-child(3) > p:last-child { max-width: 520px; color: #55585B; font-size: 14px; line-height: 1.6; }
-.warehouse-module-hero h1 button { color: #55585B; }
+.warehouse-module-hero > div:nth-child(3) > p:first-child { color: #0866B1; font-size: 12px; font-weight: 600; letter-spacing: .12em; }
+.warehouse-module-hero > div:nth-child(3) > p:last-child { max-width: 520px; color: var(--text-grey); font-size: 15px; line-height: 1.6; }
+.warehouse-module-hero h1 button { color: var(--text-grey); }
 .warehouse-module-hero > div:last-child { align-self: center; }
 .warehouse-module-hero > div:last-child button { height: 44px; width: 44px; border: 1px solid #DFE7F0; border-radius: 11px; background: #FFFFFF; color: #064B87; box-shadow: none; }
 .warehouse-module-hero > div:last-child button:hover { background: #EAF3FC; }
@@ -1264,11 +1271,11 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main [class*="font-extrabold"] { font-weight: 600; }
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main [class*="text-slate-900"] { color: #172B4D; }
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main [class*="text-slate-500"],
-:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main [class*="text-slate-600"] { color: #55585B; }
-:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main table { font-size: 13px; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main [class*="text-slate-600"] { color: var(--text-grey); }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main table { font-size: 14px; }
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main thead,
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main thead tr { background: #EAF1F8; }
-:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main th { padding: 14px 16px; color: #172B4D; font-size: 12px; font-weight: 600; line-height: 1.4; letter-spacing: .01em; border-color: #DFE7F0; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main th { padding: 14px 16px; color: #172B4D; font-size: 13px; font-weight: 600; line-height: 1.4; letter-spacing: .01em; border-color: #DFE7F0; }
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main td { padding: 14px 16px; vertical-align: middle; border-color: #DFE7F0; }
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main tbody tr { border-color: #DFE7F0; }
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main tbody tr:hover { background: #F4F8FD; }
@@ -1280,7 +1287,7 @@ body:has(.supplier-visual-content, .supplier-module-page) main { background: #F4
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main button[class*="bg-indigo-600"]:hover:not(:disabled) { background: #064B87; }
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main input:not([type="checkbox"]):not([type="radio"]),
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main select,
-:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main [role="combobox"] { min-height: 42px; border-color: #DFE7F0; border-radius: 10px; background: #FFFFFF; color: #172B4D; font-size: 14px; box-shadow: none; }
+:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main [role="combobox"] { min-height: 42px; border-color: #DFE7F0; border-radius: 10px; background: #FFFFFF; color: #172B4D; font-size: 15px; box-shadow: none; }
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main input:focus-visible,
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) main select:focus-visible { outline: 2px solid #0866B126; outline-offset: 1px; border-color: #0866B1; }
 :is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace) .animate-dock-blink,
@@ -1298,11 +1305,11 @@ body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visu
 }
 body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace)) [role="dialog"] h2,
 body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace)) [role="alertdialog"] h2 { color: #172B4D; font-size: 21px; font-weight: 700; line-height: 1.35; letter-spacing: -.015em; }
-body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace)) [role="dialog"] label { color: #172B4D; font-size: 14px; font-weight: 600; }
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace)) [role="dialog"] label { color: #172B4D; font-size: 15px; font-weight: 600; }
 body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace)) [role="dialog"] input:not([type="checkbox"]):not([type="radio"]),
 body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace)) [role="dialog"] select,
 body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace)) [role="dialog"] textarea,
-body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace)) [role="dialog"] [role="combobox"] { min-height: 44px; border-color: #DFE7F0; border-radius: 10px; background: #FFFFFF; color: #172B4D; font-size: 14px; box-shadow: none; }
+body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace)) [role="dialog"] [role="combobox"] { min-height: 44px; border-color: #DFE7F0; border-radius: 10px; background: #FFFFFF; color: #172B4D; font-size: 15px; box-shadow: none; }
 body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace)) [role="dialog"] input[readonly] { background: #EAF3FC; color: #064B87; }
 body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace)) [role="dialog"] [aria-invalid="true"] { border-color: #BC2034; }
 body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visual-workspace, .grn-visual-workspace)) [role="dialog"] input:focus-visible,
@@ -1326,7 +1333,7 @@ body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visu
   .warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-module-hero { min-height: 190px; padding: 20px; }
   .warehouse-module-hero > div:nth-child(3) { max-width: 100%; }
   .warehouse-module-hero .warehouse-hero-image { left: 15%; opacity: .24; }
-  .warehouse-hero-overlay { background: linear-gradient(90deg,#F4F7FBF5,#F4F7FBAA); }
+  .warehouse-hero-overlay { background: linear-gradient(90deg,#E4EDF8F5,#E4EDF8AA); }
   .warehouse-module-hero h1 { font-size: 25px; }
   .warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-module-hero h1 { font-size: 28px; }
   .warehouse-module-hero > div:last-child { align-self: flex-start; }
@@ -1349,7 +1356,7 @@ body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visu
   padding: 18px 24px;
   border-radius: 16px;
   overflow: hidden;
-  background-color: #F4F7FB;
+  background-color: #E4EDF8;
 }
 .gate-dashboard-hero::before {
   content: "";
@@ -1369,12 +1376,12 @@ body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visu
   z-index: -1;
   pointer-events: none;
   border-radius: 16px;
-  background: linear-gradient(90deg, #F4F7FBF5 0%, #F4F7FBE6 14%, #F4F7FBAA 30%, #F4F7FB15 65%);
+  background: linear-gradient(90deg, #E4EDF8F5 0%, #E4EDF8E6 14%, #E4EDF8AA 30%, #E4EDF815 65%);
 }
 .gate-dashboard-hero > div { position: relative; z-index: 1; min-width: 0; }
 .gate-dashboard-hero > div:first-child { max-width: 670px; }
 .gate-dashboard-hero h1 { color: #172B4D; font-size: clamp(28px, 2.25vw, 38px); font-weight: 700; line-height: 1.2; letter-spacing: -.025em; }
-.gate-dashboard-hero > div:first-child > p { max-width: 520px; margin-top: 10px; color: #55585B; font-size: 14px; line-height: 1.6; }
+.gate-dashboard-hero > div:first-child > p { max-width: 520px; margin-top: 10px; color: var(--text-grey); font-size: 15px; line-height: 1.6; }
 .gate-dashboard-hero > div:last-child {
   position: relative;
   z-index: 2;
@@ -1400,7 +1407,7 @@ body:has(:is(.warehouse-visual-workspace, .gate-visual-workspace, .assembly-visu
   border-radius: 12px;
   background: #0866B1;
   color: #FFFFFF;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   white-space: nowrap;
   box-shadow: 0 4px 14px rgba(6, 75, 135, 0.18);
@@ -1430,7 +1437,7 @@ body:has(.gate-visual-workspace) [role="dialog"] [aria-invalid="true"] { border-
   .gate-dashboard-hero { min-height: 200px; padding: 20px 16px; }
   .gate-dashboard-hero h1 { font-size: 28px; }
   .gate-dashboard-hero::before { opacity: .3; }
-  .gate-dashboard-hero::after { background: linear-gradient(90deg,#F4F7FBF2,#F4F7FB66); }
+  .gate-dashboard-hero::after { background: linear-gradient(90deg,#E4EDF8F2,#E4EDF866); }
   .gate-dashboard-hero > div:last-child,
   .gate-dashboard-hero > div:last-child > div { justify-content: flex-start; }
 }
@@ -1439,7 +1446,7 @@ body:has(.gate-visual-workspace) [role="dialog"] [aria-invalid="true"] { border-
   position: relative; isolation: isolate; display: grid;
   grid-template-columns: minmax(0,1fr) auto; align-items: center;
   min-height: 200px; gap: 24px; padding: 20px 24px;
-  overflow: hidden; border-radius: 16px; background: #F4F7FB;
+  overflow: hidden; border-radius: 16px; background: #E4EDF8;
 }
 .assembly-dashboard-hero::before {
   content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
@@ -1448,16 +1455,16 @@ body:has(.gate-visual-workspace) [role="dialog"] [aria-invalid="true"] { border-
 }
 .assembly-dashboard-hero::after {
   content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: 16px;
-  background: linear-gradient(90deg,#F4F7FBF5 0%,#F4F7FBE6 18%,#F4F7FBAA 34%,#F4F7FB15 75%);
+  background: linear-gradient(90deg,#E4EDF8F5 0%,#E4EDF8E6 18%,#E4EDF8AA 34%,#E4EDF815 75%);
 }
 .assembly-dashboard-hero > div { position: relative; z-index: 1; min-width: 0; }
 .assembly-dashboard-hero > div:first-child { max-width: 580px; }
 .assembly-dashboard-hero h1 { color: #172B4D; font-size: clamp(28px,2.25vw,38px); font-weight: 700; line-height: 1.2; letter-spacing: -.025em; }
-.assembly-dashboard-hero > div:first-child > p { max-width: 490px; margin-top: 10px; color: #55585B; font-size: 14px; line-height: 1.6; }
+.assembly-dashboard-hero > div:first-child > p { max-width: 490px; margin-top: 10px; color: var(--text-grey); font-size: 15px; line-height: 1.6; }
 .assembly-dashboard-hero > div:last-child,
 .assembly-dashboard-hero > div:last-child > div { justify-content: flex-end; gap: 12px; }
 .assembly-dashboard-hero > div:last-child button,
-.assembly-dashboard-hero > div:last-child a { min-height: 44px; border-radius: 11px; box-shadow: none; font-size: 14px; font-weight: 600; }
+.assembly-dashboard-hero > div:last-child a { min-height: 44px; border-radius: 11px; box-shadow: none; font-size: 15px; font-weight: 600; }
 .assembly-dashboard-hero > div:last-child button:not([class*="bg-primary"]) { background: #FFFFFFF2; border: 1px solid #DFE7F0; color: #064B87; }
 .assembly-visual-workspace main [class*="bg-white"][class*="border"] { border-color: #DFE7F0; background-color: #FFFFFF; box-shadow: 0 2px 6px rgb(23 43 77 / .035); }
 .assembly-visual-workspace main [class*="shadow-soft"] { box-shadow: 0 2px 6px rgb(23 43 77 / .035); }
@@ -1478,7 +1485,7 @@ body:has(.assembly-visual-workspace) [role="dialog"] [aria-invalid="true"] { bor
   .assembly-dashboard-hero { min-height: 220px; padding: 20px 16px; }
   .assembly-dashboard-hero h1 { font-size: 28px; }
   .assembly-dashboard-hero::before { opacity: .3; }
-  .assembly-dashboard-hero::after { background: linear-gradient(90deg,#F4F7FBF2,#F4F7FB66); }
+  .assembly-dashboard-hero::after { background: linear-gradient(90deg,#E4EDF8F2,#E4EDF866); }
   .assembly-dashboard-hero > div:last-child,
   .assembly-dashboard-hero > div:last-child > div { justify-content: flex-start; flex-wrap: wrap; }
 }
@@ -1488,7 +1495,7 @@ body:has(.assembly-visual-workspace) [role="dialog"] [aria-invalid="true"] { bor
   position: relative; isolation: isolate; display: grid;
   grid-template-columns: minmax(0,1fr) auto; align-items: center;
   min-height: 200px; gap: 24px; padding: 20px 24px;
-  overflow: hidden; border-radius: 16px; background: #F4F7FB;
+  overflow: hidden; border-radius: 16px; background: #E4EDF8;
 }
 .grn-dashboard-hero::before {
   content: ""; position: absolute; inset: 0 0 0 4%; z-index: -1; pointer-events: none;
@@ -1497,15 +1504,15 @@ body:has(.assembly-visual-workspace) [role="dialog"] [aria-invalid="true"] { bor
 }
 .grn-dashboard-hero::after {
   content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: 16px;
-  background: linear-gradient(90deg,#F4F7FBF5 0%,#F4F7FBE6 18%,#F4F7FBAA 34%,#F4F7FB15 75%);
+  background: linear-gradient(90deg,#E4EDF8F5 0%,#E4EDF8E6 18%,#E4EDF8AA 34%,#E4EDF815 75%);
 }
 .grn-dashboard-hero > div { position: relative; z-index: 1; min-width: 0; }
 .grn-dashboard-hero > div:first-child { max-width: 580px; }
 .grn-dashboard-hero h1 { color: #172B4D; font-size: clamp(28px,2.25vw,38px); font-weight: 700; line-height: 1.2; letter-spacing: -.025em; }
-.grn-dashboard-hero > div:first-child > p { max-width: 490px; margin-top: 10px; color: #55585B; font-size: 14px; line-height: 1.6; }
+.grn-dashboard-hero > div:first-child > p { max-width: 490px; margin-top: 10px; color: var(--text-grey); font-size: 15px; line-height: 1.6; }
 .grn-dashboard-hero > div:last-child { justify-content: flex-end; gap: 12px; }
 .grn-dashboard-hero > div:last-child button,
-.grn-dashboard-hero > div:last-child a { min-height: 44px; border-radius: 11px; box-shadow: none; font-size: 14px; font-weight: 600; }
+.grn-dashboard-hero > div:last-child a { min-height: 44px; border-radius: 11px; box-shadow: none; font-size: 15px; font-weight: 600; }
 .grn-dashboard-hero > div:last-child button:not([class*="bg-primary"]) { background: #FFFFFFF2; border: 1px solid #DFE7F0; color: #064B87; }
 .grn-visual-workspace main [class*="shadow-soft"],
 .grn-visual-workspace main [class*="shadow-glow"] { box-shadow: 0 2px 6px rgb(23 43 77 / .035); }
@@ -1527,7 +1534,7 @@ body:has(.grn-visual-workspace) [role="dialog"] [class*="font-black"] { font-wei
   .grn-dashboard-hero { min-height: 220px; padding: 20px 16px; }
   .grn-dashboard-hero h1 { font-size: 28px; }
   .grn-dashboard-hero::before { opacity: .3; }
-  .grn-dashboard-hero::after { background: linear-gradient(90deg,#F4F7FBF2,#F4F7FB66); }
+  .grn-dashboard-hero::after { background: linear-gradient(90deg,#E4EDF8F2,#E4EDF866); }
   .grn-dashboard-hero > div:last-child { justify-content: flex-start; flex-wrap: wrap; }
 }
 
@@ -1575,7 +1582,7 @@ button[role="combobox"] {
   background-color: #FFFFFF;
   color: #172B4D;
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: 15px;
   box-shadow: none;
 }
 select:not([multiple]):not([size]):hover:not(:disabled),
@@ -1599,7 +1606,7 @@ button[role="combobox"]:disabled { cursor: not-allowed; opacity: .6; }
 [role="menu"] :is([role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]) {
   min-height: 36px;
   border-radius: 7px;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.5;
   font-weight: 400;
 }
@@ -1613,7 +1620,7 @@ button[role="combobox"]:disabled { cursor: not-allowed; opacity: .6; }
   select:not([multiple]):not([size]),
   select:not([multiple]):not([size])::picker(select) { appearance: base-select; }
   select:not([multiple]):not([size]) { align-items: center; padding-inline: 12px; gap: 12px; }
-  select:not([multiple]):not([size])::picker-icon { color: #55585B; }
+  select:not([multiple]):not([size])::picker-icon { color: var(--text-grey); }
   select:not([multiple]):not([size])::picker(select) {
     margin-block: 6px;
     padding: 4px;
@@ -1636,7 +1643,7 @@ button[role="combobox"]:disabled { cursor: not-allowed; opacity: .6; }
     background: #FFFFFF;
     color: #172B4D;
     font-family: var(--font-sans);
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 400;
     line-height: 1.5;
   }
@@ -1651,7 +1658,7 @@ button[role="combobox"]:disabled { cursor: not-allowed; opacity: .6; }
 @media screen {
   body.app-typography {
     font-family: var(--font-sans);
-    font-size: 14px;
+    font-size: 15px;
     line-height: 1.5;
   }
 
@@ -1696,30 +1703,30 @@ button[role="combobox"]:disabled { cursor: not-allowed; opacity: .6; }
   }
 
   body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) label {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
     line-height: 1.4;
   }
 
   body.app-typography :is(input, select, textarea, [role="combobox"]) {
-    font-size: 14px;
+    font-size: 15px;
     line-height: 1.5;
   }
 
   body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) table {
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.5;
   }
 
   body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) th {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
     line-height: 1.4;
     letter-spacing: 0.01em;
   }
 
   body.app-typography aside nav a {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 500;
     line-height: 1.5;
   }
@@ -1741,7 +1748,7 @@ button[role="combobox"]:disabled { cursor: not-allowed; opacity: .6; }
 
 /* Warehouse dashboard uses the Supplier Dashboard's icon-led KPI cards. */
 .warehouse-visual-workspace main .warehouse-dashboard-kpi {
-  --kpi-ink: #0866B1;
+  --kpi-ink: #064B87;
   --kpi-tint: #E1EFFF;
   position: relative;
   display: grid;
@@ -1757,9 +1764,9 @@ button[role="combobox"]:disabled { cursor: not-allowed; opacity: .6; }
   background: #FFFFFF;
   box-shadow: 0 3px 12px rgb(6 75 135 / 0.035);
 }
-.warehouse-visual-workspace main .warehouse-dashboard-kpi[data-tone="stock"] { --kpi-ink: #0866B1; --kpi-tint: #E1EFFF; }
-.warehouse-visual-workspace main .warehouse-dashboard-kpi[data-tone="requests"] { --kpi-ink: #36752C; --kpi-tint: #EAF5E2; }
-.warehouse-visual-workspace main .warehouse-dashboard-kpi[data-tone="putaway"] { --kpi-ink: #986000; --kpi-tint: #FFF1D2; }
+.warehouse-visual-workspace main .warehouse-dashboard-kpi[data-tone="stock"] { --kpi-ink: #064B87; --kpi-tint: #E1EFFF; }
+.warehouse-visual-workspace main .warehouse-dashboard-kpi[data-tone="requests"] { --kpi-ink: #285C20; --kpi-tint: #EAF5E2; }
+.warehouse-visual-workspace main .warehouse-dashboard-kpi[data-tone="putaway"] { --kpi-ink: #8A5100; --kpi-tint: #FFF1D2; }
 .warehouse-visual-workspace main .warehouse-dashboard-kpi[data-tone="picks"] { --kpi-ink: #064B87; --kpi-tint: #EAF1F8; }
 .warehouse-dashboard-kpi::after { content: ""; position: absolute; bottom: 0; left: 0; width: 32%; height: 3px; background: var(--kpi-ink); }
 .warehouse-dashboard-kpi-icon { display: grid; place-items: center; width: 58px; height: 58px; border-radius: 15px; background: var(--kpi-tint); color: var(--kpi-ink); }
@@ -1828,7 +1835,7 @@ body.app-typography .warehouse-module-content[data-warehouse-tab="putaway"] .war
 .putaway-overview > div:first-child > button > svg { padding: 12px; width: 48px; height: 48px; border-radius: 13px; background: #E1EFFF; color: #0866B1; }
 .putaway-overview > div:first-child > button:first-child > svg { background: #FFF1D2; color: #986000; }
 .putaway-overview > div:first-child > button:last-child > svg { background: #EAF5E2; color: #36752C; }
-.putaway-overview > div:first-child > button > span > span:first-child { color: #55585B; }
+.putaway-overview > div:first-child > button > span > span:first-child { color: var(--text-grey); }
 @media (max-width: 639px) {
   .warehouse-module-content[data-warehouse-tab="putaway"] .warehouse-module-hero { min-height: 0; padding: 8px 0; }
 }
@@ -1853,6 +1860,9 @@ body.app-typography .warehouse-module-content[data-warehouse-tab="inventory"] .w
 .warehouse-module-content[data-warehouse-tab="picking"] .warehouse-module-hero { min-height: 104px; padding: 10px 8px; }
 body.app-typography .warehouse-module-content[data-warehouse-tab="picking"] .warehouse-module-hero h1 { font-size: clamp(26px, 2vw, 32px); }
 .assembly-requisitions-panel > div:first-child { align-items: center; }
+.assembly-picking-overview .assembly-requisitions-panel > .assembly-requisitions-heading {
+  padding: 12px 20px;
+}
 .warehouse-visual-workspace main .assembly-requisitions-panel [data-slot="card"] { gap: 0; padding-block: 0; border-radius: 14px; }
 .assembly-requisitions-panel [data-slot="card-content"] { padding: 18px 20px; }
 .assembly-requisitions-panel table :is(th, td) { vertical-align: middle; overflow-wrap: anywhere; }
@@ -2018,7 +2028,7 @@ body.app-typography .grn-form-header h1 { font-size: clamp(26px, 2vw, 32px); lin
 #grn-record-details-dialog { gap: 16px; }
 #grn-record-details-dialog > * { min-width: 0; }
 #grn-record-details-dialog .grn-detail-metadata > div { min-width: 0; }
-#grn-record-details-dialog .grn-detail-metadata b { display: block; margin-top: 5px; overflow-wrap: anywhere; font-size: 13px; font-weight: 600; }
+#grn-record-details-dialog .grn-detail-metadata b { display: block; margin-top: 5px; overflow-wrap: anywhere; font-size: 14px; font-weight: 600; }
 #grn-record-details-dialog .grn-reconciliation-table :is(th, td) { padding: 12px; vertical-align: middle; line-height: 1.5; }
 #grn-record-details-dialog .grn-reconciliation-table :is(th, td):not(:first-child) { text-align: center; font-variant-numeric: tabular-nums; }
 #grn-record-details-dialog .grn-reconciliation-table td:first-child { overflow-wrap: anywhere; }
@@ -2043,7 +2053,7 @@ body.app-typography .grn-form-header h1 { font-size: clamp(26px, 2vw, 32px); lin
   grid-column: 2; grid-row: 1; margin-top: 0;
 }
 .assembly-material-requests-page > [aria-busy] .bg-card > div:nth-of-type(2) p {
-  font-size: 14px; white-space: normal;
+  font-size: 15px; white-space: normal;
 }
 
 /* Transparent Material Requests heading card. */
@@ -2071,3 +2081,1270 @@ button[title^="Refresh"]:hover { background: #EAF0F7 !important; }
 button[data-refresh-control="true"] svg,
 button[aria-label^="Refresh"] svg,
 button[title^="Refresh"] svg { width: 18px !important; height: 18px !important; margin: 0 !important; }
+
+/* Keep small headings at their original utility sizes. */
+@layer base {
+  :is(h1, h2, h3, h4, h5, h6, [role="heading"]) {
+    --text-xs: 0.75rem;
+    --text-sm: 0.875rem;
+  }
+}
+
+/* Include compact badges and metadata that use explicit pixel utilities. */
+@layer utilities {
+  .text-\[8px\]:not(:is(h1, h2, h3, h4, h5, h6, [role="heading"], :is(h1, h2, h3, h4, h5, h6, [role="heading"]) *)) { font-size: 9px; }
+  .text-\[9px\]:not(:is(h1, h2, h3, h4, h5, h6, [role="heading"], :is(h1, h2, h3, h4, h5, h6, [role="heading"]) *)) { font-size: 10px; }
+  .text-\[10px\]:not(:is(h1, h2, h3, h4, h5, h6, [role="heading"], :is(h1, h2, h3, h4, h5, h6, [role="heading"]) *)) { font-size: 11px; }
+  .text-\[11px\]:not(:is(h1, h2, h3, h4, h5, h6, [role="heading"], :is(h1, h2, h3, h4, h5, h6, [role="heading"]) *)) { font-size: 12px; }
+  .text-\[12px\]:not(:is(h1, h2, h3, h4, h5, h6, [role="heading"], :is(h1, h2, h3, h4, h5, h6, [role="heading"]) *)) { font-size: 13px; }
+  .text-\[13px\]:not(:is(h1, h2, h3, h4, h5, h6, [role="heading"], :is(h1, h2, h3, h4, h5, h6, [role="heading"]) *)) { font-size: 14px; }
+  .text-\[14px\]:not(:is(h1, h2, h3, h4, h5, h6, [role="heading"], :is(h1, h2, h3, h4, h5, h6, [role="heading"]) *)) { font-size: 15px; }
+}
+
+/* Neutral secondary text stays readable on light surfaces; retain inverse text. */
+@media screen {
+  body.app-typography:not(.dark) :is(.text-slate-400, .text-slate-500, .text-slate-600, .text-gray-400, .text-gray-500, .text-gray-600, .text-zinc-400, .text-zinc-500, .text-neutral-400, .text-neutral-500) {
+    color: var(--text-grey);
+  }
+}
+
+/* Translucent refresh surface over the Supplier Dashboard hero image. */
+.supplier-heading-image button[data-refresh-control="true"] {
+  background: rgba(255, 255, 255, 0.65) !important;
+  border-color: rgba(255, 255, 255, 0.8) !important;
+  border-radius: 12px !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.supplier-heading-image button[data-refresh-control="true"]:hover {
+  background: rgba(255, 255, 255, 0.85) !important;
+}
+
+/* Slightly stronger title and supporting copy on the Supplier Dashboard. */
+body.app-typography main .supplier-heading-image h1 {
+  color: #10213A;
+  font-size: clamp(30px, 2.4vw, 40px);
+}
+.supplier-heading-image > div:first-child > p {
+  color: #25364D;
+  font-size: 16px;
+  font-weight: 500;
+}
+@media (max-width: 767px) {
+  body.app-typography main .supplier-heading-image h1 { font-size: 30px; }
+}
+
+/* Shared bold typography across pages, navigation, controls, and portals. */
+@media screen {
+  body.app-typography,
+  body.app-typography * {
+    font-weight: 700 !important;
+  }
+
+  :root:not(.dark) body.app-typography:not(.dark) {
+    --foreground: #10213A;
+    --card-foreground: #10213A;
+    --popover-foreground: #10213A;
+    --text-grey: #10213A;
+    --muted-foreground: #10213A;
+  }
+
+  :root:not(.dark) body.app-typography:not(.dark) :is(
+    .text-muted-foreground,
+    .text-slate-400, .text-slate-500, .text-slate-600, .text-slate-700, .text-slate-800, .text-slate-900,
+    .text-gray-400, .text-gray-500, .text-gray-600, .text-gray-700, .text-gray-800, .text-gray-900,
+    .text-zinc-400, .text-zinc-500, .text-zinc-600, .text-zinc-700, .text-zinc-800, .text-zinc-900,
+    .text-neutral-400, .text-neutral-500, .text-neutral-600, .text-neutral-700, .text-neutral-800, .text-neutral-900
+  ) {
+    color: #10213A;
+  }
+
+  body.app-typography :is(input, textarea)::placeholder {
+    color: var(--muted-foreground);
+    font-weight: 700;
+    opacity: 1;
+  }
+}
+
+/* Stronger light-blue canvas, coordinated cards, and dark semantic accents. */
+@media screen {
+  :root:not(.dark) body.app-typography:not(.dark) {
+    --background: #E4EDF8;
+    --card: #F8FBFF;
+    --border: #C5D4E6;
+    --input: #B5C8DF;
+    --shadow-soft: 0 2px 6px rgb(0 0 0 / 0.09);
+    --shadow-lift: 0 5px 16px rgb(0 0 0 / 0.13);
+  }
+
+  :root:not(.dark) body.app-typography:not(.dark) main {
+    background-color: var(--background);
+  }
+
+  :root:not(.dark) body.app-typography:not(.dark) main :is(
+    [data-slot="card"], .bg-card, .supplier-visual-kpi,
+    .supplier-visual-content > section, .supplier-dashboard-panels > section,
+    .warehouse-dashboard-kpi, .warehouse-dashboard-panels > div,
+    .inventory-stock-summary, .putaway-overview > div:first-child > button,
+    .dock-management-waiting, .warehouse-picking-queue
+  ) {
+    background-color: #F8FBFF;
+    border-color: #C5D4E6;
+    box-shadow: 0 3px 10px rgb(0 0 0 / 0.10), 0 1px 3px rgb(0 0 0 / 0.06);
+  }
+
+  body.app-typography :is(.supplier-kpi-icon, .warehouse-dashboard-kpi-icon) {
+    color: var(--kpi-ink);
+    border: 1px solid color-mix(in srgb, var(--kpi-ink) 25%, transparent);
+  }
+  body.app-typography :is(.supplier-kpi-icon, .warehouse-dashboard-kpi-icon) svg {
+    stroke-width: 2.5;
+  }
+  body.app-typography :is(.supplier-kpi-spark, .warehouse-dashboard-kpi-chart) > span {
+    opacity: 1 !important;
+  }
+
+  body.app-typography .supplier-visual-content .supplier-delivery-status {
+    border: 1px solid currentColor;
+  }
+  body.app-typography .supplier-visual-content .supplier-status-waiting { color: #784600; background: #FFE6AC; }
+  body.app-typography .supplier-visual-content .supplier-status-active { color: #063F78; background: #D4E7FF; }
+  body.app-typography .supplier-visual-content .supplier-status-submitted { color: #293F60; background: #DEE7F3; }
+  body.app-typography .supplier-visual-content .supplier-status-rejected { color: #8C1426; background: #FFDCE2; }
+  body.app-typography .supplier-visual-content .supplier-status-complete { color: #215324; background: #DCEFD5; }
+
+  body.app-typography :is(button, a).bg-primary {
+    background-color: #064B87;
+    color: #FFFFFF;
+    box-shadow: 0 3px 8px rgb(0 0 0 / 0.16);
+  }
+  body.app-typography :is(button, a).bg-primary:hover { background-color: #07365F; }
+  body.app-typography :is(button, a, input, select, textarea):focus-visible {
+    outline: 3px solid #0866B1;
+    outline-offset: 3px;
+  }
+
+  :root:not(.dark) body.app-typography:not(.dark) table thead :is(tr, th) {
+    background-color: #D8E5F4;
+    color: #10213A;
+  }
+  :root:not(.dark) body.app-typography:not(.dark) table tbody tr:hover {
+    background-color: #E8F1FC;
+  }
+}
+
+/* Apply the same surfaces to custom module panels and portaled dialogs. */
+@media screen {
+  :root:not(.dark) body.app-typography:not(.dark) :is(main, [role="dialog"], [role="alertdialog"]) {
+    --module-card: #F8FBFF;
+    --module-card-border: #C5D4E6;
+    --module-card-shadow: 0 3px 10px rgb(0 0 0 / 0.10), 0 1px 3px rgb(0 0 0 / 0.06);
+  }
+
+  :root:not(.dark) body.app-typography:not(.dark) :is(main, [role="dialog"], [role="alertdialog"]) :is(
+    [data-slot="card"],
+    section[class*="rounded"][class*="border"],
+    article[class*="rounded"][class*="border"],
+    div.bg-white[class*="rounded"][class*="border"],
+    div.bg-card[class*="rounded"][class*="border"]
+  ) {
+    background-color: var(--module-card);
+    border-color: var(--module-card-border);
+    box-shadow: var(--module-card-shadow);
+  }
+
+  :root:not(.dark) body.app-typography:not(.dark) :is([role="dialog"], [role="alertdialog"]) {
+    background-color: #F8FBFF;
+    border-color: #C5D4E6;
+    box-shadow: 0 12px 36px rgb(0 0 0 / 0.20);
+  }
+
+  :root:not(.dark) body.app-typography:not(.dark) :is(.bg-slate-50, .bg-gray-50, .bg-muted) {
+    background-color: #E8F0FA;
+  }
+
+  :root:not(.dark) body.app-typography:not(.dark) :is(.text-blue-500, .text-blue-600, .text-blue-700, .text-indigo-500, .text-indigo-600, .text-indigo-700, .text-teal-500, .text-teal-600) { color: #064B87; }
+  :root:not(.dark) body.app-typography:not(.dark) :is(.text-green-500, .text-green-600, .text-green-700, .text-emerald-500, .text-emerald-600, .text-emerald-700) { color: #215324; }
+  :root:not(.dark) body.app-typography:not(.dark) :is(.text-amber-500, .text-amber-600, .text-amber-700, .text-orange-500, .text-orange-600, .text-yellow-600, .text-yellow-700) { color: #784600; }
+  :root:not(.dark) body.app-typography:not(.dark) :is(.text-red-500, .text-red-600, .text-red-700, .text-rose-500, .text-rose-600, .text-rose-700) { color: #8C1426; }
+
+  :root:not(.dark) body.app-typography:not(.dark) [data-slot="badge"] {
+    border-color: currentColor;
+  }
+
+  :root:not(.dark) body.app-typography:not(.dark) :is(button, a):is(.bg-blue-600, .bg-indigo-600, .bg-blue-700, .bg-indigo-700) {
+    background-color: #064B87;
+    color: #FFFFFF;
+    box-shadow: 0 3px 8px rgb(0 0 0 / 0.16);
+  }
+
+  body.app-typography .recharts-cartesian-axis-tick text { fill: var(--foreground); }
+  body.app-typography .recharts-line-curve { stroke-width: 3; }
+}
+
+/* Replies retain hierarchy even with the application's bold typography setting. */
+body.app-typography .assistant-dialog .assistant-reply { font-weight: 500 !important; }
+body.app-typography .assistant-dialog .assistant-reply :is(p, dt, dd) { font-weight: 500 !important; }
+body.app-typography .assistant-dialog .assistant-reply h3 { font-weight: 700 !important; }
+.assistant-reply { overflow-wrap: anywhere; }
+.assistant-dialog > div { min-height: 0; }
+
+/* Material Master header: dark blue with white copy and action surfaces. */
+body.app-typography main .material-master-header {
+  background: #064B87;
+  border-color: #064B87;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.14);
+}
+body.app-typography main .material-master-header :is(h1, p, .supplier-page-title) {
+  color: #FFFFFF;
+}
+body.app-typography main .material-master-header .supplier-page-title-icon {
+  background: rgb(255 255 255 / 0.15);
+  color: #FFFFFF;
+  border: 1px solid rgb(255 255 255 / 0.3);
+}
+body.app-typography main .material-master-header fieldset button {
+  background: #FFFFFF !important;
+  color: #064B87 !important;
+  border-color: #FFFFFF !important;
+}
+body.app-typography main .material-master-header fieldset button:hover:not(:disabled) {
+  background: #E4EDF8 !important;
+  border-color: #E4EDF8 !important;
+}
+body.app-typography main .material-master-header button[data-information-help] {
+  background: transparent;
+  color: #FFFFFF !important;
+}
+body.app-typography main .material-master-header button:focus-visible {
+  outline-color: #FFFFFF;
+}
+
+/* Keep text-field focus subtle instead of drawing a thick square outline. */
+body.app-typography :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(8 102 177 / 0.16);
+}
+body.app-typography .login-form .login-input-shell:focus-within {
+  border-color: #97B9E1;
+  box-shadow: 0 0 0 2px rgb(8 102 177 / 0.12);
+}
+body.app-typography .login-form .login-input-shell input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* One heading-card treatment across every application module. */
+body.app-typography main .app-page-heading {
+  background: #064B87 !important;
+  border: 1px solid #064B87 !important;
+  border-radius: 18px;
+  padding: 22px 24px;
+  align-items: center;
+  color: #FFFFFF;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.14);
+}
+body.app-typography main .app-page-heading :is(h1, h2, p, span, svg, a, label) {
+  color: #FFFFFF !important;
+}
+body.app-typography main .app-page-heading::before,
+body.app-typography main .app-page-heading::after,
+body.app-typography main .app-page-heading > div[aria-hidden="true"].absolute,
+body.app-typography main .app-page-heading :is(.warehouse-hero-image, .warehouse-hero-overlay, img) {
+  display: none;
+}
+body.app-typography main .app-page-heading :is(button, a, select, input, [role="combobox"]):not([data-information-help]) {
+  background: #FFFFFF !important;
+  color: #064B87 !important;
+  border-color: #FFFFFF !important;
+}
+body.app-typography main .app-page-heading :is(button, a, [role="combobox"]):not([data-information-help]) :is(span, svg) {
+  color: #064B87 !important;
+}
+body.app-typography main .app-page-heading :is(button, a):not([data-information-help]):hover:not(:disabled) {
+  background: #E4EDF8 !important;
+}
+body.app-typography main .app-page-heading [data-information-help] {
+  color: #FFFFFF !important;
+  background: transparent !important;
+}
+body.app-typography main .app-page-heading [data-information-help] svg { color: #FFFFFF !important; }
+body.app-typography main .app-page-heading .supplier-page-title-icon {
+  background: rgb(255 255 255 / 0.15) !important;
+  border: 1px solid rgb(255 255 255 / 0.3);
+}
+body.app-typography main .app-page-heading :is(button, a, input, select):focus-visible {
+  outline-color: #FFFFFF;
+}
+@media (max-width: 639px) {
+  body.app-typography main .app-page-heading { padding: 18px; }
+}
+
+/* Dispatch history: a clear hierarchy and paired transport assignments. */
+.supplier-dispatch-history > div:first-child { padding: 20px 24px; }
+.supplier-dispatch-history .dispatch-table-scroll { margin: 0 20px 20px; border: 1px solid #C5D4E6; border-radius: 12px; }
+.supplier-dispatch-history table :is(th, td) { padding: 16px; vertical-align: middle; }
+.supplier-dispatch-history table th { text-transform: none; letter-spacing: normal; white-space: nowrap; }
+.supplier-dispatch-history table td:first-child { white-space: nowrap; }
+.supplier-dispatch-history table td:nth-child(2) { min-width: 150px; max-width: 240px; overflow-wrap: anywhere; }
+.supplier-dispatch-history table td:nth-last-child(2) { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.supplier-dispatch-history table :is(th, td):last-child { text-align: right; }
+.dispatch-transport-list { display: grid; gap: 10px; min-width: 165px; }
+.dispatch-transport-entry { display: flex; align-items: center; gap: 10px; }
+.dispatch-transport-index { display: grid; place-items: center; flex-shrink: 0; width: 24px; height: 24px; border-radius: 6px; background: #D8E5F4; color: #064B87; font-size: 12px; }
+.supplier-dispatch-history .dispatch-transport-entry p { overflow-wrap: anywhere; }
+@media (max-width: 639px) {
+  .supplier-dispatch-history > div:first-child { padding: 16px; }
+  .supplier-dispatch-history .dispatch-table-scroll { margin: 0 12px 16px; }
+}
+
+/* Damage claims: summary, shipment details, evidence, and next action. */
+body.app-typography main .damage-claim-card { padding: 22px; }
+.claim-quantity-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-block: 20px; padding: 14px 16px; border-radius: 10px; background: #E8F0FA; }
+.claim-quantity-summary dt { font-size: 13px; color: #334155; }
+.claim-quantity-summary dd { margin-top: 5px; font-size: 18px; }
+.claim-information-layout { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(220px, 1fr); gap: 22px; align-items: start; }
+.claim-shipment-section { min-width: 0; }
+.claim-shipment-details > div { min-width: 0; }
+.claim-shipment-details > div > span { display: block; font-size: 13px; color: #334155; }
+.claim-shipment-details > div > p { margin-top: 4px; overflow-wrap: anywhere; }
+.claim-evidence { min-width: 0; background: #EDF3FB; }
+.claim-evidence img { width: 128px; height: 96px; }
+@media (max-width: 767px) {
+  .claim-information-layout { grid-template-columns: minmax(0, 1fr); }
+  body.app-typography main .damage-claim-card { padding: 16px; }
+  .claim-replacement-footer > button { width: 100%; }
+}
+
+/* Consistent status colors in every module, including dialogs and tables. */
+body.app-typography [data-slot="badge"][data-status-tone="positive"] {
+  background: #14532D !important;
+  border-color: #14532D !important;
+  color: #FFFFFF !important;
+}
+body.app-typography [data-slot="badge"][data-status-tone="negative"] {
+  background: #8C1426 !important;
+  border-color: #8C1426 !important;
+  color: #FFFFFF !important;
+}
+body.app-typography [data-slot="badge"][data-status-tone] :is(span, svg) {
+  color: inherit !important;
+}
+
+/* Dispatch history blends into the page while its table remains defined. */
+:root:not(.dark) body.app-typography:not(.dark) main .supplier-dispatch-history[data-slot="card"] {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.supplier-dispatch-history > div:first-child {
+  background: transparent;
+}
+
+/* A translucent blue claim surface with clearly grouped information. */
+@media screen {
+  :root:not(.dark) body.app-typography:not(.dark) main .damage-claim-card[data-slot="card"] {
+    background: rgb(209 228 249 / 0.48);
+    border-color: rgb(131 166 207 / 0.4);
+    box-shadow: 0 3px 12px rgb(0 0 0 / 0.08);
+  }
+  .damage-claim-card > div:first-child {
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgb(131 166 207 / 0.3);
+    align-items: center;
+  }
+  .damage-claim-card .claim-quantity-summary {
+    max-width: 640px;
+    background: rgb(255 255 255 / 0.35);
+    border: 1px solid rgb(131 166 207 / 0.3);
+  }
+  .damage-claim-card .claim-quantity-summary > div + div {
+    border-left: 1px solid rgb(131 166 207 / 0.3);
+    padding-left: 16px;
+  }
+  .damage-claim-card .claim-information-layout { gap: 20px; }
+  .damage-claim-card .claim-shipment-section,
+  .damage-claim-card .claim-evidence {
+    padding: 18px;
+    border: 1px solid rgb(131 166 207 / 0.3);
+    border-radius: 12px;
+    background: rgb(255 255 255 / 0.26);
+  }
+  .damage-claim-card .claim-shipment-section > h4,
+  .damage-claim-card .claim-evidence > p:first-child {
+    padding-bottom: 12px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid rgb(131 166 207 / 0.3);
+    color: #064B87;
+  }
+  .damage-claim-card .claim-shipment-details { gap: 18px 24px; }
+  .damage-claim-card .claim-replacement-footer {
+    margin-top: 20px;
+    padding-top: 18px;
+    border-color: rgb(131 166 207 / 0.3);
+  }
+}
+
+/* Translucent blue surfaces for supplier delivery and dispatch lists. */
+:root:not(.dark) body.app-typography:not(.dark) main :is(.supplier-dispatch-history, .supplier-delivery-notices)[data-slot="card"] {
+  background: rgb(185 214 247 / 0.48);
+  border: 1px solid rgb(126 165 210 / 0.45);
+  box-shadow: 0 5px 16px rgb(0 0 0 / 0.18), 0 2px 5px rgb(0 0 0 / 0.08);
+}
+
+/* A text-only surface over the existing Supplier Dashboard hero. */
+.supplier-heading-image > div:first-child {
+  width: fit-content;
+  padding: 18px 22px;
+  border: 1px solid rgb(255 255 255 / 0.65);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.56);
+  box-shadow: 0 5px 16px rgb(0 0 0 / 0.16);
+}
+@media (max-width: 639px) {
+  .supplier-heading-image > div:first-child { padding: 16px; }
+}
+
+/* Reports: compact overview, aligned controls, and consistent panel spacing. */
+body.app-typography main .reports-workspace .reports-overview {
+  background: rgb(185 214 247 / 0.45);
+  border-color: #B0C8E4;
+  box-shadow: 0 3px 10px rgb(0 0 0 / 0.08);
+}
+.reports-overview-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, 360px); gap: 24px; align-items: center; }
+.reports-overview-layout > div { min-width: 0; }
+.reports-overview-layout h2 { margin-top: 8px; }
+.reports-scope p { margin-top: 8px; font-variant-numeric: tabular-nums; }
+.reports-tabs { width: fit-content; max-width: 100%; }
+.reports-filters { display: grid; grid-template-columns: minmax(200px, 1.4fr) repeat(2, minmax(160px, 1fr)) auto; gap: 16px; align-items: end; }
+.reports-filters label { min-width: 0; }
+.reports-filters :is(input, select) { width: 100%; min-width: 0; height: 42px; }
+.reports-filters > p { grid-column: 1 / -1; margin: 0; max-width: none; padding-top: 12px; border-top: 1px solid #D1DEEE; }
+.reports-workspace :is(section, section > div) { min-width: 0; }
+@media (max-width: 1023px) {
+  .reports-overview-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .reports-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 639px) {
+  .reports-filters { grid-template-columns: minmax(0, 1fr); padding: 16px; }
+  .reports-tabs { width: 100%; }
+  .reports-tabs button { flex: 1; padding-inline: 12px; }
+}
+
+/* Keep analytics sections in normal layout flow with an explicit vertical gap. */
+.reports-analytics-content { display: grid; gap: 24px; }
+.reports-kpis { align-items: stretch; }
+.reports-kpis > div { display: flex; flex-direction: column; min-height: 156px; padding: 20px; }
+.reports-kpis > div > p:last-child { margin-top: auto; padding-top: 12px; line-height: 1.5; }
+.reports-chart-grid { align-items: stretch; }
+.reports-chart-grid > div { display: flex; flex-direction: column; padding: 22px; overflow: hidden; }
+.reports-chart-grid h3 { line-height: 1.4; }
+.reports-trend-chart { min-width: 0; width: 100%; margin-top: 24px; }
+.reports-lifecycle-list { display: grid; gap: 0; }
+.reports-lifecycle-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; min-height: 42px; padding-block: 8px; border-bottom: 1px solid #DFE7F0; }
+.reports-lifecycle-row:last-child { border-bottom: 0; }
+.reports-lifecycle-values { display: grid; grid-template-columns: 36px 48px; gap: 12px; text-align: right; align-items: baseline; }
+.reports-lifecycle-values > span:last-child { margin-left: 0; }
+.reports-workflows > div.grid { gap: 16px; }
+.reports-workspace { padding-bottom: 80px; }
+@media (min-width: 1200px) {
+  .reports-workspace .reports-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 639px) {
+  .reports-analytics-content { gap: 18px; }
+  .reports-chart-grid > div { padding: 16px; }
+  .reports-lifecycle-values { grid-template-columns: 28px 42px; gap: 8px; }
+}
+
+/* Highlight only the delivery-list title and description. */
+.supplier-delivery-notices .delivery-notices-heading-card {
+  padding: 16px 18px;
+  border-radius: 12px;
+  border: 1px solid rgb(113 157 210 / 0.45);
+  background: rgb(158 199 245 / 0.45);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.18);
+  min-width: 0;
+}
+.delivery-notices-heading-card > div + div { margin-top: 6px; }
+
+.supplier-dispatch-history .dispatch-history-heading-card {
+  padding: 16px 18px;
+  border-radius: 12px;
+  border: 1px solid rgb(113 157 210 / 0.45);
+  background: rgb(158 199 245 / 0.45);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.18);
+  min-width: 0;
+}
+.dispatch-history-tools { width: 100%; }
+@media (min-width: 1024px) {
+  .dispatch-history-tools { width: auto; min-width: 300px; }
+  .dispatch-history-tools label { min-width: 200px; }
+}
+
+/* One continuous blue toolbar from the heading through Create ASN. */
+.supplier-delivery-notices .delivery-notices-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  margin: 20px;
+  padding: 20px;
+  border: 1px solid rgb(113 157 210 / 0.45);
+  border-radius: 12px;
+  background: rgb(158 199 245 / 0.45);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.18);
+}
+.supplier-delivery-notices .delivery-notices-heading-card {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.supplier-delivery-notices .delivery-notices-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.delivery-notices-controls > div:first-child { flex: 1 1 240px; width: auto; }
+.delivery-notices-controls > button { flex-shrink: 0; }
+.delivery-notices-controls :is(input, button) { min-height: 40px; }
+@media (min-width: 1400px) {
+  .supplier-delivery-notices .delivery-notices-toolbar {
+    grid-template-columns: minmax(260px, 1fr) minmax(0, 1.5fr);
+    align-items: center;
+    gap: 24px;
+  }
+}
+@media (max-width: 639px) {
+  .supplier-delivery-notices .delivery-notices-toolbar { margin: 12px; padding: 16px; }
+  .delivery-notices-controls > div:first-child { flex-basis: 100%; }
+  .delivery-notices-controls > button { flex: 1 1 auto; }
+}
+
+/* A continuous dispatch toolbar including search and the result count. */
+.supplier-dispatch-history > .dispatch-history-toolbar:first-child {
+  margin: 20px;
+  padding: 20px;
+  border: 1px solid rgb(113 157 210 / 0.45);
+  border-radius: 12px;
+  background: rgb(158 199 245 / 0.45);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.18);
+  align-items: center;
+  gap: 20px;
+}
+.supplier-dispatch-history .dispatch-history-heading-card {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.dispatch-history-toolbar .dispatch-history-tools { flex-shrink: 0; }
+@media (max-width: 1023px) {
+  .supplier-dispatch-history > .dispatch-history-toolbar:first-child { flex-direction: column; align-items: stretch; }
+  .dispatch-history-toolbar .dispatch-history-tools { width: 100%; }
+}
+@media (max-width: 639px) {
+  .supplier-dispatch-history > .dispatch-history-toolbar:first-child { margin: 12px; padding: 16px; }
+}
+
+.supplier-delivery-notices .delivery-notices-controls input[aria-label="Search delivery notices by ASN, vehicle, or driver"] {
+  background-color: #FFFFFF;
+}
+
+/* Consistent blue tables throughout application pages and dialogs. */
+@media screen {
+  body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) table {
+    background-color: #E3EEFC !important;
+    border-color: #B5CDE9;
+  }
+  body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) table :is(tbody, tbody tr, tbody td) {
+    background-color: #E3EEFC !important;
+  }
+  body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) table :is(thead, thead tr, thead th, tfoot, tfoot tr, tfoot td) {
+    background-color: #C6DCF5 !important;
+    color: #10213A;
+  }
+  body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) table tbody tr:hover > td {
+    background-color: #D4E5FA !important;
+  }
+}
+
+/* Defined table edges and a consistent grid across modules. */
+@media screen {
+  body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) table {
+    border-collapse: collapse;
+    border: 1px solid #C2D3E8 !important;
+  }
+  body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) table :is(th, td) {
+    border: 1px solid #CBDAED !important;
+    vertical-align: middle;
+  }
+  body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) table thead th {
+    border-bottom: 1px solid #B8CDE6 !important;
+  }
+  .supplier-delivery-notices .delivery-notices-toolbar + div > .overflow-x-auto {
+    margin: 0 20px 20px;
+    width: calc(100% - 40px);
+    border: 1px solid #C2D3E8;
+    border-radius: 10px;
+  }
+  @media (max-width: 639px) {
+    .supplier-delivery-notices .delivery-notices-toolbar + div > .overflow-x-auto {
+      margin-inline: 12px;
+      width: calc(100% - 24px);
+    }
+  }
+}
+
+.supplier-module-page .material-catalog-toolbar {
+  margin: 20px;
+  padding: 20px;
+  border: 1px solid rgb(113 157 210 / 0.45);
+  border-radius: 12px;
+  background: rgb(158 199 245 / 0.45);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.18);
+  gap: 18px;
+}
+.material-catalog-toolbar input { background-color: #FFFFFF; }
+@media (max-width: 639px) {
+  .supplier-module-page .material-catalog-toolbar { margin: 12px; padding: 16px; }
+}
+
+/* Softer light-blue rows in dispatch history. */
+body.app-typography main .supplier-dispatch-history table :is(tbody, tbody tr, tbody td) {
+  background-color: #EFF6FF !important;
+}
+body.app-typography main .supplier-dispatch-history table tbody tr:hover > td {
+  background-color: #E5F0FE !important;
+}
+
+body.app-typography main .supplier-dispatch-history table :is(thead, thead tr, thead th) {
+  background-color: #064B87 !important;
+  color: #FFFFFF !important;
+}
+
+/* Dark-blue table headers shared by all pages and dialogs. */
+@media screen {
+  body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) table :is(thead, thead tr, thead th) {
+    background-color: #064B87 !important;
+    color: #FFFFFF !important;
+  }
+  body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) table thead :is(span, button, svg, a) {
+    color: #FFFFFF !important;
+  }
+}
+
+.report-record-dialog { padding: 24px; gap: 22px; }
+.report-detail-sections { display: grid; gap: 18px; }
+.report-detail-section { padding: 18px; border: 1px solid #C4D6EC; border-radius: 12px; background: #EDF4FD; }
+.report-detail-section h3 { padding-bottom: 12px; margin-bottom: 16px; border-bottom: 1px solid #C4D6EC; color: #064B87; font-size: 15px; }
+.report-detail-section dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 28px; }
+.report-detail-section dl > div, .report-technical-details dl > div { min-width: 0; }
+.report-detail-section dt, .report-technical-details dt { font-size: 12px; color: #465B76; }
+.report-detail-section dd { margin-top: 6px; font-size: 14px; overflow-wrap: anywhere; }
+.report-technical-details { padding: 12px 16px; border: 1px solid #D2DEED; border-radius: 10px; font-size: 12px; }
+.report-technical-details summary { cursor: pointer; color: #064B87; }
+.report-technical-details dl { display: grid; gap: 12px; margin-top: 14px; }
+.report-technical-details dd { margin-top: 4px; overflow-wrap: anywhere; font-family: monospace; }
+@media (max-width: 639px) {
+  .report-record-dialog { padding: 18px; }
+  .report-detail-section dl { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+}
+
+/* Define the Supplier Dashboard's Create ASN action. */
+.supplier-heading-image a[href^="/supplier/asns/new"] {
+  border: 2px solid #000000;
+}
+
+/* Black borders only on primary actions, excluding icon-only controls. */
+@media screen {
+  body.app-typography button.bg-primary:not([data-refresh-control]):not(.size-8):not(.size-9):not(.size-10):not(.size-12),
+  body.app-typography a.bg-primary {
+    border: 2px solid #000000 !important;
+  }
+}
+
+.supplier-heading-image a[href^="/supplier/asns/new"] {
+  background-color: #1674B8 !important;
+}
+.supplier-heading-image a[href^="/supplier/asns/new"]:hover {
+  background-color: #1066A5 !important;
+}
+
+/* Compact claim layout without stretching evidence into unused space. */
+body.app-typography main .damage-claim-card {
+  padding: 18px;
+  max-width: 1200px;
+  margin-inline: auto;
+}
+.damage-claim-card > div:first-child { padding-bottom: 10px; }
+.damage-claim-card .claim-quantity-summary {
+  max-width: none;
+  margin-block: 12px;
+  padding: 10px 14px;
+  gap: 14px;
+}
+.damage-claim-card .claim-quantity-summary > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.damage-claim-card .claim-quantity-summary dd { margin-top: 0; font-size: 16px; white-space: nowrap; }
+.damage-claim-card .claim-information-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+  gap: 14px;
+}
+.damage-claim-card .claim-shipment-section,
+.damage-claim-card .claim-evidence { padding: 14px; }
+.damage-claim-card .claim-shipment-section > h4,
+.damage-claim-card .claim-evidence > p:first-child { padding-bottom: 8px; margin-bottom: 10px; }
+.damage-claim-card .claim-shipment-details { gap: 12px 20px; }
+.damage-claim-card .claim-shipment-details > div > p { margin-top: 3px; }
+.damage-claim-card .claim-evidence img { width: 112px; height: 84px; }
+.damage-claim-card .claim-replacement-footer { margin-top: 12px; padding-top: 12px; }
+@media (max-width: 767px) {
+  .damage-claim-card .claim-information-layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 479px) {
+  .damage-claim-card .claim-quantity-summary > div { align-items: flex-start; flex-direction: column; gap: 4px; }
+}
+
+.supplier-heading-image > div:first-child {
+  border: 2px solid #000000;
+}
+
+/* Supplier visual system shared across all operational modules. */
+@media screen {
+  body.app-typography main { --module-panel-blue: rgb(158 199 245 / 0.45); }
+  body.app-typography main :is(.gate-dashboard-hero, .assembly-dashboard-hero, .grn-dashboard-hero) > div:first-child,
+  body.app-typography main .warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-module-hero > div:nth-child(3),
+  body.app-typography main .dashboard-title-card {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: #10213A;
+    min-width: 0;
+  }
+  body.app-typography main :is(.gate-dashboard-hero, .assembly-dashboard-hero, .grn-dashboard-hero) > div:first-child :is(h1, p, span, svg),
+  body.app-typography main .warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-module-hero > div:nth-child(3) :is(h1, p, span, svg) {
+    color: #10213A;
+  }
+
+  body.app-typography main [data-slot="card"] > [data-slot="card-header"]:not(:is(.delivery-notices-toolbar, .dispatch-history-toolbar, .material-catalog-toolbar)) {
+    margin: 16px;
+    padding: 18px;
+    border: 1px solid rgb(113 157 210 / 0.45);
+    border-radius: 12px;
+    background: var(--module-panel-blue);
+    box-shadow: 0 4px 12px rgb(0 0 0 / 0.18);
+    gap: 12px;
+    min-width: 0;
+  }
+  body.app-typography main [data-slot="card-header"] > * { min-width: 0; }
+  body.app-typography main [data-slot="card-header"] :is(input, select, [role="combobox"]) {
+    background-color: #FFFFFF;
+    min-height: 40px;
+  }
+  body.app-typography main [data-slot="card"] { min-width: 0; }
+  body.app-typography main :is(.app-page-heading, .locations-section-header) { gap: 20px; }
+  body.app-typography main .locations-section-header {
+    background: var(--module-panel-blue);
+    border: 1px solid rgb(113 157 210 / 0.45);
+    box-shadow: 0 4px 12px rgb(0 0 0 / 0.18);
+  }
+  body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) [data-primary-action="true"]:not([data-refresh-control]):not([data-information-help]) {
+    border: 2px solid #000000 !important;
+    background-color: #1674B8;
+    color: #FFFFFF;
+  }
+  body.app-typography main .app-page-heading [data-primary-action="true"] {
+    background: #FFFFFF !important;
+    color: #064B87 !important;
+  }
+  body.app-typography main :is(.supplier-kpi-spark, .warehouse-dashboard-kpi-chart) > span { opacity: 1; }
+  body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) table :is(tbody, tbody tr, tbody td) {
+    background-color: #EFF6FF !important;
+  }
+  body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) table tbody tr:hover > td {
+    background-color: #E5F0FE !important;
+  }
+  body.app-typography main table th { line-height: 1.4; }
+  body.app-typography main table td { vertical-align: middle; line-height: 1.5; }
+  body.app-typography main [data-slot="card-header"] :is(button, [role="combobox"]) { flex-shrink: 0; }
+}
+@media (max-width: 767px) {
+  body.app-typography main [data-slot="card-header"]:has(input, select, [role="combobox"]) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  body.app-typography main [data-slot="card"] > [data-slot="card-header"] { margin: 12px; }
+  body.app-typography main .dashboard-title-card { padding: 0; }
+}
+
+body.app-typography main .supplier-delivery-notices .asn-reference-cell {
+  color: #000000;
+  font-weight: 700;
+}
+
+body.app-typography main :is(.material-reference-cell, .dispatch-reference-cell) {
+  color: #000000;
+  font-weight: 700;
+}
+
+/* Let the admin dashboard use the shell's available content width. */
+body.app-typography main:has(> div > .admin-dashboard-content) > div {
+  max-width: 1680px;
+}
+
+body.app-typography main .admin-dashboard-actions :is(button, a) {
+  background: #FFFFFF !important;
+  color: #064B87 !important;
+  border-color: #FFFFFF;
+  border-radius: 12px;
+  min-height: 40px;
+  box-shadow: 0 3px 10px rgb(0 0 0 / 0.14);
+}
+body.app-typography main .admin-dashboard-actions svg { color: #064B87 !important; }
+body.app-typography main .admin-dashboard-actions :is(button, a):hover { background: #EDF4FD !important; }
+
+body.app-typography main .app-page-heading .operations-title-icon {
+  background: rgb(255 255 255 / 0.15) !important;
+  color: #FFFFFF !important;
+}
+body.app-typography main .operations-title-icon svg { opacity: 1; stroke-width: 2.5; }
+.operations-workspace { padding-bottom: 60px; }
+.operations-workspace > div { min-width: 0; }
+.operations-kpis > [data-slot="card"] > div { min-height: 112px; padding: 18px; gap: 16px; }
+.operations-kpis svg { opacity: 1; stroke-width: 2.5; }
+.operations-charts > [data-slot="card"] { min-width: 0; }
+.operations-outcomes-content { padding-bottom: 36px; }
+@media (min-width: 1200px) {
+  .operations-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .operations-charts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .operations-charts > [data-slot="card"]:first-child { grid-column: span 2; }
+}
+@media (min-width: 640px) and (max-width: 1199px) {
+  .operations-kpis > [data-slot="card"]:last-child { grid-column: 1 / -1; }
+}
+
+body.app-typography main .admin-dashboard-actions a[href="/admin/users"] {
+  background: #1674B8 !important;
+  color: #FFFFFF !important;
+  border: 2px solid #000000 !important;
+}
+body.app-typography main .admin-dashboard-actions a[href="/admin/users"] svg {
+  color: #FFFFFF !important;
+}
+body.app-typography main .admin-dashboard-actions a[href="/admin/users"]:hover {
+  background: #1066A5 !important;
+}
+
+/* Warehouse workspace alignment -------------------------------------------------
+   Inventory tabs, receiving, dock allocation, and legacy warehouse routes are
+   authored by different screens. Keep their outer edges, cards, and tables on
+   one shared layout grid without leaking these rules into other modules. */
+.warehouse-visual-workspace main > div {
+  width: 100%;
+  min-width: 0;
+}
+
+.warehouse-visual-workspace main > div > *,
+.warehouse-visual-workspace main :is(section, article, [data-slot="card"], [role="tabpanel"]) {
+  min-width: 0;
+}
+
+.warehouse-visual-workspace main :is(.grid, [class*="grid-cols-"]) {
+  align-items: stretch;
+}
+
+.warehouse-visual-workspace main :is(.grid, [class*="grid-cols-"]) > :is(section, article, [data-slot="card"]) {
+  width: 100%;
+  height: 100%;
+}
+
+.warehouse-visual-workspace main [data-slot="card"] {
+  overflow: hidden;
+}
+
+.warehouse-visual-workspace main [data-slot="card-header"],
+.warehouse-visual-workspace main [data-slot="card-content"],
+.warehouse-visual-workspace main [data-slot="card-footer"] {
+  width: 100%;
+  min-width: 0;
+}
+
+.warehouse-visual-workspace main :is(.overflow-x-auto, [class*="overflow-x-"]) {
+  width: 100%;
+  max-width: 100%;
+}
+
+.warehouse-visual-workspace main table {
+  width: 100%;
+  min-width: 100%;
+  border-collapse: collapse;
+}
+
+.warehouse-visual-workspace main :is(th, td) {
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+
+.warehouse-visual-workspace main :is(th, td):first-child { padding-left: 18px; }
+.warehouse-visual-workspace main :is(th, td):last-child { padding-right: 18px; }
+
+.warehouse-visual-workspace main :is(h1, h2, h3, h4, p) {
+  overflow-wrap: break-word;
+}
+
+@media (max-width: 639px) {
+  .warehouse-visual-workspace main :is(th, td):first-child { padding-left: 12px; }
+  .warehouse-visual-workspace main :is(th, td):last-child { padding-right: 12px; }
+}
+
+/* Password fields use the application's accessible visibility button. Hide the
+   browser-provided Edge/Windows reveal and clear controls to prevent duplicates. */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Module dashboard hero typography: slightly larger with restrained depth. */
+body.app-typography main :is(
+  .supplier-heading-image,
+  .gate-dashboard-hero,
+  .assembly-dashboard-hero,
+  .grn-dashboard-hero,
+  .warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-module-hero,
+  .dashboard-title-card,
+  .app-page-heading
+) h1 {
+  font-size: clamp(32px, 2.55vw, 42px) !important;
+  line-height: 1.14;
+  letter-spacing: -0.025em;
+  text-shadow:
+    0 1px 0 rgb(255 255 255 / 0.75),
+    0 2px 0 rgb(6 75 135 / 0.20),
+    0 5px 10px rgb(6 38 72 / 0.20);
+}
+
+body.app-typography main :is(
+  .supplier-heading-image,
+  .gate-dashboard-hero,
+  .assembly-dashboard-hero,
+  .grn-dashboard-hero,
+  .warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-module-hero,
+  .dashboard-title-card,
+  .app-page-heading
+) h1 + p {
+  margin-top: 10px;
+  font-size: clamp(15px, 1.05vw, 18px) !important;
+  line-height: 1.55;
+  font-weight: 500;
+}
+
+/* Blue title bars need a darker lower shadow instead of a light embossed edge. */
+body.app-typography main .app-page-heading h1 {
+  text-shadow:
+    0 1px 0 rgb(255 255 255 / 0.20),
+    0 3px 0 rgb(0 39 76 / 0.38),
+    0 6px 12px rgb(0 24 52 / 0.30);
+}
+
+@media (max-width: 639px) {
+  body.app-typography main :is(
+    .supplier-heading-image,
+    .gate-dashboard-hero,
+    .assembly-dashboard-hero,
+    .grn-dashboard-hero,
+    .warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-module-hero,
+    .dashboard-title-card,
+    .app-page-heading
+  ) h1 {
+    font-size: 30px !important;
+  }
+}
+
+/* Gate Entry tables share one column and action alignment system. */
+.gate-visual-workspace main table {
+  width: 100%;
+  min-width: 1100px;
+}
+
+.gate-visual-workspace main table th {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  vertical-align: middle;
+}
+
+.gate-visual-workspace main table :is(th, td) {
+  box-sizing: border-box;
+  padding-inline: 16px;
+}
+
+.gate-visual-workspace main table th:last-child,
+.gate-visual-workspace main table td:last-child:not([colspan]) {
+  min-width: 140px;
+  text-align: center !important;
+  white-space: nowrap;
+}
+
+.gate-visual-workspace main table td:last-child:not([colspan]) > :is(div, span) {
+  width: 100%;
+  min-width: 0;
+  justify-content: center !important;
+}
+
+.gate-visual-workspace main table td:last-child:not([colspan]) :is(button, a) {
+  width: auto !important;
+  max-width: 100%;
+  min-width: 0;
+  justify-content: center;
+  margin-inline: auto;
+}
+
+@media (max-width: 639px) {
+  .gate-visual-workspace main table :is(th, td) { padding-inline: 12px; }
+}
+
+/* Dashboard hero titles sit directly on their artwork; no glass/card overlay. */
+body.app-typography main .supplier-heading-image > div:first-child,
+body.app-typography main :is(.gate-dashboard-hero, .assembly-dashboard-hero, .grn-dashboard-hero) > div:first-child,
+body.app-typography main .warehouse-module-content[data-warehouse-tab="dashboard"] .warehouse-module-hero > div:nth-child(3),
+body.app-typography main .dashboard-title-card {
+  width: auto !important;
+  max-width: 680px;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* Gate page title icons use the same translucent tile as every module. */
+body.app-typography main .gate-entry-header .gate-entry-title-icon {
+  border: 1px solid rgb(255 255 255 / 0.34) !important;
+  background: rgb(255 255 255 / 0.14) !important;
+  color: #FFFFFF !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16), 0 4px 12px rgb(0 24 52 / 0.16);
+  opacity: 1 !important;
+}
+body.app-typography main .gate-entry-header .gate-entry-title-icon svg {
+  color: #FFFFFF !important;
+  opacity: 1 !important;
+  stroke-width: 2.25;
+}
+
+/* Match all Gate Entry data grids to the dashboard table structure. */
+.gate-visual-workspace main table thead tr > th {
+  border-right: 1px solid rgb(255 255 255 / 0.55);
+  line-height: 1.25;
+}
+.gate-visual-workspace main table thead tr > th:last-child { border-right: 0; }
+.gate-visual-workspace main table tbody tr > td {
+  border-right: 1px solid #C8D8EA;
+  line-height: 1.45;
+}
+.gate-visual-workspace main table tbody tr > td:last-child { border-right: 0; }
+.gate-visual-workspace main table tbody tr { border-bottom: 1px solid #C8D8EA; }
+.gate-visual-workspace main table tbody tr:last-child { border-bottom: 0; }
+
+/* Stronger dimensional treatment for every dashboard/page hero title. */
+body.app-typography main :is(
+  .supplier-heading-image,
+  .gate-dashboard-hero,
+  .assembly-dashboard-hero,
+  .grn-dashboard-hero,
+  .warehouse-module-hero,
+  .dashboard-title-card
+) h1 {
+  text-shadow:
+    0 1px 0 #FFFFFF,
+    0 2px 0 #D7E5F2,
+    0 3px 0 #B8CEE2,
+    0 4px 0 #94B2CD,
+    0 7px 9px rgb(6 38 72 / 0.28),
+    0 12px 22px rgb(6 38 72 / 0.18) !important;
+  filter: drop-shadow(0 2px 1px rgb(255 255 255 / 0.45));
+  transform: translateZ(0);
+}
+
+/* One translucent heading-icon treatment across every application module. */
+body.app-typography main :is(
+  .gate-entry-title-icon,
+  .supplier-page-title-icon,
+  .notification-centre-title-icon,
+  .operations-title-icon,
+  .app-heading-title-icon
+) {
+  border: 1px solid rgb(255 255 255 / 0.34) !important;
+  background: rgb(255 255 255 / 0.14) !important;
+  color: #FFFFFF !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.16),
+    0 4px 12px rgb(0 24 52 / 0.16) !important;
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
+  opacity: 1 !important;
+}
+
+body.app-typography main :is(
+  .gate-entry-title-icon,
+  .supplier-page-title-icon,
+  .notification-centre-title-icon,
+  .operations-title-icon,
+  .app-heading-title-icon
+) svg {
+  color: #FFFFFF !important;
+  opacity: 1 !important;
+  stroke-width: 2.25;
+}
+
+/* Compact Gate status pills: keep operational labels on one line. */
+.gate-visual-workspace main [data-slot="badge"]:is(
+  [data-status="INSIDE_FACILITY"],
+  [data-status="READY_FOR_PICKUP"],
+  [data-status="READY FOR PICKUP"],
+  [data-status="EXITED"],
+  [data-status="VEHICLE_EXITED"]
+) {
+  width: max-content;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 5px 9px !important;
+  white-space: nowrap;
+  font-size: 10px !important;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.gate-visual-workspace main [data-slot="badge"]:is(
+  [data-status="EXITED"],
+  [data-status="VEHICLE_EXITED"]
+) {
+  border-color: #8C1426 !important;
+  background: #8C1426 !important;
+  color: #FFFFFF !important;
+}
+
+body.app-typography main .app-page-heading h1 {
+  text-shadow:
+    0 1px 0 #4E91C6,
+    0 2px 0 #347CAE,
+    0 3px 0 #17618F,
+    0 4px 0 #03436C,
+    0 7px 9px rgb(0 24 52 / 0.42),
+    0 12px 22px rgb(0 24 52 / 0.28) !important;
+  filter: drop-shadow(0 1px 0 rgb(255 255 255 / 0.22));
+  transform: translateZ(0);
+}
+
+/* Specificity-safe final icon rule for all blue module title bars. */
+body.app-typography main .app-page-heading.gate-entry-header .gate-entry-title-icon,
+body.app-typography main .app-page-heading.material-master-header .supplier-page-title-icon,
+body.app-typography main .app-page-heading.supplier-module-header .supplier-page-title-icon,
+body.app-typography main .app-page-heading.notifications-header .notification-centre-title-icon,
+body.app-typography main .app-page-heading .operations-title-icon {
+  border: 1px solid rgb(255 255 255 / 0.34) !important;
+  background-color: rgb(255 255 255 / 0.14) !important;
+  background-image: none !important;
+  color: #FFFFFF !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16), 0 4px 12px rgb(0 24 52 / 0.16) !important;
+  -webkit-backdrop-filter: blur(5px) !important;
+  backdrop-filter: blur(5px) !important;
+  opacity: 1 !important;
+}
+
+body.app-typography main .app-page-heading.gate-entry-header .gate-entry-title-icon svg,
+body.app-typography main .app-page-heading.material-master-header .supplier-page-title-icon svg,
+body.app-typography main .app-page-heading.supplier-module-header .supplier-page-title-icon svg,
+body.app-typography main .app-page-heading.notifications-header .notification-centre-title-icon svg,
+body.app-typography main .app-page-heading .operations-title-icon svg {
+  color: #FFFFFF !important;
+  opacity: 1 !important;
+}
+
+/* Finished-goods pickup: compact body copy while retaining strong headers. */
+.gate-visual-workspace main .pickup-requests-table tbody td {
+  padding-block: 13px;
+  font-size: 14px !important;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+
+.gate-visual-workspace main .pickup-requests-table :is(th, td):is(
+  :nth-child(4),
+  :nth-child(7),
+  :nth-child(8)
+) {
+  text-align: center;
+}
+
+.gate-visual-workspace main .pickup-requests-table tbody td > div {
+  line-height: 1.55;
+}
+
+.gate-visual-workspace main .pickup-requests-table [data-slot="badge"] {
+  max-width: 100%;
+  padding: 5px 7px !important;
+  font-size: 9px !important;
+  line-height: 1;
+}
+
+/* All table body copy is black; headers and semantic status badges keep their
+   module-specific colors. */
+body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) table tbody td {
+  color: #000000 !important;
+}
+
+body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) table tbody td
+  :is(p, span, div, a, button):not([data-slot="badge"]):not([data-slot="badge"] *) {
+  color: #000000 !important;
+}
+
+/* Assembly Quality: stable seven-column grid matching the dashboard tables. */
+.assembly-visual-workspace main .quality-inspection-table th {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.assembly-visual-workspace main .quality-inspection-table :is(th, td) {
+  box-sizing: border-box;
+  padding-inline: 16px;
+  vertical-align: middle;
+  border-right: 1px solid #C8D8EA;
+}
+
+.assembly-visual-workspace main .quality-inspection-table :is(th, td):last-child {
+  border-right: 0;
+}
+
+.assembly-visual-workspace main .quality-inspection-table :is(th, td):nth-child(n + 3) {
+  text-align: center;
+}
+
+.assembly-visual-workspace main .quality-inspection-table td:nth-child(4) > div,
+.assembly-visual-workspace main .quality-inspection-table td:last-child > div {
+  justify-content: center;
+}
+
+.assembly-visual-workspace main .quality-inspection-table tbody tr {
+  border-bottom: 1px solid #C8D8EA;
+}
+
+.assembly-visual-workspace main .quality-inspection-table tbody tr:last-child {
+  border-bottom: 0;
+}
+/* Keep the Inventory batch-count action legible over its primary-blue pill. */
+body.app-typography main table tbody .inventory-batch-count {
+  color: #ffffff !important;
+}
+body.app-typography .warehouse-visual-workspace main table tbody td .inventory-batch-count .inventory-batch-count-label,
+.inventory-batch-count .inventory-batch-count-label {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  opacity: 1 !important;
+}

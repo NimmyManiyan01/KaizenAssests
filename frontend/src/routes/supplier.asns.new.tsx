@@ -160,12 +160,14 @@ function StatusTooltip({ status }: { status: string }) {
   }
   const description = statusDescriptions[normalizedStatus];
   const badge = (
-    <span
+    <Badge
+      variant="outline"
+      data-status={normalizedStatus}
       className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusStyles[normalizedStatus] || "border-border bg-muted text-muted-foreground"
         }`}
     >
       {normalizedStatus.replaceAll("_", " ")}
-    </span>
+    </Badge>
   );
 
   if (!description) return badge;
@@ -982,16 +984,16 @@ function NewAsnPage() {
       >
         <div className="supplier-module-page w-full space-y-5 pb-10">
           {/* Search & ASN Table Card */}
-          <Card className="rounded-xl border-border bg-card shadow-sm">
-            <CardHeader className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-              <div>
+          <Card className="supplier-delivery-notices rounded-xl border-border bg-card shadow-sm">
+            <CardHeader className="delivery-notices-toolbar flex flex-col gap-4 p-4 sm:p-5">
+              <div className="delivery-notices-heading-card">
                 <CardTitle className="text-base font-semibold">Delivery notices</CardTitle>
                 <CardDescription>
                   Search and review the delivery notices you have created.
                 </CardDescription>
               </div>
 
-              <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+              <div className="delivery-notices-controls flex w-full flex-wrap items-center gap-2">
                 <div className="relative w-full sm:w-64">
                   <Search
                     className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -1145,7 +1147,7 @@ function NewAsnPage() {
                     ) : (
                       pagedDeliveries.map((asn) => (
                         <tr key={asn.id} className="transition-colors hover:bg-muted/40">
-                          <td className="px-4 py-3 font-mono font-medium text-primary">
+                          <td className="asn-reference-cell px-4 py-3 font-mono font-bold text-black">
                             {asn.asn_number || "â€”"}
                           </td>
                           <td className="px-4 py-3 text-foreground">
@@ -1163,7 +1165,7 @@ function NewAsnPage() {
                             <StatusTooltip status="SUBMITTED" />
                           </td>
                           <td className="px-4 py-3 text-right tabular-nums text-foreground">
-                            {asn.lines?.length || 0} items Â·{" "}
+                            {asn.lines?.length || 0} items /{" "}
                             {asn.lines?.reduce(
                               (sum: number, line: any) =>
                                 sum + Number(line.shipped_quantity ?? line.quantity ?? 0),

@@ -1927,7 +1927,7 @@ function GrnPageWorkflow() {
           detail.documents.map((d: any) => ({
             document_id: d.id || d.document_id,
             category: d.document_type || d.category || "Invoice Copy",
-            file_name: d.file_name || "document.pdf",
+            file_name: d.file_name || d.name || "Attachment",
             file_path: d.file_path || "",
           })),
         );
@@ -2774,7 +2774,7 @@ function GrnPageWorkflow() {
             document_id: document.id || document.document_id,
             grn_id: document.grn_id || grnId,
             category: document.document_type || document.category || "Document",
-            file_name: document.file_name || "document.pdf",
+            file_name: document.file_name || document.name || "Attachment",
             file_path: document.file_path || document.filePath || "",
           })),
         );

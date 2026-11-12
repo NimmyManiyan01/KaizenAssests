@@ -1,12 +1,11 @@
 import { InformationTooltip } from "@/components/ui/information-tooltip";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
 import { requireRole } from "@/lib/auth-utils";
 import { api, type AssemblyQualityInspectionItem } from "@/lib/api-client";
 import {
   AlertTriangle,
-  ArrowRight,
   CheckCircle2,
   Factory,
   Filter,
@@ -14,7 +13,6 @@ import {
   LayoutDashboard,
   Package,
   PackageCheck,
-  QrCode,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -367,17 +365,17 @@ function AssemblyQualityPage() {
               </div>
             </div>
           ) : (
-            <div className="overflow-x-auto -mx-5 px-5">
-              <table className="w-full min-w-[1000px] table-fixed text-left text-sm [&_th]:align-middle [&_td]:align-middle">
+            <div className="overflow-x-auto rounded-xl border border-border">
+              <table className="quality-inspection-table w-full min-w-[1040px] table-fixed border-collapse text-left text-sm [&_th]:align-middle [&_td]:align-middle">
+                <colgroup><col className="w-[18%]" /><col className="w-[18%]" /><col className="w-[12%]" /><col className="w-[18%]" /><col className="w-[15%]" /><col className="w-[19%]" /></colgroup>
                 <thead>
                   <tr className="border-b border-border/60 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                     <th className="py-3 px-3">Order Number</th>
                     <th className="py-3 px-3">Product Details</th>
-                    <th className="py-3 px-3">Produced Qty</th>
-                    <th className="py-3 px-3">QC Breakdown<InformationTooltip help="qc" /></th>
-                    <th className="py-3 px-3">QC Status<InformationTooltip help="workflowStatus" /></th>
-                    <th className="py-3 px-3">Quality Engineer & Date</th>
-                    <th className="py-3 px-3 text-right">Action</th>
+                    <th className="px-3 py-3 text-center">Produced Qty</th>
+                    <th className="px-3 py-3 text-center"><span className="inline-flex items-center justify-center gap-1">QC Breakdown<InformationTooltip help="qc" /></span></th>
+                    <th className="px-3 py-3 text-center"><span className="inline-flex items-center justify-center gap-1">QC Status<InformationTooltip help="workflowStatus" /></span></th>
+                    <th className="px-3 py-3 text-center">Quality Engineer &amp; Date</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
@@ -404,7 +402,7 @@ function AssemblyQualityPage() {
                       </td>
 
                       {/* Produced Qty */}
-                      <td className="py-3.5 px-3 whitespace-nowrap">
+                      <td className="px-3 py-3.5 text-center whitespace-nowrap">
                         <span className="font-bold text-foreground text-xs tabular-nums">
                           {item.produced_quantity}
                         </span>{" "}
@@ -462,36 +460,6 @@ function AssemblyQualityPage() {
                         )}
                       </td>
 
-                      {/* Action */}
-                      <td className="py-3.5 px-3 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-2">
-                          {item.can_inspect ? (
-                            <Button
-                              size="sm"
-                              className="h-7 px-3 text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white gap-1.5 rounded-lg shadow-sm"
-                              onClick={() => handleOpenInspectModal(item)}
-                            >
-                              <ShieldCheck className="size-3.5" />
-                              Perform QC
-                            </Button>
-                          ) : qualityGroup(item) === "PASSED" || item.passed_quantity > 0 ? (
-                            <Link
-                              to="/assembly/finished-goods"
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 transition-all shadow-2xs"
-                            >
-                              <QrCode className="size-3.5 text-emerald-600" />
-                              View FG Label
-                              <ArrowRight className="size-3 ml-0.5" />
-                            </Link>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">
-                              {qualityGroup(item) === "PENDING_INSPECTION"
-                                ? "Not available"
-                                : "Inspection recorded"}
-                            </span>
-                          )}
-                        </div>
-                      </td>
                     </tr>
                   ))}
                 </tbody>

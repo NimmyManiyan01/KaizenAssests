@@ -1,3 +1,4 @@
+import { Badge } from "@/components/ui/badge";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { CircleCheck, Factory, Loader2, LockKeyhole, Pencil, Plus, Search, ShieldCheck, UserX, Users } from "lucide-react";
@@ -743,7 +744,7 @@ function AdminUsersPage() {
                     <td className="px-4">{roles.find((role) => role.value === user.role)?.label || user.role}</td>
                     <td className="px-4 text-muted-foreground">{user.role === "ASSEMBLY_MANAGER" ? user.assembly_unit_code || "Unassigned" : user.shift_name || "GENERAL"}</td>
                     <td className="px-4 text-muted-foreground">{user.last_login ? new Date(user.last_login).toLocaleString() : "Never"}</td>
-                    <td className="px-4"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${user.status === "ACTIVE" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{user.status === "ACTIVE" ? "Active" : "Inactive"}</span></td>
+                    <td className="px-4"><Badge className={`rounded-full px-2.5 py-1 text-xs font-semibold ${user.status === "ACTIVE" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{user.status === "ACTIVE" ? "Active" : "Inactive"}</Badge></td>
                     <td className="flex justify-end gap-2 px-4 py-3">
                       <Button size="sm" variant="outline" onClick={() => openEdit(user)}><Pencil className="size-4" /> Edit</Button>
                       <Button size="sm" variant="outline" className={user.status === "ACTIVE" ? "border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800" : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"} onClick={() => void updateUser(user, { status: user.status === "ACTIVE" ? "INACTIVE" : "ACTIVE" })}>{user.status === "ACTIVE" ? "Deactivate account" : "Activate account"}</Button>

@@ -1,6 +1,6 @@
 import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw, Search } from "lucide-react";
 import { PackageQrActions } from "@/components/wms/package-qr-actions";
 import { toast } from "sonner";
@@ -138,7 +138,16 @@ function AssemblyDispatchPage() {
   const [verified, setVerified] = useState<string[]>([]);
   const [packageType, setPackageType] = useState("");
   const [packageCount, setPackageCount] = useState("");
+  const detailSectionRef = useRef<HTMLElement>(null);
   const selected = requests.find((request) => request.id === selectedId);
+  useEffect(() => {
+    if (!selectedId) return;
+    const frame = window.requestAnimationFrame(() => {
+      detailSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      detailSectionRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedId]);
   const load = useCallback(async (isCurrent: () => boolean = () => true) => {
     const result = await api.getSupplierFinishedGoodsDispatchRequests();
     if (!isCurrent()) return (result || []) as Pickup[];
@@ -453,7 +462,17 @@ function AssemblyDispatchPage() {
                           className="rounded-xl text-xs"
                           disabled={busy}
                           aria-pressed={selectedId === request.id}
-                          onClick={() => setSelectedId(request.id)}
+                          onClick={() => {
+                            if (selectedId === request.id) {
+                              detailSectionRef.current?.scrollIntoView({
+                                behavior: "smooth",
+                                block: "start",
+                              });
+                              detailSectionRef.current?.focus({ preventScroll: true });
+                              return;
+                            }
+                            setSelectedId(request.id);
+                          }}
                         >
                           {dispatchAction(request)}
                         </Button>
@@ -508,6 +527,8 @@ function AssemblyDispatchPage() {
         </section>
         {selected && (
           <section
+            ref={detailSectionRef}
+            tabIndex={-1}
             className="rounded-2xl border border-border/70 bg-card p-4 sm:p-5 shadow-soft space-y-5"
             aria-label="Selected pickup workflow"
           >

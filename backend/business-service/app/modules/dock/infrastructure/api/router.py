@@ -22,6 +22,7 @@ from app.modules.dock.infrastructure.api.schemas import (
     DockMasterResponse,
     DockOverviewMetrics,
     ReassignDockRequest,
+    UpdateDockActivationRequest,
     UpdateDockMasterRequest,
     UpdateDockStatusRequest,
 )
@@ -36,6 +37,17 @@ from app.modules.warehouse.infrastructure.persistence.models import WarehouseMod
 from app.modules.gate.infrastructure.persistence.models import GateEntryModel, DockAssignmentModel, DockModel
 
 router = APIRouter(prefix="/api/v1/warehouse", tags=["dock-management"])
+DEFAULT_RECEIVING_DOCK_CODE = "RM-01"
+
+
+def _reject_default_dock_removal(dock: DockMasterModel, requested_is_active: bool | None = None) -> None:
+    """Keep the baseline receiving dock present and visible in every workflow."""
+    is_default = dock.dock_code.strip().upper() == DEFAULT_RECEIVING_DOCK_CODE
+    if is_default and (requested_is_active is False or requested_is_active is None):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The default receiving dock cannot be deleted or deactivated.",
+        )
 
 
 async def _get_warehouse_user_context(user: CurrentUser, uow: UnitOfWork):
@@ -65,6 +77,7 @@ async def list_docks(
     status: Optional[str] = None,
     direction: Optional[str] = None,
     status_filter: Optional[str] = None,
+    include_inactive: bool = Query(False),
     user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
 ):
@@ -74,7 +87,12 @@ async def list_docks(
     if isinstance(dock_type, str) and dock_type.strip().upper() == "ALL":
         dock_type = None
 
-    docks = await DockAllocationService.list_docks(uow.session, dock_type=dock_type, status=actual_status)
+    docks = await DockAllocationService.list_docks(
+        uow.session,
+        dock_type=dock_type,
+        status=actual_status,
+        include_inactive=include_inactive,
+    )
     if direction:
         direction_value = direction.strip().upper()
         docks = [dock for dock in docks if dock.direction in (direction_value, "BOTH")]
@@ -202,6 +220,7 @@ async def list_docks(
                 description=d.description,
                 status=effective_status,
                 is_active=d.is_active,
+                is_default=d.dock_code.strip().upper() == DEFAULT_RECEIVING_DOCK_CODE,
                 warehouse_ref_id=d_warehouse_ref_id or assigned_sid,
                 warehouse_code=d_warehouse_code or assigned_scode,
                 warehouse_name=d_warehouse_name or assigned_sname,
@@ -249,6 +268,28 @@ async def list_docks(
         return filtered_res
 
     return res
+
+
+@router.get("/dock-management/registry", response_model=List[DockMasterResponse])
+async def list_docks_for_management(
+    user: CurrentUser = Depends(require_permission("gate:write")),
+    uow: UnitOfWork = Depends(get_uow),
+):
+    """Return the complete dock registry for lifecycle administration.
+
+    Operational consumers continue using GET /docks, which is active-only by
+    default. This endpoint deliberately includes inactive records so a dock
+    cannot exist in the source of truth while remaining hidden from managers.
+    """
+    return await list_docks(
+        dock_type=None,
+        status=None,
+        direction=None,
+        status_filter=None,
+        include_inactive=True,
+        user=user,
+        uow=uow,
+    )
 
 
 @router.post("/docks", response_model=DockMasterResponse, status_code=status.HTTP_201_CREATED)
@@ -376,6 +417,7 @@ async def get_dock_by_id(
         description=dock.description,
         status=dock.status,
         is_active=dock.is_active,
+        is_default=dock.dock_code.strip().upper() == DEFAULT_RECEIVING_DOCK_CODE,
         created_at=dock.created_at,
         updated_at=dock.updated_at,
         current_allocation=current_alloc,
@@ -395,6 +437,11 @@ async def update_dock(
 
     if req.dock_code is not None:
         dock_code = req.dock_code.strip().upper()
+        if dock.dock_code.strip().upper() == DEFAULT_RECEIVING_DOCK_CODE and dock_code != DEFAULT_RECEIVING_DOCK_CODE:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"The default receiving dock code must remain {DEFAULT_RECEIVING_DOCK_CODE}.",
+            )
         duplicate = await uow.session.scalar(select(DockMasterModel).where(DockMasterModel.dock_code == dock_code, DockMasterModel.id != dock.id))
         if duplicate:
             raise HTTPException(status_code=409, detail=f"Dock code '{dock_code}' already exists")
@@ -410,7 +457,30 @@ async def update_dock(
     if req.description is not None:
         dock.description = req.description
     if req.is_active is not None:
-        dock.is_active = req.is_active
+        _reject_default_dock_removal(dock, req.is_active)
+        if dock.is_active != req.is_active:
+            if not req.is_active and await _dock_has_active_vehicle_or_allocation(dock, uow):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="This dock cannot be deactivated while a vehicle is assigned or inside it. Release the vehicle first.",
+                )
+            previous_lifecycle = "ACTIVE" if dock.is_active else "INACTIVE"
+            dock.is_active = req.is_active
+            dock.status = "AVAILABLE" if req.is_active else "MAINTENANCE"
+            gate_dock = (await uow.session.execute(
+                select(DockModel).where(func.upper(DockModel.dock_number) == dock.dock_code.upper())
+            )).scalar_one_or_none()
+            if gate_dock:
+                gate_dock.status = dock.status
+            uow.session.add(
+                DockStatusHistoryModel(
+                    dock_id=dock.id,
+                    previous_status=previous_lifecycle,
+                    new_status="ACTIVE" if req.is_active else "INACTIVE",
+                    reason="Dock lifecycle changed through dock update",
+                    changed_by=user.username,
+                )
+            )
 
     try:
         await uow.session.commit()
@@ -418,6 +488,76 @@ async def update_dock(
         await uow.session.rollback()
         raise HTTPException(status_code=409, detail="Dock code already exists") from exc
     return await get_dock_by_id(dock.id, uow=uow)
+
+
+async def _dock_has_active_vehicle_or_allocation(
+    dock: DockMasterModel,
+    uow: UnitOfWork,
+) -> bool:
+    active_allocations = await DockAllocationService.get_active_allocations_for_docks(
+        uow.session, [dock.id]
+    )
+    if dock.id in active_allocations:
+        return True
+    active_gate_vehicle = await uow.session.scalar(
+        select(DockAssignmentModel.id)
+        .join(GateEntryModel, DockAssignmentModel.gate_entry_id == GateEntryModel.id)
+        .where(
+            func.upper(DockAssignmentModel.dock_number) == dock.dock_code.upper(),
+            DockAssignmentModel.dock_released_at.is_(None),
+            GateEntryModel.status.notin_([
+                "RELEASED", "EXITED", "CANCELLED", "GATE_EXIT_COMPLETED",
+                "VEHICLE_EXITED", "CHECKED_OUT", "COMPLETED", "REJECTED",
+                "DENIED_ENTRY",
+            ]),
+        )
+        .limit(1)
+    )
+    return active_gate_vehicle is not None
+
+
+@router.patch("/docks/{dock_id}/activation", response_model=DockMasterResponse)
+async def update_dock_activation(
+    dock_id: uuid.UUID,
+    req: UpdateDockActivationRequest,
+    user: CurrentUser = Depends(require_permission("gate:write")),
+    uow: UnitOfWork = Depends(get_uow),
+):
+    dock = (await uow.session.execute(
+        select(DockMasterModel).where(DockMasterModel.id == dock_id).with_for_update()
+    )).scalar_one_or_none()
+    if not dock:
+        raise HTTPException(status_code=404, detail="Dock not found")
+    if not req.active:
+        _reject_default_dock_removal(dock, False)
+        if await _dock_has_active_vehicle_or_allocation(dock, uow):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This dock cannot be deactivated while a vehicle is assigned or inside it. Release the vehicle first.",
+            )
+
+    previous_lifecycle = "ACTIVE" if dock.is_active else "INACTIVE"
+    if dock.is_active == req.active:
+        return await get_dock_by_id(dock.id, user=user, uow=uow)
+
+    dock.is_active = req.active
+    dock.status = "AVAILABLE" if req.active else "MAINTENANCE"
+    gate_dock = (await uow.session.execute(
+        select(DockModel).where(func.upper(DockModel.dock_number) == dock.dock_code.upper())
+    )).scalar_one_or_none()
+    if gate_dock:
+        gate_dock.status = dock.status
+    uow.session.add(
+        DockStatusHistoryModel(
+            dock_id=dock.id,
+            previous_status=previous_lifecycle,
+            new_status="ACTIVE" if req.active else "INACTIVE",
+            reason=req.reason or ("Dock activated" if req.active else "Dock deactivated"),
+            changed_by=user.username,
+        )
+    )
+    await uow.session.commit()
+    return await get_dock_by_id(dock.id, user=user, uow=uow)
 
 
 @router.delete("/docks/{dock_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -442,30 +582,15 @@ async def delete_dock(
     if not dock:
         raise HTTPException(status_code=404, detail="Dock not found")
 
+    _reject_default_dock_removal(dock)
+
     if dock.is_active and len(active_docks) <= 1:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="The last active dock cannot be deleted. Add another active dock first.",
         )
 
-    active_allocations = await DockAllocationService.get_active_allocations_for_docks(
-        uow.session, [dock.id]
-    )
-    active_gate_vehicle = await uow.session.scalar(
-        select(DockAssignmentModel.id)
-        .join(GateEntryModel, DockAssignmentModel.gate_entry_id == GateEntryModel.id)
-        .where(
-            func.upper(DockAssignmentModel.dock_number) == dock.dock_code.upper(),
-            DockAssignmentModel.dock_released_at.is_(None),
-            GateEntryModel.status.notin_([
-                "RELEASED", "EXITED", "CANCELLED", "GATE_EXIT_COMPLETED",
-                "VEHICLE_EXITED", "CHECKED_OUT", "COMPLETED", "REJECTED",
-                "DENIED_ENTRY",
-            ]),
-        )
-        .limit(1)
-    )
-    if dock.id in active_allocations or active_gate_vehicle is not None:
+    if await _dock_has_active_vehicle_or_allocation(dock, uow):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="This dock cannot be deleted while a vehicle is assigned or inside it. Release the vehicle first.",
@@ -491,8 +616,23 @@ async def update_dock_status(
     dock = (await uow.session.execute(select(DockMasterModel).where(DockMasterModel.id == dock_id))).scalar_one_or_none()
     if not dock:
         raise HTTPException(status_code=404, detail="Dock not found")
+    next_status = req.status.strip().upper()
+    if next_status not in {"AVAILABLE", "MAINTENANCE"}:
+        raise HTTPException(status_code=422, detail="Manual dock status must be AVAILABLE or MAINTENANCE")
+    if not dock.is_active:
+        raise HTTPException(status_code=409, detail="Activate this dock before changing its operational status")
+    if next_status == "MAINTENANCE" and await _dock_has_active_vehicle_or_allocation(dock, uow):
+        raise HTTPException(
+            status_code=409,
+            detail="This dock cannot enter maintenance while a vehicle is assigned or inside it. Release the vehicle first.",
+        )
     old_status = dock.status
-    dock.status = req.status.upper()
+    dock.status = next_status
+    gate_dock = (await uow.session.execute(
+        select(DockModel).where(func.upper(DockModel.dock_number) == dock.dock_code.upper())
+    )).scalar_one_or_none()
+    if gate_dock:
+        gate_dock.status = next_status
     uow.session.add(
         DockStatusHistoryModel(
             dock_id=dock.id,

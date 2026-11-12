@@ -1,7 +1,7 @@
 import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
-import { Eye, Loader2, PackageCheck, Plus, RefreshCw, Trash2, X } from "lucide-react";
+import { Eye, Loader2, PackageCheck, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -62,6 +62,7 @@ function SupplierDispatchPage() {
   const [finishedGoodsError, setFinishedGoodsError] = React.useState<string>();
   const [goods, setGoods] = React.useState([{ name: "", custom: false }]);
   const [dispatchHistory, setDispatchHistory] = React.useState<any[]>([]);
+  const [historySearch, setHistorySearch] = React.useState("");
   const [historyPage, setHistoryPage] = React.useState(1);
   const newestFirstDispatchHistory = React.useMemo(
     () =>
@@ -86,10 +87,21 @@ function SupplierDispatchPage() {
       }),
     [dispatchHistory],
   );
-  const historyPageCount = Math.max(1, Math.ceil(newestFirstDispatchHistory.length / 10));
+  const filteredDispatchHistory = React.useMemo(() => {
+    const terms = historySearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return newestFirstDispatchHistory.filter((dispatch) => {
+      const text = [dispatch.dispatch_number, dispatch.order_number, dispatch.status?.replaceAll("_", " "),
+        dispatch.vehicle_number, dispatch.transporter, dispatch.driver_name, dispatch.contact_person,
+        ...(dispatch.items || []).flatMap((item: any) => [item.material_name, item.material_code]),
+        ...(dispatch.transport_entries || []).flatMap((entry: any) => [entry.vehicle_number, entry.driver_name]),
+      ].filter(Boolean).join(" ").toLowerCase();
+      return terms.every((term) => text.includes(term));
+    });
+  }, [newestFirstDispatchHistory, historySearch]);
+  const historyPageCount = Math.max(1, Math.ceil(filteredDispatchHistory.length / 10));
   const currentHistoryPage = Math.min(historyPage, historyPageCount);
   const historyStart = (currentHistoryPage - 1) * 10;
-  const pagedDispatches = newestFirstDispatchHistory.slice(historyStart, historyStart + 10);
+  const pagedDispatches = filteredDispatchHistory.slice(historyStart, historyStart + 10);
   React.useEffect(() => { setHistoryPage(page => Math.min(page, historyPageCount)); }, [historyPageCount]);
   const [historyLoading, setHistoryLoading] = React.useState(true);
   const [historyError, setHistoryError] = React.useState<string>();
@@ -314,24 +326,32 @@ function SupplierDispatchPage() {
               setOpen(true);
             }}
           >
-            <Plus className="mr-2 size-4" /> Create Dispatch
+            <Plus className="mr-2 size-6 shrink-0" strokeWidth={3} aria-hidden="true" /> Create Dispatch
           </Button>
         </div>
       }
     >
-      <Card className="supplier-module-page overflow-hidden rounded-xl border-border bg-card shadow-sm">
-        <CardHeader className="flex flex-col gap-4 space-y-0 border-b px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
-          <div>
+      <Card className="supplier-dispatch-history supplier-module-page overflow-hidden rounded-xl border-border bg-card shadow-sm">
+        <CardHeader className="dispatch-history-toolbar flex flex-col gap-4 space-y-0 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="dispatch-history-heading-card">
             <CardTitle className="text-lg">Dispatch history</CardTitle>
             <CardDescription className="mt-1">
               Track finished goods dispatch requests created by your supplier account.
-              {!historyLoading && !historyError && (
-                <>
-                  {" "}
-                  {newestFirstDispatchHistory.length} dispatch{newestFirstDispatchHistory.length === 1 ? "" : "es"}.
-                </>
-              )}
             </CardDescription>
+          </div>
+          <div className="dispatch-history-tools flex flex-wrap items-center gap-3">
+            <label className="relative block min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-primary" aria-hidden="true" />
+              <Input value={historySearch} onChange={(event) => { setHistorySearch(event.target.value); setHistoryPage(1); }}
+                aria-label="Search dispatches by reference, goods, vehicle, driver, or status"
+                placeholder="Search dispatches" className="h-10 w-full rounded-lg bg-background pl-9 pr-9" />
+              {historySearch && <button type="button" aria-label="Clear dispatch search" onClick={() => { setHistorySearch(""); setHistoryPage(1); }} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1"><X className="size-4" /></button>}
+            </label>
+          {!historyLoading && !historyError && (
+            <span className="shrink-0 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-900">
+              {filteredDispatchHistory.length} dispatch{filteredDispatchHistory.length === 1 ? "" : "es"}
+            </span>
+          )}
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -365,18 +385,23 @@ function SupplierDispatchPage() {
                 Your newest pickup requests will appear here with their vehicle, driver, and progress.
               </p>
               <Button type="button" className="mt-5 h-10 rounded-lg" onClick={() => { void loadAssemblyFinishedGoods(); setPickupDateTouched(false); setOpen(true); }}>
-                <Plus className="mr-2 size-4" /> Create Dispatch
+                <Plus className="mr-2 size-6 shrink-0" strokeWidth={3} aria-hidden="true" /> Create Dispatch
               </Button>
             </div>
+          ) : filteredDispatchHistory.length === 0 ? (
+            <div className="px-6 py-12 text-center" role="status">
+              <p>No dispatches match your search.</p>
+              <Button variant="outline" className="mt-3" onClick={() => { setHistorySearch(""); setHistoryPage(1); }}>Clear search</Button>
+            </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-left text-sm">
+            <div className="dispatch-table-scroll overflow-x-auto" role="region" aria-label="Dispatch requests" tabIndex={0}>
+              <table className="w-full min-w-[860px] text-left text-sm">
+                <caption className="sr-only">Finished goods dispatch requests with assigned vehicles, drivers, status, and creation date.</caption>
                 <thead className="border-y bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="whitespace-nowrap px-5 py-3">Dispatch</th>
                     <th className="whitespace-nowrap px-5 py-3">Finished goods</th>
-                    <th className="whitespace-nowrap px-5 py-3">Vehicle</th>
-                    <th className="whitespace-nowrap px-5 py-3">Driver</th>
+                    <th className="whitespace-nowrap px-5 py-3">Vehicle &amp; driver</th>
                     <th className="whitespace-nowrap px-5 py-3">Status</th>
                     <th className="whitespace-nowrap px-5 py-3">Created</th>
                     <th className="whitespace-nowrap px-5 py-3">Action</th>
@@ -385,7 +410,7 @@ function SupplierDispatchPage() {
                 <tbody className="divide-y">
                   {pagedDispatches.map((dispatch) => (
                     <tr key={dispatch.id} className="transition-colors hover:bg-muted/20">
-                      <td className="px-5 py-3 font-mono font-semibold text-primary">
+                      <td className="dispatch-reference-cell px-5 py-3 font-mono font-bold text-black">
                         {dispatch.dispatch_number || dispatch.order_number || "—"}
                       </td>
                       <td className="px-5 py-3">
@@ -397,37 +422,27 @@ function SupplierDispatchPage() {
                           .join(", ") || "—"}
                       </td>
                       <td className="px-5 py-3">
-                        {Array.isArray(dispatch.transport_entries) && dispatch.transport_entries.length ? (
-                          <div className="space-y-1">
-                            {dispatch.transport_entries.map((entry: any, index: number) => (
-                              <p key={`${entry.vehicle_number || "vehicle"}-${index}`}>
-                                {index + 1}. {entry.vehicle_number || "—"}
-                              </p>
-                            ))}
-                          </div>
-                        ) : (
-                          dispatch.vehicle_number || dispatch.transporter || "—"
-                        )}
-                      </td>
-                      <td className="px-5 py-3">
-                        {Array.isArray(dispatch.transport_entries) && dispatch.transport_entries.length ? (
-                          <div className="space-y-1">
-                            {dispatch.transport_entries.map((entry: any, index: number) => (
-                              <p key={`${entry.driver_name || "driver"}-${index}`}>
-                                {index + 1}. {entry.driver_name || "—"}
-                              </p>
-                            ))}
-                          </div>
-                        ) : (
-                          dispatch.driver_name || dispatch.contact_person || "—"
-                        )}
+                        <ol className="dispatch-transport-list">
+                          {(Array.isArray(dispatch.transport_entries) && dispatch.transport_entries.length
+                            ? dispatch.transport_entries
+                            : [{ vehicle_number: dispatch.vehicle_number || dispatch.transporter, driver_name: dispatch.driver_name || dispatch.contact_person }]
+                          ).map((entry: any, index: number) => (
+                            <li key={index} className="dispatch-transport-entry">
+                              <span className="dispatch-transport-index" aria-label={`Assignment ${index + 1}`}>{index + 1}</span>
+                              <div className="min-w-0">
+                                <p className="font-mono text-sm">{entry.vehicle_number || "Not assigned"}</p>
+                                <p className="mt-0.5 text-xs text-muted-foreground">{entry.driver_name || "Driver not assigned"}</p>
+                              </div>
+                            </li>
+                          ))}
+                        </ol>
                       </td>
                       <td className="px-5 py-3">
                         <StatusBadge status={dispatch.status || "—"} />
                       </td>
                       <td className="px-5 py-3">
                         {dispatch.created_at
-                          ? new Date(dispatch.created_at).toLocaleDateString()
+                          ? new Date(dispatch.created_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
                           : "—"}
                       </td>
                       <td className="px-5 py-3">
@@ -435,6 +450,7 @@ function SupplierDispatchPage() {
                           type="button"
                           variant="outline"
                           className="h-9 rounded-lg"
+                          aria-label={`View dispatch ${dispatch.dispatch_number || dispatch.order_number || "details"}`}
                           onClick={() => setSelectedDispatch(dispatch)}
                         >
                           <Eye className="mr-1.5 size-4" />
@@ -447,9 +463,9 @@ function SupplierDispatchPage() {
               </table>
             </div>
           )}
-          {!historyLoading && !historyError && newestFirstDispatchHistory.length > 0 && (
+          {!historyLoading && !historyError && filteredDispatchHistory.length > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm">
-              <p className="text-muted-foreground">Showing {historyStart + 1}–{Math.min(historyStart + 10, newestFirstDispatchHistory.length)} of {newestFirstDispatchHistory.length} dispatches</p>
+              <p className="text-muted-foreground">Showing {historyStart + 1}–{Math.min(historyStart + 10, filteredDispatchHistory.length)} of {filteredDispatchHistory.length} dispatches</p>
               <nav aria-label="Dispatch history pagination" className="flex items-center gap-3">
                 <Button size="sm" variant="outline" disabled={currentHistoryPage === 1} onClick={() => setHistoryPage(currentHistoryPage - 1)}>Previous</Button>
                 <span aria-live="polite">{currentHistoryPage} / {historyPageCount}</span>

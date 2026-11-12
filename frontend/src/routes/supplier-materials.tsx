@@ -265,7 +265,7 @@ function SupplierMaterials() {
         }
       >
         <Card className="supplier-module-page rounded-xl border-border bg-card shadow-sm">
-          <CardHeader className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <CardHeader className="material-catalog-toolbar flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
             <CardTitle className="flex items-center gap-2 text-base font-semibold">
               <PackagePlus className="size-4 text-primary" /> Material catalog
             </CardTitle>
@@ -384,7 +384,7 @@ function SupplierMaterials() {
                       ) : (
                         pagedMaterials.map((m) => (
                           <tr key={m.id || m.code} className="transition-colors hover:bg-muted/40">
-                            <td className="px-4 py-3 font-mono font-medium text-primary">
+                            <td className="material-reference-cell px-4 py-3 font-mono font-bold text-black">
                               {m.code || "—"}
                             </td>
                             <td className="px-4 py-3 text-foreground">{m.name || "—"}</td>
@@ -396,7 +396,7 @@ function SupplierMaterials() {
                                   String(m.status).toUpperCase() === "ACTIVE"
                                     ? "border-success/30 bg-success-soft text-success"
                                     : String(m.status).toUpperCase() === "INACTIVE"
-                                      ? "border-border bg-muted text-muted-foreground"
+                                      ? "border-destructive/40 bg-danger-soft text-destructive"
                                       : "border-border bg-background text-muted-foreground"
                                 }`}
                               >

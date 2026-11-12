@@ -540,6 +540,16 @@ export function AppShell({
       if (hasUserRole(user, "SUPPLIER") && itemPath === "/damage-claims") return true;
       return getPageAccess(user?.page_permissions, itemPath, itemSearch) !== null;
     });
+  const headingNavItem =
+    nav.find((item) => item.to === fullHref) ||
+    nav.find((item) => item.to.split("?")[0] === path) ||
+    [...nav]
+      .sort((a, b) => b.to.split("?")[0].length - a.to.split("?")[0].length)
+      .find((item) => {
+        const itemPath = item.to.split("?")[0];
+        return itemPath !== "/" && path.startsWith(`${itemPath}/`);
+      });
+  const HeadingIcon = headingNavItem?.icon || LayoutDashboard;
   const currentPageAccess = getPageAccess(user?.page_permissions, path, searchStr);
   const isReadOnlyPage = path !== "/reports" && currentPageAccess === "READ";
   useEffect(() => {
@@ -994,9 +1004,19 @@ export function AppShell({
         <main className={cn("page-enter flex-1 px-4 py-6 lg:px-7", isWarehouseWorkspace && "px-5 py-5 lg:px-8 lg:py-6")}>
           <div className={cn("mx-auto w-full max-w-[1360px]", isWarehouseWorkspace && "max-w-[1680px]")}>
             {(title || subtitle || actions) && (
-              <div className={cn("mb-6 flex flex-wrap items-end justify-between gap-4", ["/assembly/material-requests", "/assembly/production", "/assembly/quality", "/assembly/finished-goods", "/assembly/dispatch"].includes(path) && "material-requests-header", path === "/supplier-dashboard" && "supplier-heading-image", ["/supplier/asns/new", "/supplier/dispatch", "/damage-claims", "/supplier-materials"].includes(path) && "supplier-module-header", ["/vehicle-queue", "/gate/finished-goods-pickup", "/gate/finished-goods-pickup-exit"].includes(path) && "gate-entry-header", path === "/notifications" && "notifications-header", path.startsWith("/admin") && "rounded-2xl border border-white/70 bg-white/35 p-5 shadow-sm backdrop-blur-sm", path === "/assembly-dashboard" && "assembly-dashboard-hero", path === "/gate-dashboard" && "gate-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") === "dashboard" && "grn-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") !== "dashboard" && "grn-form-header")}>
+              <div className={cn("mb-6 flex flex-wrap items-end justify-between gap-4", !["/supplier-dashboard", "/warehouse-dashboard", "/gate-dashboard", "/assembly-dashboard", "/admin"].includes(path) && !(path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") === "dashboard") && "app-page-heading", ["/assembly/material-requests", "/assembly/production", "/assembly/quality", "/assembly/finished-goods", "/assembly/dispatch"].includes(path) && "material-requests-header", path === "/supplier-dashboard" && "supplier-heading-image", path === "/supplier-materials" && "material-master-header", ["/supplier/asns/new", "/supplier/dispatch", "/damage-claims", "/supplier-materials"].includes(path) && "supplier-module-header", ["/vehicle-queue", "/gate/finished-goods-pickup", "/gate/finished-goods-pickup-exit"].includes(path) && "gate-entry-header", path === "/notifications" && "notifications-header", path.startsWith("/admin") && "px-0 py-1", path === "/assembly-dashboard" && "assembly-dashboard-hero", path === "/gate-dashboard" && "gate-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") === "dashboard" && "grn-dashboard-hero", path === "/grn" && (new URLSearchParams(searchStr).get("tab") || "dashboard") !== "dashboard" && "grn-form-header")}>
                 <div>
-                  {title && <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">{title}{pageHelp[path] && <InformationTooltip help={pageHelp[path]} placement="title" />}</h1>}
+                  {title && <h1 className="text-2xl font-semibold tracking-tight lg:text-[28px]">
+                    {typeof title === "string" && !title.toLowerCase().includes("dashboard") ? (
+                      <span className="inline-flex items-center gap-3">
+                        <span className="app-heading-title-icon inline-flex size-11 shrink-0 items-center justify-center rounded-xl">
+                          <HeadingIcon className="size-5" aria-hidden="true" />
+                        </span>
+                        <span>{title}</span>
+                      </span>
+                    ) : title}
+                    {pageHelp[path] && <InformationTooltip help={pageHelp[path]} placement="title" />}
+                  </h1>}
                   {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
                 </div>
                 {actions && (
@@ -1139,6 +1159,7 @@ export function StatusBadge({ status }: { status: string }) {
   return (
     <Badge
       variant="outline"
+      data-status={status}
       className={cn(
         "relative rounded-full border px-2.5 py-0.5 text-[11px] font-semibold",
         map[status] ?? map[displayLabel] ?? map["Hold"],

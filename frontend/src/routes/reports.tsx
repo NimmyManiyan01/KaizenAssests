@@ -23,7 +23,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { AppShell } from "@/components/wms/app-shell";
+import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -33,7 +33,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api, BUSINESS_API_URL } from "@/lib/api-client";
-import { getAuthToken, requireAuth } from "@/lib/auth-utils";
+import { getAuthToken, getUserInfo, requireAuth } from "@/lib/auth-utils";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/reports")({
@@ -73,12 +73,12 @@ type Summary = {
 type Row = Record<string, unknown> & { id: string; lifecycle: Bucket };
 const BUCKETS: Bucket[] = ["PENDING", "IN_PROGRESS", "DONE", "ATTENTION", "CANCELLED", "OTHER"];
 const COLORS: Record<Bucket, string> = {
-  PENDING: "#d97706",
-  IN_PROGRESS: "#2563eb",
-  DONE: "#059669",
-  ATTENTION: "#dc2626",
-  CANCELLED: "#64748b",
-  OTHER: "#7c3aed",
+  PENDING: "#8A5100",
+  IN_PROGRESS: "#16479C",
+  DONE: "#166044",
+  ATTENTION: "#991B1B",
+  CANCELLED: "#334155",
+  OTHER: "#51308C",
 };
 const label = (value: string) =>
   value.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -88,13 +88,44 @@ function display(value: unknown, key = ""): string {
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "number") return number(value);
   if (typeof value === "object") return JSON.stringify(value);
-  if ((key.endsWith("_at") || key === "receipt_date") && !Number.isNaN(Date.parse(String(value)))) {
+  if (/(?:_at|_date)$/.test(key) || key === "expected_arrival") {
     const raw = String(value);
-    return /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw)
-      ? new Date(raw).toLocaleString()
-      : raw.replace("T", " ").slice(0, 19) + " (timezone not recorded)";
+    if (!Number.isNaN(Date.parse(raw))) {
+      const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw);
+      const zoned = /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw);
+      const date = new Date(dateOnly ? raw + "T00:00:00" : raw);
+      const formatted = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+      return dateOnly || (!zoned && date.getHours() === 0 && date.getMinutes() === 0)
+        ? formatted : formatted + ", " + date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    }
   }
+  if (key === "status" || key.endsWith("_type")) return label(String(value)).toLowerCase().replace(/^./, (c) => c.toUpperCase());
   return String(value);
+}
+const moduleDescriptions: Record<string, string> = {
+  supplier: "Review your shipment notices, damage claims, returns, replacements, and finished-goods requests.",
+  gate: "Review inbound gate arrivals and finished-goods pickup entry and exit records.",
+  grn: "Review goods receipt notes, received quantities, and quarantine dispositions.",
+  warehouse: "Review putaway batches, stock by location, requisitions, and material movements.",
+  assembly: "Review production orders, quality inspections, finished goods, rework, and scrap.",
+  dispatch: "Review dispatch orders, picking, packing, loading, and delivery progress.",
+};
+function detailGroups(record: Record<string, unknown>) {
+  const groups: { title: string; fields: [string, unknown][] }[] = [
+    { title: "Record overview", fields: [] }, { title: "Shipment & assignment", fields: [] },
+    { title: "Quantities & quality", fields: [] }, { title: "Dates & progress", fields: [] },
+    { title: "Additional details", fields: [] },
+  ];
+  for (const entry of Object.entries(record)) {
+    const [key, value] = entry;
+    if (key === "id" || key.endsWith("_id") || value == null || value === "") continue;
+    const index = /status|number$|name$|code$|type$|priority|reference/.test(key) ? 0
+      : /quantity|uom|quality|result/.test(key) ? 2
+      : /_at$|_date$|expected_arrival/.test(key) ? 3
+      : /vehicle|driver|dock|location|warehouse|transporter|destination|assigned/.test(key) ? 1 : 4;
+    groups[index].fields.push(entry);
+  }
+  return groups.filter((group) => group.fields.length);
 }
 function Breakdown({ counts, total }: { counts: Record<Bucket, number>; total: number }) {
   return (
@@ -172,7 +203,11 @@ function ReportsPage() {
       .then((data: Catalog) => {
         if (active) {
           setCatalog(data);
-          setReport((current) => current || data.reports[0]?.key || "");
+          const roles = getUserInfo()?.roles || [];
+          const preferred = roles.includes("SUPPLIER") ? "supplier" : roles.includes("ASSEMBLY_MANAGER") ? "assembly" : roles.includes("DISPATCH_MANAGER") ? "dispatch" : roles.includes("GRN") ? "grn" : roles.includes("GATE_SECURITY") ? "gate" : roles.some((role) => role.startsWith("WAREHOUSE")) ? "warehouse" : "";
+          const initialModule = data.modules.some((item) => item.key === preferred) ? preferred : "";
+          setModule(initialModule);
+          setReport((current) => current || data.reports.find((item) => !initialModule || item.module === initialModule)?.key || "");
         }
       })
       .catch((e: Error) => {
@@ -329,44 +364,53 @@ function ReportsPage() {
     "h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-200";
   return (
     <AppShell
-      title="Reports & Analytics"
+      title={
+        <span className="supplier-page-title inline-flex items-center gap-3">
+          <span className="supplier-page-title-icon inline-flex size-11 shrink-0 items-center justify-center rounded-xl border border-white/30 bg-white/15 text-white">
+            <BarChart3 className="size-5" aria-hidden="true" />
+          </span>
+          Reports &amp; Analytics
+        </span>
+      }
       subtitle="Operational progress, shipment history, and workflow status."
       actions={
         <Button
+          data-refresh-control="true"
           variant="outline"
+          size="icon"
           className="rounded-xl"
+          aria-label="Refresh reports"
+          title="Refresh reports"
           onClick={() => setRefresh((r) => r + 1)}
           disabled={loading || tableLoading}
         >
           <RefreshCw className={"size-4 " + (loading || tableLoading ? "animate-spin" : "")} />
-          Refresh
         </Button>
       }
     >
-      <div className="space-y-6 pb-8">
-        <section className="rounded-3xl border border-blue-100 bg-gradient-to-br from-slate-950 via-blue-950 to-blue-800 p-6 text-white shadow-sm sm:p-8">
-          <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="reports-workspace space-y-5 pb-8">
+        <section className="reports-overview rounded-2xl border border-blue-200 p-5 shadow-sm">
+          <div className="reports-overview-layout">
             <div>
-              <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-blue-200">
+              <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary">
                 <BarChart3 className="size-4" />
                 Operational intelligence
               </p>
               <h2
                 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl"
-                style={{ color: "#ffffff", fontSize: "28px" }}
+                style={{ color: "#10213A", fontSize: "22px" }}
               >
                 {module
                   ? catalog?.modules.find((m) => m.key === module)?.label
                   : "Your operational overview"}
               </h2>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-blue-100">
-                Track every receipt, movement, production run, and delivery. Select a workflow to
-                inspect its source records.
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                {moduleDescriptions[module] || "Review authorized operational records. Select a module to focus its workflows and source records."}
               </p>
             </div>
-            <div className="rounded-2xl border border-white/15 bg-white/10 p-4 text-xs leading-6 text-blue-100">
-              <div className="flex items-center gap-2 font-semibold text-white">
-                <ShieldCheck className="size-4" />
+            <div className="reports-scope rounded-xl border border-blue-200 bg-white/40 p-4 text-xs leading-6">
+              <div className="flex items-start gap-2 font-semibold text-primary">
+                <ShieldCheck className="mt-1 size-4 shrink-0" />
                 {catalog?.scope || "Checking reporting access"}
               </div>
               <p>
@@ -379,7 +423,7 @@ function ReportsPage() {
         </section>
         {catalog?.journey_access && (
           <div
-            className="flex gap-2 rounded-2xl border bg-white p-2"
+            className="reports-tabs flex flex-wrap gap-2 rounded-xl border bg-white p-2"
             role="tablist"
             aria-label="Report sections"
           >
@@ -417,7 +461,7 @@ function ReportsPage() {
           </div>
         )}
         <section
-          className="flex flex-wrap items-end gap-3 rounded-2xl border bg-white p-4 shadow-sm"
+          className="reports-filters rounded-2xl border bg-white p-5 shadow-sm"
           aria-label="Report filters"
         >
           <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
@@ -478,8 +522,7 @@ function ReportsPage() {
             </Button>
           )}
           <p className="ml-auto max-w-sm text-xs leading-5 text-muted-foreground">
-            Dates use stored date fields; timezone-aware records use UTC boundaries. Status is the
-            latest saved state.
+            Filter records by module and date range. Status reflects the latest saved state.
           </p>
         </section>
         {(error || invalidDates) && (
@@ -493,7 +536,7 @@ function ReportsPage() {
         {section === "journey" && catalog?.journey_access && (
           <AsnJourneyPanel start={start} end={end} refreshKey={refresh} />
         )}
-        <div className={section === "analytics" ? "contents" : "hidden"}>
+        <div className={section === "analytics" ? "reports-analytics-content" : "hidden"}>
           {loading && !summary && !error ? (
             <div className="flex h-40 items-center justify-center gap-3 text-muted-foreground">
               <Loader2 className="size-5 animate-spin" />
@@ -503,7 +546,7 @@ function ReportsPage() {
             summary &&
             !invalidDates && (
               <>
-                <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <section className="reports-kpis grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Activity summary">
                   {[
                     {
                       title: "Activity records",
@@ -546,7 +589,7 @@ function ReportsPage() {
                     </div>
                   ))}
                 </section>
-                <section className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
+                <section className="reports-chart-grid grid gap-5 lg:grid-cols-[1.4fr_1fr]" aria-label="Activity charts">
                   <div className="rounded-2xl border bg-white p-5 shadow-sm">
                     <h3 className="font-semibold">Activity over time</h3>
                     <p className="mt-1 text-xs text-muted-foreground">
@@ -554,16 +597,16 @@ function ReportsPage() {
                     </p>
                     {summary.trend.length ? (
                       <div
-                        className="mt-5 h-56"
+                        className="reports-trend-chart mt-5 h-64"
                         role="img"
                         aria-label="Activity record counts by date"
                       >
                         <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart data={summary.trend}>
+                          <AreaChart data={summary.trend} margin={{ top: 12, right: 16, bottom: 8, left: 0 }}>
                             <defs>
                               <linearGradient id="reportArea" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="#2563eb" stopOpacity={0.25} />
-                                <stop offset="100%" stopColor="#2563eb" stopOpacity={0} />
+                                <stop offset="0%" stopColor="#16479C" stopOpacity={0.25} />
+                                <stop offset="100%" stopColor="#16479C" stopOpacity={0} />
                               </linearGradient>
                             </defs>
                             <CartesianGrid
@@ -574,7 +617,8 @@ function ReportsPage() {
                             <XAxis
                               dataKey="date"
                               tick={{ fontSize: 11 }}
-                              tickFormatter={(v) => String(v).slice(5)}
+                              tickMargin={10}
+                              tickFormatter={(v) => new Date(String(v) + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
                             />
                             <YAxis allowDecimals={false} tick={{ fontSize: 11 }} width={38} />
                             <Tooltip />
@@ -582,8 +626,10 @@ function ReportsPage() {
                               type="monotone"
                               dataKey="count"
                               name="Activity records"
-                              stroke="#2563eb"
-                              strokeWidth={2}
+                              stroke="#16479C"
+                              strokeWidth={3}
+                              dot={{ r: 4, fill: "#16479C", stroke: "#FFFFFF", strokeWidth: 2 }}
+                              activeDot={{ r: 6 }}
                               fill="url(#reportArea)"
                             />
                           </AreaChart>
@@ -601,9 +647,9 @@ function ReportsPage() {
                       Exact module statuses are shown in the record table.
                     </p>
                     <Breakdown counts={summary.counts} total={summary.total} />
-                    <div className="mt-5 space-y-3">
+                    <div className="reports-lifecycle-list mt-5">
                       {BUCKETS.map((b) => (
-                        <div key={b} className="flex items-center justify-between text-sm">
+                        <div key={b} className="reports-lifecycle-row text-sm">
                           <span className="flex items-center gap-2">
                             <span
                               className="size-2.5 rounded-full"
@@ -611,8 +657,8 @@ function ReportsPage() {
                             />
                             {label(b)}
                           </span>
-                          <span className="font-medium tabular-nums">
-                            {number(summary.counts[b])}
+                          <span className="reports-lifecycle-values font-medium tabular-nums">
+                            <span>{number(summary.counts[b])}</span>
                             <span className="ml-3 text-xs text-muted-foreground">
                               {summary.total
                                 ? Math.round((summary.counts[b] / summary.total) * 100)
@@ -625,7 +671,7 @@ function ReportsPage() {
                     </div>
                   </div>
                 </section>
-                <section className="rounded-2xl border bg-white p-5 shadow-sm">
+                <section className="reports-workflows rounded-2xl border bg-white p-5 shadow-sm">
                   <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                     <h3 className="font-semibold">Workflow performance</h3>
                     <span className="text-xs text-muted-foreground">
@@ -924,11 +970,11 @@ function ReportsPage() {
           if (!open) detailRequest.current++;
         }}
       >
-        <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
+        <DialogContent className="report-record-dialog max-h-[90vh] max-w-5xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{definition?.label} - Record details</DialogTitle>
             <DialogDescription>
-              Source values with their original status and units of measure.
+              {detail && definition ? String(detail.record[definition.reference] || definition.label) : "Record details"} - Recorded workflow details and quantities.
             </DialogDescription>
           </DialogHeader>
           {detailLoading ? (
@@ -940,17 +986,28 @@ function ReportsPage() {
           ) : (
             detail && (
               <>
-                <dl className="grid gap-4 rounded-xl bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {Object.entries(detail.record).map(([k, v]) => (
-                    <div key={k} className="min-w-0">
-                      <dt className="text-xs text-muted-foreground">{label(k)}</dt>
-                      <dd className="mt-1 break-words text-sm font-medium">{display(v, k)}</dd>
-                    </div>
+                <div className="report-detail-sections">
+                  {detailGroups(detail.record).map((group) => (
+                    <section key={group.title} className="report-detail-section">
+                      <h3>{group.title}</h3>
+                      <dl>
+                        {group.fields.map(([key, value]) => (
+                          <div key={key}>
+                            <dt>{label(key).replace(/Asn/g, "ASN").replace(/Grn/g, "GRN").replace(/Uom/g, "UOM")}</dt>
+                            <dd>{key === "status" ? <StatusBadge status={String(value)} /> : display(value, key)}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </section>
                   ))}
-                </dl>
+                  <details className="report-technical-details">
+                    <summary>Record references</summary>
+                    <dl>{Object.entries(detail.record).filter(([key, value]) => (key === "id" || key.endsWith("_id")) && value).map(([key, value]) => <div key={key}><dt>{label(key)}</dt><dd>{String(value)}</dd></div>)}</dl>
+                  </details>
+                </div>
                 {detail.lines.length > 0 && (
                   <div className="space-y-3">
-                    <h4 className="font-semibold">Line details / sections</h4>
+                    <h4 className="font-semibold">Material and line details</h4>
                     <div className="overflow-x-auto rounded-xl border">
                       <table className="w-full text-left text-xs">
                         <thead className="bg-slate-50">

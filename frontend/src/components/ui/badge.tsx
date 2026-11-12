@@ -25,8 +25,24 @@ const badgeVariants = cva(
 export interface BadgeProps
   extends React.HTMLAttributes<HTMLDivElement>, VariantProps<typeof badgeVariants> {}
 
-function Badge({ className, variant, ...props }: BadgeProps) {
-  return <div className={cn(badgeVariants({ variant }), className)} {...props} />;
+function badgeText(children: React.ReactNode): string {
+  return React.Children.toArray(children).map((child) => {
+    if (typeof child === "string" || typeof child === "number") return String(child);
+    if (React.isValidElement<{ children?: React.ReactNode }>(child)) return badgeText(child.props.children);
+    return "";
+  }).join(" ");
+}
+
+function statusTone(value: string): "positive" | "negative" | undefined {
+  const status = value.trim().replaceAll("_", " ").replaceAll("-", " ").replace(/\s+/g, " ").toUpperCase();
+  if (/\b(INACTIVE|REJECTED|REJECT|FAILED|FAILURE|CANCELLED|CANCELED|BLOCKED|DISABLED|DAMAGED|ERROR|DENIED|EXPIRED|DELETED|RETURNED|DELAYED)\b/.test(status)) return "negative";
+  if (/\b(SUBMITTED|ACTIVE|APPROVED|ACCEPTED|COMPLETED|COMPLETE|SUCCESS|SUCCESSFUL|PASSED|AVAILABLE|READY|DELIVERED|CLOSED|POSTED|VERIFIED|RESOLVED|CLEARED)\b/.test(status)) return "positive";
+  return undefined;
+}
+
+function Badge({ className, variant, children, ...props }: BadgeProps) {
+  const status = String((props as Record<string, unknown>)["data-status"] ?? badgeText(children));
+  return <div data-slot="badge" data-status-tone={statusTone(status)} className={cn(badgeVariants({ variant }), className)} {...props}>{children}</div>;
 }
 
 export { Badge, badgeVariants };

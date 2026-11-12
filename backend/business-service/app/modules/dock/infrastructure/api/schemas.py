@@ -22,6 +22,11 @@ class UpdateDockStatusRequest(BaseModel):
     reason: Optional[str] = None
 
 
+class UpdateDockActivationRequest(BaseModel):
+    active: bool
+    reason: Optional[str] = Field(None, max_length=256)
+
+
 class UpdateDockMasterRequest(BaseModel):
     dock_code: Optional[str] = Field(None, min_length=1, max_length=32)
     dock_name: Optional[str] = Field(None, min_length=1, max_length=128)
@@ -102,6 +107,7 @@ class DockMasterResponse(BaseModel):
     description: Optional[str] = None
     status: str
     is_active: bool
+    is_default: bool = False
     warehouse_ref_id: Optional[uuid.UUID] = None
     warehouse_code: Optional[str] = None
     warehouse_name: Optional[str] = None

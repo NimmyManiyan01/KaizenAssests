@@ -1,3 +1,4 @@
+import { Badge } from "@/components/ui/badge";
 import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { useSearch, createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -570,7 +571,7 @@ function SupplierDashboard() {
                     const sparkData = kpiCharts[metricIndex] || [];
                     const maxVal = Math.max(1, ...(sparkData.length ? sparkData : [1]));
                     return (
-                      <span key={day} style={{ height: `${count > 0 ? Math.max(12, (count / maxVal) * 100) : 3}%`, opacity: count > 0 ? 0.35 + day * 0.09 : 0.12 }} />
+                      <span key={day} style={{ height: `${count > 0 ? Math.max(12, (count / maxVal) * 100) : 3}%`, opacity: count > 0 ? 1 : 0.65 }} />
                     );
                   })}
                 </div>
@@ -717,14 +718,15 @@ function SupplierDashboard() {
                         </td>
                         <td className="px-3.5 py-3">
                           <div className="inline-flex items-center gap-1.5">
-                            <span
+                            <Badge
+                              data-status={status}
                               className={`supplier-delivery-status inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${
                                 statuses[status] || "bg-muted text-muted-foreground border-border"
                               }`}
                             >
                               <span className="supplier-status-dot" aria-hidden="true" />
                               {status.replaceAll("_", " ")}
-                            </span>
+                            </Badge>
                               </div>
                         </td>
                         <td className="px-3.5 py-3 text-muted-foreground">
@@ -1288,7 +1290,7 @@ function SupplierDashboard() {
                       <Input
                         id="dashboard-supplier-name"
                         required
-                        placeholder="e.g. Bharat Electronics Components Pvt. Ltd."
+                        placeholder="Enter supplier name"
                         value={supplierName}
                         onChange={(event) => setSupplierName(event.target.value)}
                         onBlur={() => setSupplierName((value) => value.trim())}

@@ -105,7 +105,7 @@ export function StatCard({
           })}>
           {sparkline.map((bar, index) => <span key={bar.label} title={`${bar.label}: ${bar.value}`}
             className="block flex-1 rounded-t bg-current"
-            style={{ height: `${bar.value > 0 ? Math.max(12, bar.value / Math.max(1, ...sparkline.map((item) => item.value)) * 100) : 3}%`, opacity: bar.value > 0 ? 0.35 + index * 0.09 : 0.12 }} />)}
+            style={{ height: `${bar.value > 0 ? Math.max(12, bar.value / Math.max(1, ...sparkline.map((item) => item.value)) * 100) : 3}%`, opacity: bar.value > 0 ? 1 : 0.65 }} />)}
         </div>
       )}
     </Card>

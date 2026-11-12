@@ -28,7 +28,7 @@ const roleSuggestedQuestions: Record<string, string[]> = {
   WAREHOUSE_OPERATOR: ["Show available inventory", "Show pending putaway tasks", "Where is material MAT-001?", "Explain FIFO picking", "Show warehouse zones and bins"],
   ASSEMBLY_MANAGER: ["Show active assembly orders", "Show material availability", "Explain material requests", "Show production progress", "Explain finished goods handover"],
   DISPATCH_MANAGER: ["Show dispatch status", "Show outbound orders", "Explain picking and packing", "Explain loading and gate out", "Show available inventory"],
-  SUPPLIER: ["Show my purchase orders", "Show my inbound ASN status", "Explain ASN creation", "Explain damaged material claims", "Explain finished goods pickup"],
+  SUPPLIER: ["Show my inbound ASN status", "Explain ASN creation", "Explain damaged material claims", "Explain finished goods pickup"],
 };
 
 const roleAliases: Record<string, string> = {
@@ -177,6 +177,44 @@ function getShortcutTone(label: string) {
   return "bg-violet-100 text-violet-700 group-hover:bg-violet-200";
 }
 
+function AssistantReply({ content }: { content: string }) {
+  const lines = content.split("\n").filter((line) => line.trim());
+  return (
+    <div className="assistant-reply space-y-3">
+      {lines.map((line, index) => {
+        const record = line.match(/^[\u2022*-]\s+(.+)$/);
+        if (!record) {
+          return <p key={index} className="whitespace-pre-wrap leading-relaxed">{line}</p>;
+        }
+        const text = record[1].replace(/\.$/, "");
+        const colon = text.indexOf(": ");
+        const title = colon >= 0 ? text.slice(0, colon) : null;
+        const fields = (colon >= 0 ? text.slice(colon + 2) : text).split("; ");
+        return (
+          <article key={index} className="overflow-hidden rounded-xl border border-blue-200 bg-white shadow-sm">
+            {title && <h3 className="border-b border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">{title}</h3>}
+            <dl className="space-y-2.5 p-3">
+              {fields.map((field, fieldIndex) => {
+                const match = field.match(/^(expected arrival|current location|status|supplier|vehicle|dock|material|quantity|bin|zone|product|planned|completed|scheduled|shipped|required|customer|location) (.+)$/i);
+                if (!match) return <div key={fieldIndex}><dt className="sr-only">Detail</dt><dd className="leading-relaxed">{field}</dd></div>;
+                const [, label, value] = match;
+                return (
+                  <div key={fieldIndex} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                    <dt className="text-xs capitalize text-slate-600">{label}</dt>
+                    <dd className={label.toLowerCase() === "status" ? "rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-900" : "text-right text-sm text-slate-900"}>
+                      {value}
+                    </dd>
+                  </div>
+                );
+              })}
+            </dl>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 export function SecureAssistant() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -278,7 +316,7 @@ export function SecureAssistant() {
             role="dialog"
             aria-label="WareHub Assistant"
             onClick={(event) => event.stopPropagation()}
-            className="absolute bottom-4 right-4 flex h-[min(690px,calc(100vh-32px))] w-[min(440px,calc(100vw-32px))] flex-col overflow-hidden rounded-[26px] border border-blue-100 bg-white shadow-[0_24px_80px_-24px_rgba(15,23,42,0.45)]"
+            className="assistant-dialog absolute bottom-4 right-4 flex h-[min(690px,calc(100dvh-32px))] w-[min(480px,calc(100vw-32px))] flex-col overflow-hidden rounded-[26px] border border-blue-100 bg-white shadow-[0_24px_80px_-24px_rgba(15,23,42,0.45)]"
           >
             <header className="flex items-center justify-between border-b border-white/15 bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-700 px-4 py-3.5 text-white">
               <div className="flex items-center gap-3">
@@ -397,7 +435,7 @@ export function SecureAssistant() {
                   </div>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-3" role="log" aria-live="polite" aria-relevant="additions" aria-label="Assistant conversation">
                   {messages.map((msg, index) => (
                     <div
                       key={index}
@@ -406,13 +444,13 @@ export function SecureAssistant() {
                       }`}
                     >
                       <div
-                        className={`rounded-2xl px-3.5 py-2.5 max-w-[88%] text-sm whitespace-pre-wrap break-words leading-relaxed ${
+                        className={`rounded-2xl px-3.5 py-2.5 max-w-full sm:max-w-[92%] text-sm whitespace-pre-wrap break-words leading-relaxed ${
                           msg.role === "user"
                             ? "bg-primary text-primary-foreground rounded-br-xs shadow-xs"
                             : "bg-white text-slate-800 border border-slate-200/80 rounded-bl-xs shadow-sm"
                         }`}
                       >
-                        {msg.content}
+                        {msg.role === "assistant" ? <AssistantReply content={msg.content} /> : msg.content}
                       </div>
                     </div>
                   ))}
@@ -457,7 +495,7 @@ export function SecureAssistant() {
                   onChange={(event) => setQuery(event.target.value)}
                   disabled={loading}
                   autoFocus
-                  placeholder="Ask about stock, zones, bins, or tasks..."
+                  placeholder={module.label === "Supplier" ? "Ask about your ASNs, deliveries, or claims..." : "Ask about stock, zones, bins, or tasks..."}
                   className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-3.5 pr-11 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-100 disabled:opacity-50"
                 />
                 <button

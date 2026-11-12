@@ -192,7 +192,7 @@ function LoginPage() {
             Back to Home
           </button>
           </div>
-        <div className="relative w-full rounded-3xl bg-[linear-gradient(145deg,#fff,#f6f9fe)] px-6 py-[30px] shadow-[0_1.4vw_3vw_#4785e029] min-[1000px]:min-h-[40.7vw] min-[1000px]:rounded-[1.3vw] min-[1000px]:pt-[2.8vw] min-[1000px]:pr-[3.2vw] min-[1000px]:pb-[1.9vw] min-[1000px]:pl-[4.4vw] before:pointer-events-none before:absolute before:top-0 before:right-0 before:h-[65px] before:w-[75px] before:rounded-tr-3xl before:bg-[#eaf2ff] before:content-[''] before:[clip-path:polygon(0_0,100%_0,100%_100%)] min-[1000px]:before:h-[6vw] min-[1000px]:before:w-[6.9vw] min-[1000px]:before:rounded-tr-[1.3vw] [&_input:focus-visible]:outline-2 [&_input:focus-visible]:outline-offset-[3px] [&_input:focus-visible]:outline-[#3180ff] [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-offset-[3px] [&_button:focus-visible]:outline-[#3180ff]">
+        <div className="relative w-full rounded-3xl bg-[linear-gradient(145deg,#fff,#f6f9fe)] px-6 py-[30px] shadow-[0_1.4vw_3vw_#4785e029] min-[1000px]:min-h-[40.7vw] min-[1000px]:rounded-[1.3vw] min-[1000px]:pt-[2.8vw] min-[1000px]:pr-[3.2vw] min-[1000px]:pb-[1.9vw] min-[1000px]:pl-[4.4vw] before:pointer-events-none before:absolute before:top-0 before:right-0 before:h-[65px] before:w-[75px] before:rounded-tr-3xl before:bg-[#eaf2ff] before:content-[''] before:[clip-path:polygon(0_0,100%_0,100%_100%)] min-[1000px]:before:h-[6vw] min-[1000px]:before:w-[6.9vw] min-[1000px]:before:rounded-tr-[1.3vw] [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-offset-[3px] [&_button:focus-visible]:outline-[#3180ff]">
           <p className="text-xs leading-[1.2] font-bold tracking-[3px] text-[#1168ed] min-[1000px]:text-[.8vw] min-[1000px]:tracking-[.18vw]">
             WELCOME BACK
           </p>
@@ -213,10 +213,10 @@ function LoginPage() {
           {linkError && (
             <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-600">{linkError}</p>
           )}
-          <form onSubmit={handleLogin} className="mt-7 space-y-5 min-[1000px]:mt-[1.95vw]">
+          <form onSubmit={handleLogin} className="login-form mt-7 space-y-5 min-[1000px]:mt-[1.95vw]">
             <label className="mb-5 block text-sm leading-[1.3] font-semibold min-[1000px]:mb-[1.15vw] min-[1000px]:text-[.94vw]">
               Employee ID / Username
-              <div className="border-[#c9ddff]! shadow-[0_0_3px_1px_#c9ddff]! mt-2 flex h-[50px] items-center rounded-[10px] border border-[#dae4f3] bg-[#e8f1ff] px-3 shadow-[0_1px_2px_#123b7220] min-[1000px]:mt-[.4vw] min-[1000px]:h-[2.9vw] min-[1000px]:rounded-[.7vw] min-[1000px]:px-[.85vw] [&_svg]:size-[21px] [&_svg]:shrink-0 min-[1000px]:[&_svg]:size-[1.25vw]">
+              <div className="login-input-shell mt-2 flex h-[50px] items-center rounded-[10px] border border-[#dae4f3] bg-[#e8f1ff] px-3 shadow-[0_1px_2px_#123b7220] min-[1000px]:mt-[.4vw] min-[1000px]:h-[2.9vw] min-[1000px]:rounded-[.7vw] min-[1000px]:px-[.85vw] [&_svg]:size-[21px] [&_svg]:shrink-0 min-[1000px]:[&_svg]:size-[1.25vw]">
                 <UserRound size={22} />
                 <input
                   className="ml-3 h-full min-w-0 w-full bg-transparent text-base font-normal outline-none placeholder:text-[#7f90a8] min-[1000px]:text-[.98vw]"
@@ -241,7 +241,7 @@ function LoginPage() {
                   Forgot password?
                 </button>
               </span>
-              <div className="mt-2 flex h-[50px] items-center rounded-[10px] border border-[#dae4f3] bg-[#e8f1ff] px-3 shadow-[0_1px_2px_#123b7220] min-[1000px]:mt-[.4vw] min-[1000px]:h-[2.9vw] min-[1000px]:rounded-[.7vw] min-[1000px]:px-[.85vw] [&_svg]:size-[21px] [&_svg]:shrink-0 min-[1000px]:[&_svg]:size-[1.25vw]">
+              <div className="login-input-shell mt-2 flex h-[50px] items-center rounded-[10px] border border-[#dae4f3] bg-[#e8f1ff] px-3 shadow-[0_1px_2px_#123b7220] min-[1000px]:mt-[.4vw] min-[1000px]:h-[2.9vw] min-[1000px]:rounded-[.7vw] min-[1000px]:px-[.85vw] [&_svg]:size-[21px] [&_svg]:shrink-0 min-[1000px]:[&_svg]:size-[1.25vw]">
                 <LockKeyhole size={22} />
                 <input
                   className="ml-3 h-full min-w-0 w-full bg-transparent text-base font-normal outline-none placeholder:text-[#7f90a8] min-[1000px]:text-[.98vw]"
@@ -257,7 +257,7 @@ function LoginPage() {
                   aria-label={showPassword ? "Hide password" : "Show password"}
                   onClick={() => setShowPassword(!showPassword)}
                 >
-                  {showPassword ? <Eye size={20} /> : <EyeOff size={20} />}
+                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                 </button>
               </div>
             </label>
