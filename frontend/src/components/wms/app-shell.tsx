@@ -1137,6 +1137,22 @@ export function StatusBadge({ status }: { status: string }) {
       "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 font-bold",
     "ASSEMBLY IN PROGRESS":
       "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 font-bold",
+    REPLACEMENT_COMPLETED: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 font-bold",
+    "REPLACEMENT COMPLETED": "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 font-bold",
+    REPLACEMENT_IN_TRANSIT: "bg-teal-soft text-teal border-teal/30 font-bold",
+    "REPLACEMENT IN TRANSIT": "bg-teal-soft text-teal border-teal/30 font-bold",
+    REPLACEMENT_IN_PROGRESS: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 font-bold",
+    "REPLACEMENT IN PROGRESS": "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 font-bold",
+    REPLACEMENT_OFFERED: "bg-primary-soft text-primary border-primary/25 font-bold",
+    "REPLACEMENT OFFERED": "bg-primary-soft text-primary border-primary/25 font-bold",
+    AT_RECEIVING: "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30 font-semibold",
+    "AT RECEIVING": "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30 font-semibold",
+    AWAITING_INSPECTION: "bg-warning-soft text-warning border-warning/25 font-semibold",
+    "AWAITING INSPECTION": "bg-warning-soft text-warning border-warning/25 font-semibold",
+    INSPECTION_PASSED: "bg-success-soft text-success border-success/25 font-semibold",
+    "INSPECTION PASSED": "bg-success-soft text-success border-success/25 font-semibold",
+    INSPECTION_FAILED: "bg-destructive/10 text-destructive border-destructive/25 font-semibold",
+    "INSPECTION FAILED": "bg-destructive/10 text-destructive border-destructive/25 font-semibold",
     SHORTAGE_DETECTED:
       "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30 font-bold",
     READY:

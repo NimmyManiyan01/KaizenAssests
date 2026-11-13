@@ -67,6 +67,7 @@ export const Route = createFileRoute("/supplier/asns/new")({
   validateSearch: (search: Record<string, unknown>) => ({
     open: search.open === "create" ? "create" as const : undefined,
     search: typeof search.search === "string" ? search.search : undefined,
+    claimId: typeof search.claimId === "string" ? search.claimId : undefined,
   }),
   beforeLoad: () => { },
   component: NewAsnPage,

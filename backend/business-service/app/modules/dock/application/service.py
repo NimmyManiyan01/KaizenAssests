@@ -223,10 +223,41 @@ class DockAllocationService:
             stmt = select(GateEntryModel).where(or_(*conds))
             ge_res = await session.execute(stmt)
             ge_list = ge_res.scalars().all()
+
+            from app.common.persistence.models import AsnModel
+            asn_target_status = None
+            if new_status in {"DOCK_ASSIGNED", "MOVING_TO_DOCK"}:
+                asn_target_status = "DOCK_ASSIGNED"
+            elif new_status in {"AT_DOCK", "OCCUPIED"}:
+                asn_target_status = "OCCUPIED"
+            elif new_status == "UNLOADING_IN_PROGRESS":
+                asn_target_status = "UNLOADING_IN_PROGRESS"
+            elif new_status in {"RECEIVING_COMPLETED", "COMPLETED"}:
+                asn_target_status = "RECEIVING_COMPLETED"
+            elif new_status in {"VEHICLE_EXITED", "GATE_EXIT_COMPLETED"}:
+                asn_target_status = "VEHICLE_EXITED"
+
             for ge in ge_list:
                 ge.status = new_status
                 if dock_code:
                     ge.assigned_dock_id = dock_code
+                if asn_target_status:
+                    if ge.asn_id:
+                        try:
+                            asn_m = await session.get(AsnModel, uuid.UUID(str(ge.asn_id)))
+                            if asn_m and asn_m.status not in {"CANCELLED", "VEHICLE_EXITED"}:
+                                asn_m.status = asn_target_status
+                        except Exception:
+                            pass
+                    elif ge.asn_number:
+                        try:
+                            asn_m = (await session.execute(
+                                select(AsnModel).where(func.upper(AsnModel.asn_number) == ge.asn_number.strip().upper())
+                            )).scalars().first()
+                            if asn_m and asn_m.status not in {"CANCELLED", "VEHICLE_EXITED"}:
+                                asn_m.status = asn_target_status
+                        except Exception:
+                            pass
         except Exception as exc:
             logger.warning(f"Failed to sync gate entry status to {new_status} for {gate_pass_id}: {exc}")
 
@@ -400,6 +431,22 @@ class DockAllocationService:
             raise HTTPException(status_code=409, detail="Gate entry vehicle does not match the dock request")
         gate_entry.status = "DOCK_ASSIGNED"
         gate_entry.assigned_dock_id = dock.dock_code
+        if gate_entry.asn_id:
+            try:
+                asn_m = await session.get(AsnModel, uuid.UUID(str(gate_entry.asn_id)))
+                if asn_m and asn_m.status not in {"CANCELLED", "COMPLETED", "GRN_POSTED", "VEHICLE_EXITED"}:
+                    asn_m.status = "DOCK_ASSIGNED"
+            except Exception:
+                pass
+        elif gate_entry.asn_number:
+            try:
+                asn_m = (await session.execute(
+                    select(AsnModel).where(func.upper(AsnModel.asn_number) == gate_entry.asn_number.strip().upper())
+                )).scalars().first()
+                if asn_m and asn_m.status not in {"CANCELLED", "COMPLETED", "GRN_POSTED", "VEHICLE_EXITED"}:
+                    asn_m.status = "DOCK_ASSIGNED"
+            except Exception:
+                pass
 
         gate_dock = (await session.execute(
             select(DockModel).where(DockModel.dock_number == dock.dock_code).with_for_update()
