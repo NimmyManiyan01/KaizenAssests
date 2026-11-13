@@ -1822,7 +1822,7 @@ function NewAsnPage() {
                         key={
                           line.material_id ? `${line.material_id}-${idx}` : `material-row-${idx}`
                         }
-                        className="grid min-w-0 grid-cols-1 gap-3 rounded-lg border border-border bg-muted/10 p-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(5.5rem,0.65fr)_minmax(6rem,0.8fr)_2rem] sm:items-end"
+                        className="grid min-w-0 grid-cols-1 gap-3 rounded-lg border border-border bg-muted/10 p-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(8.5rem,1fr)_5.5rem_2.5rem] sm:items-end"
                       >
                         <div className="min-w-0 space-y-1.5">
                           <Label htmlFor={`material-${idx}`}>Material *</Label>
@@ -2025,7 +2025,7 @@ function NewAsnPage() {
                             aria-describedby={
                               asnFormErrors[`quantity-${idx}`] ? `quantity-${idx}-error` : undefined
                             }
-                            className="h-11 w-full min-w-0 rounded-[10px] border-border bg-background text-right text-sm"
+                            className="h-11 w-full min-w-0 rounded-[10px] border-border bg-background px-3 text-left text-sm"
                           />
                           {asnFormErrors[`quantity-${idx}`] && (
                             <p
@@ -2044,10 +2044,10 @@ function NewAsnPage() {
                             readOnly
                             value={line.uom || "—"}
                             aria-label={`Unit of measure for material ${idx + 1}`}
-                            className="h-11 w-full min-w-0 rounded-[10px] border-border bg-muted/50 text-sm"
+                            className="h-11 w-full min-w-0 rounded-[10px] border-border bg-muted/50 text-center font-medium text-muted-foreground text-sm"
                           />
                         </div>
-                        <div className="flex items-end justify-end">
+                        <div className="flex h-11 items-center justify-center">
                           <Button
                             type="button"
                             variant="ghost"
@@ -2066,7 +2066,7 @@ function NewAsnPage() {
                                 ),
                               );
                             }}
-                            className="size-9 rounded-lg text-muted-foreground hover:text-destructive"
+                            className="size-10 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                           >
                             <Trash2 className="size-4" />
                           </Button>
