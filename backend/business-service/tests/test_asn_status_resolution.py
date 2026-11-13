@@ -150,3 +150,25 @@ def test_gate_entry_model_attributes_and_query_filters():
     stmt = select(GateEntryModel).where(or_(*ge_filters))
     assert stmt is not None
 
+
+def test_dock_allocation_request_uses_relationship_for_dock_code():
+    from app.modules.dock.infrastructure.persistence.models import (
+        DockAllocationRequestModel,
+        DockMasterModel,
+    )
+
+    dock = DockMasterModel(
+        dock_code="DOCK-02",
+        dock_name="Receiving Dock 02",
+        dock_type="RAW_MATERIAL",
+        direction="INBOUND",
+    )
+    request = DockAllocationRequestModel(
+        existing_gate_pass_id="GE-002",
+        vehicle_number="KA01AB2029",
+        assigned_dock=dock,
+    )
+
+    assert not hasattr(request, "assigned_dock_code")
+    assert request.assigned_dock.dock_code == "DOCK-02"
+

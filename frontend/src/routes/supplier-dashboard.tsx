@@ -155,11 +155,11 @@ function SupplierDashboard() {
         const rows = Array.isArray(result) ? result : result?.items || result?.suppliers || [];
         const supplier = rows.length
           ? rows.find(
-              (item: any) =>
-                String(item.id) === String(supplierId) ||
-                String(item.username || item.supplier_name || "").toLowerCase() ===
-                  String(supplierUsername || "").toLowerCase(),
-            ) || rows[0]
+            (item: any) =>
+              String(item.id) === String(supplierId) ||
+              String(item.username || item.supplier_name || "").toLowerCase() ===
+              String(supplierUsername || "").toLowerCase(),
+          ) || rows[0]
           : result;
         const companyName =
           supplier?.registered_company_name ||
@@ -586,267 +586,266 @@ function SupplierDashboard() {
 
           {/* ASN History Table Section */}
           <div className="supplier-dashboard-panels grid items-start gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-          <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold text-foreground">Delivery history</h2>
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  View and track your delivery notices.
-                </p>
+            <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-foreground">Delivery history</h2>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    View and track your delivery notices.
+                  </p>
+                </div>
+
+                <div className="flex w-full items-center sm:w-auto">
+                  <form onSubmit={(e) => e.preventDefault()} className="relative w-full sm:w-64">
+                    <Search
+                      className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                      aria-hidden="true"
+                    />
+                    <Input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Search deliveries"
+                      className="h-10 w-full rounded-lg pl-9 pr-8 text-sm"
+                      aria-label="Search deliveries by ASN, vehicle number, or status"
+                    />
+                    {query && (
+                      <button
+                        type="button"
+                        aria-label="Clear search"
+                        title="Clear search"
+                        onClick={() => setQuery("")}
+                        className="absolute right-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground text-xs cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </form>
+                </div>
               </div>
 
-              <div className="flex w-full items-center sm:w-auto">
-                <form onSubmit={(e) => e.preventDefault()} className="relative w-full sm:w-64">
-                  <Search
-                    className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                  <Input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search deliveries"
-                    className="h-10 w-full rounded-lg pl-9 pr-8 text-sm"
-                    aria-label="Search deliveries by ASN, vehicle number, or status"
-                  />
-                  {query && (
-                    <button
-                      type="button"
-                      aria-label="Clear search"
-                      title="Clear search"
-                      onClick={() => setQuery("")}
-                      className="absolute right-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground text-xs cursor-pointer"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </form>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full min-w-[620px] text-left text-sm">
-                <thead className="border-b border-border bg-muted/60 text-xs font-medium text-muted-foreground">
-                  <tr>
-                    <th scope="col" className="px-3.5 py-3">
-                      <div className="inline-flex items-center gap-1">
-                        <span>ASN Number</span>
-                      </div>
-                    </th>
-                    <th scope="col" className="px-3.5 py-3">
-                      Vehicle number
-                    </th>
-                    <th scope="col" className="px-3.5 py-3">
-                      <div className="inline-flex items-center gap-1">
-                        <span>Status</span>
-                      </div>
-                    </th>
-                    <th scope="col" className="px-3.5 py-3">
-                      Submitted date
-                    </th>
-                    <th scope="col" className="px-3.5 py-3 text-right">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/70">
-                  {asnsError && (
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full min-w-[620px] text-left text-sm">
+                  <thead className="border-b border-border bg-muted/60 text-xs font-medium text-muted-foreground">
                     <tr>
-                      <td colSpan={5} className="px-4 py-3">
-                        <div
-                          role="alert"
-                          className="flex flex-wrap items-center justify-between gap-3 text-sm text-destructive"
-                        >
-                          <span>{asnsError}</span>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void loadAsns()}
-                          >
-                            Try again
-                          </Button>
+                      <th scope="col" className="px-3.5 py-3">
+                        <div className="inline-flex items-center gap-1">
+                          <span>ASN Number</span>
                         </div>
-                      </td>
+                      </th>
+                      <th scope="col" className="px-3.5 py-3">
+                        Vehicle number
+                      </th>
+                      <th scope="col" className="px-3.5 py-3">
+                        <div className="inline-flex items-center gap-1">
+                          <span>Status</span>
+                        </div>
+                      </th>
+                      <th scope="col" className="px-3.5 py-3">
+                        Submitted date
+                      </th>
+                      <th scope="col" className="px-3.5 py-3 text-right">
+                        Actions
+                      </th>
                     </tr>
-                  )}
-                  {asnsLoading && asns.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={5}
-                        className="px-4 py-10 text-center text-sm text-muted-foreground"
-                      >
-                        <span className="inline-flex items-center gap-2" role="status">
-                          <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                          Loading delivery notices…
-                        </span>
-                      </td>
-                    </tr>
-                  )}
-                  {!asnsLoading && !asnsError && rows.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={5}
-                        className="px-4 py-10 text-center text-sm text-muted-foreground"
-                      >
-                        {query
-                          ? "No deliveries match your search."
-                          : "No delivery notices yet. The local database currently has no supplier delivery records."}
-                      </td>
-                    </tr>
-                  )}
-                  {visibleDeliveries.map((asn) => {
-                    const key = String(asn.id || asn.asn_number);
-                    const status = String(asn.status || "SUBMITTED").toUpperCase();
-                    return (
-                      <tr key={key} className="transition-colors hover:bg-muted/40">
-                        <td className="px-3.5 py-3 font-mono font-medium text-primary">
-                          <Tooltip delayDuration={150}>
-                            <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                className="cursor-pointer text-left font-medium text-primary hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                onClick={() => showDetails(asn)}
-                              >
-                                {asn.asn_number || "—"}
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent
-                              side="top"
-                              className="max-w-xs border border-border bg-popover text-xs text-popover-foreground shadow-soft"
+                  </thead>
+                  <tbody className="divide-y divide-border/70">
+                    {asnsError && (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-3">
+                          <div
+                            role="alert"
+                            className="flex flex-wrap items-center justify-between gap-3 text-sm text-destructive"
+                          >
+                            <span>{asnsError}</span>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void loadAsns()}
                             >
-                              Click to view delivery details for {asn.asn_number}
-                            </TooltipContent>
-                          </Tooltip>
+                              Try again
+                            </Button>
+                          </div>
                         </td>
-                        <td className="px-3.5 py-3 font-mono text-foreground">
-                          {asn.vehicle_number || "—"}
+                      </tr>
+                    )}
+                    {asnsLoading && asns.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-4 py-10 text-center text-sm text-muted-foreground"
+                        >
+                          <span className="inline-flex items-center gap-2" role="status">
+                            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                            Loading delivery notices…
+                          </span>
                         </td>
-                        <td className="px-3.5 py-3">
-                          <div className="inline-flex items-center gap-1.5">
-                            <Badge
-                              data-status={status}
-                              className={`supplier-delivery-status inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${
-                                statuses[status] || "bg-muted text-muted-foreground border-border"
-                              }`}
-                            >
-                              <span className="supplier-status-dot" aria-hidden="true" />
-                              {status.replaceAll("_", " ")}
-                            </Badge>
-                              </div>
+                      </tr>
+                    )}
+                    {!asnsLoading && !asnsError && rows.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-4 py-10 text-center text-sm text-muted-foreground"
+                        >
+                          {query
+                            ? "No deliveries match your search."
+                            : "No delivery notices yet. The local database currently has no supplier delivery records."}
                         </td>
-                        <td className="px-3.5 py-3 text-muted-foreground">
-                          {asn.created_at
-                            ? new Date(asn.created_at).toLocaleDateString()
-                            : asn.delivery_date ||
-                              asn.expected_arrival_date ||
-                              asn.expected_arrival_at?.split("T")[0] ||
-                              "—"}
-                        </td>
-                        <td className="px-3.5 py-3 text-right">
-                          <div className="flex items-center justify-end gap-1">
+                      </tr>
+                    )}
+                    {visibleDeliveries.map((asn) => {
+                      const key = String(asn.id || asn.asn_number);
+                      const status = String(asn.status || "SUBMITTED").toUpperCase();
+                      return (
+                        <tr key={key} className="transition-colors hover:bg-muted/40">
+                          <td className="px-3.5 py-3 font-mono font-medium text-primary">
                             <Tooltip delayDuration={150}>
                               <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 text-sm font-medium text-primary hover:bg-primary/10"
+                                <button
+                                  type="button"
+                                  className="cursor-pointer text-left font-medium text-primary hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                   onClick={() => showDetails(asn)}
                                 >
-                                  <Eye className="size-4" /> View
-                                </Button>
+                                  {asn.asn_number || "—"}
+                                </button>
                               </TooltipTrigger>
                               <TooltipContent
                                 side="top"
                                 className="max-w-xs border border-border bg-popover text-xs text-popover-foreground shadow-soft"
                               >
-                                Open delivery details, transport info, and item list
+                                Click to view delivery details for {asn.asn_number}
                               </TooltipContent>
                             </Tooltip>
-                          </div>
-                        </td>
-                      </tr>
+                          </td>
+                          <td className="px-3.5 py-3 font-mono text-foreground">
+                            {asn.vehicle_number || "—"}
+                          </td>
+                          <td className="px-3.5 py-3">
+                            <div className="inline-flex items-center gap-1.5">
+                              <Badge
+                                data-status={status}
+                                className={`supplier-delivery-status inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${statuses[status] || "bg-muted text-muted-foreground border-border"
+                                  }`}
+                              >
+                                <span className="supplier-status-dot" aria-hidden="true" />
+                                {status.replaceAll("_", " ")}
+                              </Badge>
+                            </div>
+                          </td>
+                          <td className="px-3.5 py-3 text-muted-foreground">
+                            {asn.created_at
+                              ? new Date(asn.created_at).toLocaleDateString()
+                              : asn.delivery_date ||
+                              asn.expected_arrival_date ||
+                              asn.expected_arrival_at?.split("T")[0] ||
+                              "—"}
+                          </td>
+                          <td className="px-3.5 py-3 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <Tooltip delayDuration={150}>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 text-sm font-medium text-primary hover:bg-primary/10"
+                                    onClick={() => showDetails(asn)}
+                                  >
+                                    <Eye className="size-4" /> View
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent
+                                  side="top"
+                                  className="max-w-xs border border-border bg-popover text-xs text-popover-foreground shadow-soft"
+                                >
+                                  Open delivery details, transport info, and item list
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-3 text-sm text-muted-foreground">
+                <p aria-live="polite">
+                  Showing {rows.length ? (currentDeliveryPage - 1) * deliveryPageSize + 1 : 0}–{Math.min(currentDeliveryPage * deliveryPageSize, rows.length)} of {rows.length} deliveries
+                </p>
+                <nav aria-label="Delivery history pagination" className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" disabled={currentDeliveryPage === 1 || asnsLoading} onClick={() => setDeliveryPage(currentDeliveryPage - 1)}>Previous</Button>
+                  <span className="min-w-12 text-center text-xs" aria-current="page">{currentDeliveryPage} / {deliveryPageCount}</span>
+                  <Button variant="outline" size="sm" disabled={currentDeliveryPage >= deliveryPageCount || asnsLoading} onClick={() => setDeliveryPage(currentDeliveryPage + 1)}>Next</Button>
+                </nav>
+              </div>
+            </section>
+
+            {/* ASN Submission Trend beside delivery history */}
+            <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-foreground">ASN activity</h2>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    Delivery notices submitted in the selected period.
+                  </p>
+                </div>
+                <Select
+                  value={String(trendDays)}
+                  onValueChange={(value) => setTrendDays(Number(value) as 7 | 30 | 90)}
+                >
+                  <SelectTrigger
+                    aria-label="ASN activity range"
+                    className="h-11 w-[156px] gap-3 rounded-[10px] border-[#DFE7F0] bg-white text-sm font-medium text-[#172B4D] shadow-none hover:border-[#B3C8D9] focus:ring-2 focus:ring-[#0866B1]/20"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="supplier-activity-range-menu rounded-xl border-[#DFE7F0] bg-white p-1 text-[#172B4D] shadow-[0_8px_24px_rgb(23_43_77_/_0.10)]">
+                    <SelectItem value="7">Last 7 Days</SelectItem>
+                    <SelectItem value="30">Last 30 Days</SelectItem>
+                    <SelectItem value="90">Last 90 Days</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {asnsLoading && asns.length === 0 ? (
+                <div
+                  className="mt-4 flex h-36 items-center justify-center rounded-lg border border-border text-sm text-muted-foreground"
+                  role="status"
+                >
+                  <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
+                  Loading activity…
+                </div>
+              ) : asnsError && asns.length === 0 ? (
+                <div role="alert" className="mt-4 flex h-36 flex-col items-center justify-center gap-1 rounded-lg border border-border px-4 text-center text-sm text-destructive">
+                  <span>Supplier activity could not be loaded.</span>
+                  <span className="text-xs text-muted-foreground">{asnsError}</span>
+                </div>
+              ) : trend.every(({ count }) => count === 0) ? (
+                <div className="mt-4 flex h-36 flex-col items-center justify-center gap-1 rounded-lg border border-border px-4 text-center text-sm text-muted-foreground">
+                  <span>No delivery notices in this period.</span>
+                  {asns.length === 0 && <span className="text-xs">Create an ASN to populate supplier activity.</span>}
+                </div>
+              ) : (
+                <div className="mt-4 flex h-36 items-end gap-2 overflow-x-auto rounded-lg border-b border-l border-border bg-[repeating-linear-gradient(to_bottom,transparent_0,transparent_34px,color-mix(in_oklab,var(--border)_50%,transparent)_35px)] px-2 pb-1 pt-3">
+                  {trend.map(({ key, label, count }) => {
+                    const max = Math.max(...trend.map((item) => item.count), 1);
+                    return (
+                      <div key={key} className="flex flex-1 flex-col items-center justify-end gap-1">
+                        <span className="text-[10px] font-bold text-slate-500">{count}</span>
+                        <div
+                          className="h-auto min-w-4 w-full max-w-8 rounded-t bg-primary transition-colors hover:bg-primary/80"
+                          title={`${label}: ${count}`}
+                          style={{ height: `${count ? Math.max((count / max) * 100, 8) : 3}px` }}
+                        />
+                        <span className="text-[9px] font-medium text-muted-foreground">{label}</span>
+                      </div>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-3 text-sm text-muted-foreground">
-              <p aria-live="polite">
-                Showing {rows.length ? (currentDeliveryPage - 1) * deliveryPageSize + 1 : 0}–{Math.min(currentDeliveryPage * deliveryPageSize, rows.length)} of {rows.length} deliveries
-              </p>
-              <nav aria-label="Delivery history pagination" className="flex items-center gap-2">
-                <Button variant="outline" size="sm" disabled={currentDeliveryPage === 1 || asnsLoading} onClick={() => setDeliveryPage(currentDeliveryPage - 1)}>Previous</Button>
-                <span className="min-w-12 text-center text-xs" aria-current="page">{currentDeliveryPage} / {deliveryPageCount}</span>
-                <Button variant="outline" size="sm" disabled={currentDeliveryPage >= deliveryPageCount || asnsLoading} onClick={() => setDeliveryPage(currentDeliveryPage + 1)}>Next</Button>
-              </nav>
-            </div>
-          </section>
-
-          {/* ASN Submission Trend beside delivery history */}
-          <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold text-foreground">ASN activity</h2>
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  Delivery notices submitted in the selected period.
-                </p>
-              </div>
-              <Select
-                value={String(trendDays)}
-                onValueChange={(value) => setTrendDays(Number(value) as 7 | 30 | 90)}
-              >
-                <SelectTrigger
-                  aria-label="ASN activity range"
-                  className="h-11 w-[156px] gap-3 rounded-[10px] border-[#DFE7F0] bg-white text-sm font-medium text-[#172B4D] shadow-none hover:border-[#B3C8D9] focus:ring-2 focus:ring-[#0866B1]/20"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="supplier-activity-range-menu rounded-xl border-[#DFE7F0] bg-white p-1 text-[#172B4D] shadow-[0_8px_24px_rgb(23_43_77_/_0.10)]">
-                  <SelectItem value="7">Last 7 Days</SelectItem>
-                  <SelectItem value="30">Last 30 Days</SelectItem>
-                  <SelectItem value="90">Last 90 Days</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {asnsLoading && asns.length === 0 ? (
-              <div
-                className="mt-4 flex h-36 items-center justify-center rounded-lg border border-border text-sm text-muted-foreground"
-                role="status"
-              >
-                <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
-                Loading activity…
-              </div>
-            ) : asnsError && asns.length === 0 ? (
-              <div role="alert" className="mt-4 flex h-36 flex-col items-center justify-center gap-1 rounded-lg border border-border px-4 text-center text-sm text-destructive">
-                <span>Supplier activity could not be loaded.</span>
-                <span className="text-xs text-muted-foreground">{asnsError}</span>
-              </div>
-            ) : trend.every(({ count }) => count === 0) ? (
-              <div className="mt-4 flex h-36 flex-col items-center justify-center gap-1 rounded-lg border border-border px-4 text-center text-sm text-muted-foreground">
-                <span>No delivery notices in this period.</span>
-                {asns.length === 0 && <span className="text-xs">Create an ASN to populate supplier activity.</span>}
-              </div>
-            ) : (
-              <div className="mt-4 flex h-36 items-end gap-2 overflow-x-auto rounded-lg border-b border-l border-border bg-[repeating-linear-gradient(to_bottom,transparent_0,transparent_34px,color-mix(in_oklab,var(--border)_50%,transparent)_35px)] px-2 pb-1 pt-3">
-                {trend.map(({ key, label, count }) => {
-                  const max = Math.max(...trend.map((item) => item.count), 1);
-                  return (
-                    <div key={key} className="flex flex-1 flex-col items-center justify-end gap-1">
-                      <span className="text-[10px] font-bold text-slate-500">{count}</span>
-                      <div
-                        className="h-auto min-w-4 w-full max-w-8 rounded-t bg-primary transition-colors hover:bg-primary/80"
-                        title={`${label}: ${count}`}
-                        style={{ height: `${count ? Math.max((count / max) * 100, 8) : 3}px` }}
-                      />
-                      <span className="text-[9px] font-medium text-muted-foreground">{label}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
+                </div>
+              )}
+            </section>
 
           </div>
 
@@ -1519,18 +1518,18 @@ function SupplierDashboard() {
                                     prev.map((item, i) =>
                                       i === idx
                                         ? {
-                                            ...item,
-                                            material_name: val,
-                                            item_code:
-                                              matched?.code ||
-                                              matched?.material_code ||
-                                              item.item_code,
-                                            uom:
-                                              matched?.uom ||
-                                              matched?.base_uom ||
-                                              item.uom ||
-                                              "PCS",
-                                          }
+                                          ...item,
+                                          material_name: val,
+                                          item_code:
+                                            matched?.code ||
+                                            matched?.material_code ||
+                                            item.item_code,
+                                          uom:
+                                            matched?.uom ||
+                                            matched?.base_uom ||
+                                            item.uom ||
+                                            "PCS",
+                                        }
                                         : item,
                                     ),
                                   );

@@ -457,6 +457,7 @@ async def list_expected_deliveries(
     if ge_passes:
         dr_result = await uow.session.execute(
             select(DockAllocationRequestModel)
+            .options(selectinload(DockAllocationRequestModel.assigned_dock))
             .where(DockAllocationRequestModel.existing_gate_pass_id.in_(ge_passes))
             .order_by(DockAllocationRequestModel.created_at.desc())
         )
@@ -498,12 +499,19 @@ async def list_expected_deliveries(
             grn_by_asn_id.get(asn.id)
             or (grn_by_asn_num.get(asn.asn_number.strip().upper()) if asn.asn_number else None)
         )
+        assigned_dock_code = (
+            ge.assigned_dock_id
+            if ge and ge.assigned_dock_id
+            else dr.assigned_dock.dock_code
+            if dr and dr.assigned_dock
+            else None
+        )
 
         op_status = resolve_asn_operational_status(
             asn_status=asn.status,
             gate_entry_status=ge.status if ge else None,
             gate_entry_exited=bool(ge and (ge.exited_at is not None or ge.status in ("VEHICLE_EXITED", "GATE_EXIT_COMPLETED"))),
-            assigned_dock_code=(ge.assigned_dock_id if ge else None) or (dr.assigned_dock_code if dr else None),
+            assigned_dock_code=assigned_dock_code,
             dock_request_status=dr.status if dr else None,
             grn_status=gr.status if gr else None,
             grn_posted=bool(gr and (gr.posted_at is not None or gr.status in ("GRN_POSTED", "COMPLETED", "RECEIVING_COMPLETE"))),
@@ -519,7 +527,7 @@ async def list_expected_deliveries(
                 "gate_entry_number": ge.gate_entry_number,
                 "vehicle_number": ge.vehicle_number,
                 "driver_name": ge.driver_name,
-                "dock_number": ge.assigned_dock_id or (dr.assigned_dock_code if dr else None),
+                "dock_number": assigned_dock_code,
                 "exited_at": ge.exited_at.isoformat() if ge.exited_at else None,
             }
 
