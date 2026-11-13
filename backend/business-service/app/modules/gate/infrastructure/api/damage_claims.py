@@ -55,7 +55,13 @@ class ResponseBody(BaseModel):
     return_required: bool = False
 class ShipmentBody(BaseModel):
     vehicle_number: str = Field(..., min_length=1, max_length=32)
+    driver_name: str | None = Field(None, max_length=128)
+    driver_contact: str | None = Field(None, max_length=32)
     expected_arrival: datetime.datetime | None = None
+    replacement_quantity: float | None = Field(None, gt=0)
+    transporter: str | None = Field(None, max_length=128)
+    challan_number: str | None = Field(None, max_length=128)
+    invoice_number: str | None = Field(None, max_length=128)
 class GateBody(BaseModel):
     vehicle_number: str = Field(..., min_length=1, max_length=32)
 class ReceiptBody(BaseModel):
@@ -92,6 +98,33 @@ async def next_number(uow, model, field, prefix):
     try: sequence = int(value.split("-",1)[1]) + 1 if value else 1
     except (ValueError, IndexError): sequence = 1
     return f"{prefix}-{sequence:05d}"
+
+def compute_replacement_asn_number(original_asn_number: str, existing_records: list[str]) -> str:
+    """Compute collision-safe replacement reference: {original}-R, or -R2, -R3 if already exists."""
+    cleaned = (original_asn_number or "").strip()
+    if not cleaned:
+        cleaned = "ASN-REPLACEMENT"
+    base_ref = f"{cleaned}-R"
+    existing_set = {str(n).strip().upper() for n in existing_records if n}
+    if base_ref.upper() not in existing_set:
+        return base_ref
+    counter = 2
+    while f"{base_ref.upper()}{counter}" in existing_set or f"{cleaned.upper()}-R{counter}" in existing_set:
+        counter += 1
+    return f"{cleaned}-R{counter}"
+
+async def get_next_replacement_asn_number(uow: UnitOfWork, original_asn_number: str) -> str:
+    """Generate a collision-safe replacement ASN reference by appending -R to the original ASN."""
+    cleaned = (original_asn_number or "").strip()
+    if not cleaned:
+        cleaned = "ASN-REPLACEMENT"
+    base_ref = f"{cleaned}-R"
+    existing_records = (await uow.session.execute(
+        select(AsnModel.asn_number).where(
+            func.upper(AsnModel.asn_number).like(f"{base_ref.upper()}%")
+        )
+    )).scalars().all()
+    return compute_replacement_asn_number(original_asn_number, existing_records)
 
 @router.get("")
 async def list_claims(user: CurrentUser = Depends(get_current_user), uow: UnitOfWork = Depends(get_uow)):
@@ -212,7 +245,35 @@ async def list_claims(user: CurrentUser = Depends(get_current_user), uow: UnitOf
             evidence = (await uow.session.execute(select(GrnDamageEvidenceModel).where(GrnDamageEvidenceModel.grn_line_id == source_line.id))).scalars().all()
             shipment = (await uow.session.execute(select(ReplacementShipmentModel).where(ReplacementShipmentModel.claim_id == claim.id))).scalar_one_or_none()
             returned = (await uow.session.execute(select(SupplierReturnModel).where(SupplierReturnModel.claim_id == claim.id))).scalar_one_or_none()
-            result.append({"id": str(claim.id), "claim_number": claim.claim_number, "status": "PENDING_RESPONSE" if not claim.supplier_response else claim.supplier_response,
+
+            orig_asn_num = (source_grn.asn_number if source_grn else None) or (asn.asn_number if asn else None)
+            display_status = claim.status
+            if claim.status == "CLOSED":
+                display_status = "RESOLVED"
+            elif claim.status == "REPLACEMENT_COMPLETED":
+                display_status = "REPLACEMENT_COMPLETED"
+            elif claim.status in {"REPLACEMENT_IN_TRANSIT", "REPLACEMENT_IN_PROGRESS"}:
+                display_status = claim.status
+            elif shipment:
+                if shipment.status in {"INVENTORY_POSTED", "PUTAWAY_COMPLETED"}:
+                    display_status = "REPLACEMENT_COMPLETED"
+                elif shipment.status in {"IN_TRANSIT", "AT_RECEIVING", "AWAITING_INSPECTION", "INSPECTION_PASSED"}:
+                    display_status = "REPLACEMENT_IN_TRANSIT"
+                else:
+                    display_status = shipment.status
+            elif not claim.supplier_response:
+                display_status = "PENDING_RESPONSE"
+            else:
+                display_status = "ACCEPTED" if claim.supplier_response in {"ACCEPT", "PARTIALLY_ACCEPT", "REPLACEMENT_OFFERED"} else claim.supplier_response
+
+            workflow_state = (
+                "COMPLETED" if (claim.status == "REPLACEMENT_COMPLETED" or (shipment and shipment.status in {"INVENTORY_POSTED", "PUTAWAY_COMPLETED"}))
+                else ("IN_PROGRESS" if (shipment or claim.status in {"REPLACEMENT_IN_TRANSIT", "REPLACEMENT_IN_PROGRESS"})
+                else "PENDING")
+            )
+
+            result.append({"id": str(claim.id), "claim_number": claim.claim_number, "status": display_status,
+              "claim_status": claim.status, "workflow_state": workflow_state,
               "claim_source": "GRN",
               "response": claim.supplier_response, "resolution": claim.resolution, "responded_at": claim.responded_at.isoformat() if claim.responded_at else None, "supplier_remarks": claim.supplier_remarks,
               "return_required": claim.return_required, "po_number": source_grn.po_number if source_grn else None,
@@ -221,8 +282,11 @@ async def list_claims(user: CurrentUser = Depends(get_current_user), uow: UnitOf
               "batch_number": None, "received_quantity": float(source_line.received_quantity or 0),
               "accepted_quantity": float(source_line.accepted_quantity or 0), "damaged_quantity": float(source_line.damaged_quantity or 0),
               "rejected_quantity": float(source_line.rejected_quantity or 0), "uom": source_line.uom,
-              "asn_number": (source_grn.asn_number if source_grn else None) or (asn.asn_number if asn else None),
+              "asn_number": orig_asn_num,
+              "original_asn_number": orig_asn_num,
+              "replacement_asn_number": shipment.shipment_number if shipment else (f"{orig_asn_num}-R" if orig_asn_num else None),
               "asn_id": str(asn.id) if asn else (str(source_grn.asn_id) if source_grn and source_grn.asn_id else None),
+              "original_asn_id": str(asn.id) if asn else (str(source_grn.asn_id) if source_grn and source_grn.asn_id else None),
               "vehicle_number": (source_grn.vehicle_number if source_grn else None) or (gate_entry.vehicle_number if gate_entry else None) or (asn.vehicle_number if asn else None),
               "gate_entry_number": (source_grn.gate_entry_number if source_grn else None) or (gate_entry.gate_entry_number if gate_entry else None),
               "inbound_exited_at": gate_entry.exited_at.isoformat() if gate_entry and gate_entry.exited_at else None,
@@ -232,8 +296,8 @@ async def list_claims(user: CurrentUser = Depends(get_current_user), uow: UnitOf
               "asn_shipment_date": asn.shipment_date.isoformat() if asn and asn.shipment_date else None,
               "damage_reason": next((e.reason for e in evidence if e.reason), None), "remarks": next((e.remarks for e in evidence if e.remarks), None),
               "photos": [{"filename": e.file_name, "content_type": "image/*", "file_path": e.file_path} for e in evidence],
-              "replacement_asn": None if not shipment else {"id": str(shipment.id), "asn_number": shipment.shipment_number, "status": shipment.status, "claim_id": str(claim.id), "supplier_id": str(claim.supplier_id), "expected_quantity": float(shipment.expected_quantity)},
-              "shipment": None if not shipment else {"id":str(shipment.id),"shipment_number":shipment.shipment_number,"status":shipment.status,"vehicle_number":shipment.vehicle_number,"gate_entry_number":shipment.gate_entry_number,"replacement_grn_number":shipment.replacement_grn_number,"expected_quantity":float(shipment.expected_quantity),"received_quantity":float(shipment.received_quantity) if shipment.received_quantity is not None else None,"accepted_quantity":float(shipment.accepted_quantity) if shipment.accepted_quantity is not None else None,"damaged_quantity":float(shipment.damaged_quantity) if shipment.damaged_quantity is not None else None,"putaway_location":shipment.putaway_location},
+              "replacement_asn": None if not shipment else {"id": str(shipment.id), "asn_id": str(shipment.asn_id) if shipment.asn_id else None, "asn_number": shipment.shipment_number, "status": shipment.status, "claim_id": str(claim.id), "supplier_id": str(claim.supplier_id), "expected_quantity": float(shipment.expected_quantity), "original_asn_number": orig_asn_num},
+              "shipment": None if not shipment else {"id":str(shipment.id),"shipment_number":shipment.shipment_number,"asn_id":str(shipment.asn_id) if shipment.asn_id else None,"asn_number":shipment.shipment_number,"status":shipment.status,"vehicle_number":shipment.vehicle_number,"gate_entry_number":shipment.gate_entry_number,"replacement_grn_number":shipment.replacement_grn_number,"expected_quantity":float(shipment.expected_quantity),"received_quantity":float(shipment.received_quantity) if shipment.received_quantity is not None else None,"accepted_quantity":float(shipment.accepted_quantity) if shipment.accepted_quantity is not None else None,"damaged_quantity":float(shipment.damaged_quantity) if shipment.damaged_quantity is not None else None,"putaway_location":shipment.putaway_location},
               "return": None if not returned else {"id":str(returned.id),"return_number":returned.return_number,"status":returned.status,"vehicle_number":returned.vehicle_number}})
             continue
         grn_id = (await uow.session.execute(
@@ -242,20 +306,38 @@ async def list_claims(user: CurrentUser = Depends(get_current_user), uow: UnitOf
         photos = (await uow.session.execute(select(DamagePhotoModel).where(DamagePhotoModel.damage_report_id == report.id))).scalars().all()
         shipment=(await uow.session.execute(select(ReplacementShipmentModel).where(ReplacementShipmentModel.claim_id==claim.id))).scalar_one_or_none()
         returned=(await uow.session.execute(select(SupplierReturnModel).where(SupplierReturnModel.claim_id==claim.id))).scalar_one_or_none()
-        display_status = "PENDING_RESPONSE" if not claim.supplier_response else ("ACCEPTED" if claim.supplier_response in {"ACCEPT", "PARTIALLY_ACCEPT"} else ("REJECTED" if claim.supplier_response == "REJECT" else claim.supplier_response))
+        orig_asn_num = asn.asn_number if asn else None
+        display_status = claim.status
         if claim.status == "CLOSED": display_status = "RESOLVED"
-        result.append({"id":str(claim.id),"claim_number":claim.claim_number,"status":display_status,"response":claim.supplier_response,"resolution":claim.resolution,
+        elif claim.status == "REPLACEMENT_COMPLETED": display_status = "REPLACEMENT_COMPLETED"
+        elif claim.status in {"REPLACEMENT_IN_TRANSIT", "REPLACEMENT_IN_PROGRESS"}: display_status = claim.status
+        elif shipment:
+            if shipment.status in {"INVENTORY_POSTED", "PUTAWAY_COMPLETED"}: display_status = "REPLACEMENT_COMPLETED"
+            elif shipment.status in {"IN_TRANSIT", "AT_RECEIVING", "AWAITING_INSPECTION", "INSPECTION_PASSED"}: display_status = "REPLACEMENT_IN_TRANSIT"
+            else: display_status = shipment.status
+        elif not claim.supplier_response: display_status = "PENDING_RESPONSE"
+        else: display_status = "ACCEPTED" if claim.supplier_response in {"ACCEPT", "PARTIALLY_ACCEPT", "REPLACEMENT_OFFERED"} else claim.supplier_response
+        workflow_state = (
+            "COMPLETED" if (claim.status == "REPLACEMENT_COMPLETED" or (shipment and shipment.status in {"INVENTORY_POSTED", "PUTAWAY_COMPLETED"}))
+            else ("IN_PROGRESS" if (shipment or claim.status in {"REPLACEMENT_IN_TRANSIT", "REPLACEMENT_IN_PROGRESS"})
+            else "PENDING")
+        )
+        result.append({"id":str(claim.id),"claim_number":claim.claim_number,"status":display_status,"claim_status":claim.status,"workflow_state":workflow_state,"response":claim.supplier_response,"resolution":claim.resolution,
           "claim_source": "LEGACY_DAMAGE_REPORT",
           "responded_at":claim.responded_at.isoformat() if claim.responded_at else None,"supplier_remarks":claim.supplier_remarks,"return_required":claim.return_required,"po_number":report.po_number,"grn_number":report.grn_number,
           "grn_id": str(grn_id) if grn_id else None,
           "material":report.material_name or report.material_code,"item_code":report.material_code,"batch_number":None,
           "received_quantity":float(report.received_quantity),"accepted_quantity":float(line.good_quantity or 0),
           "damaged_quantity":float(report.damaged_quantity),"rejected_quantity":float(line.rejected_quantity or 0),"uom":line.uom,
-          "asn_number": asn.asn_number if asn else None, "vehicle_number": asn.vehicle_number if asn else gate_entry.vehicle_number,
+          "asn_number": orig_asn_num, "original_asn_number": orig_asn_num,
+          "replacement_asn_number": shipment.shipment_number if shipment else (f"{orig_asn_num}-R" if orig_asn_num else None),
+          "asn_id": str(asn.id) if asn else None, "original_asn_id": str(asn.id) if asn else None,
+          "vehicle_number": asn.vehicle_number if asn else gate_entry.vehicle_number,
           "driver_name": asn.driver_name if asn else gate_entry.driver_name, "driver_contact": asn.driver_contact if asn else None,
           "damage_reason": report.damage_reason, "remarks": report.remarks,
           "photos": [{"filename": p.filename, "content_type": p.content_type, "image_base64": __import__("base64").b64encode(p.image_data).decode("ascii")} for p in photos],
-          "shipment": None if not shipment else {"id":str(shipment.id),"shipment_number":shipment.shipment_number,"status":shipment.status,"vehicle_number":shipment.vehicle_number,
+          "replacement_asn": None if not shipment else {"id": str(shipment.id), "asn_id": str(shipment.asn_id) if shipment.asn_id else None, "asn_number": shipment.shipment_number, "status": shipment.status, "claim_id": str(claim.id), "supplier_id": str(claim.supplier_id), "expected_quantity": float(shipment.expected_quantity), "original_asn_number": orig_asn_num},
+          "shipment": None if not shipment else {"id":str(shipment.id),"shipment_number":shipment.shipment_number,"asn_id":str(shipment.asn_id) if shipment.asn_id else None,"asn_number":shipment.shipment_number,"status":shipment.status,"vehicle_number":shipment.vehicle_number,
             "gate_entry_number":shipment.gate_entry_number,"replacement_grn_number":shipment.replacement_grn_number,"expected_quantity":float(shipment.expected_quantity),
             "received_quantity":float(shipment.received_quantity) if shipment.received_quantity is not None else None,"accepted_quantity":float(shipment.accepted_quantity) if shipment.accepted_quantity is not None else None,
             "damaged_quantity":float(shipment.damaged_quantity) if shipment.damaged_quantity is not None else None,"putaway_location":shipment.putaway_location},
@@ -284,54 +366,126 @@ async def respond(claim_id:str, body:ResponseBody, user:CurrentUser=Depends(get_
 async def ship_replacement(claim_id:str, body:ShipmentBody,user:CurrentUser=Depends(get_current_user),uow:UnitOfWork=Depends(get_uow)):
     require_role(user,"SUPPLIER","ADMIN"); claim,report,line=await claim_context(claim_id,uow)
     await ensure_supplier_owns_claim(user, claim, uow)
-    if claim.resolution not in {"REPLACEMENT","RETURN_REPLACEMENT"}: raise HTTPException(409,"Claim resolution does not include replacement")
+    if not claim.resolution:
+        claim.resolution = "REPLACEMENT"
+        if not claim.supplier_response:
+            claim.supplier_response = "ACCEPT"
+        if not claim.responded_at:
+            claim.responded_at = now()
+    elif claim.resolution not in {"REPLACEMENT","RETURN_REPLACEMENT"}:
+        raise HTTPException(409,"Claim resolution does not include replacement")
     existing=(await uow.session.execute(select(ReplacementShipmentModel).where(ReplacementShipmentModel.claim_id==claim.id))).scalar_one_or_none()
-    if existing: return {"id":str(existing.id),"shipment_number":existing.shipment_number,"status":existing.status}
-    number=await next_number(uow,ReplacementShipmentModel,ReplacementShipmentModel.shipment_number,"RS")
-    replacement_quantity = (
+    if existing:
+        return {"id":str(existing.id),"shipment_number":existing.shipment_number,"asn_id":str(existing.asn_id) if existing.asn_id else None,"asn_number":existing.shipment_number,"status":existing.status}
+
+    # Fetch ONLY eligible damaged material from damage claim
+    item_code = report.material_code if report is not None else (line.item_code if line is not None else "ITEM")
+    material_name = (
+        report.material_name or report.material_code
+        if report is not None
+        else (line.material_name or line.item_code if line is not None else item_code)
+    )
+    material_id = getattr(line, "material_id", None) if line is not None else None
+    max_eligible_qty = float(
         report.damaged_quantity
         if report is not None
         else (line.damaged_quantity or 0) + (line.rejected_quantity or 0)
     )
-    if replacement_quantity <= 0:
+    if max_eligible_qty <= 0:
         raise HTTPException(409, "Claim has no damaged or rejected quantity available for replacement")
-    uom = line.uom if line is not None else "PCS"
-    source_grn = await uow.session.get(GrnModel, claim.source_grn_id) if claim.source_grn_id else None
-    asn_number = await next_number(uow, AsnModel, AsnModel.asn_number, "RASN")
+    uom = (line.uom if line is not None else "PCS") or "PCS"
+
+    if body.replacement_quantity is not None:
+        req_qty = float(body.replacement_quantity)
+        if req_qty <= 0:
+            raise HTTPException(422, "Replacement quantity must be greater than zero")
+        if req_qty > max_eligible_qty:
+            raise HTTPException(422, f"Replacement quantity ({req_qty}) cannot exceed eligible damaged quantity ({max_eligible_qty})")
+        replacement_quantity = Decimal(str(req_qty))
+    else:
+        replacement_quantity = Decimal(str(max_eligible_qty))
+
+    # Retrieve original ASN and append suffix -R
+    original_asn = None
+    original_asn_number = None
+    source_grn = None
+    if claim.source_grn_id:
+        source_grn = await uow.session.get(GrnModel, claim.source_grn_id)
+        if source_grn:
+            if source_grn.asn_id:
+                original_asn = await uow.session.get(AsnModel, source_grn.asn_id)
+            if not original_asn and source_grn.gate_entry_id:
+                gate = await uow.session.get(GateEntryModel, source_grn.gate_entry_id)
+                if gate and gate.asn_id:
+                    original_asn = await uow.session.get(AsnModel, gate.asn_id)
+            original_asn_number = (original_asn.asn_number if original_asn else None) or source_grn.asn_number
+    elif claim.damage_report_id and report:
+        if report.gate_entry_id:
+            gate = await uow.session.get(GateEntryModel, report.gate_entry_id)
+            if gate and gate.asn_id:
+                original_asn = await uow.session.get(AsnModel, gate.asn_id)
+                original_asn_number = original_asn.asn_number
+    if not original_asn_number:
+        original_asn_number = f"ASN-{claim.claim_number}"
+
+    replacement_asn_number = await get_next_replacement_asn_number(uow, original_asn_number)
+
+    supplier = await uow.session.get(SupplierModel, claim.supplier_id)
+    supplier_name = supplier.supplier_name if supplier else "Supplier"
+
     replacement_asn = AsnModel(
-        asn_number=asn_number,
+        asn_number=replacement_asn_number,
         supplier_id=claim.supplier_id,
-        po_id=str(source_grn.po_id) if source_grn and source_grn.po_id else None,
-        po_number=source_grn.po_number if source_grn else None,
+        po_id=str(source_grn.po_id) if source_grn and source_grn.po_id else (str(original_asn.po_id) if original_asn and original_asn.po_id else None),
+        po_number=source_grn.po_number if source_grn and source_grn.po_number else (original_asn.po_number if original_asn else None),
         status="SUBMITTED",
-        warehouse_id=source_grn.warehouse_id if source_grn else None,
+        warehouse_id=source_grn.warehouse_id if source_grn and source_grn.warehouse_id else (original_asn.warehouse_id if original_asn else "WH_PUNE-01"),
         vehicle_number=body.vehicle_number.upper(),
-        expected_arrival_at=body.expected_arrival,
+        driver_name=body.driver_name or (original_asn.driver_name if original_asn else "Replacement Driver"),
+        driver_contact=body.driver_contact or (original_asn.driver_contact if original_asn else None),
+        expected_arrival_at=body.expected_arrival or (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)),
         shipment_date=now().date(),
         shipment_type="REPLACEMENT",
         claim_id=claim.id,
+        transporter=body.transporter,
+        challan_number=body.challan_number,
+        invoice_number=body.invoice_number,
         logistics=[{
             "type": "replacement_claim",
             "claim_id": str(claim.id),
+            "claim_number": claim.claim_number,
+            "original_asn_id": str(original_asn.id) if original_asn else None,
+            "original_asn_number": original_asn_number,
             "original_grn_id": str(claim.source_grn_id) if claim.source_grn_id else None,
             "original_grn_number": source_grn.grn_number if source_grn else None,
-            "material_code": line.item_code if line else None,
+            "material_code": item_code,
+            "material_name": material_name,
+            "damaged_quantity": max_eligible_qty,
             "replacement_quantity": float(replacement_quantity),
             "uom": uom,
+        }, {
+            "type": "asn_details",
+            "supplier_name": supplier_name,
+            "destination_warehouse": "Main Warehouse",
         }],
     )
-    if line is not None:
-        replacement_asn.lines.append(AsnLineModel(
-            item_code=line.item_code,
-            material_name=line.material_name or line.item_code,
-            shipped_quantity=replacement_quantity,
-            uom=uom,
-        ))
+    replacement_asn.lines.append(AsnLineModel(
+        material_id=material_id,
+        item_code=item_code,
+        material_name=material_name,
+        shipped_quantity=replacement_quantity,
+        uom=uom,
+    ))
     uow.session.add(replacement_asn)
     await uow.session.flush()
-    shipment=ReplacementShipmentModel(shipment_number=number,claim_id=claim.id,asn_id=replacement_asn.id,expected_quantity=replacement_quantity,vehicle_number=body.vehicle_number.upper(),expected_arrival=body.expected_arrival,status="IN_TRANSIT")
-    uow.session.add(shipment); claim.status="REPLACEMENT_IN_TRANSIT"; uow.session.add(NotificationModel(user_role="GATE_SECURITY",title=f"Replacement {number} expected",message=f"Vehicle {shipment.vehicle_number} carrying {replacement_quantity} {uom or ''} for {claim.claim_number}.",link="/replacement-gate-entry")); await uow.session.flush()
-    return {"id":str(shipment.id),"shipment_number":number,"asn_id":str(replacement_asn.id),"asn_number":asn_number,"shipment_type":"REPLACEMENT","claim_id":str(claim.id),"status":shipment.status}
+
+    shipment=ReplacementShipmentModel(shipment_number=replacement_asn_number,claim_id=claim.id,asn_id=replacement_asn.id,expected_quantity=replacement_quantity,vehicle_number=body.vehicle_number.upper(),expected_arrival=body.expected_arrival,status="IN_TRANSIT")
+    uow.session.add(shipment)
+    claim.status="REPLACEMENT_IN_TRANSIT"
+    uow.session.add(NotificationModel(user_role="GATE_SECURITY",title=f"Replacement {replacement_asn_number} expected",message=f"Vehicle {shipment.vehicle_number} carrying replacement {replacement_quantity} {uom} for claim {claim.claim_number} (Original ASN: {original_asn_number}).",link="/replacement-gate-entry"))
+    uow.session.add(NotificationModel(user_role="WAREHOUSE",title=f"Replacement {replacement_asn_number} dispatched",message=f"Supplier dispatched replacement {replacement_asn_number} for claim {claim.claim_number}.",link="/damage-claims"))
+    await uow.session.flush()
+    return {"id":str(shipment.id),"shipment_number":replacement_asn_number,"asn_id":str(replacement_asn.id),"asn_number":replacement_asn_number,"original_asn_number":original_asn_number,"shipment_type":"REPLACEMENT","claim_id":str(claim.id),"status":shipment.status}
 
 async def get_shipment(shipment_id,uow):
     try: sid=uuid.UUID(shipment_id)
@@ -403,8 +557,11 @@ async def post_inventory(shipment_id:str,user:CurrentUser=Depends(get_current_us
     require_role(user,"WAREHOUSE","ADMIN"); shipment=await get_shipment(shipment_id,uow)
     if shipment.status!="PUTAWAY_COMPLETED" or shipment.inventory_posted_at: raise HTTPException(409,"Complete putaway before posting inventory")
     claim,report,line=await claim_context(str(shipment.claim_id),uow); qty=shipment.accepted_quantity or 0
-    stock=(await uow.session.execute(select(MaterialStockModel).where(MaterialStockModel.material_code==report.material_code).with_for_update())).scalar_one_or_none()
-    if stock is None: stock=MaterialStockModel(material_code=report.material_code,material_name=report.material_name or report.material_code,category="REPLACEMENT",on_hand=0,allocated=0,available=0,uom=line.uom or "PCS",warehouse_id="WH_PUNE-01",reorder_point=0); uow.session.add(stock)
+    mat_code = report.material_code if report is not None else (line.item_code if line is not None else "ITEM")
+    mat_name = (report.material_name or report.material_code) if report is not None else (line.material_name or line.item_code if line is not None else mat_code)
+    uom_val = (line.uom if line is not None else "PCS") or "PCS"
+    stock=(await uow.session.execute(select(MaterialStockModel).where(MaterialStockModel.material_code==mat_code).with_for_update())).scalar_one_or_none()
+    if stock is None: stock=MaterialStockModel(material_code=mat_code,material_name=mat_name,category="REPLACEMENT",on_hand=0,allocated=0,available=0,uom=uom_val,warehouse_id="WH_PUNE-01",reorder_point=0); uow.session.add(stock)
     stock.on_hand=(stock.on_hand or 0)+qty; stock.available=(stock.available or 0)+qty; stock.updated_at=datetime.datetime.now(); shipment.inventory_posted_at=now(); shipment.status="INVENTORY_POSTED"; claim.status="REPLACEMENT_COMPLETED"; await uow.session.flush()
     return {"status":shipment.status,"inventory_added":float(qty),"available_inventory":float(stock.available)}
 

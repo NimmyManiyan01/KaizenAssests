@@ -30,7 +30,7 @@ from app.common.domain.exceptions import DomainRuleViolationException, NotFoundE
 from app.common.email_utils import render_premium_email, send_email
 from app.database.session import UnitOfWork, get_uow
 from app.modules.gate.adapters.mock_adapters import InMemoryGateEntryRepository
-from app.modules.gate.infrastructure.persistence.models import DamagePhotoModel, DamageReportModel, DockAssignmentModel, DockModel, GateEntryAuditLogModel, GateEntryModel, GateExitModel, ReceivingLineModel, SupplierDamageClaimModel, VehicleExitApprovalModel, FinishedGoodsPickupGateVisitModel
+from app.modules.gate.infrastructure.persistence.models import DamagePhotoModel, DamageReportModel, DockAssignmentModel, DockModel, GateEntryAuditLogModel, GateEntryModel, GateExitModel, ReceivingLineModel, SupplierDamageClaimModel, VehicleExitApprovalModel, FinishedGoodsPickupGateVisitModel, ReplacementShipmentModel
 from app.modules.assembly.infrastructure.persistence.models import AssemblyFinishedGoodsAllocationModel, AssemblyFinishedGoodsModel, FinishedGoodsSectionModel
 from app.modules.assembly.infrastructure.finished_goods import post_dispatch_stock
 from app.common.persistence.models import AsnLineModel, PurchaseOrderModel, AsnModel, MaterialModel, MaterialStockModel, NotificationModel, SupplierContactModel, SupplierModel, SupplierUserModel, FinishedGoodsRequestModel
@@ -286,10 +286,67 @@ async def complete_finished_goods_pickup_gate_exit(
 logger = logging.getLogger(__name__)
 
 
-def _asn_response(asn: AsnModel) -> dict:
+def resolve_asn_operational_status(
+    asn_status: str | None,
+    gate_entry_status: str | None = None,
+    gate_entry_exited: bool = False,
+    assigned_dock_code: str | None = None,
+    dock_request_status: str | None = None,
+    grn_status: str | None = None,
+    grn_posted: bool = False,
+) -> str:
+    """Compute the true operational lifecycle status of an ASN from linked gate, dock, and receiving events."""
+    current_asn_st = (asn_status or "SUBMITTED").strip().upper()
+    if current_asn_st == "CANCELLED":
+        return "CANCELLED"
+
+    ge_st = (gate_entry_status or "").strip().upper()
+    dock_st = (dock_request_status or "").strip().upper()
+    grn_st = (grn_status or "").strip().upper()
+
+    # 1. Gate Exit / Facility Departure
+    if gate_entry_exited or ge_st in {"VEHICLE_EXITED", "GATE_EXIT_COMPLETED", "EXITED"}:
+        return "VEHICLE_EXITED"
+
+    # 2. GRN Posted / Finished Goods In Stock
+    if grn_posted or grn_st in {"GRN_POSTED", "POSTED", "COMPLETED", "RECEIVING_COMPLETE"}:
+        return "GRN_POSTED"
+    if "PARTIAL" in grn_st or grn_st == "DRAFT":
+        return "GRN_PENDING"
+
+    # 3. Quality & Receiving Stages
+    if ge_st in {"RECEIVING_COMPLETED", "COMPLETED", "UNLOADED"}:
+        return "RECEIVING_COMPLETED"
+    if ge_st in {"QUALITY_INSPECTION_REQUIRED", "QUALITY_PASSED", "QUALITY_FAILED"}:
+        return ge_st
+    if ge_st == "UNLOADING_IN_PROGRESS":
+        return "UNLOADING_IN_PROGRESS"
+    if ge_st in {"AT_DOCK", "OCCUPIED"}:
+        return "OCCUPIED"
+
+    # 4. Dock Assigned Stages
+    if ge_st in {"DOCK_ASSIGNED", "MOVING_TO_DOCK"} or (assigned_dock_code and str(assigned_dock_code).strip()):
+        return "DOCK_ASSIGNED"
+    if dock_st in {"DOCK_ASSIGNED", "OCCUPIED", "AT_DOCK"}:
+        return "DOCK_ASSIGNED"
+    if dock_st == "COMPLETED":
+        return "RECEIVING_COMPLETED"
+
+    # 5. Gate Checked-In / Waiting for Dock
+    if ge_st in {"AWAITING_DOCK", "GATE_ENTRY_APPROVED", "PO_VERIFIED", "APPROVED", "CHECKED_IN"}:
+        return "AWAITING_DOCK"
+    if ge_st in {"DENIED_ENTRY", "REJECTED"}:
+        return "REJECTED"
+
+    # 6. Fallback to ASN's current status (or default to SUBMITTED)
+    return current_asn_st
+
+
+def _asn_response(asn: AsnModel, operational_status: str | None = None, gate_info: dict | None = None) -> dict:
     logistics = asn.logistics or []
     details = next((item for item in logistics if isinstance(item, dict) and item.get("type") == "asn_details"), {})
-    return {
+    effective_status = operational_status or asn.status
+    response_data = {
         "id": str(asn.id),
         "asn_number": asn.asn_number,
         "po_id": asn.po_id,
@@ -298,6 +355,8 @@ def _asn_response(asn: AsnModel) -> dict:
         "shipment_type": asn.shipment_type,
         "is_replacement": asn.shipment_type == "REPLACEMENT",
         "claim_id": str(asn.claim_id) if asn.claim_id else None,
+        "original_asn_number": next((entry.get("original_asn_number") for entry in logistics if isinstance(entry, dict) and entry.get("type") == "replacement_claim"), None),
+        "original_asn_id": next((entry.get("original_asn_id") for entry in logistics if isinstance(entry, dict) and entry.get("type") == "replacement_claim"), None),
         "supplier_name": details.get("supplier_name") or (asn.supplier.supplier_name if asn.supplier else None),
         "destination_warehouse": details.get("destination_warehouse"),
         "destination_warehouse_id": details.get("destination_warehouse_id"),
@@ -308,7 +367,7 @@ def _asn_response(asn: AsnModel) -> dict:
         "delivery_date": asn.expected_arrival_at.date().isoformat() if asn.expected_arrival_at else None,
         "expected_arrival_date": asn.expected_arrival_at.date().isoformat() if asn.expected_arrival_at else None,
         "shipment_date": asn.shipment_date.isoformat() if asn.shipment_date else None,
-        "status": asn.status,
+        "status": effective_status,
         "created_at": asn.created_at.isoformat() if asn.created_at else None,
         "invoice_number": asn.invoice_number,
         "invoice_date": asn.invoice_date.isoformat() if asn.invoice_date else None,
@@ -331,6 +390,13 @@ def _asn_response(asn: AsnModel) -> dict:
             for line in (asn.lines or [])
         ],
     }
+    if gate_info:
+        response_data["gate_entry_number"] = gate_info.get("gate_entry_number")
+        response_data["gate_entry"] = gate_info
+        if gate_info.get("dock_number"):
+            response_data["assigned_dock_id"] = gate_info.get("dock_number")
+            response_data["dock_number"] = gate_info.get("dock_number")
+    return response_data
 
 
 @preview_router.get("/expected-deliveries")
@@ -349,7 +415,128 @@ async def list_expected_deliveries(
         except ValueError:
             return []
     result = await uow.session.execute(query)
-    return [_asn_response(asn) for asn in result.scalars().all()]
+    asns = result.scalars().all()
+    if not asns:
+        return []
+
+    # Batch fetch related Gate Entries, Dock Requests, and GRNs for live status resolution
+    asn_uuids = [asn.id for asn in asns if asn.id]
+    vehicle_numbers = [asn.vehicle_number.strip().upper() for asn in asns if asn.vehicle_number]
+    po_numbers = [asn.po_number.strip().upper() for asn in asns if asn.po_number]
+
+    ge_filters = []
+    if asn_uuids:
+        ge_filters.append(GateEntryModel.asn_id.in_(asn_uuids))
+    if vehicle_numbers:
+        ge_filters.append(func.upper(GateEntryModel.vehicle_number).in_(vehicle_numbers))
+    if po_numbers:
+        ge_filters.append(func.upper(GateEntryModel.po_number).in_(po_numbers))
+
+    gate_entries = []
+    if ge_filters:
+        ge_result = await uow.session.execute(
+            select(GateEntryModel)
+            .where(or_(*ge_filters))
+            .order_by(GateEntryModel.created_at.desc())
+        )
+        gate_entries = ge_result.scalars().all()
+
+    ge_by_asn_id = {}
+    ge_by_vehicle = {}
+    ge_by_po = {}
+    for ge in gate_entries:
+        if ge.asn_id and str(ge.asn_id) not in ge_by_asn_id:
+            ge_by_asn_id[str(ge.asn_id)] = ge
+        if ge.vehicle_number and ge.vehicle_number.strip().upper() not in ge_by_vehicle:
+            ge_by_vehicle[ge.vehicle_number.strip().upper()] = ge
+        if ge.po_number and ge.po_number.strip().upper() not in ge_by_po:
+            ge_by_po[ge.po_number.strip().upper()] = ge
+
+    ge_passes = [ge.gate_entry_number for ge in gate_entries if ge.gate_entry_number]
+    dock_req_by_pass = {}
+    if ge_passes:
+        dr_result = await uow.session.execute(
+            select(DockAllocationRequestModel)
+            .options(selectinload(DockAllocationRequestModel.assigned_dock))
+            .where(DockAllocationRequestModel.existing_gate_pass_id.in_(ge_passes))
+            .order_by(DockAllocationRequestModel.created_at.desc())
+        )
+        for dr in dr_result.scalars().all():
+            if dr.existing_gate_pass_id and dr.existing_gate_pass_id not in dock_req_by_pass:
+                dock_req_by_pass[dr.existing_gate_pass_id] = dr
+
+    asn_numbers = [asn.asn_number.strip().upper() for asn in asns if asn.asn_number]
+    grn_filters = []
+    if asns:
+        if asn_uuids:
+            grn_filters.append(GrnModel.asn_id.in_(asn_uuids))
+    if asn_numbers:
+        grn_filters.append(func.upper(GrnModel.asn_number).in_(asn_numbers))
+    grn_by_asn_id = {}
+    grn_by_asn_num = {}
+    if grn_filters:
+        grn_result = await uow.session.execute(
+            select(GrnModel)
+            .where(or_(*grn_filters))
+            .order_by(GrnModel.created_at.desc())
+        )
+        for gr in grn_result.scalars().all():
+            if gr.asn_id and gr.asn_id not in grn_by_asn_id:
+                grn_by_asn_id[gr.asn_id] = gr
+            if gr.asn_number and gr.asn_number.strip().upper() not in grn_by_asn_num:
+                grn_by_asn_num[gr.asn_number.strip().upper()] = gr
+
+    responses = []
+    status_updated = False
+    for asn in asns:
+        ge = (
+            ge_by_asn_id.get(str(asn.id))
+            or (ge_by_vehicle.get(asn.vehicle_number.strip().upper()) if asn.vehicle_number else None)
+            or (ge_by_po.get(asn.po_number.strip().upper()) if asn.po_number else None)
+        )
+        dr = dock_req_by_pass.get(ge.gate_entry_number) if ge and ge.gate_entry_number else None
+        gr = (
+            grn_by_asn_id.get(asn.id)
+            or (grn_by_asn_num.get(asn.asn_number.strip().upper()) if asn.asn_number else None)
+        )
+        assigned_dock_code = (
+            ge.assigned_dock_id
+            if ge and ge.assigned_dock_id
+            else dr.assigned_dock.dock_code
+            if dr and dr.assigned_dock
+            else None
+        )
+
+        op_status = resolve_asn_operational_status(
+            asn_status=asn.status,
+            gate_entry_status=ge.status if ge else None,
+            gate_entry_exited=bool(ge and (ge.exited_at is not None or ge.status in ("VEHICLE_EXITED", "GATE_EXIT_COMPLETED"))),
+            assigned_dock_code=assigned_dock_code,
+            dock_request_status=dr.status if dr else None,
+            grn_status=gr.status if gr else None,
+            grn_posted=bool(gr and (gr.posted_at is not None or gr.status in ("GRN_POSTED", "COMPLETED", "RECEIVING_COMPLETE"))),
+        )
+
+        if op_status and op_status != asn.status and asn.status != "CANCELLED":
+            asn.status = op_status
+            status_updated = True
+
+        gate_info = None
+        if ge:
+            gate_info = {
+                "gate_entry_number": ge.gate_entry_number,
+                "vehicle_number": ge.vehicle_number,
+                "driver_name": ge.driver_name,
+                "dock_number": assigned_dock_code,
+                "exited_at": ge.exited_at.isoformat() if ge.exited_at else None,
+            }
+
+        responses.append(_asn_response(asn, operational_status=op_status, gate_info=gate_info))
+
+    if status_updated:
+        await uow.session.flush()
+
+    return responses
 
 
 DEFAULT_MATERIAL_COMPONENTS = [
@@ -642,13 +829,47 @@ async def get_expected_delivery(
             .limit(1)
         )
         gate_entry = gate_result.scalars().first()
+    dock_req = None
+    if gate_entry and gate_entry.gate_entry_number:
+        dr_res = await uow.session.execute(
+            select(DockAllocationRequestModel)
+            .where(DockAllocationRequestModel.existing_gate_pass_id == gate_entry.gate_entry_number)
+            .order_by(DockAllocationRequestModel.created_at.desc())
+            .limit(1)
+        )
+        dock_req = dr_res.scalars().first()
+
+    grn_filters = [GrnModel.asn_id == asn.id]
+    if asn.asn_number:
+        grn_filters.append(func.upper(GrnModel.asn_number) == asn.asn_number.strip().upper())
+    grn_res = await uow.session.execute(
+        select(GrnModel).where(or_(*grn_filters)).order_by(GrnModel.created_at.desc()).limit(1)
+    )
+    grn_record = grn_res.scalars().first()
+
+    op_status = resolve_asn_operational_status(
+        asn_status=asn.status,
+        gate_entry_status=gate_entry.status if gate_entry else None,
+        gate_entry_exited=bool(gate_entry and (gate_entry.exited_at is not None or gate_entry.status in ("VEHICLE_EXITED", "GATE_EXIT_COMPLETED"))),
+        assigned_dock_code=(gate_entry.assigned_dock_id if gate_entry else None) or (dock_req.assigned_dock_code if dock_req else None),
+        dock_request_status=dock_req.status if dock_req else None,
+        grn_status=grn_record.status if grn_record else None,
+        grn_posted=bool(grn_record and (grn_record.posted_at is not None or grn_record.status in ("GRN_POSTED", "COMPLETED", "RECEIVING_COMPLETE"))),
+    )
+
+    if op_status and op_status != asn.status and asn.status != "CANCELLED":
+        asn.status = op_status
+        await uow.session.flush()
+
+    response["status"] = op_status
     if gate_entry:
         response["gate_entry_number"] = gate_entry.gate_entry_number
         response["gate_entry"] = {
             "gate_entry_number": gate_entry.gate_entry_number,
             "vehicle_number": gate_entry.vehicle_number,
             "driver_name": gate_entry.driver_name,
-            "dock_number": gate_entry.assigned_dock_id,
+            "dock_number": gate_entry.assigned_dock_id or (dock_req.assigned_dock_code if dock_req else None),
+            "exited_at": gate_entry.exited_at.isoformat() if gate_entry.exited_at else None,
         }
     return response
 
@@ -1285,17 +1506,59 @@ async def create_supplier_asn(
         if replay is not None:
             return _asn_response(replay)
 
-    number_result = await uow.session.execute(
-        select(AsnModel.asn_number).where(
-            func.upper(AsnModel.asn_number).like(f"ASN-{year}-%")
+    claim_id_raw = payload.get("claim_id")
+    claim_model = None
+    if claim_id_raw:
+        try:
+            claim_uuid = uuid.UUID(str(claim_id_raw))
+            claim_model = await uow.session.get(SupplierDamageClaimModel, claim_uuid)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid claim identifier")
+        if claim_model is None:
+            raise HTTPException(status_code=404, detail="Referenced damage claim not found")
+        if claim_model.supplier_id != supplier_id:
+            raise HTTPException(status_code=403, detail="Claim belongs to another supplier")
+        existing_rep = (await uow.session.execute(
+            select(ReplacementShipmentModel).where(ReplacementShipmentModel.claim_id == claim_model.id)
+        )).scalar_one_or_none()
+        if existing_rep:
+            raise HTTPException(status_code=409, detail="Replacement transaction already in progress for this claim")
+
+    orig_asn_num = None
+    original_asn_id = None
+    if claim_model is not None:
+        original_asn = None
+        if claim_model.source_grn_id:
+            source_grn = await uow.session.get(GrnModel, claim_model.source_grn_id)
+            if source_grn:
+                if source_grn.asn_id:
+                    original_asn = await uow.session.get(AsnModel, source_grn.asn_id)
+                orig_asn_num = (original_asn.asn_number if original_asn else None) or source_grn.asn_number
+        elif claim_model.damage_report_id:
+            report = await uow.session.get(DamageReportModel, claim_model.damage_report_id)
+            if report and report.gate_entry_id:
+                gate = await uow.session.get(GateEntryModel, report.gate_entry_id)
+                if gate and gate.asn_id:
+                    original_asn = await uow.session.get(AsnModel, gate.asn_id)
+                    orig_asn_num = original_asn.asn_number
+        if original_asn:
+            original_asn_id = str(original_asn.id)
+        if not orig_asn_num:
+            orig_asn_num = f"ASN-{claim_model.claim_number}"
+        from app.modules.gate.infrastructure.api.damage_claims import get_next_replacement_asn_number
+        asn_number = await get_next_replacement_asn_number(uow, orig_asn_num)
+    else:
+        number_result = await uow.session.execute(
+            select(AsnModel.asn_number).where(
+                func.upper(AsnModel.asn_number).like(f"ASN-{year}-%")
+            )
         )
-    )
-    highest = 0
-    for value in number_result.scalars().all():
-        match = re.fullmatch(rf"ASN-{year}-(\d+)", str(value).strip().upper())
-        if match:
-            highest = max(highest, int(match.group(1)))
-    asn_number = f"ASN-{year}-{highest + 1:03d}"
+        highest = 0
+        for value in number_result.scalars().all():
+            match = re.fullmatch(rf"ASN-{year}-(\d+)", str(value).strip().upper())
+            if match:
+                highest = max(highest, int(match.group(1)))
+        asn_number = f"ASN-{year}-{highest + 1:03d}"
 
     asn = AsnModel(
         asn_number=asn_number,
@@ -1312,7 +1575,8 @@ async def create_supplier_asn(
         transporter=str(payload.get("transporter") or "").strip() or None,
         number_of_packages=payload.get("number_of_packages") or None,
         package_type=str(payload.get("package_type") or "").strip() or None,
-        shipment_type=str(payload.get("shipment_type") or "STANDARD").upper(),
+        shipment_type="REPLACEMENT" if claim_model is not None else str(payload.get("shipment_type") or "STANDARD").upper(),
+        claim_id=claim_model.id if claim_model is not None else None,
         invoice_number=str(payload.get("invoice_number") or "").strip() or None,
         challan_number=str(payload.get("challan_number") or "").strip() or None,
         logistics=logistics + [{
@@ -1321,9 +1585,30 @@ async def create_supplier_asn(
             "destination_warehouse": destination_label,
             "destination_warehouse_id": str(destination_config.id) if destination_config else None,
             "client_request_id": client_request_id or None,
-        }],
+        }] + ([{
+            "type": "replacement_claim",
+            "claim_id": str(claim_model.id),
+            "claim_number": claim_model.claim_number,
+            "original_asn_number": orig_asn_num,
+            "original_asn_id": original_asn_id,
+        }] if claim_model is not None else []),
     )
     uow.session.add(asn)
+    if claim_model is not None:
+        total_qty = sum(Decimal(str(quantity)) for _, quantity in validated_asn_totals)
+        shipment = ReplacementShipmentModel(
+            shipment_number=asn_number,
+            claim_id=claim_model.id,
+            asn_id=asn.id,
+            expected_quantity=total_qty,
+            vehicle_number=vehicle_number,
+            expected_arrival=expected_arrival_at,
+            status="IN_TRANSIT",
+        )
+        uow.session.add(shipment)
+        claim_model.status = "REPLACEMENT_IN_TRANSIT"
+        if not claim_model.resolution:
+            claim_model.resolution = "REPLACEMENT"
     for raw_line, quantity in validated_asn_totals:
         asn.lines.append(AsnLineModel(
             material_id=uuid.UUID(str(raw_line["material_id"])) if raw_line.get("material_id") else None,
@@ -1963,6 +2248,38 @@ async def _save_gate_entry(session, entry: GateEntry, document_data: bytes | Non
         model.vehicle_photo_data = vehicle_data
     await session.flush()
 
+    # Synchronize ASN status if linked
+    target_asn_id = entry.asn_id or (model.asn_id if model else None)
+    st_val = entry.status.value if hasattr(entry.status, "value") else str(entry.status or "")
+    st_upper = st_val.strip().upper()
+    asn_target_status = None
+    if st_upper in {"DOCK_ASSIGNED", "MOVING_TO_DOCK"}:
+        asn_target_status = "DOCK_ASSIGNED"
+    elif st_upper in {"AT_DOCK", "OCCUPIED"}:
+        asn_target_status = "OCCUPIED"
+    elif st_upper == "UNLOADING_IN_PROGRESS":
+        asn_target_status = "UNLOADING_IN_PROGRESS"
+    elif st_upper in {"QUALITY_INSPECTION_REQUIRED", "QUALITY_PASSED", "QUALITY_FAILED"}:
+        asn_target_status = st_upper
+    elif st_upper in {"RECEIVING_COMPLETED", "COMPLETED", "UNLOADED"}:
+        asn_target_status = "RECEIVING_COMPLETED"
+    elif st_upper in {"VEHICLE_EXITED", "GATE_EXIT_COMPLETED", "EXITED"}:
+        asn_target_status = "VEHICLE_EXITED"
+
+    if asn_target_status:
+        try:
+            asn_rec = None
+            if target_asn_id:
+                asn_rec = await session.get(AsnModel, uuid.UUID(str(target_asn_id)))
+            if not asn_rec and hasattr(model, "asn_number") and model.asn_number:
+                asn_rec = (await session.execute(
+                    select(AsnModel).where(func.upper(AsnModel.asn_number) == model.asn_number.strip().upper())
+                )).scalars().first()
+            if asn_rec and asn_rec.status not in {"CANCELLED", "GRN_POSTED", "VEHICLE_EXITED"}:
+                asn_rec.status = asn_target_status
+        except Exception:
+            pass
+
 
 @preview_router.get("/purchase-orders/{po_number}", response_model=PurchaseOrderRecordDto)
 async def get_purchase_order(
@@ -2322,6 +2639,17 @@ async def create_gate_entry(
     entry.queue_for_dock_allocation()
     if asn:
         asn.status = GateEntryStatus.AWAITING_DOCK.value
+        if asn.shipment_type == "REPLACEMENT" or asn.claim_id:
+            rep_ship = (await uow.session.execute(
+                select(ReplacementShipmentModel).where(
+                    (ReplacementShipmentModel.asn_id == asn.id) | (ReplacementShipmentModel.claim_id == asn.claim_id)
+                )
+            )).scalars().first()
+            if rep_ship:
+                rep_ship.gate_entry_number = gate_entry_num
+                rep_ship.status = "AT_RECEIVING"
+                rep_ship.gate_recorded_by = user.username
+                rep_ship.gate_recorded_at = datetime.datetime.now(datetime.timezone.utc)
         uow.session.add(NotificationModel(
             user_role="WAREHOUSE",
             title="Gate Entry Approved",
@@ -4245,6 +4573,22 @@ async def complete_gate_exit(
     uow.session.add(gate_exit)
     gate_entry.status = GateEntryStatus.GATE_EXIT_COMPLETED.value
     gate_entry.updated_at = completed_at
+    if gate_entry.asn_id:
+        try:
+            asn_rec = await uow.session.get(AsnModel, uuid.UUID(str(gate_entry.asn_id)))
+            if asn_rec and asn_rec.status != "CANCELLED":
+                asn_rec.status = "VEHICLE_EXITED"
+        except Exception:
+            pass
+    elif getattr(gate_entry, "vehicle_number", None):
+        try:
+            asn_rec = (await uow.session.execute(
+                select(AsnModel).where(func.upper(AsnModel.vehicle_number) == gate_entry.vehicle_number.strip().upper()).order_by(AsnModel.created_at.desc())
+            )).scalars().first()
+            if asn_rec and asn_rec.status != "CANCELLED":
+                asn_rec.status = "VEHICLE_EXITED"
+        except Exception:
+            pass
     uow.session.add(NotificationModel(user_role="WAREHOUSE", title="Gate Exit Completed", message=f"{approval.vehicle_number} left the warehouse at {completed_at.isoformat()}.", link="/vehicle-exit"))
     await uow.session.flush()
     return {"gate_entry_id": str(gate_entry.id), "status": gate_entry.status, "vehicle_number": approval.vehicle_number,
@@ -4536,6 +4880,34 @@ async def post_grn(
     grn.posted_by = user.username
     grn.posted_at = posted_at
     grn.verification_notes = request.verification_notes
+    asn_target = None
+    if grn.asn_id:
+        asn_target = await uow.session.get(AsnModel, grn.asn_id)
+    elif grn.asn_number:
+        asn_target = (await uow.session.execute(
+            select(AsnModel).where(func.upper(AsnModel.asn_number) == grn.asn_number.strip().upper())
+        )).scalars().first()
+
+    if asn_target and asn_target.status not in {"CANCELLED", "VEHICLE_EXITED"}:
+        asn_target.status = "GRN_POSTED"
+
+    if asn_target and (asn_target.shipment_type == "REPLACEMENT" or asn_target.claim_id):
+        rep_ship = (await uow.session.execute(
+            select(ReplacementShipmentModel).where(
+                (ReplacementShipmentModel.asn_id == asn_target.id) | (ReplacementShipmentModel.claim_id == asn_target.claim_id)
+            )
+        )).scalars().first()
+        if rep_ship:
+            rep_ship.replacement_grn_number = grn.grn_number
+            rep_ship.accepted_quantity = sum(Decimal(str(line.accepted_quantity or 0)) for line in grn.lines)
+            rep_ship.damaged_quantity = sum(Decimal(str(line.damaged_quantity or 0)) for line in grn.lines)
+            rep_ship.received_quantity = sum(Decimal(str(line.received_quantity or 0)) for line in grn.lines)
+            rep_ship.status = "INVENTORY_POSTED"
+            rep_ship.inventory_posted_at = posted_at
+        if asn_target.claim_id:
+            claim_record = await uow.session.get(SupplierDamageClaimModel, asn_target.claim_id)
+            if claim_record:
+                claim_record.status = "REPLACEMENT_COMPLETED"
     uow.session.add(to_outbox_row("GoodsReceiptNote", str(grn.id), GrnPostedEvent(
         occurred_at=posted_at, grn_id=str(grn.id), grn_number=grn.grn_number,
         po_number=grn.po_number, asn_number=grn.asn_number, supplier_name=grn.supplier_name,
@@ -4822,6 +5194,23 @@ async def mark_inbound_vehicle_exited(
     model.exited_at = now
     model.exited_by = user.username
     model.updated_at = now
+
+    if model.asn_id:
+        try:
+            asn_rec = await uow.session.get(AsnModel, uuid.UUID(str(model.asn_id)))
+            if asn_rec and asn_rec.status != "CANCELLED":
+                asn_rec.status = "VEHICLE_EXITED"
+        except Exception:
+            pass
+    elif getattr(model, "vehicle_number", None):
+        try:
+            asn_rec = (await uow.session.execute(
+                select(AsnModel).where(func.upper(AsnModel.vehicle_number) == model.vehicle_number.strip().upper()).order_by(AsnModel.created_at.desc())
+            )).scalars().first()
+            if asn_rec and asn_rec.status != "CANCELLED":
+                asn_rec.status = "VEHICLE_EXITED"
+        except Exception:
+            pass
 
     audit_entry = GateEntryAuditLogModel(
         gate_entry_id=model.id,

@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Truck,
   Camera,
+  Upload,
 } from "lucide-react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
@@ -890,8 +891,21 @@ function InboundArrivals() {
       <Dialog open={isNewRegistrationModalOpen} onOpenChange={handleGateEntryModalOpenChange}>
         <DialogContent className="max-w-2xl rounded-2xl bg-card p-6 shadow-2xl">
           <form
+            noValidate
             onSubmit={(e) => {
               e.preventDefault();
+              if (!selectedAsn.trim()) {
+                toast.error("ASN Number is required", {
+                  description: "Please enter or select an ASN number before generating the gate pass.",
+                });
+                return;
+              }
+              if (!vehicleNumberInput.trim()) {
+                toast.error("Vehicle Number is required", {
+                  description: "Please ensure a valid vehicle is assigned to this ASN before generating the gate pass.",
+                });
+                return;
+              }
               if (asnTransportEntries.length > 0 && selectedTransportIndex < 0) {
                 toast.error("No supplier-assigned vehicle is available", {
                   description: "Every vehicle on this ASN already has an active gate pass. Record its exit before creating another entry.",
@@ -900,13 +914,13 @@ function InboundArrivals() {
               }
               if (!asnDocumentFile) {
                 toast.error("ASN Document Photo is required", {
-                  description: "Capture the ASN document photo before generating the gate pass.",
+                  description: "Capture or upload the ASN document photo before generating the gate pass.",
                 });
                 return;
               }
               if (!vehiclePhotoBlob) {
                 toast.error("Vehicle Photo is required", {
-                  description: "Capture the vehicle photo before generating the gate pass.",
+                  description: "Capture or upload the vehicle photo before generating the gate pass.",
                 });
                 return;
               }
@@ -1007,6 +1021,7 @@ function InboundArrivals() {
                   </label>
                   <input
                     type="text"
+                    list="asn-numbers-list"
                     value={selectedAsn}
                     autoFocus
                     onChange={(e) => {
@@ -1018,9 +1033,16 @@ function InboundArrivals() {
                         e.preventDefault();
                       }
                     }}
-                    placeholder="Enter ASN number"
+                    placeholder="Enter or select ASN number"
                     className="h-9 w-full rounded-xl border bg-background px-3 font-semibold text-xs font-mono focus:ring-1 focus:ring-primary"
                   />
+                  <datalist id="asn-numbers-list">
+                    {asnRecords.map((asn) => (
+                      <option key={asn.id || asn.asn_number} value={asn.asn_number}>
+                        {asn.asn_number} {asn.supplier_name ? `— ${asn.supplier_name}` : ""} {asn.vehicle_number ? `(${asn.vehicle_number})` : ""}
+                      </option>
+                    ))}
+                  </datalist>
                 </div>
 
                 {/* Expected Delivery Date Auto-Filled */}
@@ -1040,14 +1062,31 @@ function InboundArrivals() {
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
                     ASN Document Photo *
                   </label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-9 w-full rounded-xl text-xs"
-                    onClick={() => void openAsnCamera()}
-                  >
-                    <Camera className="mr-2 size-4" /> Open Camera
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 flex-1 rounded-xl text-xs"
+                      onClick={() => void openAsnCamera()}
+                    >
+                      <Camera className="mr-2 size-4" /> Open Camera
+                    </Button>
+                    <label className="flex h-9 flex-1 cursor-pointer items-center justify-center rounded-xl border border-input bg-background px-3 text-xs font-medium hover:bg-accent hover:text-accent-foreground">
+                      <Upload className="mr-2 size-4" /> Upload Photo
+                      <input
+                        type="file"
+                        accept="image/*,.pdf"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setAsnDocumentFile(file);
+                            setAsnDocumentPreview(URL.createObjectURL(file));
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
                   {asnCameraOpen && (
                     <div className="mt-2 space-y-2 rounded-xl border bg-background p-2">
                       <video
@@ -1183,7 +1222,6 @@ function InboundArrivals() {
                   </label>
                   <input
                     type="text"
-                    required
                     value={vehicleNumberInput}
                     readOnly
                     className="h-9 w-full rounded-xl border bg-muted/50 px-3 font-mono font-bold text-xs text-primary"
@@ -1214,7 +1252,6 @@ function InboundArrivals() {
                   </label>
                   <input
                     type="text"
-                    required
                     value={driverNameInput}
                     readOnly
                     className="h-9 w-full rounded-xl border bg-muted/50 px-3 font-semibold text-xs text-primary"
@@ -1227,7 +1264,6 @@ function InboundArrivals() {
                   </label>
                   <input
                     type="text"
-                    required
                     value={driverMobileInput}
                     readOnly
                     className="h-9 w-full rounded-xl border bg-muted/50 px-3 font-mono text-xs text-primary"
@@ -1238,14 +1274,32 @@ function InboundArrivals() {
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
                     Vehicle Photo *
                   </label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-9 w-full rounded-xl text-xs"
-                    onClick={() => void openVehicleCamera()}
-                  >
-                    <Camera className="mr-2 size-4" /> Open Camera
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 flex-1 rounded-xl text-xs"
+                      onClick={() => void openVehicleCamera()}
+                    >
+                      <Camera className="mr-2 size-4" /> Open Camera
+                    </Button>
+                    <label className="flex h-9 flex-1 cursor-pointer items-center justify-center rounded-xl border border-input bg-background px-3 text-xs font-medium hover:bg-accent hover:text-accent-foreground">
+                      <Upload className="mr-2 size-4" /> Upload Photo
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setVehiclePhotoBlob(file);
+                            setVehiclePhotoPreview(URL.createObjectURL(file));
+                            setUploadedVehiclePhoto(file.name);
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
                   {cameraOpen && (
                     <div className="mt-2 space-y-2 rounded-xl border bg-background p-2">
                       <video
@@ -1360,7 +1414,6 @@ function InboundArrivals() {
                   </label>
                   <input
                     type="text"
-                    required
                     value={invoiceNoInput}
                     onChange={(e) => setInvoiceNoInput(e.target.value)}
                     placeholder="Enter invoice number"
@@ -1374,7 +1427,6 @@ function InboundArrivals() {
                   </label>
                   <input
                     type="date"
-                    required
                     value={invoiceDateInput}
                     onChange={(e) => setInvoiceDateInput(e.target.value)}
                     className="h-9 w-full rounded-xl border bg-background px-3 text-xs font-semibold focus:ring-1 focus:ring-primary"
@@ -1516,7 +1568,7 @@ function InboundArrivals() {
               </Button>
               <Button
                 type="submit"
-                disabled={submittingWebEntry || (asnTransportEntries.length > 0 && selectedTransportIndex < 0)}
+                disabled={submittingWebEntry}
                 className="rounded-xl font-bold shadow-sm"
               >
                 {submittingWebEntry ? (

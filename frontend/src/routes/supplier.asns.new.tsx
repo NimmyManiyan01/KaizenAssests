@@ -67,6 +67,7 @@ export const Route = createFileRoute("/supplier/asns/new")({
   validateSearch: (search: Record<string, unknown>) => ({
     open: search.open === "create" ? "create" as const : undefined,
     search: typeof search.search === "string" ? search.search : undefined,
+    claimId: typeof search.claimId === "string" ? search.claimId : undefined,
   }),
   beforeLoad: () => { },
   component: NewAsnPage,
@@ -276,9 +277,16 @@ function NewAsnPage() {
   const [selectedAsn, setSelectedAsn] = useState<AsnRecord | null>(null);
   const [asnPendingDelete, setAsnPendingDelete] = useState<AsnRecord | null>(null);
 
+  const currentUser = getUserInfo();
+  const supplierId = currentUser?.supplierId;
+  const supplierUsername = currentUser?.username;
+  const supplierFullName = currentUser?.full_name;
+  const requestIdRef = useRef("");
+  const submitInFlightRef = useRef(false);
+
   // Modal Form Inputs
   const [asnNumber, setAsnNumber] = useState("");
-  const [supplierName, setSupplierName] = useState("MTU");
+  const [supplierName, setSupplierName] = useState(supplierUsername || "");
   const [supplierCompanyName, setSupplierCompanyName] = useState("");
   const [expectedArrivalDate, setExpectedArrivalDate] = useState("");
   const [transportEntries, setTransportEntries] = useState<TransportEntry[]>([
@@ -296,12 +304,6 @@ function NewAsnPage() {
   ]);
 
   const [materialCatalog, setMaterialCatalog] = useState<any[]>([]);
-  const currentUser = getUserInfo();
-  const supplierId = currentUser?.supplierId;
-  const supplierUsername = currentUser?.username;
-  const supplierFullName = currentUser?.full_name;
-  const requestIdRef = useRef("");
-  const submitInFlightRef = useRef(false);
 
   const loadActiveMaterials = useCallback(async () => {
     setMaterialLoading(true);
@@ -351,7 +353,11 @@ function NewAsnPage() {
           supplier?.supplier_name ||
           "";
         setSupplierCompanyName(companyName);
-        if (companyName) setSupplierName("MTU");
+        if (supplierUsername) {
+          setSupplierName(supplierUsername);
+        } else if (companyName) {
+          setSupplierName(companyName);
+        }
       })
       .catch((error) => {
         toast.error("Unable to load supplier account details", {
@@ -371,6 +377,12 @@ function NewAsnPage() {
         );
       });
   }, [loadActiveMaterials, supplierId, supplierUsername]);
+
+  useEffect(() => {
+    if (supplierUsername && (!supplierName || supplierName === "MTU")) {
+      setSupplierName(supplierUsername);
+    }
+  }, [supplierUsername, supplierName]);
 
   const loadAsnData = async () => {
     setLoading(true);
@@ -445,7 +457,7 @@ function NewAsnPage() {
     setAsnFormErrors({});
     setSubmissionError("");
     setExpectedArrivalDate(todayDate());
-    setSupplierName("MTU");
+    setSupplierName(supplierUsername || "");
 
     const initialEntryId =
       typeof window !== "undefined" && window.crypto?.randomUUID
@@ -725,7 +737,7 @@ function NewAsnPage() {
       const payload = {
         client_request_id:
           requestIdRef.current || (requestIdRef.current = createAsnRequestId()),
-        supplier_name: supplierName.trim(),
+        supplier_name: (supplierUsername || supplierName.trim() || "Supplier"),
         expected_arrival_at: expectedArrivalDate,
         vehicle_number: primaryVehicle,
         driver_name: primaryDriver,
@@ -763,7 +775,8 @@ function NewAsnPage() {
 
       const createdAsn = await api.createAsn(payload);
       const createdAsnNumber = createdAsn?.asn_number || asnNumber;
-      const createdSupplierName = createdAsn?.supplier_name || supplierName.trim();
+      const createdSupplierName =
+        createdAsn?.supplier_name || supplierUsername || supplierName.trim() || "Supplier";
 
       const newRecord: AsnRecord = {
         // Keep the server identifier so the PDF endpoint can resolve this
@@ -863,7 +876,7 @@ function NewAsnPage() {
     }
     setSelectedAsn(null);
     setAsnNumber(asn.asn_number);
-    setSupplierName("MTU");
+    setSupplierName(asn.supplier_name || supplierUsername || "");
     setExpectedArrivalDate(
       asn.delivery_date ||
       asn.expected_arrival_date ||
@@ -1627,7 +1640,7 @@ function NewAsnPage() {
                         id="supplier-name"
                         required
                         readOnly
-                        value="MTU"
+                        value={supplierName || supplierUsername || ""}
                         className="h-10 cursor-default rounded-lg border-border bg-muted/50 text-sm caret-transparent"
                       />
                     </div>
@@ -1821,7 +1834,7 @@ function NewAsnPage() {
                         key={
                           line.material_id ? `${line.material_id}-${idx}` : `material-row-${idx}`
                         }
-                        className="grid min-w-0 grid-cols-1 gap-3 rounded-lg border border-border bg-muted/10 p-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(5.5rem,0.65fr)_minmax(6rem,0.8fr)_2rem] sm:items-end"
+                        className="grid min-w-0 grid-cols-1 gap-3 rounded-lg border border-border bg-muted/10 p-3 sm:grid-cols-[minmax(0,1.8fr)_minmax(0,1.4fr)_minmax(140px,1.2fr)_4.75rem_2.5rem] sm:items-end"
                       >
                         <div className="min-w-0 space-y-1.5">
                           <Label htmlFor={`material-${idx}`}>Material *</Label>
@@ -2024,7 +2037,7 @@ function NewAsnPage() {
                             aria-describedby={
                               asnFormErrors[`quantity-${idx}`] ? `quantity-${idx}-error` : undefined
                             }
-                            className="h-11 w-full min-w-0 rounded-[10px] border-border bg-background text-right text-sm"
+                            className="h-11 w-full min-w-0 rounded-[10px] border border-[#DFE7F0] bg-white px-3 text-left text-sm text-[#172B4D] shadow-none focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary"
                           />
                           {asnFormErrors[`quantity-${idx}`] && (
                             <p
@@ -2043,10 +2056,10 @@ function NewAsnPage() {
                             readOnly
                             value={line.uom || "—"}
                             aria-label={`Unit of measure for material ${idx + 1}`}
-                            className="h-11 w-full min-w-0 rounded-[10px] border-border bg-muted/50 text-sm"
+                            className="h-11 w-full min-w-0 rounded-[10px] border border-[#DFE7F0] bg-muted/40 text-center font-medium text-muted-foreground text-sm shadow-none"
                           />
                         </div>
-                        <div className="flex items-end justify-end">
+                        <div className="flex h-11 items-center justify-center">
                           <Button
                             type="button"
                             variant="ghost"
@@ -2065,7 +2078,7 @@ function NewAsnPage() {
                                 ),
                               );
                             }}
-                            className="size-9 rounded-lg text-muted-foreground hover:text-destructive"
+                            className="size-10 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                           >
                             <Trash2 className="size-4" />
                           </Button>

@@ -44,6 +44,7 @@ from app.modules.gate.infrastructure.persistence.models import (
     DockModel,
     GateEntryModel,
     SupplierDamageClaimModel,
+    ReplacementShipmentModel,
 )
 from app.modules.dock.infrastructure.persistence.models import (
     DockAllocationRequestModel,
@@ -1993,6 +1994,23 @@ class SqlAlchemyGrnRepository(GrnRepository):
         grn.posted_at = now
         if verification_notes:
             grn.verification_notes = verification_notes
+
+        if grn.asn_id:
+            asn_record = await self._session.get(AsnModel, grn.asn_id)
+            if asn_record and (asn_record.shipment_type == "REPLACEMENT" or asn_record.claim_id):
+                rep_ship = (await self._session.execute(
+                    select(ReplacementShipmentModel).where(
+                        (ReplacementShipmentModel.asn_id == asn_record.id) | (ReplacementShipmentModel.claim_id == asn_record.claim_id)
+                    )
+                )).scalars().first()
+                if rep_ship:
+                    rep_ship.replacement_grn_number = grn.grn_number
+                    rep_ship.status = "INVENTORY_POSTED"
+                    rep_ship.inventory_posted_at = now
+                if asn_record.claim_id:
+                    claim_record = await self._session.get(SupplierDamageClaimModel, asn_record.claim_id)
+                    if claim_record:
+                        claim_record.status = "REPLACEMENT_COMPLETED"
 
         # Retrieve the assignment for this exact vehicle arrival.  An ASN can
         # contain several vehicles, so ASN/PO alone must never select an
