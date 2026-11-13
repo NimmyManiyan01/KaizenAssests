@@ -124,9 +124,14 @@ function SupplierDashboard() {
   const deliveryHelpTriggerRef = useRef<HTMLButtonElement>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const currentUser = getUserInfo();
+  const supplierId = currentUser?.supplierId;
+  const supplierUsername = currentUser?.username;
+  const supplierFullName = currentUser?.full_name;
+
   // Modal Form Inputs
   const [asnNumber, setAsnNumber] = useState("");
-  const [supplierName, setSupplierName] = useState("");
+  const [supplierName, setSupplierName] = useState(supplierUsername || "");
   const [supplierCompanyName, setSupplierCompanyName] = useState("");
   const [expectedArrivalDate, setExpectedArrivalDate] = useState("");
   const [vehicleNumber, setVehicleNumber] = useState("");
@@ -142,10 +147,6 @@ function SupplierDashboard() {
   const [materialsLoading, setMaterialsLoading] = useState(false);
   const [materialsError, setMaterialsError] = useState("");
   const [materialSearch, setMaterialSearch] = useState("");
-  const currentUser = getUserInfo();
-  const supplierId = currentUser?.supplierId;
-  const supplierUsername = currentUser?.username;
-  const supplierFullName = currentUser?.full_name;
 
   useEffect(() => {
     loadAsns();
@@ -166,7 +167,11 @@ function SupplierDashboard() {
           supplier?.supplier_name ||
           "";
         setSupplierCompanyName(companyName);
-        if (companyName) setSupplierName(companyName);
+        if (supplierUsername) {
+          setSupplierName(supplierUsername);
+        } else if (companyName) {
+          setSupplierName(companyName);
+        }
       })
       .catch(() => undefined);
     setMaterialsLoading(true);
@@ -279,7 +284,7 @@ function SupplierDashboard() {
       setAsnNumber("");
     }
     setExpectedArrivalDate(todayDate());
-    setSupplierName(supplierCompanyName || supplierFullName || supplierUsername || "");
+    setSupplierName(supplierUsername || supplierCompanyName || supplierFullName || "");
     setVehicleNumber("");
     setDriverName("");
     setDriverMobile("");
@@ -322,7 +327,7 @@ function SupplierDashboard() {
     try {
       const payload = {
         asn_number: asnNumber,
-        supplier_name: supplierName.trim(),
+        supplier_name: (supplierUsername || supplierName).trim(),
         supplier_id: currentUser?.supplierId,
         expected_arrival_at: expectedArrivalDate,
         vehicle_number: vehicleNumber.toUpperCase().trim(),
