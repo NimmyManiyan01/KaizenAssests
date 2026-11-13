@@ -58,6 +58,218 @@ _consumer_task: asyncio.Task | None = None
 _producer_task: asyncio.Task | None = None
 
 
+async def _run_dev_startup_schema_compatibility(connection, tables: list[str]) -> None:
+    """
+    Development-only fallback schema alignment checks (R05).
+    In enterprise production, all schema definitions are strictly managed via Alembic migrations.
+    """
+    from sqlalchemy import inspect, text
+
+    if "grn_batch_qr" in tables:
+        try:
+            await connection.execute(
+                text("ALTER TABLE grn_batch_qr ALTER COLUMN batch_id DROP NOT NULL")
+            )
+            await connection.commit()
+        except Exception as e:
+            logger.debug("Note dropping not-null on grn_batch_qr.batch_id: %s", e)
+
+    if "rack_occupancy_event" in tables:
+        try:
+            await connection.execute(
+                text("ALTER TABLE rack_occupancy_event ALTER COLUMN balance_id DROP NOT NULL")
+            )
+            await connection.commit()
+        except Exception as e:
+            logger.debug("Note dropping not-null on rack_occupancy_event.balance_id: %s", e)
+        try:
+            await connection.execute(
+                text("ALTER TABLE rack_occupancy_event ALTER COLUMN id SET DEFAULT gen_random_uuid()")
+            )
+            await connection.commit()
+        except Exception as e:
+            logger.debug("Note setting default on rack_occupancy_event.id: %s", e)
+
+    if "putaway_location_assignment" in tables:
+        try:
+            pla_cols = await connection.run_sync(
+                lambda conn: {c["name"] for c in inspect(conn).get_columns("putaway_location_assignment")}
+            )
+            if "destination_store_id" in pla_cols and "destination_warehouse_ref_id" not in pla_cols:
+                await connection.execute(
+                    text('ALTER TABLE putaway_location_assignment RENAME COLUMN destination_store_id TO destination_warehouse_ref_id')
+                )
+                await connection.commit()
+            elif "destination_warehouse_ref_id" not in pla_cols:
+                await connection.execute(
+                    text('ALTER TABLE putaway_location_assignment ADD COLUMN destination_warehouse_ref_id UUID REFERENCES warehouse_configuration(id) ON DELETE SET NULL')
+                )
+                await connection.commit()
+            for fk_name in [
+                "fk_putaway_location_assignment_destination_store_id",
+                "fk_putaway_location_assignment_destination_zone_id",
+                "fk_putaway_location_assignment_destination_bin_id",
+            ]:
+                try:
+                    await connection.execute(text(f'ALTER TABLE putaway_location_assignment DROP CONSTRAINT IF EXISTS {fk_name}'))
+                    await connection.commit()
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug("Note aligning putaway_location_assignment columns: %s", e)
+
+    if "putaway_task" in tables:
+        try:
+            pt_cols = await connection.run_sync(
+                lambda conn: {c["name"] for c in inspect(conn).get_columns("putaway_task")}
+            )
+            if "destination_store_id" in pt_cols and "destination_warehouse_ref_id" not in pt_cols:
+                await connection.execute(
+                    text('ALTER TABLE putaway_task RENAME COLUMN destination_store_id TO destination_warehouse_ref_id')
+                )
+                await connection.commit()
+            elif "destination_warehouse_ref_id" not in pt_cols:
+                await connection.execute(
+                    text('ALTER TABLE putaway_task ADD COLUMN destination_warehouse_ref_id UUID REFERENCES warehouse_configuration(id) ON DELETE SET NULL')
+                )
+                await connection.commit()
+
+            if "destination_bin_id" not in pt_cols:
+                await connection.execute(
+                    text('ALTER TABLE putaway_task ADD COLUMN destination_bin_id UUID REFERENCES warehouse_bin(id) ON DELETE SET NULL')
+                )
+                await connection.commit()
+            if "destination_bin_code" not in pt_cols:
+                await connection.execute(
+                    text('ALTER TABLE putaway_task ADD COLUMN destination_bin_code VARCHAR(128)')
+                )
+                await connection.commit()
+            if "destination_location_id" not in pt_cols:
+                await connection.execute(
+                    text('ALTER TABLE putaway_task ADD COLUMN destination_location_id UUID REFERENCES storage_location(id) ON DELETE SET NULL')
+                )
+                await connection.commit()
+            if "destination_zone_id" not in pt_cols:
+                await connection.execute(
+                    text('ALTER TABLE putaway_task ADD COLUMN destination_zone_id UUID REFERENCES warehouse_zone(id) ON DELETE SET NULL')
+                )
+                await connection.commit()
+
+            for fk_name in [
+                "fk_putaway_task_destination_store_id",
+                "fk_putaway_task_destination_zone_id",
+                "fk_putaway_task_destination_bin_id",
+            ]:
+                try:
+                    await connection.execute(text(f'ALTER TABLE putaway_task DROP CONSTRAINT IF EXISTS {fk_name}'))
+                    await connection.commit()
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug("Note aligning putaway_task columns: %s", e)
+
+    if "storage_location" in tables:
+        try:
+            sl_cols = await connection.run_sync(
+                lambda conn: {c["name"] for c in inspect(conn).get_columns("storage_location")}
+            )
+            if "store_id" in sl_cols and "warehouse_ref_id" not in sl_cols:
+                await connection.execute(
+                    text('ALTER TABLE storage_location RENAME COLUMN store_id TO warehouse_ref_id')
+                )
+                await connection.commit()
+            elif "warehouse_ref_id" not in sl_cols:
+                await connection.execute(
+                    text('ALTER TABLE storage_location ADD COLUMN warehouse_ref_id UUID REFERENCES warehouse_configuration(id) ON DELETE SET NULL')
+                )
+                await connection.commit()
+
+            if "zone_id" not in sl_cols:
+                await connection.execute(
+                    text('ALTER TABLE storage_location ADD COLUMN zone_id UUID REFERENCES warehouse_zone(id) ON DELETE SET NULL')
+                )
+                await connection.commit()
+            if "bin_id" not in sl_cols:
+                await connection.execute(
+                    text('ALTER TABLE storage_location ADD COLUMN bin_id UUID REFERENCES warehouse_bin(id) ON DELETE SET NULL')
+                )
+                await connection.commit()
+
+            for fk_name in [
+                "fk_storage_location_store_id",
+                "fk_storage_location_zone_id",
+                "fk_storage_location_bin_id",
+            ]:
+                try:
+                    await connection.execute(text(f'ALTER TABLE storage_location DROP CONSTRAINT IF EXISTS {fk_name}'))
+                    await connection.commit()
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug("Note aligning storage_location columns: %s", e)
+
+    if "inventory_movement_history" in tables:
+        try:
+            imh_cols = await connection.run_sync(
+                lambda conn: {c["name"] for c in inspect(conn).get_columns("inventory_movement_history")}
+            )
+            if "store_id" in imh_cols and "warehouse_ref_id" not in imh_cols:
+                await connection.execute(
+                    text('ALTER TABLE inventory_movement_history RENAME COLUMN store_id TO warehouse_ref_id')
+                )
+                await connection.commit()
+            elif "warehouse_ref_id" not in imh_cols:
+                await connection.execute(
+                    text('ALTER TABLE inventory_movement_history ADD COLUMN warehouse_ref_id UUID REFERENCES warehouse_configuration(id) ON DELETE SET NULL')
+                )
+                await connection.commit()
+
+            if "store_code" in imh_cols and "warehouse_code" not in imh_cols:
+                await connection.execute(
+                    text('ALTER TABLE inventory_movement_history RENAME COLUMN store_code TO warehouse_code')
+                )
+                await connection.commit()
+            elif "warehouse_code" not in imh_cols:
+                await connection.execute(
+                    text('ALTER TABLE inventory_movement_history ADD COLUMN warehouse_code VARCHAR(64)')
+                )
+                await connection.commit()
+
+            for fk_name in [
+                "fk_inventory_movement_history_store_id",
+                "fk_inventory_movement_history_from_bin_id",
+                "fk_inventory_movement_history_to_bin_id",
+            ]:
+                try:
+                    await connection.execute(text(f'ALTER TABLE inventory_movement_history DROP CONSTRAINT IF EXISTS {fk_name}'))
+                    await connection.commit()
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug("Note aligning inventory_movement_history columns: %s", e)
+
+    if "material_stock" in tables:
+        try:
+            ms_cols = await connection.run_sync(
+                lambda conn: {c["name"] for c in inspect(conn).get_columns("material_stock")}
+            )
+            if "location_id" not in ms_cols:
+                await connection.execute(
+                    text('ALTER TABLE material_stock ADD COLUMN location_id UUID')
+                )
+                await connection.commit()
+        except Exception as e:
+            logger.debug("Note aligning material_stock columns: %s", e)
+
+    if "inventory_location_balance" in tables and "warehouse_rack" in tables:
+        try:
+            from app.modules.storage.application.rack_capacity import _install_postgres
+            await connection.run_sync(_install_postgres)
+            await connection.commit()
+        except Exception as e:
+            logger.debug("Note reinstalling postgres rack trigger: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
@@ -92,201 +304,10 @@ async def lifespan(app: FastAPI):
                     )
                     await connection.commit()
 
-                if "grn_batch_qr" in tables:
-                    try:
-                        await connection.execute(
-                            text("ALTER TABLE grn_batch_qr ALTER COLUMN batch_id DROP NOT NULL")
-                        )
-                        await connection.commit()
-                    except Exception as e:
-                        logger.debug("Note dropping not-null on grn_batch_qr.batch_id: %s", e)
-
-                if "rack_occupancy_event" in tables:
-                    try:
-                        await connection.execute(
-                            text("ALTER TABLE rack_occupancy_event ALTER COLUMN balance_id DROP NOT NULL")
-                        )
-                        await connection.commit()
-                    except Exception as e:
-                        logger.debug("Note dropping not-null on rack_occupancy_event.balance_id: %s", e)
-                    try:
-                        await connection.execute(
-                            text("ALTER TABLE rack_occupancy_event ALTER COLUMN id SET DEFAULT gen_random_uuid()")
-                        )
-                        await connection.commit()
-                    except Exception as e:
-                        logger.debug("Note setting default on rack_occupancy_event.id: %s", e)
-
-                if "putaway_location_assignment" in tables:
-                    try:
-                        pla_cols = await connection.run_sync(
-                            lambda conn: {c["name"] for c in inspect(conn).get_columns("putaway_location_assignment")}
-                        )
-                        if "destination_store_id" in pla_cols and "destination_warehouse_ref_id" not in pla_cols:
-                            await connection.execute(
-                                text('ALTER TABLE putaway_location_assignment RENAME COLUMN destination_store_id TO destination_warehouse_ref_id')
-                            )
-                            await connection.commit()
-                        elif "destination_warehouse_ref_id" not in pla_cols:
-                            await connection.execute(
-                                text('ALTER TABLE putaway_location_assignment ADD COLUMN destination_warehouse_ref_id UUID REFERENCES warehouse_configuration(id) ON DELETE SET NULL')
-                            )
-                            await connection.commit()
-                        # Drop legacy foreign keys pointing to old store_* tables
-                        for fk_name in ["fk_putaway_location_assignment_destination_store_id", "fk_putaway_location_assignment_destination_zone_id", "fk_putaway_location_assignment_destination_bin_id"]:
-                            try:
-                                await connection.execute(text(f'ALTER TABLE putaway_location_assignment DROP CONSTRAINT IF EXISTS {fk_name}'))
-                                await connection.commit()
-                            except Exception:
-                                pass
-                    except Exception as e:
-                        logger.debug("Note aligning putaway_location_assignment columns: %s", e)
-
-                if "putaway_task" in tables:
-                    try:
-                        pt_cols = await connection.run_sync(
-                            lambda conn: {c["name"] for c in inspect(conn).get_columns("putaway_task")}
-                        )
-                        if "destination_store_id" in pt_cols and "destination_warehouse_ref_id" not in pt_cols:
-                            await connection.execute(
-                                text('ALTER TABLE putaway_task RENAME COLUMN destination_store_id TO destination_warehouse_ref_id')
-                            )
-                            await connection.commit()
-                        elif "destination_warehouse_ref_id" not in pt_cols:
-                            await connection.execute(
-                                text('ALTER TABLE putaway_task ADD COLUMN destination_warehouse_ref_id UUID REFERENCES warehouse_configuration(id) ON DELETE SET NULL')
-                            )
-                            await connection.commit()
-
-                        if "destination_bin_id" not in pt_cols:
-                            await connection.execute(
-                                text('ALTER TABLE putaway_task ADD COLUMN destination_bin_id UUID REFERENCES warehouse_bin(id) ON DELETE SET NULL')
-                            )
-                            await connection.commit()
-                        if "destination_bin_code" not in pt_cols:
-                            await connection.execute(
-                                text('ALTER TABLE putaway_task ADD COLUMN destination_bin_code VARCHAR(128)')
-                            )
-                            await connection.commit()
-                        if "destination_location_id" not in pt_cols:
-                            await connection.execute(
-                                text('ALTER TABLE putaway_task ADD COLUMN destination_location_id UUID REFERENCES storage_location(id) ON DELETE SET NULL')
-                            )
-                            await connection.commit()
-                        if "destination_zone_id" not in pt_cols:
-                            await connection.execute(
-                                text('ALTER TABLE putaway_task ADD COLUMN destination_zone_id UUID REFERENCES warehouse_zone(id) ON DELETE SET NULL')
-                            )
-                            await connection.commit()
-
-                        # Drop legacy foreign keys pointing to old store_* tables
-                        for fk_name in ["fk_putaway_task_destination_store_id", "fk_putaway_task_destination_zone_id", "fk_putaway_task_destination_bin_id"]:
-                            try:
-                                await connection.execute(text(f'ALTER TABLE putaway_task DROP CONSTRAINT IF EXISTS {fk_name}'))
-                                await connection.commit()
-                            except Exception:
-                                pass
-                    except Exception as e:
-                        logger.debug("Note aligning putaway_task columns: %s", e)
-
-                if "storage_location" in tables:
-                    try:
-                        sl_cols = await connection.run_sync(
-                            lambda conn: {c["name"] for c in inspect(conn).get_columns("storage_location")}
-                        )
-                        if "store_id" in sl_cols and "warehouse_ref_id" not in sl_cols:
-                            await connection.execute(
-                                text('ALTER TABLE storage_location RENAME COLUMN store_id TO warehouse_ref_id')
-                            )
-                            await connection.commit()
-                        elif "warehouse_ref_id" not in sl_cols:
-                            await connection.execute(
-                                text('ALTER TABLE storage_location ADD COLUMN warehouse_ref_id UUID REFERENCES warehouse_configuration(id) ON DELETE SET NULL')
-                            )
-                            await connection.commit()
-
-                        if "zone_id" not in sl_cols:
-                            await connection.execute(
-                                text('ALTER TABLE storage_location ADD COLUMN zone_id UUID REFERENCES warehouse_zone(id) ON DELETE SET NULL')
-                            )
-                            await connection.commit()
-                        if "bin_id" not in sl_cols:
-                            await connection.execute(
-                                text('ALTER TABLE storage_location ADD COLUMN bin_id UUID REFERENCES warehouse_bin(id) ON DELETE SET NULL')
-                            )
-                            await connection.commit()
-
-                        # Drop legacy foreign keys pointing to old store_* tables
-                        for fk_name in ["fk_storage_location_store_id", "fk_storage_location_zone_id", "fk_storage_location_bin_id"]:
-                            try:
-                                await connection.execute(text(f'ALTER TABLE storage_location DROP CONSTRAINT IF EXISTS {fk_name}'))
-                                await connection.commit()
-                            except Exception:
-                                pass
-                    except Exception as e:
-                        logger.debug("Note aligning storage_location columns: %s", e)
-
-                if "inventory_movement_history" in tables:
-                    try:
-                        imh_cols = await connection.run_sync(
-                            lambda conn: {c["name"] for c in inspect(conn).get_columns("inventory_movement_history")}
-                        )
-                        if "store_id" in imh_cols and "warehouse_ref_id" not in imh_cols:
-                            await connection.execute(
-                                text('ALTER TABLE inventory_movement_history RENAME COLUMN store_id TO warehouse_ref_id')
-                            )
-                            await connection.commit()
-                        elif "warehouse_ref_id" not in imh_cols:
-                            await connection.execute(
-                                text('ALTER TABLE inventory_movement_history ADD COLUMN warehouse_ref_id UUID REFERENCES warehouse_configuration(id) ON DELETE SET NULL')
-                            )
-                            await connection.commit()
-
-                        if "store_code" in imh_cols and "warehouse_code" not in imh_cols:
-                            await connection.execute(
-                                text('ALTER TABLE inventory_movement_history RENAME COLUMN store_code TO warehouse_code')
-                            )
-                            await connection.commit()
-                        elif "warehouse_code" not in imh_cols:
-                            await connection.execute(
-                                text('ALTER TABLE inventory_movement_history ADD COLUMN warehouse_code VARCHAR(64)')
-                            )
-                            await connection.commit()
-
-                        # Drop legacy foreign keys pointing to old store_* tables
-                        for fk_name in ["fk_inventory_movement_history_store_id", "fk_inventory_movement_history_from_bin_id", "fk_inventory_movement_history_to_bin_id"]:
-                            try:
-                                await connection.execute(text(f'ALTER TABLE inventory_movement_history DROP CONSTRAINT IF EXISTS {fk_name}'))
-                                await connection.commit()
-                            except Exception:
-                                pass
-                    except Exception as e:
-                        logger.debug("Note aligning inventory_movement_history columns: %s", e)
-
-                if "material_stock" in tables:
-                    try:
-                        ms_cols = await connection.run_sync(
-                            lambda conn: {c["name"] for c in inspect(conn).get_columns("material_stock")}
-                        )
-                        if "location_id" not in ms_cols:
-                            await connection.execute(
-                                text('ALTER TABLE material_stock ADD COLUMN location_id UUID')
-                            )
-                            await connection.commit()
-                    except Exception as e:
-                        logger.debug("Note aligning material_stock columns: %s", e)
-
-                if "inventory_location_balance" in tables and "warehouse_rack" in tables:
-                    try:
-                        from app.modules.storage.application.rack_capacity import _install_postgres
-                        await connection.run_sync(_install_postgres)
-                        await connection.commit()
-                    except Exception as e:
-                        logger.debug("Note reinstalling postgres rack trigger: %s", e)
-
-                # Supplier schema is version-controlled via Alembic migrations
-                # (20261106_supplier_profile_fields & 20261106_standardize_postgresql_schema).
-                # Runtime DDL is retired to prevent ACCESS EXCLUSIVE locking during multi-pod boot.
+                if not settings.startup_schema_compatibility:
+                    logger.info("Database schema is managed via Alembic; skipping runtime startup DDL checks (R05)")
+                else:
+                    await _run_dev_startup_schema_compatibility(connection, tables)
     except Exception as exc:
         logger.debug("Database preflight check note: %s", exc)
 
@@ -383,7 +404,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
-        allow_origin_regex=r"https://.*\.azurecontainerapps\.io|https?://(localhost|127\.0\.0\.1)(:\d+)?",
+        allow_origin_regex=r"https://.*\.azurecontainerapps\.io|https://.*\.kaizentrixglobal\.com|https?://(localhost|127\.0\.0\.1)(:\d+)?",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

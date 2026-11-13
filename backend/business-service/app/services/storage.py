@@ -1,12 +1,14 @@
 """
-Asynchronous and Non-Blocking File Storage Services for Kaizen AMS (CHG-PERF-001, CHG-AZ-002).
+Asynchronous and Non-Blocking File Storage Services for Kaizen AMS (CHG-PERF-001, CHG-AZ-002, R03).
 Provides abstract StorageService, LocalStorageService (non-blocking threadpool),
-and AzureBlobStorageService for Azure cloud deployment with SAS URL generation.
+and AzureBlobStorageService for Azure cloud deployment with SAS URL generation
+and backward-compatible local file resolution.
 """
 from __future__ import annotations
 
 import abc
 import os
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -133,13 +135,48 @@ class LocalStorageService(StorageService):
 
 class AzureBlobStorageService(StorageService):
     """
-    Azure Blob Storage implementation (CHG-AZ-002).
-    Uploads directly to Azure Blob container with SAS token generation and non-blocking I/O.
+    Azure Blob Storage implementation (CHG-AZ-002, R03).
+    Supports connection string and Managed Identity (DefaultAzureCredential).
+    Maintains backward compatibility with previously uploaded local files.
     """
 
-    def __init__(self, connection_string: str, container_name: str = "kaizen-wms-media") -> None:
+    def __init__(
+        self,
+        connection_string: Optional[str] = None,
+        account_url: Optional[str] = None,
+        container_name: str = "kaizen-wms-media",
+        account_name: Optional[str] = None,
+    ) -> None:
         self.connection_string = connection_string
+        self.account_url = account_url
         self.container_name = container_name
+        self.account_name = account_name
+        self.local_fallback = LocalStorageService(root_dir="media_uploads")
+
+    def _get_account_name(self) -> str:
+        if self.account_name:
+            return self.account_name
+        if self.connection_string:
+            match = re.search(r"AccountName=([^;]+)", self.connection_string)
+            if match:
+                return match.group(1)
+        if self.account_url:
+            parsed = urlparse(self.account_url)
+            parts = parsed.netloc.split(".")
+            if parts:
+                return parts[0]
+        return "kaizenwmsstorage"
+
+    def _get_blob_service_client(self):
+        from azure.storage.blob.aio import BlobServiceClient
+
+        if self.connection_string:
+            return BlobServiceClient.from_connection_string(self.connection_string)
+        if self.account_url:
+            from azure.identity.aio import DefaultAzureCredential
+
+            return BlobServiceClient(account_url=self.account_url, credential=DefaultAzureCredential())
+        raise ValueError("AzureBlobStorageService requires either connection_string or account_url")
 
     def _extract_blob_name(self, path: str) -> str:
         """Extract relative blob name from full URL or relative path."""
@@ -150,14 +187,22 @@ class AzureBlobStorageService(StorageService):
             return parts[1] if len(parts) > 1 else parts[0]
         if path.startswith(f"{self.container_name}/"):
             return path[len(f"{self.container_name}/") :]
+        if path.startswith("/media/"):
+            return path[len("/media/") :]
+        if path.startswith("media_uploads/"):
+            return path[len("media_uploads/") :]
         return path.lstrip("/")
 
     async def save_file(self, content: bytes, filename: str, subfolder: str = "general") -> str:
         try:
-            from azure.storage.blob.aio import BlobServiceClient  # type: ignore
-
-            async with BlobServiceClient.from_connection_string(self.connection_string) as client:
+            client = self._get_blob_service_client()
+            async with client:
                 container_client = client.get_container_client(self.container_name)
+                # Ensure container exists
+                try:
+                    await container_client.create_container()
+                except Exception:
+                    pass
                 ext = os.path.splitext(filename)[1].lower() or ".bin"
                 blob_name = f"{subfolder}/{uuid.uuid4()}{ext}"
                 blob_client = container_client.get_blob_client(blob_name)
@@ -166,77 +211,78 @@ class AzureBlobStorageService(StorageService):
                 return blob_client.url
         except ImportError:
             logger.warning("azure-storage-blob not installed; falling back to LocalStorageService")
-            local = LocalStorageService()
-            return await local.save_file(content, filename, subfolder)
+            return await self.local_fallback.save_file(content, filename, subfolder)
         except Exception as exc:
             logger.error("AzureBlobStorage upload failed: %s; falling back to LocalStorageService", exc)
-            local = LocalStorageService()
-            return await local.save_file(content, filename, subfolder)
+            return await self.local_fallback.save_file(content, filename, subfolder)
 
     async def read_file(self, path: str) -> bytes:
+        # Check local disk first for backward compatibility with historical uploads
+        if await self.local_fallback.file_exists(path):
+            return await self.local_fallback.read_file(path)
+
         blob_name = self._extract_blob_name(path)
         try:
-            from azure.storage.blob.aio import BlobServiceClient  # type: ignore
-
-            async with BlobServiceClient.from_connection_string(self.connection_string) as client:
+            client = self._get_blob_service_client()
+            async with client:
                 blob_client = client.get_blob_client(container=self.container_name, blob=blob_name)
                 stream = await blob_client.download_blob()
                 return await stream.readall()
         except ImportError:
-            local = LocalStorageService()
-            return await local.read_file(path)
+            return await self.local_fallback.read_file(path)
         except Exception as exc:
             logger.error("AzureBlobStorage download failed for %s: %s", blob_name, exc)
             raise FileNotFoundError(f"Azure Blob {blob_name} could not be read: {exc}")
 
     async def delete_file(self, path: str) -> bool:
+        if await self.local_fallback.file_exists(path):
+            return await self.local_fallback.delete_file(path)
+
         blob_name = self._extract_blob_name(path)
         try:
-            from azure.storage.blob.aio import BlobServiceClient  # type: ignore
-
-            async with BlobServiceClient.from_connection_string(self.connection_string) as client:
+            client = self._get_blob_service_client()
+            async with client:
                 blob_client = client.get_blob_client(container=self.container_name, blob=blob_name)
                 await blob_client.delete_blob()
                 return True
         except ImportError:
-            local = LocalStorageService()
-            return await local.delete_file(path)
+            return await self.local_fallback.delete_file(path)
         except Exception as exc:
             logger.warning("AzureBlobStorage delete failed for %s: %s", blob_name, exc)
             return False
 
     async def file_exists(self, path: str) -> bool:
+        if await self.local_fallback.file_exists(path):
+            return True
+
         blob_name = self._extract_blob_name(path)
         try:
-            from azure.storage.blob.aio import BlobServiceClient  # type: ignore
-
-            async with BlobServiceClient.from_connection_string(self.connection_string) as client:
+            client = self._get_blob_service_client()
+            async with client:
                 blob_client = client.get_blob_client(container=self.container_name, blob=blob_name)
                 return await blob_client.exists()
         except ImportError:
-            local = LocalStorageService()
-            return await local.file_exists(path)
+            return await self.local_fallback.file_exists(path)
         except Exception as exc:
             logger.warning("AzureBlobStorage existence check failed for %s: %s", blob_name, exc)
             return False
 
     async def generate_sas_url(self, path: str, expiry_hours: int = 1) -> str:
         blob_name = self._extract_blob_name(path)
+        account_name = self._get_account_name()
         try:
             from azure.storage.blob import BlobSasPermissions, generate_blob_sas  # type: ignore
 
-            # If account key is extractable from connection string, generate SAS token
             sas_token = generate_blob_sas(
-                account_name="kaizenstorage",
+                account_name=account_name,
                 container_name=self.container_name,
                 blob_name=blob_name,
                 permission=BlobSasPermissions(read=True),
                 expiry=datetime.now(timezone.utc) + timedelta(hours=expiry_hours),
             )
-            return f"https://kaizenstorage.blob.core.windows.net/{self.container_name}/{blob_name}?{sas_token}"
+            return f"https://{account_name}.blob.core.windows.net/{self.container_name}/{blob_name}?{sas_token}"
         except Exception:
-            # Fall back to raw URL if SAS generation is unavailable
-            return f"https://kaizenstorage.blob.core.windows.net/{self.container_name}/{blob_name}"
+            return f"https://{account_name}.blob.core.windows.net/{self.container_name}/{blob_name}"
 
 
 _storage_instance: Optional[StorageService] = None

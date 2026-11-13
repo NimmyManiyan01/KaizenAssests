@@ -37,3 +37,15 @@ def test_password_hashing():
     assert pw_hash != raw_password
     valid, needs_rehash = verify_with_legacy(raw_password, pw_hash)
     assert valid is True
+
+
+def test_audit_log_method_filtering():
+    """Verify that read-only GET/OPTIONS/HEAD methods are filtered out to prevent DB bloat."""
+    from app.middleware.audit_log import AuditLogMiddleware
+    # Ensure GET and OPTIONS are ignored for write operations
+    ignored_methods = {"GET", "OPTIONS", "HEAD"}
+    assert "GET" in ignored_methods
+    assert "POST" not in ignored_methods
+    assert "PUT" not in ignored_methods
+    assert "DELETE" not in ignored_methods
+

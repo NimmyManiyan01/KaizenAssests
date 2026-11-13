@@ -176,6 +176,98 @@ async def _resolve_current_user(
             token_hash=token_hash,
         )
 
+    # Enterprise authentication alignment (R02): Staff database sessions are validated
+    # against user_session in all environments (production, staging, dev, local).
+    if token.startswith("mock-jwt-db-user-") or token.startswith("db-session-") or token.startswith("staff-db-token-"):
+        session_token = (
+            token.removeprefix("mock-jwt-db-user-")
+            .removeprefix("db-session-")
+            .removeprefix("staff-db-token-")
+        )
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        from app.database.session import AsyncSessionFactory
+        from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel, UserSessionModel
+
+        token_hash = hashlib.sha256(session_token.encode()).hexdigest()
+        now_utc = datetime.now(timezone.utc)
+        account = None
+        session_row = None
+        async with AsyncSessionFactory() as session:
+            session_row = (await session.execute(
+                select(UserSessionModel).where(
+                    UserSessionModel.token_hash == token_hash,
+                    UserSessionModel.is_active.is_(True),
+                    UserSessionModel.expires_at > now_utc,
+                    UserSessionModel.revoked_at.is_(None),
+                )
+            )).scalar_one_or_none()
+
+            if session_row is not None:
+                result = await session.execute(
+                    select(UserAccountModel)
+                    .options(selectinload(UserAccountModel.warehouse))
+                    .where(
+                        UserAccountModel.id == session_row.user_id,
+                        UserAccountModel.status == "ACTIVE",
+                    )
+                )
+                account = result.scalar_one_or_none()
+            else:
+                result = await session.execute(
+                    select(UserAccountModel)
+                    .options(selectinload(UserAccountModel.warehouse))
+                    .where(
+                        UserAccountModel.auth_token_hash.contains(token_hash),
+                        UserAccountModel.status == "ACTIVE",
+                        UserAccountModel.auth_token_expires_at > now_utc,
+                    )
+                )
+                account = result.scalar_one_or_none()
+                if account and token_hash not in [h.strip() for h in (account.auth_token_hash or "").split(",") if h.strip()]:
+                    account = None
+        if account:
+            role_key = account.role.strip().upper().replace(" ", "_")
+            role = {
+                "SUPER_ADMIN": "ADMIN",
+                "ADMIN_OFFICER": "ADMIN",
+                "PROCUREMENT_MANAGER": "MANAGER",
+                "PROCUREMENT_OFFICER": "PROCUREMENT",
+                "WAREHOUSE_MANAGER": "WAREHOUSE_MANAGER",
+                "WAREHOUSE_OPERATOR": "WAREHOUSE_OPERATOR",
+            }.get(role_key, role_key)
+
+            perms = []
+            if role in ("ADMIN", "WAREHOUSE_MANAGER", "WAREHOUSE"):
+                perms = ["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "warehouse:read", "warehouse:write", "dispatch:read", "dispatch:write", "dispatch:execute"]
+            elif role == "SUPPLIER":
+                perms = _supplier_material_permissions(account.page_permissions or {})
+            elif role == "WAREHOUSE_OPERATOR":
+                perms = ["warehouse:read", "warehouse:write", "storage:read", "putaway:execute", "pickup:execute"]
+            elif role in ("ASSEMBLY", "ASSEMBLY_MANAGER"):
+                perms = ["material_request:create", "material_request:read", "assembly:read", "assembly:write"]
+            elif role in ("DISPATCH", "DISPATCH_MANAGER"):
+                perms = ["dispatch:read", "dispatch:write", "dispatch:execute"]
+
+            claims = {
+                "employee_id": account.employee_id,
+                "assembly_unit_code": account.assembly_unit_code,
+                "applications": account.applications or [],
+                "warehouse_ref_id": str(account.warehouse_ref_id) if account.warehouse_ref_id else None,
+                "warehouse_code": account.warehouse.warehouse_code if account.warehouse else None,
+                "warehouse_name": account.warehouse.warehouse_name if account.warehouse else None,
+            }
+            return CurrentUser(
+                subject=account.employee_id,
+                username=account.username,
+                roles=[role],
+                permissions=perms,
+                raw_claims=claims,
+                session_id=str(session_row.id) if session_row else None,
+                token_hash=token_hash,
+            )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or invalid")
+
     if settings.environment.lower() in ("local", "dev", "test", "development"):
         if token == "mock-jwt-manager-token" and settings.environment.lower() == "test":
             return CurrentUser(
@@ -185,93 +277,6 @@ async def _resolve_current_user(
                 permissions=["procurement:approve", "gate:approve"],
                 raw_claims={},
             )
-        if token.startswith("mock-jwt-db-user-"):
-            session_token = token.removeprefix("mock-jwt-db-user-")
-            from sqlalchemy import select
-            from sqlalchemy.orm import selectinload
-            from app.database.session import AsyncSessionFactory
-            from app.modules.warehouse.infrastructure.persistence.models import UserAccountModel, UserSessionModel
-
-            token_hash = hashlib.sha256(session_token.encode()).hexdigest()
-            now_utc = datetime.now(timezone.utc)
-            account = None
-            session_row = None
-            async with AsyncSessionFactory() as session:
-                session_row = (await session.execute(
-                    select(UserSessionModel).where(
-                        UserSessionModel.token_hash == token_hash,
-                        UserSessionModel.is_active.is_(True),
-                        UserSessionModel.expires_at > now_utc,
-                        UserSessionModel.revoked_at.is_(None),
-                    )
-                )).scalar_one_or_none()
-
-                if session_row is not None:
-                    result = await session.execute(
-                        select(UserAccountModel)
-                        .options(selectinload(UserAccountModel.warehouse))
-                        .where(
-                            UserAccountModel.id == session_row.user_id,
-                            UserAccountModel.status == "ACTIVE",
-                        )
-                    )
-                    account = result.scalar_one_or_none()
-                else:
-                    result = await session.execute(
-                        select(UserAccountModel)
-                        .options(selectinload(UserAccountModel.warehouse))
-                        .where(
-                            UserAccountModel.auth_token_hash.contains(token_hash),
-                            UserAccountModel.status == "ACTIVE",
-                            UserAccountModel.auth_token_expires_at > now_utc,
-                        )
-                    )
-                    account = result.scalar_one_or_none()
-                    if account and token_hash not in [h.strip() for h in (account.auth_token_hash or "").split(",") if h.strip()]:
-                        account = None
-            if account:
-                role_key = account.role.strip().upper().replace(" ", "_")
-                role = {
-                    "SUPER_ADMIN": "ADMIN",
-                    "ADMIN_OFFICER": "ADMIN",
-                    "PROCUREMENT_MANAGER": "MANAGER",
-                    "PROCUREMENT_OFFICER": "PROCUREMENT",
-                    "WAREHOUSE_MANAGER": "WAREHOUSE_MANAGER",
-                    "WAREHOUSE_OPERATOR": "WAREHOUSE_OPERATOR",
-                }.get(role_key, role_key)
-
-                perms = []
-                if role in ("ADMIN", "WAREHOUSE_MANAGER", "WAREHOUSE"):
-                    perms = ["gate:read", "gate:write", "gate:approve", "gate:verify", "gate:entry:read", "gate:entry:create", "storage:read", "storage:write", "receiving:read", "receiving:write", "returns:read", "returns:write", "warehouse:read", "warehouse:write", "dispatch:read", "dispatch:write", "dispatch:execute"]
-                elif role == "SUPPLIER":
-                    perms = _supplier_material_permissions(account.page_permissions or {})
-                elif role == "WAREHOUSE_OPERATOR":
-                    perms = ["warehouse:read", "warehouse:write", "storage:read", "putaway:execute", "pickup:execute"]
-                elif role == "WAREHOUSE_OPERATOR":
-                    perms = ["warehouse:read", "storage:read", "putaway:execute", "pickup:execute"]
-                elif role in ("ASSEMBLY", "ASSEMBLY_MANAGER"):
-                    perms = ["material_request:create", "material_request:read", "assembly:read", "assembly:write"]
-                elif role in ("DISPATCH", "DISPATCH_MANAGER"):
-                    perms = ["dispatch:read", "dispatch:write", "dispatch:execute"]
-
-                claims = {
-                    "employee_id": account.employee_id,
-                    "assembly_unit_code": account.assembly_unit_code,
-                    "applications": account.applications or [],
-                    "warehouse_ref_id": str(account.warehouse_ref_id) if account.warehouse_ref_id else None,
-                    "warehouse_code": account.warehouse.warehouse_code if account.warehouse else None,
-                    "warehouse_name": account.warehouse.warehouse_name if account.warehouse else None,
-                }
-                return CurrentUser(
-                    subject=account.employee_id,
-                    username=account.username,
-                    roles=[role],
-                    permissions=perms,
-                    raw_claims=claims,
-                    session_id=str(session_row.id) if session_row else None,
-                    token_hash=token_hash,
-                )
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or invalid")
         if token == "mock-jwt-supplier-token" and settings.environment.lower() == "test":
             return CurrentUser(
                 subject="supplier",

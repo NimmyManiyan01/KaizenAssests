@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from urllib.parse import unquote
 
@@ -41,15 +42,28 @@ def _target_reference(path: str) -> str | None:
     return candidates[-1][:255] if candidates else None
 
 
+async def _persist_audit_log_entry(entry_data: dict) -> None:
+    """Persist audit record asynchronously to avoid blocking the client response."""
+    try:
+        async with AsyncSessionFactory() as session:
+            session.add(SystemAuditLogModel(**entry_data))
+            await session.commit()
+    except Exception as exc:
+        logger.warning("Unable to persist audit log asynchronously: %s", exc)
+
+
 class AuditLogMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         path = request.url.path.rstrip("/") or "/"
         method = request.method.upper()
+
+        # Enterprise optimization (R04): Skip read-only idempotent GET requests,
+        # health probes, and preflight OPTIONS to prevent write amplification.
         if (
             not path.startswith("/api/")
             or path in IGNORED_PATHS
-            or method in {"OPTIONS", "HEAD"}
+            or method in {"GET", "OPTIONS", "HEAD"}
             or path in {"/api/health", "/api/v1/health"}
         ):
             return response
@@ -69,23 +83,25 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             audit_action = "LOGOUT"
         else:
             audit_action = method
+
+        entry_data = {
+            "actor_username": actor[:128],
+            "actor_employee_id": employee_id[:64] if employee_id else None,
+            "actor_roles": roles[:255] if roles else None,
+            "module": _module_for_path(path),
+            "action": audit_action,
+            "request_path": path[:512],
+            "target_reference": _target_reference(path),
+            "status_code": response.status_code,
+            "result": "SUCCESS" if response.status_code < 400 else "FAILED",
+            "request_id": getattr(request.state, "request_id", None),
+            "ip_address": request.client.host[:64] if request.client else None,
+            "user_agent": (request.headers.get("User-Agent") or "")[:1000] or None,
+        }
+
         try:
-            async with AsyncSessionFactory() as session:
-                session.add(SystemAuditLogModel(
-                    actor_username=actor[:128],
-                    actor_employee_id=employee_id[:64] if employee_id else None,
-                    actor_roles=roles[:255] if roles else None,
-                    module=_module_for_path(path),
-                    action=audit_action,
-                    request_path=path[:512],
-                    target_reference=_target_reference(path),
-                    status_code=response.status_code,
-                    result="SUCCESS" if response.status_code < 400 else "FAILED",
-                    request_id=getattr(request.state, "request_id", None),
-                    ip_address=request.client.host[:64] if request.client else None,
-                    user_agent=(request.headers.get("User-Agent") or "")[:1000] or None,
-                ))
-                await session.commit()
+            asyncio.create_task(_persist_audit_log_entry(entry_data))
         except Exception as exc:
-            logger.warning("Unable to persist audit log: %s", exc)
+            logger.warning("Unable to schedule audit log task: %s", exc)
+
         return response

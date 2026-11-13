@@ -199,10 +199,12 @@ async def dev_login(
     Authenticate an active staff account created through User Management.
     """
     settings = get_settings()
-    if settings.environment.lower() not in {"local", "test", "development", "dev"}:
+    # Enterprise alignment (R02): Database-backed authentication is supported across all
+    # environments (including production). Dedicated enterprise SSO can disable it via DISABLE_DB_LOGIN.
+    if getattr(settings, "disable_db_login", False):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Development login is disabled outside local/test/development environments.",
+            detail="Direct database login is disabled. Please use the configured enterprise identity provider.",
         )
 
     req_username = (request.username or "").strip()
