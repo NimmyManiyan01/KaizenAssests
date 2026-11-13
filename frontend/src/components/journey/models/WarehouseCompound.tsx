@@ -68,10 +68,14 @@ export function WarehouseCompound() {
       ))}
       {/* Front wall returns stop outside the left security cabin and the entry road. */}
       <WallRun position={[-19.25, 0, 15]} length={25.5} />
-      <WallRun position={[17.75, 0, 15]} length={28.5} />
+      {/* Separate outbound opening aligned to the dispatch truck lane. */}
+      <WallRun position={[9.5, 0, 15]} length={12} />
+      <WallRun position={[29, 0, 15]} length={6} />
+      <Pillar position={[15.5, 0, 15]} gate />
+      <Pillar position={[26, 0, 15]} gate />
       <Pillar position={[-6.5, 0, 15]} gate />
       <Pillar position={[3.5, 0, 15]} gate />
-      {[-25.5, -19, -12.5, 10.5, 17.5, 24.5].map((x) => (
+      {[-25.5, -19, -12.5, 10.5, 29].map((x) => (
         <Pillar key={x} position={[x, 0, 15]} />
       ))}
       {/* Rear wall returns leave room for the exit barrier and its right-side cabin. */}

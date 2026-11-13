@@ -61,6 +61,8 @@ function BoxQrLabels({ bx, bz }: { bx: number; bz: number }) {
   );
 }
 
+import { StaticBatch } from "../StaticBatch";
+
 interface PalletAndCargoProps {
   position?: [number, number, number];
   rotation?: [number, number, number];
@@ -82,6 +84,7 @@ export function PalletAndCargo({
 }: PalletAndCargoProps) {
   return (
     <group position={position} rotation={rotation} scale={scale}>
+      <StaticBatch>
       {/* ─── WOODEN PALLET ─── */}
       <group position={[0, 0.08, 0]}>
         {/* 3 Longitudinal Stringer Runners */}
@@ -165,6 +168,7 @@ export function PalletAndCargo({
           )}
         </group>
       )}
+      </StaticBatch>
     </group>
   );
 }

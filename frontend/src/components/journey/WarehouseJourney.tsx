@@ -4,6 +4,8 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { JOURNEY_STAGES, type JourneyStage } from "./data/journeyStages";
 import { JourneyCanvas } from "./JourneyCanvas";
 import { api } from "@/lib/api-client";
+import { isAuthenticated } from "@/lib/auth-utils";
+import { scrollLandingTo } from "@/lib/useLenis";
 import { journeyStore, setJourneyProgress } from "./journeyStore";
 
 gsap.registerPlugin(ScrollTrigger);
@@ -52,6 +54,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
   const [selectedAsnId, setSelectedAsnId] = useState("");
 
   useEffect(() => {
+    if (!isAuthenticated()) return;
     let cancelled = false;
     const loadAsnJourney = async () => {
       const [asnResult, gateResult] = await Promise.allSettled([
@@ -94,6 +97,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
   }, []);
 
   useEffect(() => {
+    if (!isAuthenticated()) return;
     let cancelled = false;
     const loadSnapshot = async () => {
       const [gates, dashboard, inventory, assembly, dispatch, exits] = await Promise.allSettled([
@@ -184,25 +188,6 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
     setMounted(true);
   }, []);
 
-  // Automatic cinematic intro on page load
-  useEffect(() => {
-    if (!mounted) return;
-
-    introTweenRef.current = gsap.to(overviewRef.current, {
-      val: 1,
-      duration: 2.4,
-      delay: 0.8,
-      ease: "power2.inOut",
-      onUpdate: () => {
-        setJourneyProgress(0, overviewRef.current.val);
-      },
-    });
-
-    return () => {
-      introTweenRef.current?.kill();
-    };
-  }, [mounted]);
-
   // Read pointer targets in the camera without rerendering the entire scene
   useEffect(() => {
     if (!mounted) return;
@@ -245,7 +230,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
         const targetFraction =
           OVERVIEW_SCROLL_FRACTION + nextProgress * (1 - OVERVIEW_SCROLL_FRACTION);
         const targetScroll = trigger.start + targetFraction * (trigger.end - trigger.start);
-        window.scrollTo(0, targetScroll);
+        scrollLandingTo(targetScroll, true);
       }
 
       frame = requestAnimationFrame(playTick);
@@ -270,6 +255,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
         anticipatePin: 1,
         onUpdate: (self) => {
           const rawProgress = self.progress;
+          targetProgress.current = rawProgress;
 
           if (rawProgress > 0.002 && introTweenRef.current?.isActive()) {
             introTweenRef.current.kill();
@@ -320,22 +306,17 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
 
     return () => {
       ctx.revert();
+      scrollTriggerRef.current = null;
+      setJourneyProgress(0, 0);
     };
   }, [mounted, stages.length]);
 
   useEffect(() => {
     const replay = () => {
       introTweenRef.current?.kill();
-      targetProgress.current = 0;
-      overviewRef.current.val = 0;
-      setJourneyProgress(0, 0);
-      setActiveIndex(0);
-      setTaglineIndex(0);
-      setShowPutawayHud(false);
-      setPutawayStored(false);
-      requestAnimationFrame(() => {
-        ScrollTrigger.refresh();
-      });
+      // Let ScrollTrigger publish the animated return, rather than teleporting
+      // the camera to frame zero while the document is still at the bottom.
+      // The landing page owns the single Lenis scrollTo call for replay.
     };
     window.addEventListener("warehub:replay-journey", replay);
     window.addEventListener("kaizenassests:replay-journey", replay);
@@ -359,10 +340,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
         OVERVIEW_SCROLL_FRACTION + (index / (stages.length - 1)) * (1 - OVERVIEW_SCROLL_FRACTION);
       const targetScroll = trigger.start + targetFraction * (trigger.end - trigger.start);
 
-      window.scrollTo({
-        top: targetScroll,
-        behavior: "smooth",
-      });
+      scrollLandingTo(targetScroll);
     },
     [stages.length],
   );
@@ -372,7 +350,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
     const targetVal = overviewRef.current.val < 0.5 ? 1 : 0;
 
     if (targetVal === 0 && window.scrollY > 80) {
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      scrollLandingTo(0);
     }
 
     introTweenRef.current = gsap.to(overviewRef.current, {

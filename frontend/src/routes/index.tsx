@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { getDefaultRouteForUser, getUserInfo, isAuthenticated } from "@/lib/auth-utils";
 import logoUrl from "@/assets/Logo.png";
+import { useLenis, scrollLandingTo } from "@/lib/useLenis";
 
 // Keep the landing page's first paint independent from the heavy Three.js/WebGL
 // journey. The interactive scene is loaded after the lightweight page shell.
@@ -26,6 +27,7 @@ export const Route = createFileRoute("/")({
 });
 
 function HomePage() {
+  useLenis();
   const navigate = useNavigate();
   const loggedIn = isAuthenticated();
   const userInfo = getUserInfo();
@@ -49,8 +51,7 @@ function HomePage() {
 
   const scrollToTop = () => {
     window.dispatchEvent(new Event("warehub:replay-journey"));
-    window.dispatchEvent(new Event("kaizenassests:replay-journey"));
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollLandingTo(0);
   };
 
   return (
@@ -60,7 +61,7 @@ function HomePage() {
     >
       {/* Top Floating Glass Header */}
       <header
-        className={`fixed top-0 left-0 right-0 z-50 border-b backdrop-blur-xl transition-all duration-300 ${isDarkMode ? "border-white/10 bg-slate-950/75" : isScrolled ? "border-slate-800/80 bg-slate-950/80 shadow-lg" : "border-transparent bg-slate-950/35"}`}
+        className={`fixed top-0 left-0 right-0 z-50 border-b backdrop-blur-xl transition-all duration-300 ${isScrolled ? "border-slate-800/80 bg-slate-950/90 shadow-lg" : "border-white/10 bg-slate-950/90"}`}
       >
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2.5 sm:px-6 sm:py-3">
           <button

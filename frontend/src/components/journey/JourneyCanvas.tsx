@@ -1,4 +1,4 @@
-import { memo, Suspense, useEffect, useState } from "react";
+import { memo, Suspense, useEffect, useState, useRef } from "react";
 import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
@@ -12,6 +12,8 @@ import { ConveyorSystem as ConveyorSystemModel } from "./models/ConveyorSystem";
 import { PumpAssemblyCell as PumpAssemblyCellModel } from "./models/PumpAssemblyCell";
 import { NatureEnvironment as NatureEnvironmentModel } from "./models/NatureEnvironment";
 import { DynamicActors } from "./DynamicActors";
+import { StaticBatch } from "./StaticBatch";
+import { SceneRuntime } from "./SceneRuntime";
 
 // Compare transform tuples by value so unchanged models skip reconciliation
 function sameModelProps(previous: object, next: object) {
@@ -63,9 +65,23 @@ export function JourneyCanvas({
   selectedAsn,
 }: JourneyCanvasProps) {
   const [manualTruckOffset, setManualTruckOffset] = useState({ x: 0, z: 0 });
+  const container = useRef<HTMLDivElement>(null);
+  const [rendering, setRendering] = useState(true);
+  useEffect(() => {
+    let inView = true;
+    const update = () => setRendering(inView && !document.hidden);
+    const observer = new IntersectionObserver(([entry]) => {
+      inView = !!entry?.isIntersecting;
+      update();
+    });
+    if (container.current) observer.observe(container.current);
+    document.addEventListener("visibilitychange", update);
+    return () => { observer.disconnect(); document.removeEventListener("visibilitychange", update); };
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isFreeOrbit) return;
       if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
       const target = event.target as HTMLElement | null;
       if (target?.matches("input, textarea, select, button, [contenteditable='true']")) return;
@@ -86,12 +102,12 @@ export function JourneyCanvas({
     };
     window.addEventListener("keydown", handleKeyDown, { passive: false });
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [isFreeOrbit]);
 
   return (
-    <div className="absolute inset-0 -z-10 bg-[#e7e9e5] overflow-hidden">
+    <div ref={container} className="absolute inset-0 z-0 bg-[#e7e9e5] overflow-hidden">
       <Canvas
-        frameloop="always"
+        frameloop={rendering ? "always" : "never"}
         performance={{ min: 0.65, max: 1, debounce: 250 }}
         camera={{ position: [-6.5, 17.5, 43.5], fov: 48, near: 0.1, far: 4000 }}
         gl={{
@@ -101,7 +117,9 @@ export function JourneyCanvas({
           stencil: false,
           depth: true,
         }}
-        dpr={[1, 1.5]}
+        // Stable framebuffer size: changing DPR during a pinned scroll causes
+        // GPU reallocations and fights Canvas updates at chapter boundaries.
+        dpr={1}
         shadows={{ type: THREE.PCFShadowMap }}
       >
         <color attach="background" args={["#e7e9e5"]} />
@@ -126,17 +144,12 @@ export function JourneyCanvas({
         />
 
         {/* Key Operational Luminaires */}
-        <pointLight position={[2, 6, 22]} intensity={3.5} color="#38bdf8" distance={25} />
-        <pointLight position={[-4, 7, -22]} intensity={3.5} color="#38bdf8" distance={25} />
-        <pointLight position={[-10, 8, -50]} intensity={2.5} color="#06b6d4" distance={35} />
-        <pointLight position={[10, 12, -120]} intensity={3.0} color="#38bdf8" distance={45} />
-        <pointLight position={[-8, 6, -180]} intensity={2.5} color="#2dd4bf" distance={35} />
-        <pointLight position={[-4, 7, -210]} intensity={3.5} color="#38bdf8" distance={25} />
-        <pointLight position={[2, 6, -248]} intensity={3.5} color="#38bdf8" distance={25} />
+        <pointLight position={[0, 8, -30]} intensity={3.5} color="#38bdf8" distance={35} />
 
         <Suspense fallback={null}>
+          <SceneRuntime />
           {/* Nature Environment (Hills, Flat Ground, City) */}
-          <NatureEnvironment />
+          <StaticBatch><NatureEnvironment /></StaticBatch>
 
           {/* Camera Controller: Guided 60fps trajectory or Free 3D Orbit */}
           {isFreeOrbit ? (
@@ -160,7 +173,7 @@ export function JourneyCanvas({
           />
 
           {/* ─── 3D WAREHOUSE STATIC ENVIRONMENT OBJECTS (NEVER RE-RENDER ON SCROLL) ─── */}
-          <WarehouseBuilding />
+          <StaticBatch><WarehouseBuilding /></StaticBatch>
 
           {/* Static Receiving Dock 02 */}
           <LoadingDock
@@ -171,6 +184,7 @@ export function JourneyCanvas({
           />
 
           {/* ─── STORAGE AISLES & INVENTORY MATRIX ─── */}
+          <StaticBatch>
           {/* Left Rack Row 1 */}
           <StorageRack
             position={[-7.5, 0, -68]}
@@ -234,9 +248,12 @@ export function JourneyCanvas({
           <PalletAndCargo position={[-8, 1.66, -124.3]} rotation={[0, 0, 0]} boxCount={6} />
           <PalletAndCargo position={[8, 3.46, -124.3]} rotation={[0, 0, 0]} boxCount={8} />
 
+          </StaticBatch>
           {/* ─── SCENE 5: PRODUCTION ASSEMBLY ─── */}
-          <ConveyorSystem position={[0.35, 0, -165]} length={16} width={1.1} height={0.96} />
-          <PumpAssemblyCell position={[-0.8, 0, -165]} />
+          <StaticBatch>
+            <ConveyorSystem position={[13.1, 1.12, -29]} length={10} width={1.1} height={0.96} />
+          </StaticBatch>
+          <PumpAssemblyCell position={[11.95, 1.12, -29]} />
 
           {/* ─── SCENE 6: OUTBOUND DISPATCH DOCK ─── */}
           <LoadingDock position={[-8.5, 0, -212]} doorOpenProgress={1} doorNumber="BAY 06" />

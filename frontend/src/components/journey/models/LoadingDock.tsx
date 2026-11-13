@@ -8,6 +8,7 @@ interface LoadingDockProps {
   doorOpenProgress?: number; // 0 to 1
   doorNumber?: string;
   pickupLane?: boolean;
+  dockAuthorized?: boolean;
 }
 
 export function LoadingDock({
@@ -16,8 +17,11 @@ export function LoadingDock({
   doorOpenProgress = 0,
   doorNumber = "BAY 02",
   pickupLane = false,
+  dockAuthorized = false,
 }: LoadingDockProps) {
   const shutterRef = useRef<THREE.Mesh>(null);
+
+  const isAuthorized = dockAuthorized || doorOpenProgress > 0.45;
 
   useFrame(() => {
     if (shutterRef.current) {
@@ -100,6 +104,33 @@ export function LoadingDock({
         <mesh position={[0, 4.2, 0.2]}>
           <boxGeometry args={[1.8, 0.5, 0.05]} />
           <meshStandardMaterial color="#ffffff" emissive="#38bdf8" emissiveIntensity={2} />
+        </mesh>
+
+        {/* ─── DOCK TRAFFIC STATUS SIGNAL LAMP ─── */}
+        {/* Signal Box Housing */}
+        <mesh position={[2.6, 4.2, 0.2]}>
+          <boxGeometry args={[0.45, 0.9, 0.15]} />
+          <meshStandardMaterial color="#0f172a" roughness={0.8} />
+        </mesh>
+        {/* Red LED (Docking / Unauthorized) */}
+        <mesh position={[2.6, 4.42, 0.29]}>
+          <cylinderGeometry args={[0.13, 0.13, 0.04, 24]} />
+          <meshStandardMaterial
+            color={isAuthorized ? "#450a0a" : "#ef4444"}
+            emissive={isAuthorized ? "#200000" : "#ef4444"}
+            emissiveIntensity={isAuthorized ? 0.1 : 3.5}
+            roughness={0.2}
+          />
+        </mesh>
+        {/* Green LED (Docked & Unloading Authorized) */}
+        <mesh position={[2.6, 3.98, 0.29]}>
+          <cylinderGeometry args={[0.13, 0.13, 0.04, 24]} />
+          <meshStandardMaterial
+            color={isAuthorized ? "#22c55e" : "#052e16"}
+            emissive={isAuthorized ? "#22c55e" : "#002000"}
+            emissiveIntensity={isAuthorized ? 3.5 : 0.1}
+            roughness={0.2}
+          />
         </mesh>
       </group>
     </group>

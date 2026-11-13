@@ -1,11 +1,22 @@
 import { WarehouseCompound } from "./WarehouseCompound";
-import { WarehouseRoof } from "./WarehouseRoof";
+import { WarehouseAsset } from "./WarehouseAsset";
 
 export function WarehouseBuilding() {
   return (
     <group>
+      <WarehouseAsset />
       <WarehouseCompound />
-      <WarehouseRoof />
+      <mesh position={[18.5, 0.004, 22]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <planeGeometry args={[5.8, 58]} />
+        <meshStandardMaterial color="#30383f" roughness={0.96} />
+      </mesh>
+      {[-2.65, 2.65].map(x => (
+        <mesh key={`exit-${x}`} position={[18.5 + x, 0.015, 22]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.12, 58]} />
+          <meshStandardMaterial color="#f1eee0" />
+        </mesh>
+      ))}
+      {/* Open roof keeps the overhead journey visible, as in the reference. */}
       {/* ─── GROUND / FLOORS ─── */}
       {/* Concrete yard and a dedicated inbound asphalt road through the security gate. */}
       <mesh position={[0, -0.02, 25]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
@@ -80,79 +91,7 @@ export function WarehouseBuilding() {
         </mesh>
       ))}
 
-      {/* ─── WAREHOUSE FRONT FACADE (Z = 0) ─── */}
-      <group position={[0, 5, 0]}>
-        {/* Left Wall Panel */}
-        <mesh position={[-16, 0, 0]} castShadow receiveShadow>
-          <boxGeometry args={[16, 10, 1.2]} />
-          <meshStandardMaterial color="#475569" roughness={0.7} metalness={0.15} />
-        </mesh>
-        {/* Right Wall Panel */}
-        <mesh position={[16, 0, 0]} castShadow receiveShadow>
-          <boxGeometry args={[16, 10, 1.2]} />
-          <meshStandardMaterial color="#475569" roughness={0.7} metalness={0.15} />
-        </mesh>
-        {/* Teal plinth and vertical metal cladding ribs give the facade depth. */}
-        {[-16, 16].map((x) => (
-          <group key={x} position={[x, 0, 0]}>
-            <mesh position={[0, -4.15, 0.64]} castShadow>
-              <boxGeometry args={[16, 1.7, 0.12]} />
-              <meshStandardMaterial color="#247984" roughness={0.55} />
-            </mesh>
-            {Array.from({ length: 15 }, (_, i) => (
-              <mesh key={i} position={[i - 7, 0.7, 0.64]} castShadow>
-                <boxGeometry args={[0.06, 8.3, 0.09]} />
-                <meshStandardMaterial color="#64748b" metalness={0.35} roughness={0.5} />
-              </mesh>
-            ))}
-          </group>
-        ))}
-        {/* Lintel Beam above Portal */}
-        <mesh position={[0, 3.5, 0]} castShadow receiveShadow>
-          <boxGeometry args={[16, 3, 1.4]} />
-          <meshStandardMaterial color="#187d86" roughness={0.45} metalness={0.3} />
-        </mesh>
-        {/* Illuminated Nexus Portal Header Sign */}
-        <mesh position={[0, 3.6, 0.75]}>
-          <boxGeometry args={[8, 0.9, 0.1]} />
-          <meshStandardMaterial color="#0f172a" emissive="#38bdf8" emissiveIntensity={1.8} />
-        </mesh>
-      </group>
-
-      {/* ─── STRUCTURAL INTERIOR ROOF TRUSSES & HIGH-BAY LIGHTS ─── */}
-      {[-30, -65, -100, -135, -170, -205, -240].map((trussZ, i) => (
-        <group key={i} position={[0, 9.5, trussZ]}>
-          {/* Cross Steel Beam */}
-          <mesh castShadow>
-            <boxGeometry args={[48, 0.6, 0.6]} />
-            <meshStandardMaterial color="#334155" metalness={0.8} roughness={0.3} />
-          </mesh>
-          {/* Vertical Support Columns Left & Right */}
-          <mesh position={[-23, -4.5, 0]} castShadow>
-            <boxGeometry args={[0.8, 9, 0.8]} />
-            <meshStandardMaterial color="#427985" metalness={0.45} roughness={0.45} />
-          </mesh>
-          <mesh position={[23, -4.5, 0]} castShadow>
-            <boxGeometry args={[0.8, 9, 0.8]} />
-            <meshStandardMaterial color="#427985" metalness={0.45} roughness={0.45} />
-          </mesh>
-
-          {/* Industrial High-Bay LED Lights */}
-          {[-12, 0, 12].map((lx, j) => (
-            <group key={j} position={[lx, -0.4, 0]}>
-              <mesh>
-                <cylinderGeometry args={[0.6, 0.8, 0.3, 16]} />
-                <meshStandardMaterial color="#475569" metalness={0.7} />
-              </mesh>
-              <mesh position={[0, -0.16, 0]}>
-                <cylinderGeometry args={[0.55, 0.55, 0.05, 16]} />
-                <meshStandardMaterial color="#ffffff" emissive="#e0f2fe" emissiveIntensity={3} />
-              </mesh>
-              <pointLight color="#bae6fd" intensity={3} distance={24} decay={2} />
-            </group>
-          ))}
-        </group>
-      ))}
+      {/* The imported cutaway owns the facade and structural frame. */}
     </group>
   );
 }

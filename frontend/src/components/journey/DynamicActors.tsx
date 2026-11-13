@@ -84,6 +84,7 @@ function DynamicActorsComponent({ manualTruckOffset, selectedAsn }: DynamicActor
     }
 
     if (palletRef.current) {
+      palletRef.current.visible = sp >= 0.18;
       palletRef.current.position.set(kin.palletPos[0], kin.palletPos[1], kin.palletPos[2]);
       palletRef.current.rotation.set(kin.palletRot[0], kin.palletRot[1], kin.palletRot[2]);
     }
@@ -186,7 +187,7 @@ function DynamicActorsComponent({ manualTruckOffset, selectedAsn }: DynamicActor
         <WarehouseForklift
           position={[0, 0, 0]}
           rotation={[0, 0, 0]}
-          forkLiftProgress={init.forkLiftProgress}
+          liftProgress={init.forkLiftProgress}
           liftProgressRef={forkliftLiftRef}
         />
       </group>
@@ -208,7 +209,7 @@ function DynamicActorsComponent({ manualTruckOffset, selectedAsn }: DynamicActor
       </group>
 
       {/* Holographic Laser Scanner at Rack Bay 1 (3D bounding wireframe & laser line) */}
-      <group ref={laserScanRef} position={[7.4, 2.5, -68.0]} visible={init.showLaserScan}>
+      <group ref={laserScanRef} position={[4.25, 3.8, -50]} visible={init.showLaserScan}>
         <mesh rotation={[0, -Math.PI / 2, 0]}>
           <planeGeometry args={[1.5, 1.3]} />
           <meshBasicMaterial
@@ -258,13 +259,14 @@ function DynamicActorsComponent({ manualTruckOffset, selectedAsn }: DynamicActor
         <WarehouseForklift
           position={[0, 0, 0]}
           rotation={[0, 0, 0]}
-          forkLiftProgress={0.34}
+          liftProgress={0.34}
         />
       </group>
 
       {/* ─── SCENE 7: DEPARTURE GATE EXIT ─── */}
       <GateBarrier
-        position={[0, 0, -252]}
+        position={[18.5, 0, 15]}
+        rotation={[0, Math.PI, 0]}
         barrierOpenProgress={init.barrier2Open}
         openProgressRef={barrier2OpenRef}
         gateType="exit"
