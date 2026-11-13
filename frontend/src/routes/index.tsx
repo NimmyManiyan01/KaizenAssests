@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { getDefaultRouteForUser, getUserInfo, isAuthenticated } from "@/lib/auth-utils";
 import logoUrl from "@/assets/Logo.png";
 import { useLenis, scrollLandingTo } from "@/lib/useLenis";
+import { JourneyErrorBoundary } from "@/components/journey/JourneyErrorBoundary";
 
 // Keep the landing page's first paint independent from the heavy Three.js/WebGL
 // journey. The interactive scene is loaded after the lightweight page shell.
@@ -137,7 +138,9 @@ function HomePage() {
             </section>
           }
         >
-          <WarehouseJourney />
+          <JourneyErrorBoundary>
+            <WarehouseJourney />
+          </JourneyErrorBoundary>
         </Suspense>
 
         {/* Final Lifecycle Completion Screen */}
