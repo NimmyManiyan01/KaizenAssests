@@ -177,7 +177,7 @@ export function WarehouseJourney({ stages = JOURNEY_STAGES }: WarehouseJourneyPr
         return {
           ...stage,
           telemetry: stage.telemetry.map((item) =>
-            liveTelemetry[item.label] ? { ...item, value: liveTelemetry[item.label] } : item,
+            liveTelemetry[item.label] ? { ...item, value: String(liveTelemetry[item.label] ?? item.value) } : item,
           ),
         };
       }),

@@ -22,14 +22,14 @@ export function StaticBatch({ children }: { children: ReactNode }) {
       for (let node: THREE.Object3D | null = object; node && node !== group; node = node.parent) {
         if (node.userData.journeyAnimated) return;
       }
-      if (object.constructor !== THREE.Mesh || object.children.length) return;
+      if (object.type !== "Mesh" || object.children.length) return;
       const mesh = object as THREE.Mesh;
       if (Array.isArray(mesh.material) || mesh.material.transparent ||
           !(mesh.material instanceof THREE.MeshStandardMaterial || mesh.material instanceof THREE.MeshBasicMaterial) ||
           Object.keys(mesh.geometry.morphAttributes).length) return;
       let materialKey = keys.get(mesh.material);
       if (!materialKey) {
-        const json = mesh.material.toJSON() as Record<string, unknown>;
+        const json = (mesh.material as any).toJSON() as Record<string, unknown>;
         delete json.uuid; delete json.metadata; delete json.name;
         if (tintable(mesh)) { delete json.color; json.vertexColors = true; }
         materialKey = JSON.stringify(json);
