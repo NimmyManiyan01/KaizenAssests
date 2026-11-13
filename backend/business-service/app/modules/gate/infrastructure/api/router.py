@@ -420,17 +420,17 @@ async def list_expected_deliveries(
         return []
 
     # Batch fetch related Gate Entries, Dock Requests, and GRNs for live status resolution
-    asn_id_strs = [str(asn.id) for asn in asns if asn.id]
-    asn_numbers = [asn.asn_number.strip().upper() for asn in asns if asn.asn_number]
+    asn_uuids = [asn.id for asn in asns if asn.id]
     vehicle_numbers = [asn.vehicle_number.strip().upper() for asn in asns if asn.vehicle_number]
+    po_numbers = [asn.po_number.strip().upper() for asn in asns if asn.po_number]
 
     ge_filters = []
-    if asn_id_strs:
-        ge_filters.append(GateEntryModel.asn_id.in_(asn_id_strs))
-    if asn_numbers:
-        ge_filters.append(func.upper(GateEntryModel.asn_number).in_(asn_numbers))
+    if asn_uuids:
+        ge_filters.append(GateEntryModel.asn_id.in_(asn_uuids))
     if vehicle_numbers:
         ge_filters.append(func.upper(GateEntryModel.vehicle_number).in_(vehicle_numbers))
+    if po_numbers:
+        ge_filters.append(func.upper(GateEntryModel.po_number).in_(po_numbers))
 
     gate_entries = []
     if ge_filters:
@@ -442,15 +442,15 @@ async def list_expected_deliveries(
         gate_entries = ge_result.scalars().all()
 
     ge_by_asn_id = {}
-    ge_by_asn_num = {}
     ge_by_vehicle = {}
+    ge_by_po = {}
     for ge in gate_entries:
         if ge.asn_id and str(ge.asn_id) not in ge_by_asn_id:
             ge_by_asn_id[str(ge.asn_id)] = ge
-        if ge.asn_number and ge.asn_number.strip().upper() not in ge_by_asn_num:
-            ge_by_asn_num[ge.asn_number.strip().upper()] = ge
         if ge.vehicle_number and ge.vehicle_number.strip().upper() not in ge_by_vehicle:
             ge_by_vehicle[ge.vehicle_number.strip().upper()] = ge
+        if ge.po_number and ge.po_number.strip().upper() not in ge_by_po:
+            ge_by_po[ge.po_number.strip().upper()] = ge
 
     ge_passes = [ge.gate_entry_number for ge in gate_entries if ge.gate_entry_number]
     dock_req_by_pass = {}
@@ -464,9 +464,9 @@ async def list_expected_deliveries(
             if dr.existing_gate_pass_id and dr.existing_gate_pass_id not in dock_req_by_pass:
                 dock_req_by_pass[dr.existing_gate_pass_id] = dr
 
+    asn_numbers = [asn.asn_number.strip().upper() for asn in asns if asn.asn_number]
     grn_filters = []
     if asns:
-        asn_uuids = [asn.id for asn in asns if asn.id]
         if asn_uuids:
             grn_filters.append(GrnModel.asn_id.in_(asn_uuids))
     if asn_numbers:
@@ -490,8 +490,8 @@ async def list_expected_deliveries(
     for asn in asns:
         ge = (
             ge_by_asn_id.get(str(asn.id))
-            or (ge_by_asn_num.get(asn.asn_number.strip().upper()) if asn.asn_number else None)
             or (ge_by_vehicle.get(asn.vehicle_number.strip().upper()) if asn.vehicle_number else None)
+            or (ge_by_po.get(asn.po_number.strip().upper()) if asn.po_number else None)
         )
         dr = dock_req_by_pass.get(ge.gate_entry_number) if ge and ge.gate_entry_number else None
         gr = (
@@ -4572,10 +4572,10 @@ async def complete_gate_exit(
                 asn_rec.status = "VEHICLE_EXITED"
         except Exception:
             pass
-    elif gate_entry.asn_number:
+    elif getattr(gate_entry, "vehicle_number", None):
         try:
             asn_rec = (await uow.session.execute(
-                select(AsnModel).where(func.upper(AsnModel.asn_number) == gate_entry.asn_number.strip().upper())
+                select(AsnModel).where(func.upper(AsnModel.vehicle_number) == gate_entry.vehicle_number.strip().upper()).order_by(AsnModel.created_at.desc())
             )).scalars().first()
             if asn_rec and asn_rec.status != "CANCELLED":
                 asn_rec.status = "VEHICLE_EXITED"
@@ -5194,10 +5194,10 @@ async def mark_inbound_vehicle_exited(
                 asn_rec.status = "VEHICLE_EXITED"
         except Exception:
             pass
-    elif model.asn_number:
+    elif getattr(model, "vehicle_number", None):
         try:
             asn_rec = (await uow.session.execute(
-                select(AsnModel).where(func.upper(AsnModel.asn_number) == model.asn_number.strip().upper())
+                select(AsnModel).where(func.upper(AsnModel.vehicle_number) == model.vehicle_number.strip().upper()).order_by(AsnModel.created_at.desc())
             )).scalars().first()
             if asn_rec and asn_rec.status != "CANCELLED":
                 asn_rec.status = "VEHICLE_EXITED"

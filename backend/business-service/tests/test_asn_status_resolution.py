@@ -123,3 +123,30 @@ def test_asn_response_formatting():
     assert resp["assigned_dock_id"] == "DOCK-01"
     assert resp["dock_number"] == "DOCK-01"
 
+
+def test_gate_entry_model_attributes_and_query_filters():
+    from app.modules.gate.infrastructure.persistence.models import GateEntryModel
+    from sqlalchemy import select, or_, func
+
+    # Verify GateEntryModel has asn_id, vehicle_number, po_number, and NOT asn_number
+    assert hasattr(GateEntryModel, "asn_id")
+    assert hasattr(GateEntryModel, "vehicle_number")
+    assert hasattr(GateEntryModel, "po_number")
+    assert not hasattr(GateEntryModel, "asn_number")
+
+    # Verify building query filters with asn_uuids, vehicle_numbers, po_numbers works without AttributeError
+    asn_uuids = [uuid.uuid4()]
+    vehicle_numbers = ["KA01AB2029"]
+    po_numbers = ["PO-2026-101"]
+
+    ge_filters = []
+    if asn_uuids:
+        ge_filters.append(GateEntryModel.asn_id.in_(asn_uuids))
+    if vehicle_numbers:
+        ge_filters.append(func.upper(GateEntryModel.vehicle_number).in_(vehicle_numbers))
+    if po_numbers:
+        ge_filters.append(func.upper(GateEntryModel.po_number).in_(po_numbers))
+
+    stmt = select(GateEntryModel).where(or_(*ge_filters))
+    assert stmt is not None
+

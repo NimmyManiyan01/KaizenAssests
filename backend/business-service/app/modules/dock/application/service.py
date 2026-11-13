@@ -249,10 +249,10 @@ class DockAllocationService:
                                 asn_m.status = asn_target_status
                         except Exception:
                             pass
-                    elif ge.asn_number:
+                    elif getattr(ge, "vehicle_number", None):
                         try:
                             asn_m = (await session.execute(
-                                select(AsnModel).where(func.upper(AsnModel.asn_number) == ge.asn_number.strip().upper())
+                                select(AsnModel).where(func.upper(AsnModel.vehicle_number) == ge.vehicle_number.strip().upper()).order_by(AsnModel.created_at.desc())
                             )).scalars().first()
                             if asn_m and asn_m.status not in {"CANCELLED", "VEHICLE_EXITED"}:
                                 asn_m.status = asn_target_status
@@ -438,10 +438,10 @@ class DockAllocationService:
                     asn_m.status = "DOCK_ASSIGNED"
             except Exception:
                 pass
-        elif gate_entry.asn_number:
+        elif getattr(gate_entry, "vehicle_number", None):
             try:
                 asn_m = (await session.execute(
-                    select(AsnModel).where(func.upper(AsnModel.asn_number) == gate_entry.asn_number.strip().upper())
+                    select(AsnModel).where(func.upper(AsnModel.vehicle_number) == gate_entry.vehicle_number.strip().upper()).order_by(AsnModel.created_at.desc())
                 )).scalars().first()
                 if asn_m and asn_m.status not in {"CANCELLED", "COMPLETED", "GRN_POSTED", "VEHICLE_EXITED"}:
                     asn_m.status = "DOCK_ASSIGNED"
