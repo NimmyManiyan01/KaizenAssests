@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Truck,
   Warehouse,
+  X,
 } from "lucide-react";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { StatCard } from "@/components/wms/primitives";
@@ -174,15 +175,25 @@ function GateDashboard() {
               </CardDescription>
             </div>
 
-            <div className="relative w-full sm:w-72">
+            <div className="relative w-full sm:w-80 md:w-96 lg:w-[420px] shrink-0">
               <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
               <input
                 type="text"
                 placeholder="Search Gate Pass, Vehicle, Supplier, ASN..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-9 w-full rounded-xl border bg-background pl-9 pr-3 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary"
+                className="h-9 w-full rounded-xl border bg-background pl-9 pr-8 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary"
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="size-4" />
+                </button>
+              )}
             </div>
           </CardHeader>
           <CardContent className="px-5 pb-5 pt-0">

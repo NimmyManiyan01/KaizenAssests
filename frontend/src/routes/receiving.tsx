@@ -501,7 +501,7 @@ function ReceivingControlCenter() {
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
-              <div className="relative w-64">
+              <div className="relative w-72 sm:w-80 md:w-96">
                 <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
                 <input
                   type="text"
