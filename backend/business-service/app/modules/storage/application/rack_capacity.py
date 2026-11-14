@@ -25,6 +25,7 @@ def install_rack_capacity(connection):
                     zone_id UUID NOT NULL,
                     rack_code VARCHAR(64) NOT NULL,
                     maximum_capacity INTEGER NOT NULL,
+                    capacity_uom VARCHAR(32) DEFAULT 'PCS' NOT NULL,
                     occupied_quantity NUMERIC(18, 4) DEFAULT '0' NOT NULL,
                     CONSTRAINT pk_store_rack PRIMARY KEY (id),
                     CONSTRAINT uq_store_rack_zone_code UNIQUE (zone_id, rack_code),
@@ -63,7 +64,7 @@ def install_rack_capacity(connection):
             .join(WarehouseBinModel, WarehouseBinModel.id == StorageLocationModel.bin_id)
             .where(WarehouseBinModel.zone_id == zone_id, func.upper(WarehouseBinModel.rack) == rack)) or 0
         connection.execute(insert(WarehouseRackModel).values(id=uuid.uuid4(), zone_id=zone_id, rack_code=rack,
-            maximum_capacity=math.ceil(max(capacity or 0, occupied, 1)), occupied_quantity=occupied))
+            maximum_capacity=math.ceil(max(capacity or 0, occupied, 1)), capacity_uom="PCS", occupied_quantity=occupied))
     if connection.dialect.name == "sqlite":
         _install_sqlite(connection)
     elif connection.dialect.name == "postgresql":
@@ -83,9 +84,10 @@ def _install_sqlite(c):
         parts = []
         if operation != "DELETE":
             parts.append(f"SELECT CASE WHEN NEW.quantity < 0 OR NEW.available_quantity < 0 OR NEW.available_quantity > NEW.quantity THEN RAISE(ABORT, 'Rack inventory quantity cannot be negative or over-available') END;")
-            # Enforce PCS on new stock, while allowing removal of legacy non-PCS balances.
+            # Enforce the rack's configured UOM on new/increased stock.
             changed = "1" if operation == "INSERT" else "NEW.quantity > OLD.quantity OR NEW.storage_location_id <> OLD.storage_location_id"
-            parts.append(f"SELECT CASE WHEN ({changed}) AND {_rack('NEW')} IS NOT NULL AND (upper(NEW.uom) <> 'PCS' OR NEW.quantity <> CAST(NEW.quantity AS INTEGER)) THEN RAISE(ABORT, 'Rack capacity requires whole PCS quantities') END;")
+            parts.append(f"SELECT CASE WHEN ({changed}) AND {_rack('NEW')} IS NOT NULL AND upper(NEW.uom) <> (SELECT upper(capacity_uom) FROM warehouse_rack WHERE id={_rack('NEW')}) THEN RAISE(ABORT, 'Material UOM does not match the rack capacity UOM') END;")
+            parts.append(f"SELECT CASE WHEN ({changed}) AND {_rack('NEW')} IS NOT NULL AND (SELECT upper(capacity_uom) FROM warehouse_rack WHERE id={_rack('NEW')}) IN ('PCS','BOX','SET','BUNDLE','EA') AND NEW.quantity <> CAST(NEW.quantity AS INTEGER) THEN RAISE(ABORT, 'This rack UOM requires whole quantities') END;")
         if operation != "INSERT":
             parts += [f"UPDATE warehouse_rack SET occupied_quantity=occupied_quantity-OLD.quantity WHERE id={_rack('OLD')};",
                 f"INSERT INTO rack_occupancy_event(id,rack_id,balance_id,quantity_delta,reason,actor) SELECT lower(hex(randomblob(16))),id,OLD.id,-OLD.quantity,'Stock balance {operation.lower()}','inventory_transaction' FROM warehouse_rack WHERE id={_rack('OLD')} AND OLD.quantity <> 0;"]
@@ -103,16 +105,17 @@ def _install_postgres(c):
     except Exception:
         pass
     c.exec_driver_sql("""CREATE OR REPLACE FUNCTION maintain_rack_occupancy() RETURNS trigger AS $$
-    DECLARE old_rack uuid; new_rack uuid; remaining numeric;
+    DECLARE old_rack uuid; new_rack uuid; new_capacity_uom varchar(32); remaining numeric;
     BEGIN
       IF TG_OP='UPDATE' AND NEW.quantity=OLD.quantity AND NEW.storage_location_id=OLD.storage_location_id THEN RETURN NEW; END IF;
       IF TG_OP <> 'INSERT' THEN
         SELECT r.id INTO old_rack FROM warehouse_rack r JOIN warehouse_bin b ON b.zone_id=r.zone_id AND upper(b.rack)=upper(r.rack_code) JOIN storage_location l ON l.bin_id=b.id WHERE l.id=OLD.storage_location_id;
       END IF;
       IF TG_OP <> 'DELETE' THEN
-        SELECT r.id INTO new_rack FROM warehouse_rack r JOIN warehouse_bin b ON b.zone_id=r.zone_id AND upper(b.rack)=upper(r.rack_code) JOIN storage_location l ON l.bin_id=b.id WHERE l.id=NEW.storage_location_id;
+        SELECT r.id, r.capacity_uom INTO new_rack, new_capacity_uom FROM warehouse_rack r JOIN warehouse_bin b ON b.zone_id=r.zone_id AND upper(b.rack)=upper(r.rack_code) JOIN storage_location l ON l.bin_id=b.id WHERE l.id=NEW.storage_location_id;
         IF NEW.quantity < 0 OR NEW.available_quantity < 0 OR NEW.available_quantity > NEW.quantity THEN RAISE EXCEPTION 'Rack inventory quantity cannot be negative or over-available'; END IF;
-        IF new_rack IS NOT NULL AND (TG_OP='INSERT' OR NEW.quantity>OLD.quantity OR NEW.storage_location_id<>OLD.storage_location_id) AND (upper(NEW.uom)<>'PCS' OR NEW.quantity<>trunc(NEW.quantity)) THEN RAISE EXCEPTION 'Rack capacity requires whole PCS quantities'; END IF;
+        IF new_rack IS NOT NULL AND (TG_OP='INSERT' OR NEW.quantity>OLD.quantity OR NEW.storage_location_id<>OLD.storage_location_id) AND upper(NEW.uom)<>upper(new_capacity_uom) THEN RAISE EXCEPTION 'Material UOM % does not match rack capacity UOM %',NEW.uom,new_capacity_uom; END IF;
+        IF new_rack IS NOT NULL AND (TG_OP='INSERT' OR NEW.quantity>OLD.quantity OR NEW.storage_location_id<>OLD.storage_location_id) AND upper(new_capacity_uom) IN ('PCS','BOX','SET','BUNDLE','EA') AND NEW.quantity<>trunc(NEW.quantity) THEN RAISE EXCEPTION 'Rack UOM % requires whole quantities',new_capacity_uom; END IF;
       END IF;
       PERFORM id FROM warehouse_rack WHERE (old_rack IS NOT NULL AND id=old_rack) OR (new_rack IS NOT NULL AND id=new_rack) ORDER BY id FOR UPDATE;
       IF old_rack IS NOT NULL THEN
@@ -121,7 +124,7 @@ def _install_postgres(c):
       END IF;
       IF new_rack IS NOT NULL THEN
         SELECT maximum_capacity-coalesce(occupied_quantity, 0) INTO remaining FROM warehouse_rack WHERE id=new_rack;
-        IF NEW.quantity>remaining THEN RAISE EXCEPTION 'Rack capacity exceeded. Only % PCS can be stored.',remaining; END IF;
+        IF NEW.quantity>remaining THEN RAISE EXCEPTION 'Rack capacity exceeded. Only % % can be stored.',remaining,new_capacity_uom; END IF;
         UPDATE warehouse_rack SET occupied_quantity=coalesce(occupied_quantity, 0)+NEW.quantity WHERE id=new_rack;
         IF NEW.quantity<>0 THEN INSERT INTO rack_occupancy_event(id,rack_id,balance_id,quantity_delta,reason,actor) VALUES(gen_random_uuid(),new_rack,NEW.id::text,NEW.quantity,'Stock balance '||lower(TG_OP),coalesce(nullif(current_setting('app.actor',true),''),cast(current_user as varchar(128)))); END IF;
       END IF;
@@ -162,9 +165,15 @@ async def validate_rack_capacity(session, bin_model, quantity, uom=None):
         qty_dec = Decimal(str(quantity if quantity is not None else 0))
     except Exception:
         raise HTTPException(422, "Invalid quantity")
-    if qty_dec <= 0 or qty_dec != qty_dec.to_integral_value() or (uom and str(uom).strip().upper() != "PCS"):
-        raise HTTPException(422, "Rack capacity requires positive whole PCS quantities")
+    rack_uom = str(rack.capacity_uom or "PCS").strip().upper()
+    incoming_uom = str(uom or rack_uom).strip().upper()
+    if incoming_uom != rack_uom:
+        raise HTTPException(422, f"This rack accepts only {rack_uom}; the material uses {incoming_uom}")
+    if qty_dec <= 0:
+        raise HTTPException(422, "Rack quantity must be greater than zero")
+    if rack_uom in {"PCS", "BOX", "SET", "BUNDLE", "EA"} and qty_dec != qty_dec.to_integral_value():
+        raise HTTPException(422, f"Rack UOM {rack_uom} requires whole quantities")
     remaining = Decimal(rack.maximum_capacity) - Decimal(rack.occupied_quantity or 0)
     if qty_dec > remaining:
-        raise HTTPException(409, f"Rack capacity exceeded. Only {remaining.normalize():f} PCS can be stored.")
+        raise HTTPException(409, f"Rack capacity exceeded. Only {remaining.normalize():f} {rack_uom} can be stored.")
     return rack

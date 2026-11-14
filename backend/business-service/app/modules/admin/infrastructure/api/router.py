@@ -27,14 +27,12 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
 ADMIN_ROLES = {"ADMIN", "SUPERUSER", "SUPER_ADMIN"}
 MANAGED_ROLES = [
-    {"value": "SUPER_ADMIN", "label": "Super Administrator"},
     {"value": "ADMIN", "label": "System Administrator"},
     {"value": "SUPPLIER", "label": "Supplier"},
     {"value": "WAREHOUSE_MANAGER", "label": "Warehouse Manager"},
     {"value": "GATE_SECURITY", "label": "Gate Security"},
     {"value": "GRN", "label": "GRN / Receiving"},
     {"value": "ASSEMBLY_MANAGER", "label": "Assembly Manager"},
-    {"value": "QUALITY", "label": "Quality Inspector"},
 ]
 ROLE_VALUES = {item["value"] for item in MANAGED_ROLES} | ADMIN_ROLES
 

@@ -111,6 +111,15 @@ class BinCreateRequest(BaseModel):
     qr_identifier: str | None = Field(default=None, max_length=128)
     storage_type: str = Field(default="GENERAL", max_length=64)
     capacity: int = Field(gt=0, le=2147483647, strict=True)
+    capacity_uom: str = Field(default="PCS", min_length=1, max_length=32)
+
+    @field_validator("capacity_uom")
+    @classmethod
+    def validate_capacity_uom(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if not re.fullmatch(r"[A-Z][A-Z0-9_-]{0,31}", normalized):
+            raise ValueError("Capacity UOM may contain only letters, numbers, underscores, and hyphens")
+        return normalized
 
     @field_validator("bin_code", "rack", "position")
     @classmethod
@@ -590,8 +599,9 @@ async def create_zone_bin(
             raise HTTPException(409, "This rack already exists in the zone. Use Add Material to put away stock.")
         rack = existing_rack
         rack.maximum_capacity = payload.capacity
+        rack.capacity_uom = payload.capacity_uom
     else:
-        rack = WarehouseRackModel(id=uuid.uuid4(), zone_id=zone.id, rack_code=payload.rack, maximum_capacity=payload.capacity, occupied_quantity=0)
+        rack = WarehouseRackModel(id=uuid.uuid4(), zone_id=zone.id, rack_code=payload.rack, maximum_capacity=payload.capacity, capacity_uom=payload.capacity_uom, occupied_quantity=0)
         uow.session.add(rack)
         await uow.session.flush()
         uow.session.add(RackOccupancyEventModel(
@@ -599,7 +609,7 @@ async def create_zone_bin(
             rack_id=rack.id,
             balance_id="INITIAL_SETUP",
             quantity_delta=Decimal("0.0"),
-            reason=f"Rack created; maximum capacity {payload.capacity} PCS",
+            reason=f"Rack created; maximum capacity {payload.capacity} {payload.capacity_uom}",
             actor=user.username,
         ))
 
@@ -664,6 +674,7 @@ def _rack_response(rack):
     occupied = float(rack.occupied_quantity)
     maximum = rack.maximum_capacity
     return {"id": str(rack.id), "rack_code": rack.rack_code, "maximum_capacity": maximum,
+        "capacity_uom": rack.capacity_uom,
         "occupied_quantity": occupied, "available_capacity": maximum - occupied,
         "occupancy_percentage": round(occupied / maximum * 100, 1),
         "occupancy_status": "Empty" if occupied == 0 else "Full" if occupied >= maximum else "Partially Occupied"}
@@ -672,7 +683,18 @@ def _rack_response(rack):
 class RackCapacityUpdate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     maximum_capacity: int = Field(gt=0, le=2147483647, strict=True)
+    capacity_uom: str | None = Field(default=None, min_length=1, max_length=32)
     reason: str = Field(default="", max_length=1000)
+
+    @field_validator("capacity_uom")
+    @classmethod
+    def validate_capacity_uom(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().upper()
+        if not re.fullmatch(r"[A-Z][A-Z0-9_-]{0,31}", normalized):
+            raise ValueError("Capacity UOM may contain only letters, numbers, underscores, and hyphens")
+        return normalized
 
 
 async def _rack_in_zone(uow, zone_id, rack_id):
@@ -743,14 +765,19 @@ async def update_rack_capacity(zone_id: str, rack_id: str, payload: RackCapacity
     rack = await _lock_rack(uow, rack)
     if payload.maximum_capacity < rack.occupied_quantity:
         raise HTTPException(409, "Maximum capacity cannot be less than current occupancy")
+    if payload.capacity_uom and payload.capacity_uom != rack.capacity_uom and rack.occupied_quantity > 0:
+        raise HTTPException(409, "Capacity UOM can only be changed while the rack is empty")
     before = rack.maximum_capacity
+    before_uom = rack.capacity_uom
     rack.maximum_capacity = payload.maximum_capacity
+    if payload.capacity_uom:
+        rack.capacity_uom = payload.capacity_uom
     bins = (await uow.session.scalars(select(WarehouseBinModel).where(WarehouseBinModel.zone_id == rack.zone_id,
         func.upper(WarehouseBinModel.rack) == rack.rack_code).with_for_update())).all()
     for bin_model in bins:
         bin_model.capacity = payload.maximum_capacity
     uow.session.add(RackOccupancyEventModel(id=uuid.uuid4(), rack_id=rack.id, balance_id="CAPACITY_UPDATE", quantity_delta=Decimal("0.0"), actor=user.username,
-        reason=(f"Capacity {before} -> {payload.maximum_capacity} PCS" + (f": {payload.reason}" if payload.reason else ""))[:1000]))
+        reason=(f"Capacity {before} {before_uom} -> {payload.maximum_capacity} {rack.capacity_uom}" + (f": {payload.reason}" if payload.reason else ""))[:1000]))
     await uow.session.flush()
     return _rack_response(rack)
 

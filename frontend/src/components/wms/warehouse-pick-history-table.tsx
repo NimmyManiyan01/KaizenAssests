@@ -23,6 +23,8 @@ export interface PickHistoryTask {
   id: string;
   task_number?: string;
   assembly_order_number?: string;
+  assembly_unit_code?: string;
+  destination_label?: string;
   material_code?: string;
   material_name?: string;
   material_qr?: string;
@@ -32,6 +34,7 @@ export interface PickHistoryTask {
   batch_number?: string;
   uom?: string;
   pick_location?: string;
+  pick_locations?: Array<{ location_code: string; picked_quantity?: number }>;
   confirmation?: {
     confirmed?: boolean;
     confirmed_by?: string;
@@ -56,6 +59,22 @@ const formatDateTime = (value?: string | null) => {
   const parsed = new Date(hasTimezone ? normalized : `${normalized}Z`);
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 };
+
+const compactLocation = (value?: string | null) => {
+  const code = String(value || "").trim();
+  if (!code) return "—";
+  const zoneMatches = [...code.matchAll(/ZONE-[A-Z0-9]+/gi)];
+  const bin = code.match(/BIN-[A-Z0-9]+/i)?.[0];
+  const zone = zoneMatches.at(-1)?.[0];
+  return zone && bin ? `${zone.toUpperCase()} → ${bin.toUpperCase()}` : code;
+};
+
+const taskLocations = (task: PickHistoryTask) =>
+  task.pick_locations?.length
+    ? task.pick_locations
+    : task.pick_location
+      ? [{ location_code: task.pick_location, picked_quantity: task.picked_quantity ?? task.quantity }]
+      : [];
 
 export function WarehousePickHistoryTable({
   tasks,
@@ -87,9 +106,9 @@ export function WarehousePickHistoryTable({
   const locationOptions = useMemo(() => {
     const set = new Set<string>();
     for (const t of tasks) {
-      const loc = t.pick_location?.trim();
-      if (loc && loc !== "—" && loc !== "-") {
-        set.add(loc);
+      for (const location of taskLocations(t)) {
+        const loc = location.location_code?.trim();
+        if (loc && loc !== "—" && loc !== "-") set.add(loc);
       }
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
@@ -115,9 +134,10 @@ export function WarehousePickHistoryTable({
         const match =
           String(t.task_number || "").toLowerCase().includes(q) ||
           String(t.assembly_order_number || "").toLowerCase().includes(q) ||
+          String(t.assembly_unit_code || "").toLowerCase().includes(q) ||
           String(t.material_name || "").toLowerCase().includes(q) ||
           String(t.material_code || "").toLowerCase().includes(q) ||
-          String(t.pick_location || "").toLowerCase().includes(q) ||
+          taskLocations(t).some((location) => location.location_code.toLowerCase().includes(q)) ||
           String(t.confirmation?.confirmed_by || "").toLowerCase().includes(q) ||
           String(t.batch_number || "").toLowerCase().includes(q);
         if (!match) return false;
@@ -129,7 +149,7 @@ export function WarehousePickHistoryTable({
       }
 
       // Pick Location filter
-      if (selectedLocation !== "ALL" && t.pick_location !== selectedLocation) {
+      if (selectedLocation !== "ALL" && !taskLocations(t).some((location) => location.location_code === selectedLocation)) {
         return false;
       }
 
@@ -292,7 +312,7 @@ export function WarehousePickHistoryTable({
               <option value="ALL">All Locations ({locationOptions.length})</option>
               {locationOptions.map((loc) => (
                 <option key={loc} value={loc}>
-                  {loc}
+                  {compactLocation(loc)}
                 </option>
               ))}
             </select>
@@ -393,6 +413,7 @@ export function WarehousePickHistoryTable({
             <tr>
               <th className="px-3.5 py-3">Task No</th>
               <th className="px-3.5 py-3">Assembly Request</th>
+              <th className="px-3.5 py-3">Destination Unit</th>
               <th className="px-3.5 py-3">Material</th>
               <th className="px-3.5 py-3">Pick Location</th>
               <th className="px-3.5 py-3 text-right">Picked Qty</th>
@@ -404,7 +425,7 @@ export function WarehousePickHistoryTable({
           <tbody className="divide-y divide-border/60">
             {paginatedTasks.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-12 text-center text-muted-foreground">
+                <td colSpan={9} className="py-12 text-center text-muted-foreground">
                   <div className="flex flex-col items-center justify-center gap-2">
                     <Boxes className="size-8 text-muted-foreground/40" />
                     <p className="font-semibold text-foreground text-sm">
@@ -442,6 +463,12 @@ export function WarehousePickHistoryTable({
                     {task.assembly_order_number || "—"}
                   </td>
 
+                  <td className="px-3.5 py-3.5 whitespace-nowrap">
+                    <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 font-mono text-[11px] font-semibold text-indigo-800">
+                      {task.destination_label || (task.assembly_unit_code ? `Assembly Unit ${task.assembly_unit_code}` : "—")}
+                    </span>
+                  </td>
+
                   {/* Material */}
                   <td className="px-3.5 py-3.5">
                     <span className="block font-bold text-foreground">
@@ -455,11 +482,16 @@ export function WarehousePickHistoryTable({
                   </td>
 
                   {/* Pick Location */}
-                  <td className="px-3.5 py-3.5 whitespace-nowrap">
-                    <span className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold bg-muted/50 border border-border/70 rounded-md px-2 py-0.5 text-foreground">
-                      <MapPin className="size-3 text-primary shrink-0" />
-                      {task.pick_location || "—"}
-                    </span>
+                  <td className="px-3.5 py-3.5">
+                    <div className="flex flex-col items-start gap-1">
+                      {taskLocations(task).map((location) => (
+                        <span key={location.location_code} className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-border/70 bg-muted/50 px-2 py-0.5 font-mono text-[11px] font-semibold text-foreground">
+                          <MapPin className="size-3 shrink-0 text-primary" />
+                          {compactLocation(location.location_code)}
+                          {location.picked_quantity != null && <span>· {location.picked_quantity} {task.uom || "PCS"}</span>}
+                        </span>
+                      ))}
+                    </div>
                   </td>
 
                   {/* Picked Quantity */}

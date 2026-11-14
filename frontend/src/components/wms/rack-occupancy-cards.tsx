@@ -12,7 +12,7 @@ import { toast } from "sonner";
 
 type RackCapacity = {
   id: string; rack_code: string; maximum_capacity: number; occupied_quantity: number;
-  available_capacity: number; occupancy_percentage: number; occupancy_status: string;
+  available_capacity: number; occupancy_percentage: number; occupancy_status: string; capacity_uom: string;
 };
 type RackBin = {
   id: string; zone_id: string; rack: string; bin_code: string; position?: string;
@@ -38,8 +38,8 @@ function hasCapacity(value: RackCapacity | null | undefined): value is RackCapac
 function CapacitySummary({ rack, label }: { rack: RackCapacity; label: string }) {
   return <div className="space-y-3">
     <div className="grid grid-cols-2 gap-4 text-sm">
-      <div><p className="text-xs text-muted-foreground">Capacity (Occupied / Maximum)</p><p className="mt-1 font-semibold tabular-nums">{rack.occupied_quantity.toLocaleString()} / {rack.maximum_capacity.toLocaleString()} PCS</p></div>
-      <div><p className="text-xs text-muted-foreground">Available Capacity</p><p className="mt-1 font-semibold tabular-nums">{rack.available_capacity.toLocaleString()} PCS</p></div>
+      <div><p className="text-xs text-muted-foreground">Capacity (Occupied / Maximum)</p><p className="mt-1 font-semibold tabular-nums">{rack.occupied_quantity.toLocaleString()} / {rack.maximum_capacity.toLocaleString()} {rack.capacity_uom || "PCS"}</p></div>
+      <div><p className="text-xs text-muted-foreground">Available Capacity</p><p className="mt-1 font-semibold tabular-nums">{rack.available_capacity.toLocaleString()} {rack.capacity_uom || "PCS"}</p></div>
     </div>
     <div className="flex justify-between text-xs text-muted-foreground"><span>Occupancy</span><span className="tabular-nums">{rack.occupancy_percentage}%</span></div>
     <div role="progressbar" aria-label={`${label} occupancy`} aria-valuemin={0} aria-valuemax={rack.maximum_capacity} aria-valuenow={rack.occupied_quantity}
@@ -153,8 +153,10 @@ export function RackOccupancyCards({ bins, allBins, zone, onAddMaterial, onUpdat
     const { bin, mode } = selection;
     setError("");
     const quantity = Number(form.quantity);
-    if (["pick", "transfer", "capacity"].includes(mode) && (!Number.isSafeInteger(quantity) || quantity <= 0)) {
-      setError("Enter a positive whole number of PCS."); return;
+    const rackUom = String(content.capacity_uom || "PCS").toUpperCase();
+    const requiresWholeQuantity = ["PCS", "BOX", "SET", "BUNDLE", "EA"].includes(rackUom);
+    if (["pick", "transfer", "capacity"].includes(mode) && (!Number.isFinite(quantity) || quantity <= 0 || (requiresWholeQuantity && !Number.isSafeInteger(quantity)))) {
+      setError(`Enter a positive ${requiresWholeQuantity ? "whole " : ""}quantity in ${rackUom}.`); return;
     }
     if (["empty", "transfer", "pick"].includes(mode) && form.reason.trim().length < 3) {
       setError("Enter a reason of at least 3 characters."); return;
@@ -264,10 +266,10 @@ export function RackOccupancyCards({ bins, allBins, zone, onAddMaterial, onUpdat
               <div className="space-y-2"><Label htmlFor="rack-material-scan">Material QR scan *</Label><Input id="rack-material-scan" required value={form.materialScan} onChange={e => setForm({ ...form, materialScan: e.target.value })} /></div>
             </div>}
             {selection.mode === "transfer" && <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2"><Label htmlFor="rack-destination">Destination rack *</Label><select id="rack-destination" className="h-10 w-full rounded-md border bg-background px-3" required value={form.destination} onChange={e => setForm({ ...form, destination: e.target.value })}><option value="">Select another rack</option>{allBins.filter(b => b.rack_capacity?.id !== selection.bin.rack_capacity?.id).map(b => <option key={b.id} value={b.id}>{b.rack} / {b.bin_code} / {hasCapacity(b.rack_capacity) ? `${b.rack_capacity.available_capacity} PCS available` : "Capacity unavailable"}</option>)}</select></div>
+              <div className="space-y-2"><Label htmlFor="rack-destination">Destination rack *</Label><select id="rack-destination" className="h-10 w-full rounded-md border bg-background px-3" required value={form.destination} onChange={e => setForm({ ...form, destination: e.target.value })}><option value="">Select another rack</option>{allBins.filter(b => b.rack_capacity?.id !== selection.bin.rack_capacity?.id && String(b.rack_capacity?.capacity_uom || "PCS").toUpperCase() === String(content?.materials.find(material => material.material_qr === form.materialScan.trim())?.uom || content?.capacity_uom || "PCS").toUpperCase()).map(b => <option key={b.id} value={b.id}>{b.rack} / {b.bin_code} / {hasCapacity(b.rack_capacity) ? `${b.rack_capacity.available_capacity} ${b.rack_capacity.capacity_uom || "PCS"} available` : "Capacity unavailable"}</option>)}</select></div>
               <div className="space-y-2"><Label htmlFor="destination-rack-scan">Destination rack QR scan *</Label><Input id="destination-rack-scan" required value={form.destinationScan} onChange={e => setForm({ ...form, destinationScan: e.target.value })} /></div>
             </div>}
-            {selection.mode !== "empty" && <div className="space-y-2"><Label htmlFor="rack-quantity">{selection.mode === "capacity" ? "Maximum Capacity (PCS)" : "Quantity (PCS)"} *</Label><Input id="rack-quantity" type="number" min={1} step={1} required value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} /></div>}
+            {selection.mode !== "empty" && <div className="space-y-2"><Label htmlFor="rack-quantity">{selection.mode === "capacity" ? `Maximum Capacity (${content.capacity_uom || "PCS"})` : `Quantity (${content.capacity_uom || "PCS"})`} *</Label><Input id="rack-quantity" type="number" min={1} step={1} required value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} /></div>}
             {selection.mode !== "capacity" && <div className="space-y-2"><Label htmlFor="rack-reason">Reason *</Label><Input id="rack-reason" minLength={3} maxLength={1000} required value={form.reason} onChange={e => setForm({ ...form, reason: e.target.value })} /></div>}
             {selection.mode === "empty" && <div className="space-y-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"><p>This records an authorized inventory removal adjustment for every available batch in the rack. Inventory records and audit history are retained. Reserved stock must be released first. To relocate stock instead, use Transfer.</p><label className="flex items-start gap-2"><input className="mt-1" type="checkbox" required checked={form.confirmed} onChange={e => setForm({ ...form, confirmed: e.target.checked })} />I confirm the physical stock removal and authorize this adjustment.</label></div>}
             <div className="flex justify-end gap-2 border-t pt-4"><Button type="button" variant="outline" disabled={saving} onClick={() => manage("details")}>Cancel</Button><Button type="submit" disabled={saving}>{saving ? "Saving..." : selection.mode === "empty" ? "Confirm Audited Adjustment" : "Confirm"}</Button></div>

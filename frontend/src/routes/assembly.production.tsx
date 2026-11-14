@@ -18,7 +18,6 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
-  User,
   X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -453,8 +452,7 @@ function AssemblyProductionPage() {
                     <th className="py-3 px-3">Target Qty</th>
                     <th className="py-3 px-3 min-w-[140px]">Progress<InformationTooltip help="production" /></th>
                     <th className="py-3 px-3">Status</th>
-                    <th className="py-3 px-3">Line & Operator</th>
-                    <th className="py-3 px-3 text-right">Production Actions</th>
+                    <th className="py-3 px-3 text-center">Production Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
@@ -552,22 +550,9 @@ function AssemblyProductionPage() {
                           {getStatusBadge(order.status)}
                         </td>
 
-                        {/* Line & Operator */}
-                        <td className="py-3.5 px-3 whitespace-nowrap">
-                          <div className="flex flex-col text-[11px]">
-                            <span className="font-semibold text-foreground">
-                              {order.assigned_line || "LINE-01"}
-                            </span>
-                            <span className="text-muted-foreground flex items-center gap-1 mt-0.5">
-                              <User className="size-3 text-muted-foreground/60" />
-                              {order.assigned_operator || "Unassigned"}
-                            </span>
-                          </div>
-                        </td>
-
                         {/* Production Actions */}
-                        <td className="py-3.5 px-3 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-2">
+                        <td className="py-3.5 px-3 text-center whitespace-nowrap align-middle">
+                          <div className="flex items-center justify-center gap-2">
                             {order.can_complete && order.traceability_required && (
                               <Button size="sm" variant="outline" onClick={() => void handleOpenConsumption(order)}
                                 className="h-7 px-3 text-xs font-semibold gap-1.5 rounded-lg">

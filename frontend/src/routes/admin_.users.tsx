@@ -55,13 +55,11 @@ type ManagedUser = {
 
 type RoleOption = { value: string; label: string };
 const DEFAULT_ROLES: RoleOption[] = [
-  { value: "SUPER_ADMIN", label: "Super Administrator" },
   { value: "ADMIN", label: "System Administrator" },
   { value: "WAREHOUSE_MANAGER", label: "Warehouse Manager" },
   { value: "GATE_SECURITY", label: "Gate Security" },
   { value: "GRN", label: "GRN / Receiving" },
   { value: "ASSEMBLY_MANAGER", label: "Assembly Manager" },
-  { value: "QUALITY", label: "Quality Inspector" },
   { value: "SUPPLIER", label: "Supplier" },
 ];
 type AssemblyUnit = { id: string; code: string; name: string; description?: string | null; status: string };

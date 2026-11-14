@@ -118,6 +118,7 @@ class BinTransferRequest(BaseModel):
 
 
 class MaterialIssueCreateRequest(BaseModel):
+    """Legacy internal payload retained for non-routed migration code."""
     requisition_number: str
     assembly_order_number: str
     issued_to: str = "Assembly Line 02"
@@ -125,6 +126,7 @@ class MaterialIssueCreateRequest(BaseModel):
 
 
 class MaterialHandoverConfirmRequest(BaseModel):
+    """Legacy internal payload retained for non-routed migration code."""
     receiver_name: str = "Assembly Receiver"
     assembly_line: str = "Assembly Line 02"
     scanned_qr: Optional[str] = None
@@ -2193,7 +2195,6 @@ async def get_inventory_movement_history(
 # PART J â€” MATERIAL ISSUE & ASSEMBLY HANDOVER (Sections 35, 36, 37, 38)
 # ============================================================
 
-@inventory_router.post("/material-issues")
 async def create_material_issue(
     req: MaterialIssueCreateRequest,
     user: CurrentUser = Depends(get_current_user),
@@ -2352,7 +2353,6 @@ async def create_material_issue(
     }
 
 
-@inventory_router.post("/material-issues/{issue_number}/handover-confirm")
 async def confirm_assembly_handover(
     issue_number: str,
     req: MaterialHandoverConfirmRequest,
@@ -2398,7 +2398,6 @@ async def confirm_assembly_handover(
     }
 
 
-@inventory_router.get("/material-issues")
 async def get_material_issues(
     search: Optional[str] = None,
     user: CurrentUser = Depends(get_current_user),
@@ -3323,8 +3322,14 @@ async def get_role_notifications(
     """Return persisted notifications for one of the signed-in user's roles."""
     allowed_roles = {str(user_role).strip().upper() for user_role in user.roles if user_role}
     requested_role = role.strip().upper() if role else None
-    if requested_role and requested_role in allowed_roles:
-        allowed_roles = {requested_role}
+    if allowed_roles.intersection({"WAREHOUSE", "WAREHOUSE_MANAGER", "WAREHOUSE_OPERATOR"}):
+        allowed_roles.update({"WAREHOUSE", "WAREHOUSE_MANAGER", "WAREHOUSE_OPERATOR"})
+    if requested_role:
+        requested_family = {requested_role}
+        if requested_role in {"WAREHOUSE", "WAREHOUSE_MANAGER", "WAREHOUSE_OPERATOR"}:
+            requested_family.update({"WAREHOUSE", "WAREHOUSE_MANAGER", "WAREHOUSE_OPERATOR"})
+        if requested_family.intersection(allowed_roles):
+            allowed_roles = requested_family.intersection(allowed_roles)
     if not allowed_roles:
         return []
 

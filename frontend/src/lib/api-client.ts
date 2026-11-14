@@ -1640,7 +1640,25 @@ export const api = {
   },
 
   async updateAsn(id: string, data: any): Promise<any> {
-    return { id, ...data };
+    return request<any>(`${BUSINESS_API_URL}/api/gate/asns/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  },
+
+  async reviseAsn(id: string, reason: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/gate/asns/${encodeURIComponent(id)}/revise`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    });
+  },
+
+  async dispatchAsn(id: string): Promise<any> {
+    return request<any>(`${BUSINESS_API_URL}/api/gate/asns/${encodeURIComponent(id)}/dispatch`, {
+      method: "POST",
+    });
   },
 
   async getNextAsnNumber(): Promise<{ asnNumber: string }> {
@@ -1869,7 +1887,7 @@ export const api = {
     if (filters?.warehouse_code) query.set("warehouse_code", filters.warehouse_code);
     if (filters?.warehouse_ref_id) query.set("warehouse_ref_id", filters.warehouse_ref_id);
     const response = await request<any>(
-      `${BUSINESS_API_URL}/api/storage/inventory/notifications?${query.toString()}`,
+      `${BUSINESS_API_URL}/api/v1/notifications?${query.toString()}`,
     );
     return Array.isArray(response) ? response : [];
   },
@@ -2590,6 +2608,7 @@ export const api = {
       qr_identifier?: string;
       storage_type?: string;
       capacity?: number;
+      capacity_uom?: string;
       maximum_weight?: number;
       maximum_volume?: number;
       allowed_material_category?: string;
@@ -2976,17 +2995,6 @@ export const api = {
   async approveMaterialRequest(id: string): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/v1/assembly-requisitions/${encodeURIComponent(id)}/approve`, {
       method: "POST",
-    });
-  },
-  async createMaterialIssue(data: {
-    requisition_number?: string;
-    assembly_order_number?: string;
-    issued_to?: string;
-  }): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/material-issues`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
     });
   },
   // ============================
@@ -3722,48 +3730,6 @@ export const api = {
     );
   },
 
-  async getMaterialIssues(status?: string): Promise<any[]> {
-    const qStr = status && status !== "ALL" ? `?status=${encodeURIComponent(status)}` : "";
-    return request<any[]>(`${BUSINESS_API_URL}/api/storage/inventory/material-issues${qStr}`);
-  },
-  async createMaterialIssue(payload: {
-    request_number?: string;
-    requisition_number?: string;
-    assembly_order_number?: string;
-    issued_to?: string;
-    issued_to_line?: string;
-    issued_by_name?: string;
-    notes?: string;
-    items?: Array<{
-      material_code: string;
-      batch_number: string;
-      location_code: string;
-      picked_quantity: number;
-    }>;
-  }): Promise<any> {
-    return request<any>(`${BUSINESS_API_URL}/api/storage/inventory/material-issues`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-  },
-  async confirmMaterialHandover(
-    issueNumber: string,
-    payload: {
-      assembly_receiver_name: string;
-      scanned_material_qr?: string;
-      remarks?: string;
-    },
-  ): Promise<any> {
-    return request<any>(
-      `${BUSINESS_API_URL}/api/storage/inventory/material-issues/${encodeURIComponent(issueNumber)}/handover-confirm`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      },
-    );
-  },
   async getMaterialReturns(status?: string): Promise<any[]> {
     const qStr = status && status !== "ALL" ? `?status=${encodeURIComponent(status)}` : "";
     return request<any[]>(`${BUSINESS_API_URL}/api/storage/inventory/material-returns${qStr}`);

@@ -242,7 +242,7 @@ class AssemblyFinishedGoodsModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     assembly_order_id: Mapped[uuid.UUID] = mapped_column(
-        GUID, ForeignKey("assembly_order.id", ondelete="RESTRICT"), nullable=False, unique=True, index=True
+        GUID, ForeignKey("assembly_order.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     product_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     product_name: Mapped[str] = mapped_column(String(255), nullable=False)

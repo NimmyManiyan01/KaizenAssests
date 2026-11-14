@@ -207,6 +207,11 @@ interface AsnRecord {
   status: string;
   created_at: string;
   lines: any[];
+  revision_number?: number;
+  revision_reason?: string | null;
+  finalized_at?: string | null;
+  superseded_at?: string | null;
+  dispatched_at?: string | null;
 }
 
 interface TransportEntry {
@@ -276,6 +281,11 @@ function NewAsnPage() {
   const [materialLoadError, setMaterialLoadError] = useState("");
   const [selectedAsn, setSelectedAsn] = useState<AsnRecord | null>(null);
   const [asnPendingDelete, setAsnPendingDelete] = useState<AsnRecord | null>(null);
+  const [editingAsnReference, setEditingAsnReference] = useState<string | null>(null);
+  const [revisionTarget, setRevisionTarget] = useState<AsnRecord | null>(null);
+  const [revisionReason, setRevisionReason] = useState("");
+  const [dispatchTarget, setDispatchTarget] = useState<AsnRecord | null>(null);
+  const [lifecycleSaving, setLifecycleSaving] = useState(false);
 
   const currentUser = getUserInfo();
   const supplierId = currentUser?.supplierId;
@@ -436,6 +446,11 @@ function NewAsnPage() {
           status: a.status || "",
           created_at: a.created_at || a.submitted_at || "",
           lines: Array.isArray(a.lines) ? a.lines : [],
+          revision_number: a.revision_number || 0,
+          revision_reason: a.revision_reason || null,
+          finalized_at: a.finalized_at || null,
+          superseded_at: a.superseded_at || null,
+          dispatched_at: a.dispatched_at || null,
         };
       });
       asnListRef.current = mapped;
@@ -452,6 +467,7 @@ function NewAsnPage() {
   const handleOpenCreateModal = useCallback(async () => {
     // Open immediately so a failed optional ASN preview cannot make the button appear inert.
     setIsAssignmentOpen(true);
+    setEditingAsnReference(null);
     requestIdRef.current = createAsnRequestId();
     setAsnNumber(getAsnPreviewFromRecords(asnListRef.current));
     setAsnFormErrors({});
@@ -773,7 +789,9 @@ function NewAsnPage() {
         status: "SUBMITTED",
       };
 
-      const createdAsn = await api.createAsn(payload);
+      const createdAsn = editingAsnReference
+        ? await api.updateAsn(editingAsnReference, payload)
+        : await api.createAsn(payload);
       const createdAsnNumber = createdAsn?.asn_number || asnNumber;
       const createdSupplierName =
         createdAsn?.supplier_name || supplierUsername || supplierName.trim() || "Supplier";
@@ -794,19 +812,31 @@ function NewAsnPage() {
         status: createdAsn?.status || "SUBMITTED",
         created_at: createdAsn?.created_at || new Date().toISOString(),
         lines: Array.isArray(createdAsn?.lines) ? createdAsn.lines : payload.lines,
+        revision_number: createdAsn?.revision_number || 0,
+        revision_reason: createdAsn?.revision_reason || null,
+        finalized_at: createdAsn?.finalized_at || null,
+        superseded_at: createdAsn?.superseded_at || null,
+        dispatched_at: createdAsn?.dispatched_at || null,
       };
 
-      setAsnList((prev) => [newRecord, ...prev]);
+      setAsnList((prev) =>
+        editingAsnReference
+          ? prev.map((record) => record.asn_number === editingAsnReference ? newRecord : record)
+          : [newRecord, ...prev],
+      );
       setAsnSubmitted(true);
       setIsModalOpen(false);
       setIsAssignmentOpen(false);
 
       setAsnNumber(createdAsnNumber);
-      toast.success(`ASN ${createdAsnNumber} submitted successfully`);
+      toast.success(editingAsnReference
+        ? `ASN ${createdAsnNumber} updated successfully`
+        : `ASN ${createdAsnNumber} submitted successfully`);
+      setEditingAsnReference(null);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not create ASN.";
+      const message = error instanceof Error ? error.message : `Could not ${editingAsnReference ? "update" : "create"} ASN.`;
       setSubmissionError(message);
-      toast.error("ASN creation failed", { description: message });
+      toast.error(editingAsnReference ? "ASN update failed" : "ASN creation failed", { description: message });
     } finally {
       submitInFlightRef.current = false;
       setSubmitting(false);
@@ -817,6 +847,11 @@ function NewAsnPage() {
     if (!selectedAsn) return;
     try {
       await api.downloadAsnPdf(selectedAsn.asn_number);
+      const finalizedAt = selectedAsn.finalized_at || new Date().toISOString();
+      setAsnList((rows) => rows.map((row) => row.asn_number === selectedAsn.asn_number
+        ? { ...row, finalized_at: finalizedAt, status: row.status === "SUBMITTED" ? "FINALIZED" : row.status }
+        : row));
+      setSelectedAsn((current) => current ? { ...current, finalized_at: finalizedAt, status: current.status === "SUBMITTED" ? "FINALIZED" : current.status } : current);
       toast.success("ASN PDF downloaded");
     } catch (error: any) {
       toast.error(error?.message || "Unable to download ASN");
@@ -844,9 +879,48 @@ function NewAsnPage() {
   };
 
   const canModifyAsn = (asn: AsnRecord) => {
-    if (String(asn.status).toUpperCase() === "CANCELLED") return false;
-    const createdAt = new Date(asn.created_at).getTime();
-    return Number.isFinite(createdAt) && Date.now() - createdAt <= 60 * 60 * 1000;
+    const status = String(asn.status).toUpperCase();
+    return !asn.finalized_at && !asn.superseded_at && !asn.dispatched_at && !["CANCELLED", "SUPERSEDED", "DISPATCHED"].includes(status);
+  };
+
+  const reviseAsnRecord = (asn: AsnRecord) => {
+    setRevisionReason("");
+    setRevisionTarget(asn);
+  };
+
+  const confirmRevision = async () => {
+    if (!revisionTarget || revisionReason.trim().length < 3) return;
+    setLifecycleSaving(true);
+    try {
+      const revision = await api.reviseAsn(revisionTarget.asn_number, revisionReason.trim());
+      const original = revisionTarget;
+      setRevisionTarget(null);
+      setRevisionReason("");
+      await loadAsnData();
+      toast.success(`${revision.asn_number} created. Update it, then download the revised hard copy.`);
+      editAsnRecord({ ...revision, id: String(revision.id), supplier_name: revision.supplier_name || original.supplier_name, destination_warehouse: revision.destination_warehouse || original.destination_warehouse, created_at: revision.created_at || new Date().toISOString(), lines: revision.lines || [] });
+    } catch (error: any) {
+      toast.error(error?.message || "Unable to revise ASN");
+    } finally {
+      setLifecycleSaving(false);
+    }
+  };
+
+  const dispatchAsnRecord = (asn: AsnRecord) => setDispatchTarget(asn);
+
+  const confirmDispatch = async () => {
+    if (!dispatchTarget) return;
+    setLifecycleSaving(true);
+    try {
+      const updated = await api.dispatchAsn(dispatchTarget.asn_number);
+      setAsnList((rows) => rows.map((row) => row.asn_number === dispatchTarget.asn_number ? { ...row, ...updated } : row));
+      toast.success(`${dispatchTarget.asn_number} marked as dispatched and locked`);
+      setDispatchTarget(null);
+    } catch (error: any) {
+      toast.error(error?.message || "Unable to confirm dispatch");
+    } finally {
+      setLifecycleSaving(false);
+    }
   };
 
   const deleteAsnRecord = (asn: AsnRecord) => {
@@ -869,12 +943,16 @@ function NewAsnPage() {
 
   const editAsnRecord = (asn: AsnRecord) => {
     if (!canModifyAsn(asn)) {
-      toast.error("Edit window expired", {
-        description: "ASN edits are allowed only within 1 hour of submission.",
+      toast.error("ASN is locked", {
+        description: asn.finalized_at
+          ? "This version was downloaded. Use Revise ASN to make a correction."
+          : "This ASN can no longer be edited.",
       });
       return;
     }
     setSelectedAsn(null);
+    setEditingAsnReference(asn.asn_number);
+    requestIdRef.current = "";
     setAsnNumber(asn.asn_number);
     setSupplierName(asn.supplier_name || supplierUsername || "");
     setExpectedArrivalDate(
@@ -1175,7 +1253,7 @@ function NewAsnPage() {
                             ) || "â€”"}
                           </td>
                           <td className="whitespace-nowrap px-4 py-3">
-                            <StatusTooltip status="SUBMITTED" />
+                            <StatusTooltip status={asn.status || "SUBMITTED"} />
                           </td>
                           <td className="px-4 py-3 text-right tabular-nums text-foreground">
                             {asn.lines?.length || 0} items /{" "}
@@ -1206,6 +1284,18 @@ function NewAsnPage() {
                                   onSelect={() => editAsnRecord(asn)}
                                 >
                                   <Pencil /> Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  disabled={!asn.finalized_at || Boolean(asn.superseded_at) || Boolean(asn.dispatched_at)}
+                                  onSelect={() => reviseAsnRecord(asn)}
+                                >
+                                  <FileText /> Revise ASN
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  disabled={!asn.finalized_at || Boolean(asn.superseded_at) || Boolean(asn.dispatched_at)}
+                                  onSelect={() => dispatchAsnRecord(asn)}
+                                >
+                                  <Truck /> Confirm dispatch
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
@@ -1344,6 +1434,75 @@ function NewAsnPage() {
                   onClick={() => void confirmDeleteAsn()}
                 >
                   Delete ASN
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+          <Dialog
+            open={Boolean(revisionTarget)}
+            onOpenChange={(open) => {
+              if (!open && !lifecycleSaving) {
+                setRevisionTarget(null);
+                setRevisionReason("");
+              }
+            }}
+          >
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Revise {revisionTarget?.asn_number}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  A new revision will be created and the current downloaded version will be marked as superseded.
+                  The driver must carry the newly downloaded hard copy.
+                </p>
+                <label className="block space-y-2 text-sm font-medium">
+                  Revision reason <span className="text-destructive">*</span>
+                  <textarea
+                    autoFocus
+                    value={revisionReason}
+                    onChange={(event) => setRevisionReason(event.target.value.slice(0, 500))}
+                    rows={4}
+                    minLength={3}
+                    maxLength={500}
+                    placeholder="Describe what needs to be corrected"
+                    className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  />
+                  <span className="block text-right text-xs text-muted-foreground">{revisionReason.length}/500</span>
+                </label>
+                <div className="flex justify-end gap-2">
+                  <Button type="button" variant="outline" disabled={lifecycleSaving} onClick={() => setRevisionTarget(null)}>
+                    Cancel
+                  </Button>
+                  <Button type="button" disabled={lifecycleSaving || revisionReason.trim().length < 3} onClick={() => void confirmRevision()}>
+                    {lifecycleSaving && <Loader2 className="mr-2 size-4 animate-spin" />}
+                    Create revision
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+          <AlertDialog
+            open={Boolean(dispatchTarget)}
+            onOpenChange={(open) => !open && !lifecycleSaving && setDispatchTarget(null)}
+          >
+            <AlertDialogContent className="sm:max-w-lg">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Confirm vehicle dispatch</AlertDialogTitle>
+                <AlertDialogDescription className="space-y-2">
+                  <span className="block">
+                    Confirm that <strong className="text-foreground">{dispatchTarget?.asn_number}</strong> has left the supplier facility.
+                  </span>
+                  <span className="block">
+                    The driver must have the latest downloaded hard copy. This locks the ASN and prevents further revisions.
+                  </span>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={lifecycleSaving}>Cancel</AlertDialogCancel>
+                <AlertDialogAction disabled={lifecycleSaving} onClick={(event) => { event.preventDefault(); void confirmDispatch(); }}>
+                  {lifecycleSaving && <Loader2 className="mr-2 size-4 animate-spin" />}
+                  Confirm dispatch
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -1834,7 +1993,7 @@ function NewAsnPage() {
                         key={
                           line.material_id ? `${line.material_id}-${idx}` : `material-row-${idx}`
                         }
-                        className="grid min-w-0 grid-cols-1 gap-3 rounded-lg border border-border bg-muted/10 p-3 sm:grid-cols-[minmax(0,1.8fr)_minmax(0,1.4fr)_minmax(140px,1.2fr)_4.75rem_2.5rem] sm:items-end"
+                        className="grid min-w-0 grid-cols-1 gap-3 rounded-lg border border-border bg-muted/10 p-3 sm:grid-cols-[minmax(0,1.8fr)_minmax(0,1.4fr)_minmax(140px,1.2fr)_4.75rem_2.5rem] sm:items-start"
                       >
                         <div className="min-w-0 space-y-1.5">
                           <Label htmlFor={`material-${idx}`}>Material *</Label>
@@ -2059,7 +2218,7 @@ function NewAsnPage() {
                             className="h-11 w-full min-w-0 rounded-[10px] border border-[#DFE7F0] bg-muted/40 text-center font-medium text-muted-foreground text-sm shadow-none"
                           />
                         </div>
-                        <div className="flex h-11 items-center justify-center">
+                        <div className="flex h-11 items-center justify-center sm:mt-5">
                           <Button
                             type="button"
                             variant="ghost"
@@ -2130,7 +2289,7 @@ function NewAsnPage() {
                       ) : (
                         <CheckCircle2 className="mr-2 size-4" />
                       )}
-                      Submit ASN
+                      {editingAsnReference ? "Update ASN" : "Submit ASN"}
                     </Button>
                   </div>
                 </div>

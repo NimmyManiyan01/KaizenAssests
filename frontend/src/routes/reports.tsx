@@ -14,15 +14,6 @@ import {
   Search,
   ShieldCheck,
 } from "lucide-react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { AppShell, StatusBadge } from "@/components/wms/app-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -71,7 +62,7 @@ type Summary = {
   note: string;
 };
 type Row = Record<string, unknown> & { id: string; lifecycle: Bucket };
-const BUCKETS: Bucket[] = ["PENDING", "IN_PROGRESS", "DONE", "ATTENTION", "CANCELLED", "OTHER"];
+const DASHBOARD_BUCKETS: Bucket[] = ["PENDING", "IN_PROGRESS", "DONE"];
 const COLORS: Record<Bucket, string> = {
   PENDING: "#8A5100",
   IN_PROGRESS: "#16479C",
@@ -103,13 +94,70 @@ function display(value: unknown, key = ""): string {
   return String(value);
 }
 const moduleDescriptions: Record<string, string> = {
-  supplier: "Review your shipment notices, damage claims, returns, replacements, and finished-goods requests.",
-  gate: "Review inbound gate arrivals and finished-goods pickup entry and exit records.",
-  grn: "Review goods receipt notes, received quantities, and quarantine dispositions.",
-  warehouse: "Review putaway batches, stock by location, requisitions, and material movements.",
-  assembly: "Review production orders, quality inspections, finished goods, rework, and scrap.",
-  dispatch: "Review dispatch orders, picking, packing, loading, and delivery progress.",
+  supplier: "Shipment notices and finished-goods pickup requests for your supplier operation.",
+  gate: "Inbound arrivals, active vehicles, and completed gate movements.",
+  grn: "Review goods receipt notes and received quantities.",
+  warehouse: "Storage stock, putaway, material picking, and issue transactions.",
+  assembly: "Review production orders, quality inspections, and finished goods.",
+  dispatch: "Dispatch orders and outbound delivery progress.",
 };
+
+const moduleReportKeys: Record<string, string[]> = {
+  gate: ["gate_entries", "gate_pickups"],
+  supplier: ["asns", "fg_requests"],
+  grn: ["receipts"],
+  warehouse: ["stock", "putaways", "picks", "pickup_batches", "issues"],
+  assembly: ["orders", "inspections", "finished_goods"],
+  dispatch: ["dispatches"],
+};
+
+type KpiDefinition = { title: string; value: number; help: string; tone: string };
+
+function moduleKpis(moduleKey: string, summary: Summary): KpiDefinition[] {
+  const report = (key: string) => summary.reports.find((item) => item.key === key);
+  const total = (key: string) => report(key)?.total || 0;
+  const count = (key: string, bucket: Bucket) => report(key)?.counts[bucket] || 0;
+  const active = (key: string) => count(key, "PENDING") + count(key, "IN_PROGRESS");
+  const kpis: Record<string, KpiDefinition[]> = {
+    gate: [
+      { title: "Inbound vehicles", value: total("gate_entries"), help: "Gate arrivals in the selected period", tone: "text-blue-700" },
+      { title: "Vehicles inside", value: active("gate_entries") + active("gate_pickups"), help: "Currently pending or moving through gate", tone: "text-amber-700" },
+      { title: "FG pickup vehicles", value: total("gate_pickups"), help: "Finished-good collection visits", tone: "text-violet-700" },
+      { title: "Gate movements closed", value: count("gate_entries", "DONE") + count("gate_pickups", "DONE"), help: "Completed entry and exit movements", tone: "text-emerald-700" },
+    ],
+    supplier: [
+      { title: "Shipment notices", value: total("asns"), help: "Advance shipment notices submitted", tone: "text-blue-700" },
+      { title: "Open shipments", value: active("asns"), help: "Shipments awaiting receipt completion", tone: "text-amber-700" },
+      { title: "FG pickup requests", value: total("fg_requests"), help: "Finished-good requests raised", tone: "text-violet-700" },
+      { title: "Completed supplier flows", value: count("asns", "DONE") + count("fg_requests", "DONE"), help: "Completed receipts and pickups", tone: "text-emerald-700" },
+    ],
+    grn: [
+      { title: "Goods receipts", value: total("receipts"), help: "GRNs in the selected period", tone: "text-blue-700" },
+      { title: "Awaiting posting", value: count("receipts", "PENDING"), help: "Receipts not yet posted", tone: "text-amber-700" },
+      { title: "Receiving in progress", value: count("receipts", "IN_PROGRESS"), help: "Active receiving records", tone: "text-violet-700" },
+      { title: "Posted receipts", value: count("receipts", "DONE"), help: "Completed goods receipts", tone: "text-emerald-700" },
+    ],
+    warehouse: [
+      { title: "Stock batches", value: total("stock"), help: "Material batches currently on hand", tone: "text-blue-700" },
+      { title: "Open putaways", value: active("putaways"), help: "Batches waiting for storage", tone: "text-amber-700" },
+      { title: "Open picks", value: active("picks") + active("pickup_batches"), help: "Material picking work in queue", tone: "text-violet-700" },
+      { title: "Material issues", value: total("issues"), help: "Completed issue transactions", tone: "text-emerald-700" },
+    ],
+    assembly: [
+      { title: "Production orders", value: total("orders"), help: "Assembly orders in scope", tone: "text-blue-700" },
+      { title: "Orders in production", value: count("orders", "IN_PROGRESS"), help: "Currently active production orders", tone: "text-amber-700" },
+      { title: "QC completed", value: count("inspections", "DONE"), help: "Quality-certified production orders", tone: "text-violet-700" },
+      { title: "Finished-good units", value: total("finished_goods"), help: "Serialized finished-good records", tone: "text-emerald-700" },
+    ],
+    dispatch: [
+      { title: "Dispatch orders", value: total("dispatches"), help: "Outbound orders in scope", tone: "text-blue-700" },
+      { title: "Awaiting dispatch", value: count("dispatches", "PENDING"), help: "Orders waiting to start", tone: "text-amber-700" },
+      { title: "In transit", value: count("dispatches", "IN_PROGRESS"), help: "Active outbound movements", tone: "text-violet-700" },
+      { title: "Completed deliveries", value: count("dispatches", "DONE"), help: "Closed outbound orders", tone: "text-emerald-700" },
+    ],
+  };
+  return kpis[moduleKey] || [];
+}
 function detailGroups(record: Record<string, unknown>) {
   const groups: { title: string; fields: [string, unknown][] }[] = [
     { title: "Record overview", fields: [] }, { title: "Shipment & assignment", fields: [] },
@@ -123,7 +171,7 @@ function detailGroups(record: Record<string, unknown>) {
       : /quantity|uom|quality|result/.test(key) ? 2
       : /_at$|_date$|expected_arrival/.test(key) ? 3
       : /vehicle|driver|dock|location|warehouse|transporter|destination|assigned/.test(key) ? 1 : 4;
-    groups[index].fields.push(entry);
+    groups[index]?.fields.push(entry);
   }
   return groups.filter((group) => group.fields.length);
 }
@@ -132,9 +180,9 @@ function Breakdown({ counts, total }: { counts: Record<Bucket, number>; total: n
     <div
       className="flex h-2.5 overflow-hidden rounded-full bg-slate-100"
       role="img"
-      aria-label={BUCKETS.map((b) => label(b) + ": " + counts[b]).join(", ")}
+      aria-label={DASHBOARD_BUCKETS.map((b) => label(b) + ": " + counts[b]).join(", ")}
     >
-      {BUCKETS.map(
+      {DASHBOARD_BUCKETS.map(
         (b) =>
           counts[b] > 0 && (
             <span
@@ -184,7 +232,9 @@ function ReportsPage() {
   const detailRequest = useRef(0);
   const invalidDates = !!start && !!end && start > end;
   const reports = useMemo(
-    () => (catalog?.reports || []).filter((r) => !module || r.module === module),
+    () => (catalog?.reports || []).filter((r) =>
+      r.module === module && (moduleReportKeys[module] || []).includes(r.key),
+    ),
     [catalog, module],
   );
   const definition = reports.find((r) => r.key === report);
@@ -205,9 +255,13 @@ function ReportsPage() {
           setCatalog(data);
           const roles = getUserInfo()?.roles || [];
           const preferred = roles.includes("SUPPLIER") ? "supplier" : roles.includes("ASSEMBLY_MANAGER") ? "assembly" : roles.includes("DISPATCH_MANAGER") ? "dispatch" : roles.includes("GRN") ? "grn" : roles.includes("GATE_SECURITY") ? "gate" : roles.some((role) => role.startsWith("WAREHOUSE")) ? "warehouse" : "";
-          const initialModule = data.modules.some((item) => item.key === preferred) ? preferred : "";
+          const initialModule = data.modules.some((item) => item.key === preferred)
+            ? preferred
+            : data.modules[0]?.key || "";
           setModule(initialModule);
-          setReport((current) => current || data.reports.find((item) => !initialModule || item.module === initialModule)?.key || "");
+          setReport((current) => current || data.reports.find((item) =>
+            item.module === initialModule && (moduleReportKeys[initialModule] || []).includes(item.key)
+          )?.key || "");
         }
       })
       .catch((e: Error) => {
@@ -285,8 +339,19 @@ function ReportsPage() {
   };
   const chooseModule = (key: string) => {
     setModule(key);
-    chooseReport(catalog?.reports.find((r) => !key || r.module === key)?.key || "");
+    chooseReport(catalog?.reports.find((r) =>
+      r.module === key && (moduleReportKeys[key] || []).includes(r.key)
+    )?.key || "");
   };
+  const dashboardKpis = summary && module ? moduleKpis(module, summary) : [];
+  const dashboardReports = summary?.reports.filter((item) =>
+    item.module === module && (moduleReportKeys[module] || []).includes(item.key),
+  ) || [];
+  const dashboardCounts = DASHBOARD_BUCKETS.reduce((counts, key) => {
+    counts[key] = dashboardReports.reduce((sum, item) => sum + (item.counts[key] || 0), 0);
+    return counts;
+  }, { PENDING: 0, IN_PROGRESS: 0, DONE: 0, ATTENTION: 0, CANCELLED: 0, OTHER: 0 } as Record<Bucket, number>);
+  const dashboardLifecycleTotal = DASHBOARD_BUCKETS.reduce((sum, key) => sum + dashboardCounts[key], 0);
   const openDetail = async (row: Row) => {
     const version = ++detailRequest.current;
     setDetailOpen(true);
@@ -348,7 +413,6 @@ function ReportsPage() {
               "completed_quantity",
               "passed_quantity",
               "available_quantity",
-              "damaged_quantity",
               "uom",
             ].includes(k),
           ),
@@ -453,7 +517,6 @@ function ReportsPage() {
               }
               onClick={() => {
                 setSection("journey");
-                chooseModule("");
               }}
             >
               ASN journey
@@ -473,7 +536,6 @@ function ReportsPage() {
               value={module}
               onChange={(e) => chooseModule(e.target.value)}
             >
-              <option value="">All authorized modules</option>
               {catalog?.modules.map((m) => (
                 <option key={m.key} value={m.key}>
                   {m.label}
@@ -509,13 +571,12 @@ function ReportsPage() {
               }}
             />
           </label>
-          {(start || end || module) && (
+          {(start || end) && (
             <Button
               variant="ghost"
               onClick={() => {
                 setStart("");
                 setEnd("");
-                chooseModule("");
               }}
             >
               Reset
@@ -547,108 +608,54 @@ function ReportsPage() {
             !invalidDates && (
               <>
                 <section className="reports-kpis grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Activity summary">
-                  {[
-                    {
-                      title: "Activity records",
-                      value: summary.total,
-                      icon: Activity,
-                      help: "Source records across selected workflows",
-                      color: "text-slate-800",
-                    },
-                    {
-                      title: "Pending",
-                      value: summary.counts.PENDING,
-                      icon: Clock3,
-                      help: "Waiting to start or for approval",
-                      color: "text-amber-700",
-                    },
-                    {
-                      title: "In progress",
-                      value: summary.counts.IN_PROGRESS,
-                      icon: RefreshCw,
-                      help: "Assigned or active in the workflow",
-                      color: "text-blue-700",
-                    },
-                    {
-                      title: "Done",
-                      value: summary.counts.DONE,
-                      icon: CheckCircle2,
-                      help: "Complete at the workflow boundary",
-                      color: "text-emerald-700",
-                    },
-                  ].map((k) => (
-                    <div key={k.title} className="rounded-2xl border bg-white p-5 shadow-sm">
-                      <div className="flex items-center justify-between text-sm text-muted-foreground">
-                        {k.title}
-                        <k.icon className={"size-5 " + k.color} />
+                  {dashboardKpis.map((k, index) => {
+                    const KpiIcon = [Activity, Clock3, RefreshCw, CheckCircle2][index] || Activity;
+                    return (
+                      <div key={k.title} className="rounded-2xl border bg-white p-5 shadow-sm">
+                        <div className="flex items-center justify-between text-sm text-muted-foreground">
+                          {k.title}
+                          <KpiIcon className={"size-5 " + k.tone} />
+                        </div>
+                        <p className={"mt-3 text-3xl font-semibold tabular-nums " + k.tone}>
+                          {number(k.value)}
+                        </p>
+                        <p className="mt-2 text-xs text-muted-foreground">{k.help}</p>
                       </div>
-                      <p className={"mt-3 text-3xl font-semibold tabular-nums " + k.color}>
-                        {number(k.value)}
-                      </p>
-                      <p className="mt-2 text-xs text-muted-foreground">{k.help}</p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </section>
                 <section className="reports-chart-grid grid gap-5 lg:grid-cols-[1.4fr_1fr]" aria-label="Activity charts">
                   <div className="rounded-2xl border bg-white p-5 shadow-sm">
-                    <h3 className="font-semibold">Activity over time</h3>
+                    <h3 className="font-semibold">Module workload</h3>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Record counts by each workflow's reporting date.
+                      Record volume for the workflows that matter to this module.
                     </p>
-                    {summary.trend.length ? (
-                      <div
-                        className="reports-trend-chart mt-5 h-64"
-                        role="img"
-                        aria-label="Activity record counts by date"
-                      >
-                        <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart data={summary.trend} margin={{ top: 12, right: 16, bottom: 8, left: 0 }}>
-                            <defs>
-                              <linearGradient id="reportArea" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="#16479C" stopOpacity={0.25} />
-                                <stop offset="100%" stopColor="#16479C" stopOpacity={0} />
-                              </linearGradient>
-                            </defs>
-                            <CartesianGrid
-                              strokeDasharray="3 3"
-                              vertical={false}
-                              stroke="#e2e8f0"
-                            />
-                            <XAxis
-                              dataKey="date"
-                              tick={{ fontSize: 11 }}
-                              tickMargin={10}
-                              tickFormatter={(v) => new Date(String(v) + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
-                            />
-                            <YAxis allowDecimals={false} tick={{ fontSize: 11 }} width={38} />
-                            <Tooltip />
-                            <Area
-                              type="monotone"
-                              dataKey="count"
-                              name="Activity records"
-                              stroke="#16479C"
-                              strokeWidth={3}
-                              dot={{ r: 4, fill: "#16479C", stroke: "#FFFFFF", strokeWidth: 2 }}
-                              activeDot={{ r: 6 }}
-                              fill="url(#reportArea)"
-                            />
-                          </AreaChart>
-                        </ResponsiveContainer>
-                      </div>
-                    ) : (
-                      <p className="py-20 text-center text-sm text-muted-foreground">
-                        No activity in the selected period.
-                      </p>
-                    )}
+                    <div className="mt-5 space-y-5">
+                      {dashboardReports.map((item) => {
+                        const maximum = Math.max(...dashboardReports.map((entry) => entry.total), 1);
+                        return (
+                          <div key={item.key}>
+                            <div className="mb-2 flex items-center justify-between gap-4 text-sm">
+                              <span className="font-medium text-slate-700">{item.label}</span>
+                              <span className="font-semibold tabular-nums text-slate-900">{number(item.total)}</span>
+                            </div>
+                            <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
+                              <div className="h-full rounded-full bg-blue-700" style={{ width: `${Math.max((item.total / maximum) * 100, item.total ? 5 : 0)}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {!dashboardReports.length && <p className="py-16 text-center text-sm text-muted-foreground">No module activity in the selected period.</p>}
+                    </div>
                   </div>
                   <div className="rounded-2xl border bg-white p-5 shadow-sm">
                     <h3 className="font-semibold">Lifecycle distribution</h3>
                     <p className="mb-5 mt-1 text-xs text-muted-foreground">
                       Exact module statuses are shown in the record table.
                     </p>
-                    <Breakdown counts={summary.counts} total={summary.total} />
+                    <Breakdown counts={dashboardCounts} total={dashboardLifecycleTotal} />
                     <div className="reports-lifecycle-list mt-5">
-                      {BUCKETS.map((b) => (
+                      {DASHBOARD_BUCKETS.map((b) => (
                         <div key={b} className="reports-lifecycle-row text-sm">
                           <span className="flex items-center gap-2">
                             <span
@@ -658,10 +665,10 @@ function ReportsPage() {
                             {label(b)}
                           </span>
                           <span className="reports-lifecycle-values font-medium tabular-nums">
-                            <span>{number(summary.counts[b])}</span>
+                            <span>{number(dashboardCounts[b])}</span>
                             <span className="ml-3 text-xs text-muted-foreground">
-                              {summary.total
-                                ? Math.round((summary.counts[b] / summary.total) * 100)
+                              {dashboardLifecycleTotal
+                                ? Math.round((dashboardCounts[b] / dashboardLifecycleTotal) * 100)
                                 : 0}
                               %
                             </span>
@@ -679,7 +686,7 @@ function ReportsPage() {
                     </span>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                    {summary.reports.map((r) => (
+                    {dashboardReports.map((r) => (
                       <button
                         key={r.key}
                         type="button"
@@ -705,7 +712,6 @@ function ReportsPage() {
                         <p className="mt-2 text-[11px] text-muted-foreground">
                           {r.counts.PENDING} pending / {r.counts.IN_PROGRESS} in progress /{" "}
                           {r.counts.DONE} done
-                          {r.counts.ATTENTION ? " / " + r.counts.ATTENTION + " attention" : ""}
                         </p>
                         {r.open_over_7_days > 0 && (
                           <p className="mt-2 text-xs font-medium text-amber-700">
@@ -771,7 +777,7 @@ function ReportsPage() {
                   className={controls}
                 >
                   <option value="">All lifecycle groups</option>
-                  {BUCKETS.map((b) => (
+                  {DASHBOARD_BUCKETS.map((b) => (
                     <option key={b} value={b}>
                       {label(b)}
                     </option>

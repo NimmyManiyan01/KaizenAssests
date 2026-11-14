@@ -123,7 +123,7 @@ async def bootstrap_system_data() -> None:
                     full_name=settings.admin_full_name.strip(),
                     email=settings.admin_email.strip().lower(),
                     password_hash=hash_password(settings.admin_password),
-                    role="SUPER_ADMIN",
+                    role="ADMIN",
                     applications=["WMS", "AMS"],
                     page_permissions={},
                     status="ACTIVE",
@@ -131,7 +131,7 @@ async def bootstrap_system_data() -> None:
                 )
                 session.add(admin_account)
                 logger.info(
-                    "Bootstrap: Seeded default administrator '%s' (%s) with role SUPER_ADMIN",
+                    "Bootstrap: Seeded default administrator '%s' (%s) with role ADMIN",
                     admin_account.username,
                     admin_account.employee_id,
                 )

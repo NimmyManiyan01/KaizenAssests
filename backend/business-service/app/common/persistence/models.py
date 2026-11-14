@@ -320,6 +320,12 @@ class AsnModel(Base):
     challan_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     logistics: Mapped[Optional[list[dict]]] = mapped_column(JSON, nullable=True)
+    root_asn_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID, ForeignKey("asn.id", ondelete="RESTRICT"), nullable=True, index=True)
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    revision_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    finalized_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    superseded_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    dispatched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     supplier: Mapped[Optional[SupplierModel]] = relationship("SupplierModel")
     lines: Mapped[List[AsnLineModel]] = relationship(back_populates="asn", cascade="all, delete-orphan")

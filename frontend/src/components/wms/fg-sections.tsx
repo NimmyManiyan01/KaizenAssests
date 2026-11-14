@@ -158,6 +158,17 @@ export function FgSections({
   );
 }
 
+const truckFinishedGoodStatus = (visit: any): string => {
+  const sections = Array.isArray(visit.sections) ? visit.sections : [];
+  const itemName = String(visit.product_name || visit.product_code || "FG unit").trim();
+  const allDispatched = sections.length > 0 && sections.every((section: any) => section.status === "DISPATCHED");
+  const loadedCount = sections.filter((section: any) => ["LOADED", "DISPATCHED"].includes(section.status)).length;
+  if (allDispatched) return `${itemName} dispatched`;
+  if (visit.status === "READY_FOR_GATE_EXIT" || (sections.length > 0 && loadedCount === sections.length)) return `${itemName} loaded`;
+  if (loadedCount > 0) return `${itemName} loading in progress`;
+  return `1 ${itemName} assigned to truck`;
+};
+
 export function FgLoading({ onVerifyFgQr }: { onVerifyFgQr?: (visit: any) => void }) {
   const [visits, setVisits] = useState<any[]>([]);
   const [loadingQrImages, setLoadingQrImages] = useState<Record<string, string>>({});
@@ -254,12 +265,12 @@ export function FgLoading({ onVerifyFgQr }: { onVerifyFgQr?: (visit: any) => voi
                   {v.vehicle_number} · Gate Pass {v.gate_pass_number}
                 </span>
                 <span className="mt-1 block truncate text-xs text-muted-foreground">
-                  FG {v.main_fg_id || v.fg_id} · {v.status} · {v.dispatched_sections}/{v.total_sections ?? (v.sections ? v.sections.length : (v.dispatched_sections || 0))} dispatched
+                  FG {v.main_fg_id || v.fg_id} · {v.status} · {truckFinishedGoodStatus(v)}
                 </span>
               </span>
               <span className="flex shrink-0 items-center gap-3">
                 <span className="hidden rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 sm:inline-flex">
-                  {v.dispatch_status}
+                  {truckFinishedGoodStatus(v)}
                 </span>
                 <ChevronDown
                   className={`size-5 text-muted-foreground transition-transform ${
@@ -273,7 +284,7 @@ export function FgLoading({ onVerifyFgQr }: { onVerifyFgQr?: (visit: any) => voi
             <div id={`fg-loading-${v.gate_pass_number}`} className="space-y-6 border-t border-border/60 p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                {v.dispatch_status} ({v.dispatched_sections}/{v.total_sections ?? (v.sections ? v.sections.length : (v.dispatched_sections || 0))} dispatched)
+                {truckFinishedGoodStatus(v)}
               </p>
               {onVerifyFgQr && (
                 <Button

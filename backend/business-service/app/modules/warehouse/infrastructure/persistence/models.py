@@ -197,7 +197,7 @@ class UserAccountModel(Base):
 
 
 class WarehouseRackModel(Base):
-    """One shared PCS capacity for every legacy bin belonging to a zone/rack."""
+    """One shared UOM-specific capacity for every bin belonging to a zone/rack."""
     __tablename__ = "warehouse_rack"
     __table_args__ = (
         UniqueConstraint("zone_id", "rack_code", name="uq_warehouse_rack_zone_code"),
@@ -208,6 +208,7 @@ class WarehouseRackModel(Base):
     zone_id: Mapped[uuid.UUID] = mapped_column(GUID, ForeignKey("warehouse_zone.id", ondelete="RESTRICT"), nullable=False)
     rack_code: Mapped[str] = mapped_column(String(64), nullable=False)
     maximum_capacity: Mapped[int] = mapped_column(Integer, nullable=False)
+    capacity_uom: Mapped[str] = mapped_column(String(32), nullable=False, default="PCS", server_default="PCS")
     occupied_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0, server_default="0")
 
 

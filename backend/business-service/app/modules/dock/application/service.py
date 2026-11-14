@@ -317,12 +317,17 @@ class DockAllocationService:
             )
 
         from app.modules.warehouse.infrastructure.persistence.models import WarehouseModel
-        # Warehouse assignment is optional. If the dock is already tied to a
-        # warehouse, use that relationship; otherwise allocate the dock
-        # without requiring a warehouse or warehouse operator from the UI.
-        assigned_warehouse = await session.scalar(select(WarehouseModel).where(WarehouseModel.status == "ACTIVE"))
-        if assigned_warehouse_ref_id and (not assigned_warehouse or assigned_warehouse_ref_id != assigned_warehouse.id):
-            raise HTTPException(status_code=422, detail="The allocation must use the configured warehouse")
+        # Warehouse assignment is optional. Resolve only an explicit request
+        # or the dock's configured relationship; never attach an unrelated
+        # active warehouse merely because it is the only configured row.
+        target_warehouse_id = assigned_warehouse_ref_id or dock.warehouse_ref_id
+        assigned_warehouse = (
+            await session.get(WarehouseModel, target_warehouse_id)
+            if target_warehouse_id
+            else None
+        )
+        if target_warehouse_id and not assigned_warehouse:
+            raise HTTPException(status_code=422, detail="The selected warehouse does not exist")
         if assigned_warehouse and (assigned_warehouse.status or "").upper() != "ACTIVE":
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Selected warehouse is not active or available")
         if dock.warehouse_ref_id and assigned_warehouse and dock.warehouse_ref_id != assigned_warehouse.id:
@@ -600,32 +605,12 @@ class DockAllocationService:
             )
         )
 
-        # Notification to Warehouse Module
-        session.add(
-            NotificationModel(
-                user_role="WAREHOUSE",
-                title="DOCK ALLOCATED",
-                message=notif_msg,
-                link=f"/dock-management?requestId={req.id}",
-            )
-        )
-
         session.add(
             NotificationModel(
                 user_role="GATE_SECURITY",
                 title="Dock available for vehicle",
                 message=f"Dock {dock.dock_code} is allocated to vehicle {req.vehicle_number} (Gate Pass {req.existing_gate_pass_id}). Send the vehicle to the assigned dock.",
                 link="/vehicle-queue",
-            )
-        )
-
-        # Mandatory Notification to Quality Inspector
-        session.add(
-            NotificationModel(
-                user_role="QUALITY_INSPECTOR",
-                title="DOCK ALLOCATED",
-                message=notif_msg,
-                link=f"/dock-management?requestId={req.id}",
             )
         )
 
@@ -664,7 +649,20 @@ class DockAllocationService:
         notif_msg = "DOCK ALLOCATION CONFIRMED\n" + "\n".join(details) + f"\nProceed to Dock {dock.dock_code}."
 
         try:
-            for role in ["WAREHOUSE", "WAREHOUSE_OPERATOR", "QUALITY_INSPECTOR"]:
+            target_roles = ["WAREHOUSE", "WAREHOUSE_OPERATOR", "QUALITY_INSPECTOR"]
+            idempotency_keys = {
+                role: f"DOCK_ALLOCATION_CONFIRMED:{req.id}:{dock.id}:{role}"
+                for role in target_roles
+            }
+            existing_keys = set((await session.execute(
+                select(NotificationModel.idempotency_key).where(
+                    NotificationModel.idempotency_key.in_(list(idempotency_keys.values()))
+                )
+            )).scalars().all())
+            for role in target_roles:
+                idempotency_key = idempotency_keys[role]
+                if idempotency_key in existing_keys:
+                    continue
                 session.add(
                     NotificationModel(
                         user_role=role,
@@ -683,6 +681,8 @@ class DockAllocationService:
                         driver_phone=driver_phone,
                         asn_number=asn_number,
                         po_number=po_number,
+                        notification_type="DOCK_ALLOCATION_CONFIRMED",
+                        idempotency_key=idempotency_key,
                     )
                 )
         except Exception:

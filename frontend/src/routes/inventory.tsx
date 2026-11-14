@@ -220,7 +220,7 @@ function SimpleWarehouseModule() {
   const [newZoneForm, setNewZoneForm] = useState({ zone_code: "", zone_name: "" });
   const [firstWarehouse, setFirstWarehouse] = useState({ name: "", location: "" });
   const [newBinForm, setNewBinForm] = useState({ zone_id: "" });
-  const [newBinRows, setNewBinRows] = useState<[{ rack: string; position: string; capacity: string; bin_code: string }]>([{ rack: "", position: "", capacity: "", bin_code: "" }]);
+  const [newBinRows, setNewBinRows] = useState<[{ rack: string; position: string; capacity: string; capacity_uom: string; bin_code: string }]>([{ rack: "", position: "", capacity: "", capacity_uom: "PCS", bin_code: "" }]);
   const [viewBinQrModal, setViewBinQrModal] = useState<any>(null);
   const [binQrImage, setBinQrImage] = useState<string | null>(null);
   const [deleteZoneTarget, setDeleteZoneTarget] = useState<any | null>(null);
@@ -481,7 +481,8 @@ function SimpleWarehouseModule() {
           try {
             const detail = await api.getMaterialInventoryDetail(String(code));
             const summary = detail?.summary || {};
-            const firstLocation = Array.isArray(detail?.locations) ? detail.locations[0] : null;
+            const storageLocations = Array.isArray(detail?.locations) ? detail.locations : [];
+            const firstLocation = storageLocations[0] || null;
             const movementBatches = (Array.isArray(detail?.movements) ? detail.movements : [])
               .filter((movement: any) => movement.movement_type === "PUTAWAY" && movement.batch_lot)
               .map((movement: any) => ({
@@ -502,7 +503,9 @@ function SimpleWarehouseModule() {
                 movementBatches.map((b: any) => b.batch_number).join(", ") || row.batch_number,
               location: firstLocation?.bin_code || firstLocation?.location_code || row.location,
               location_code: firstLocation?.location_code || row.location_code,
+              zone_code: firstLocation?.zone_code || row.zone_code,
               bin_code: firstLocation?.bin_code || row.bin_code,
+              storage_locations: storageLocations,
               uom: summary.uom || row.uom,
             };
           } catch {
@@ -511,13 +514,15 @@ function SimpleWarehouseModule() {
         }),
       );
       setInventorySummary(refreshedStockRows);
-      const assemblyPickingTasks = (
+      const baseAssemblyPickingTasks = (
         Array.isArray(assemblyPickingTasksRes) ? assemblyPickingTasksRes : []
       ).flatMap((task: any) =>
         (Array.isArray(task.items) ? task.items : []).map((item: any) => ({
           id: `${task.id}:${item.material_code}`,
           task_number: task.task_number,
           assembly_order_number: task.request_number,
+          assembly_unit_code: task.assembly_unit_code,
+          destination_label: task.destination_label,
           material_code: item.material_code,
           material_name: item.material_name,
           material_qr: item.material_qr,
@@ -533,11 +538,51 @@ function SimpleWarehouseModule() {
             item.batch_number || item.batch_lot_number || task.confirmation?.batch_number,
           uom: item.uom,
           pick_location: item.pick_location || task.pick_location || task.destination,
+          pick_locations: item.pick_locations || task.pick_locations || [],
           confirmation: item.confirmation || task.confirmation,
           status: item.status || task.status,
           assembly_pick_task_id: task.id,
         })),
       );
+      const pickingMaterialCodes = Array.from(new Set(
+        baseAssemblyPickingTasks
+          .map((task: any) => String(task.material_code || "").trim())
+          .filter(Boolean),
+      ));
+      const pickingBalances = new Map<string, any[]>();
+      await Promise.all(pickingMaterialCodes.map(async (materialCode) => {
+        try {
+          const balances = await api.getInventoryLocationBalances(materialCode);
+          pickingBalances.set(
+            materialCode.toUpperCase(),
+            (Array.isArray(balances) ? balances : []).filter(
+              (balance: any) => Number(balance.available_quantity || 0) > 0,
+            ).sort((a: any, b: any) => {
+              const aTime = new Date(a.received_date || a.updated_at || 0).getTime();
+              const bTime = new Date(b.received_date || b.updated_at || 0).getTime();
+              if (aTime !== bTime) return aTime - bTime;
+              return String(a.batch_number || "").localeCompare(String(b.batch_number || ""));
+            }),
+          );
+        } catch {
+          pickingBalances.set(materialCode.toUpperCase(), []);
+        }
+      }));
+      const assemblyPickingTasks = baseAssemblyPickingTasks.map((task: any) => {
+        let quantityToPlan = Math.max(
+          0,
+          Number(task.requested_quantity ?? task.quantity ?? 0) - Number(task.picked_quantity || 0),
+        );
+        const pickPlan = [];
+        for (const balance of pickingBalances.get(String(task.material_code || "").toUpperCase()) || []) {
+          if (quantityToPlan <= 0) break;
+          const quantity = Math.min(quantityToPlan, Number(balance.available_quantity || 0));
+          if (quantity <= 0) continue;
+          pickPlan.push({ ...balance, pick_quantity: quantity, pick_sequence: pickPlan.length + 1 });
+          quantityToPlan -= quantity;
+        }
+        return { ...task, pick_plan: pickPlan };
+      });
       setPickupTasks(assemblyPickingTasks);
       setWarehouses(Array.isArray(warehouseConfigurationRes) ? warehouseConfigurationRes : []);
 
@@ -611,9 +656,34 @@ function SimpleWarehouseModule() {
   const scanAvailableCapacity = Number(
     scanAssignedBin?.rack_capacity?.available_capacity ?? Number.POSITIVE_INFINITY,
   );
+  const scanAssignedQuantity = scanPutawayTask?.location_assignments?.find(
+    (assignment: any) =>
+      assignment.destination_bin_id === scanAssignedBin?.id ||
+      assignment.location_code === scanAssignedBin?.bin_code,
+  )?.quantity;
   const scanMaximumQuantity = scanPutawayTask
-    ? Math.min(Number(scanPutawayTask.quantity || 0), scanAvailableCapacity)
+    ? Math.min(
+        Number(scanPutawayTask.quantity || 0),
+        scanAvailableCapacity,
+        scanAssignedQuantity == null ? Number.POSITIVE_INFINITY : Number(scanAssignedQuantity),
+      )
     : 0;
+  const assignPutawayUom = String(assignPutawayTask?.uom || "PCS").toUpperCase();
+  const eligibleAssignZoneIds = useMemo(
+    () =>
+      new Set(
+        allFlattenedBins
+          .filter(
+            (bin) =>
+              bin.warehouse_ref_id === assignWarehouseRefId &&
+              isAssignableRack(bin.status) &&
+              String(bin.rack_capacity?.capacity_uom || "PCS").toUpperCase() === assignPutawayUom,
+          )
+          .map((bin) => bin.zone_id)
+          .filter(Boolean),
+      ),
+    [allFlattenedBins, assignPutawayUom, assignWarehouseRefId],
+  );
 
   // Action: Assign Storage Location to Putaway Task
   const handleConfirmAssignPutaway = async () => {
@@ -657,11 +727,35 @@ function SimpleWarehouseModule() {
 
   const openAssignPutaway = (task: any) => {
     if (!canAssignPutaway(task)) return;
+    const targetWarehouseId = task.destination_warehouse_ref_id || task.assigned_warehouse_ref_id || warehouses[0]?.id || "";
+    const taskUom = String(task.uom || "PCS").toUpperCase();
+    const compatibleZoneIds = new Set(
+      allFlattenedBins
+        .filter(
+          (bin) =>
+            bin.warehouse_ref_id === targetWarehouseId &&
+            isAssignableRack(bin.status) &&
+            String(bin.rack_capacity?.capacity_uom || "PCS").toUpperCase() === taskUom,
+        )
+        .map((bin) => bin.zone_id),
+    );
+    const destinationZoneId = compatibleZoneIds.has(task.destination_zone_id)
+      ? task.destination_zone_id
+      : "";
+    const destinationBinId = allFlattenedBins.some(
+      (bin) =>
+        bin.id === task.destination_bin_id &&
+        bin.zone_id === destinationZoneId &&
+        isAssignableRack(bin.status) &&
+        String(bin.rack_capacity?.capacity_uom || "PCS").toUpperCase() === taskUom,
+    )
+      ? task.destination_bin_id
+      : "";
     setSelectedPutawayGroup(null);
     setAssignPutawayTask(task);
-    setAssignWarehouseRefId(task.destination_warehouse_ref_id || task.assigned_warehouse_ref_id || warehouses[0]?.id || "");
-    setAssignZoneId(task.destination_zone_id || "");
-    setSelectedLocationId(task.destination_bin_id || "");
+    setAssignWarehouseRefId(targetWarehouseId);
+    setAssignZoneId(destinationZoneId);
+    setSelectedLocationId(destinationBinId);
     setAssignQuantity(String(unassignedPutawayQuantity(task)));
   };
 
@@ -674,10 +768,21 @@ function SimpleWarehouseModule() {
     const availableCapacity = Number(
       assignedBin?.rack_capacity?.available_capacity ?? Number.POSITIVE_INFINITY,
     );
+    const assignedQuantity = task.location_assignments?.find(
+      (assignment: any) =>
+        assignment.destination_bin_id === assignedBin?.id ||
+        assignment.location_code === assignedBin?.bin_code,
+    )?.quantity;
     setPutawayScan({
       materialQr: "",
       binQr: "",
-      quantity: String(Math.min(Number(task.quantity || 0), availableCapacity)),
+      quantity: String(
+        Math.min(
+          Number(task.quantity || 0),
+          availableCapacity,
+          assignedQuantity == null ? Number.POSITIVE_INFINITY : Number(assignedQuantity),
+        ),
+      ),
     });
     setPutawayScanValid(false);
     setMaterialQrVerified(false);
@@ -705,7 +810,12 @@ function SimpleWarehouseModule() {
       .then(async (rows: any[]) => {
         const balance = (Array.isArray(rows) ? rows : [])
           .filter((row: any) => Number(row.available_quantity || 0) > 0)
-          .sort((a: any, b: any) => Number(b.available_quantity || 0) - Number(a.available_quantity || 0))[0];
+          .sort((a: any, b: any) => {
+            const aTime = new Date(a.received_date || a.updated_at || 0).getTime();
+            const bTime = new Date(b.received_date || b.updated_at || 0).getTime();
+            if (aTime !== bTime) return aTime - bTime;
+            return String(a.batch_number || "").localeCompare(String(b.batch_number || ""));
+          })[0];
         if (!balance) return;
         const resolved = await api.resolveBinQr(balance.location_code);
         if (active) setAvailablePickupBin({
@@ -725,16 +835,9 @@ function SimpleWarehouseModule() {
       return false;
     }
     try {
-      if (field === "material") {
-        const expectedCode = String(pickupToConfirm.material_code || "").trim().toUpperCase();
-        const expectedBatch = String(pickupToConfirm.batch_number || "").trim().toUpperCase();
-        const normalizedValue = value.toUpperCase();
-        if (!normalizedValue.includes(expectedCode) && (!expectedBatch || !normalizedValue.includes(expectedBatch))) {
-          throw new Error(`Material QR does not match ${expectedCode}.`);
-        }
-      } else {
-        const rack = await api.resolveBinQr(value);
-        const expectedLocation = String(pickupToConfirm.pick_location || "").trim().toUpperCase();
+      let verifiedBinAvailable: number | null = null;
+      const findVerifiedBinBalance = async (scanValue: string) => {
+        const rack = await api.resolveBinQr(scanValue);
         const actualLocation = String(rack.location_code || "").trim().toUpperCase();
         const actualBin = String(rack.bin_code || "").trim().toUpperCase();
         const balances = await api.getInventoryLocationBalances(pickupToConfirm.material_code);
@@ -742,13 +845,42 @@ function SimpleWarehouseModule() {
           const balanceLocation = String(balance.location_code || "").trim().toUpperCase();
           return balanceLocation === actualLocation || balanceLocation.includes(actualBin);
         });
+        return { rack, actualLocation, actualBin, matchingBalance };
+      };
+      if (field === "material") {
+        const expectedCode = String(pickupToConfirm.material_code || "").trim().toUpperCase();
+        const expectedBatch = String(pickupToConfirm.batch_number || "").trim().toUpperCase();
+        const normalizedValue = value.toUpperCase();
+        if (!normalizedValue.includes(expectedCode) && (!expectedBatch || !normalizedValue.includes(expectedBatch))) {
+          throw new Error(`Material QR does not match ${expectedCode}.`);
+        }
+        if (pickupQrVerified.rack && pickupConfirmation.zone_scan.trim()) {
+          const verified = await findVerifiedBinBalance(pickupConfirmation.zone_scan.trim());
+          verifiedBinAvailable = Number(verified.matchingBalance?.available_quantity || 0);
+        }
+      } else {
+        const { actualLocation, actualBin, matchingBalance } = await findVerifiedBinBalance(value);
+        const expectedLocation = String(pickupToConfirm.pick_location || "").trim().toUpperCase();
         if (!matchingBalance || Number(matchingBalance.available_quantity || 0) <= 0)
           throw new Error(`BIN QR does not contain available ${pickupToConfirm.material_code}.`);
+        verifiedBinAvailable = Number(matchingBalance.available_quantity || 0);
         if (expectedLocation && actualLocation !== expectedLocation && !expectedLocation.includes(actualBin)) {
           toast.info(`Verified alternate BIN with ${matchingBalance.available_quantity} ${matchingBalance.uom || ""} available.`);
         }
       }
       setPickupQrVerified((current) => ({ ...current, [field]: true }));
+      const bothVerified = field === "material" ? pickupQrVerified.rack : pickupQrVerified.material;
+      if (bothVerified && verifiedBinAvailable != null && verifiedBinAvailable > 0) {
+        const remainingRequested = Math.max(
+          0,
+          Number(pickupToConfirm.requested_quantity ?? pickupToConfirm.quantity ?? 0) -
+            Number(pickupToConfirm.picked_quantity || 0),
+        );
+        setPickupConfirmation((current) => ({
+          ...current,
+          quantity: String(Math.min(remainingRequested, verifiedBinAvailable!)),
+        }));
+      }
       setPickupQrError("");
       toast.success(`${field === "material" ? "Material" : "BIN"} QR verified.`);
       return true;
@@ -1177,7 +1309,7 @@ function SimpleWarehouseModule() {
     try {
       const nextCode = await api.getNextBinCode(zone.id);
       setNewBinForm({ zone_id: zone.id });
-      setNewBinRows([{ rack: nextCode.suggested_rack_code, position: "", capacity: "", bin_code: nextCode.suggested_bin_code }]);
+      setNewBinRows([{ rack: nextCode.suggested_rack_code, position: "", capacity: "", capacity_uom: "PCS", bin_code: nextCode.suggested_bin_code }]);
     } catch (err: any) {
       toast.error(err.message || "Unable to prepare the next bin code.");
       return;
@@ -1226,7 +1358,7 @@ function SimpleWarehouseModule() {
           !Number.isSafeInteger(Number(row.capacity)) || Number(row.capacity) <= 0 ||
           !row.bin_code.trim()
         ) {
-          toast.error("Enter a positive whole Maximum Capacity (PCS). Reopen the form if codes are missing.");
+          toast.error("Enter a positive whole maximum capacity and select its UOM. Reopen the form if codes are missing.");
           return;
         }
         if (
@@ -1264,6 +1396,7 @@ function SimpleWarehouseModule() {
           bin_name: normalizedBinCode,
           rack: normalizedRack,
           capacity: Number(row.capacity),
+          capacity_uom: row.capacity_uom,
           qr_identifier: `QR-${normalizedBinCode}`,
         });
         toast.success(`Rack ${normalizedRack} created with capacity ${row.capacity} PCS.`);
@@ -1313,12 +1446,43 @@ function SimpleWarehouseModule() {
       : (summaryQuantity ?? "—");
   };
 
-  const getInventoryDisplayLocation = (item: any) =>
-    item.location_code ||
-    item.bin_code ||
-    item.location ||
-    item.batch_details?.[0]?.location ||
-    "—";
+  const compactInventoryLocation = (value?: string, zoneCode?: string, binCode?: string) => {
+    const zone = String(zoneCode || "").trim();
+    const bin = String(binCode || "").trim();
+    if (zone && bin) {
+      const compactBin = bin.toUpperCase().startsWith(`${zone.toUpperCase()}-`)
+        ? bin.slice(zone.length + 1)
+        : bin;
+      return `${zone} → ${compactBin}`;
+    }
+
+    const raw = String(value || "").trim();
+    if (!raw) return "—";
+    const parsedZone = raw.match(/(?:^|[-_/])(ZONE-[A-Z0-9]+)/i)?.[1];
+    const parsedBin = raw.match(/(?:^|[-_/])(BIN-[A-Z0-9]+)/i)?.[1];
+    if (parsedZone && parsedBin) return `${parsedZone.toUpperCase()} → ${parsedBin.toUpperCase()}`;
+    if (zone || bin) return [zone, bin].filter(Boolean).join(" → ");
+    return raw;
+  };
+
+  const getInventoryDisplayLocations = (item: any) => {
+    const locations = Array.isArray(item.storage_locations) ? item.storage_locations : [];
+    const labels = locations.map((location: any) =>
+      compactInventoryLocation(
+        location.location_code || location.location,
+        location.zone_code || location.zone_name,
+        location.bin_code,
+      ),
+    );
+    if (!labels.length) {
+      labels.push(compactInventoryLocation(
+        item.location_code || item.location || item.batch_details?.[0]?.location,
+        item.zone_code,
+        item.bin_code,
+      ));
+    }
+    return [...new Set(labels.filter((label) => label && label !== "—"))];
+  };
 
   // Dashboard Aggregates (Real backend numbers)
   const pendingRequestsCount = materialRequests.filter(
@@ -1610,18 +1774,6 @@ function SimpleWarehouseModule() {
                 <Boxes className="h-4 w-4" />
                 Inventory
               </TabsTrigger>
-              <TabsTrigger value="requests" className="gap-2 px-4 py-2 text-xs font-semibold">
-                <ClipboardList className="h-4 w-4" />
-                Material Requests
-                {pendingRequestsCount > 0 && (
-                  <Badge
-                    variant="secondary"
-                    className="ml-1 bg-blue-500/15 text-blue-700 dark:text-blue-400 font-bold px-1.5 py-0.2"
-                  >
-                    {pendingRequestsCount}
-                  </Badge>
-                )}
-              </TabsTrigger>
               <TabsTrigger value="picking" className="gap-2 px-4 py-2 text-xs font-semibold">
                 <ListOrdered className="h-4 w-4" />
                 Picking
@@ -1790,7 +1942,7 @@ function SimpleWarehouseModule() {
                 <div className="space-y-2">
                   {[
                     { label: "Putaway tasks", count: pendingPutawayCount, tab: "putaway" as TabType, tone: "border-amber-200 bg-amber-50 text-amber-900" },
-                    { label: "Material requests", count: pendingRequestsCount, tab: "requests" as TabType, tone: "border-blue-200 bg-blue-50 text-blue-900" },
+                    { label: "Requisitions to review", count: pendingRequestsCount, tab: "picking" as TabType, tone: "border-blue-200 bg-blue-50 text-blue-900" },
                     { label: "Picking tasks", count: pendingPickingCount, tab: "picking" as TabType, tone: "border-violet-200 bg-violet-50 text-violet-900" },
                   ].map((item) => (
                     <button key={item.tab} type="button" onClick={() => handleTabChange(item.tab)} className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left text-sm font-semibold transition hover:brightness-[0.98] ${item.tone}`}>
@@ -2046,9 +2198,13 @@ function SimpleWarehouseModule() {
                             {getInventoryDisplayQuantity(item)} {item.uom || ""}
                           </td>
                           <td className="py-3 px-3">
-                            <Badge variant="outline" className="text-[10px] font-mono">
-                              {getInventoryDisplayLocation(item)}
-                            </Badge>
+                            <div className="flex flex-wrap gap-1.5">
+                              {getInventoryDisplayLocations(item).map((location) => (
+                                <Badge key={location} variant="outline" className="text-[10px] font-mono">
+                                  {location}
+                                </Badge>
+                              ))}
+                            </div>
                           </td>
                           <td className="sticky right-0 overflow-hidden bg-card py-3 px-3 text-center">
                             <Button
@@ -2063,6 +2219,9 @@ function SimpleWarehouseModule() {
                                     const firstLocation = Array.isArray(detail?.locations)
                                       ? detail.locations[0]
                                       : null;
+                                    const storageLocations = Array.isArray(detail?.locations)
+                                      ? detail.locations
+                                      : [];
                                     const putawayMovements = (
                                       Array.isArray(detail?.movements) ? detail.movements : []
                                     ).filter(
@@ -2086,8 +2245,10 @@ function SimpleWarehouseModule() {
                                       total_quantity: detail?.summary?.total_stock,
                                       on_hand_quantity: detail?.summary?.total_stock,
                                       location_code: firstLocation?.location_code,
+                                      zone_code: firstLocation?.zone_code,
                                       bin_code:
                                         firstLocation?.bin_code || putawayMovements[0]?.to_location,
+                                      storage_locations: storageLocations,
                                       location:
                                         firstLocation?.bin_code ||
                                         firstLocation?.location_code ||
@@ -2117,6 +2278,7 @@ function SimpleWarehouseModule() {
                                             bin_code:
                                               firstLocation?.bin_code ||
                                               putawayMovements[0]?.to_location,
+                                            storage_locations: storageLocations,
                                             location:
                                               firstLocation?.location_code ||
                                               putawayMovements[0]?.to_location,
@@ -2350,23 +2512,6 @@ function SimpleWarehouseModule() {
                 <AssemblyRequisitionsPanel
                   refreshKey={requisitionRefreshKey}
                   showRefresh={false}
-                  pickupTasks={pickupTasks}
-                  onConfirmPick={(task) => {
-                    setPickupFifoAlert("");
-                    setPickupQrVerified({ material: false, rack: false });
-                    setPickupQrError("");
-                    setPickupConfirmation({
-                      material_scan: "",
-                      zone_scan: "",
-                      quantity: String(
-                        Math.max(
-                          0,
-                          Number(task.requested_quantity || 0) - Number(task.picked_quantity || 0),
-                        ),
-                      ),
-                    });
-                    setPickupToConfirm(task);
-                  }}
                   onUpdated={() => fetchData(true)}
                 />
                 <Card className="warehouse-picking-queue overflow-x-auto border-violet-200 bg-gradient-to-br from-violet-50/80 via-white to-indigo-50/50 p-5 shadow-sm dark:border-violet-900/60 dark:bg-violet-950/20">
@@ -2375,8 +2520,9 @@ function SimpleWarehouseModule() {
                   </h3>
                   <table className="w-full min-w-[1040px] table-fixed text-left text-sm">
                     <colgroup>
-                      <col className="w-[15%]" />
-                      <col className="w-[15%]" />
+                      <col className="w-[13%]" />
+                      <col className="w-[13%]" />
+                      <col className="w-[13%]" />
                       <col className="w-[14%]" />
                       <col className="w-[24%]" />
                       <col className="w-[10%]" />
@@ -2387,6 +2533,7 @@ function SimpleWarehouseModule() {
                       <tr className="border-b border-violet-200 bg-violet-100/70 text-violet-950 uppercase dark:border-violet-900 dark:bg-violet-950/50 dark:text-violet-100">
                         <th className="py-2.5 px-3">Task No</th>
                         <th className="py-2.5 px-3">Assembly Order</th>
+                        <th className="py-2.5 px-3">Destination Unit</th>
                         <th className="py-2.5 px-3">Material</th>
                         <th className="py-2.5 px-3">Pick Location</th>
                         <th className="py-2.5 px-3">Quantity</th>
@@ -2404,7 +2551,7 @@ function SimpleWarehouseModule() {
                           ),
                       ).length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="text-center py-6 text-slate-500">
+                          <td colSpan={8} className="text-center py-6 text-slate-500">
                             No pick tasks in queue. Approve a Material Request to generate pick tasks.
                           </td>
                         </tr>
@@ -2446,16 +2593,38 @@ function SimpleWarehouseModule() {
                               <td className="py-3 px-3 text-slate-600">
                                 {p.assembly_order_number || p.assembly_order || "-"}
                               </td>
+                              <td className="py-3 px-3">
+                                <Badge variant="outline" className="bg-indigo-50 font-mono text-[10px] text-indigo-800">
+                                  {p.destination_label || (p.assembly_unit_code ? `Assembly Unit ${p.assembly_unit_code}` : "—")}
+                                </Badge>
+                              </td>
                               <td className="py-3 px-3 font-medium">
                                 {p.material_name || p.material_code}
                               </td>
                               <td className="py-3 px-3">
-                                <Badge
-                                  variant="outline"
-                                  className="bg-slate-50 font-mono text-[10px]"
-                                >
-                                  {p.pick_location || "—"}
-                                </Badge>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {Array.isArray(p.pick_plan) && p.pick_plan.length > 1 && (
+                                    <Badge className="bg-amber-100 text-[10px] font-semibold text-amber-800 hover:bg-amber-100">
+                                      Split across {p.pick_plan.length} locations
+                                    </Badge>
+                                  )}
+                                  {Array.isArray(p.pick_plan) && p.pick_plan.length > 0 ? (
+                                    p.pick_plan.map((location: any) => (
+                                      <Badge key={location.id || location.storage_location_id} variant="outline" className="bg-slate-50 font-mono text-[10px]">
+                                        {location.pick_sequence === 1 ? "1. FIFO first: " : `${location.pick_sequence}. Remaining: `}
+                                        {compactInventoryLocation(
+                                          location.location_code,
+                                          location.zone_code || location.zone_name,
+                                          location.bin || location.bin_code,
+                                        )} · {location.pick_quantity} {location.uom || p.uom || ""}
+                                      </Badge>
+                                    ))
+                                  ) : (
+                                    <Badge variant="outline" className="bg-slate-50 font-mono text-[10px]">
+                                      {compactInventoryLocation(p.pick_location)}
+                                    </Badge>
+                                  )}
+                                </div>
                               </td>
                               <td className="py-3 px-3 font-bold">
                                 {p.quantity ?? "—"} {p.uom || ""}
@@ -2871,7 +3040,13 @@ function SimpleWarehouseModule() {
                     {availablePickupBin && (
                       <div className="rounded-lg border border-blue-200 bg-blue-50 p-2.5 text-xs text-blue-900">
                         <p className="font-semibold">Remaining stock location</p>
-                        <p className="mt-1">{availablePickupBin.location_code} · {availablePickupBin.available_quantity} {availablePickupBin.uom || ""} available</p>
+                        <p className="mt-1">
+                          {compactInventoryLocation(
+                            availablePickupBin.location_code,
+                            availablePickupBin.zone_code || availablePickupBin.zone_name,
+                            availablePickupBin.bin_code,
+                          )} · {availablePickupBin.available_quantity} {availablePickupBin.uom || ""} available
+                        </p>
                         <div className="mt-2 grid grid-cols-2 gap-2">
                           <Button type="button" size="sm" variant="outline" onClick={() => {
                             const value = String(availablePickupBin.qr_value || availablePickupBin.location_code || "");
@@ -2924,7 +3099,9 @@ function SimpleWarehouseModule() {
                       </p>
                     )}
                     <p className="text-xs text-muted-foreground">
-                      Source rack: {pickupToConfirm.pick_location || "Not assigned"}
+                      Source rack: {pickupToConfirm.pick_location
+                        ? compactInventoryLocation(pickupToConfirm.pick_location)
+                        : "Not assigned"}
                     </p>
                     {pickupToConfirm.batch_number && (
                       <p className="text-xs text-muted-foreground">
@@ -3008,13 +3185,19 @@ function SimpleWarehouseModule() {
                       .filter(
                         (z) =>
                           z.warehouse_ref_id === assignWarehouseRefId &&
-                          (!z.status || String(z.status).toUpperCase() === "ACTIVE"),
+                          (!z.status || String(z.status).toUpperCase() === "ACTIVE") &&
+                          eligibleAssignZoneIds.has(z.id),
                       )
                       .map((z) => (
                         <SelectItem key={z.id} value={z.id}>
                           {z.zone_code || z.zone_name}
                         </SelectItem>
                       ))}
+                    {eligibleAssignZoneIds.size === 0 && (
+                      <div className="px-2 py-3 text-sm text-muted-foreground">
+                        No active zones have racks configured for {assignPutawayUom}.
+                      </div>
+                    )}
                   </SelectContent>
                 </Select>
                 </div>
@@ -3034,11 +3217,12 @@ function SimpleWarehouseModule() {
                         (loc) =>
                           loc.warehouse_ref_id === assignWarehouseRefId &&
                           loc.zone_id === assignZoneId &&
-                          isAssignableRack(loc.status),
+                          isAssignableRack(loc.status) &&
+                          String(loc.rack_capacity?.capacity_uom || "PCS").toUpperCase() === String(assignPutawayTask.uom || "PCS").toUpperCase(),
                       )
                       .map((loc) => (
                         <SelectItem key={loc.id} value={loc.id} disabled={typeof loc.rack_capacity?.available_capacity === "number" && loc.rack_capacity.available_capacity <= 0}>
-                          {loc.rack || loc.bin_code} ({loc.bin_code}){typeof loc.rack_capacity?.available_capacity === "number" ? ` / ${loc.rack_capacity.available_capacity} PCS available` : ""}
+                          {loc.rack || loc.bin_code} ({loc.bin_code}){typeof loc.rack_capacity?.available_capacity === "number" ? ` / ${loc.rack_capacity.available_capacity} ${loc.rack_capacity?.capacity_uom || "PCS"} available` : ""}
                         </SelectItem>
                       ))}
                   </SelectContent>
@@ -3375,9 +3559,13 @@ function SimpleWarehouseModule() {
                   Storage Location
                 </div>
                 <div className="break-words font-semibold">
-                  {selectedInventory.warehouse || selectedInventory.warehouse_id || "-"} →{" "}
-                  {selectedInventory.zone_code || selectedInventory.zone_name || "-"} →{" "}
-                  {selectedInventory.bin_code || selectedInventory.location || "-"}
+                  <div className="flex flex-wrap gap-1.5">
+                    {getInventoryDisplayLocations(selectedInventory).map((location) => (
+                      <Badge key={location} variant="outline" className="font-mono text-[10px]">
+                        {location}
+                      </Badge>
+                    ))}
+                  </div>
                 </div>
               </div>
               <div className="space-y-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
@@ -3410,7 +3598,13 @@ function SimpleWarehouseModule() {
                           <div className="space-y-0.5">
                             <span className="block font-semibold">Batch {batchIndex + 1}</span>
                             <span className="block break-all font-mono">{batch.batch_number || selectedInventory.material_code}</span>
-                            <span className="block break-words text-[10px] text-muted-foreground">Location: {batch.location || batch.location_code || batch.to_location || selectedInventory.bin_code || selectedInventory.location || "-"}</span>
+                            <span className="block break-words text-[10px] text-muted-foreground">
+                              Location: {compactInventoryLocation(
+                                batch.location || batch.location_code || batch.to_location || selectedInventory.location,
+                                batch.zone_code,
+                                batch.bin_code,
+                              )}
+                            </span>
                           </div>
                           {isOldestAvailable ? (
                             <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-1 text-[10px] font-bold text-red-800 dark:bg-red-900/50 dark:text-red-100">
@@ -3712,7 +3906,16 @@ function SimpleWarehouseModule() {
                     <Input id="new-rack-code" className="h-11 w-full" readOnly value={newBinRows[0].rack} />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="new-rack-capacity" className="block text-sm leading-5">Maximum Capacity (PCS) *</Label>
+                    <Label htmlFor="new-rack-capacity-uom" className="block text-sm leading-5">Capacity UOM *</Label>
+                    <Select value={newBinRows[0].capacity_uom} onValueChange={value => setNewBinRows([{ ...newBinRows[0], capacity_uom: value }])}>
+                      <SelectTrigger id="new-rack-capacity-uom" className="h-11 w-full"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {["PCS", "BOX", "BUNDLE", "SET", "KG", "LITER", "METER"].map(uom => <SelectItem key={uom} value={uom}>{uom}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="new-rack-capacity" className="block text-sm leading-5">Maximum Capacity ({newBinRows[0].capacity_uom}) *</Label>
                     <Input id="new-rack-capacity" className="h-11 w-full" type="number" min={1} max={2147483647} step={1} required placeholder="80" value={newBinRows[0].capacity} onChange={e => setNewBinRows([{ ...newBinRows[0], capacity: e.target.value }])} />
                   </div>
                   <div className="space-y-2">

@@ -167,10 +167,8 @@ const warehouseManagerNav = [
   { label: "Dashboard", to: "/inventory?tab=dashboard", icon: LayoutDashboard },
   { label: "Putaway", to: "/inventory?tab=putaway", icon: PackageCheck },
   { label: "Inventory", to: "/inventory?tab=inventory", icon: Boxes },
-  { label: "Material Requests", to: "/inventory?tab=requests", icon: ClipboardList },
   { label: "Picking", to: "/inventory?tab=picking", icon: ListOrdered },
   { label: "Locations", to: "/inventory?tab=locations", icon: Building2 },
-  { label: "Material Issue", to: "/inventory?tab=material-issue", icon: ClipboardList },
 ];
 
 const assemblyNav = [
@@ -1224,24 +1222,28 @@ function parseDockAllocationDetails(n: any) {
     n?.dockCode ||
     msg.match(/Dock Code:\s*([^\n]+)/i)?.[1]?.trim() ||
     msg.match(/Proceed (?:directly )?to Dock\s*([^\n.]+)/i)?.[1]?.trim() ||
-    "D-01";
+    msg.match(/Dock\s+([A-Z0-9_-]+)/i)?.[1]?.trim() ||
+    "N/A";
   const dockName =
     n?.dock_name ||
     n?.dockName ||
-    msg.match(/Dock Name:\s*([^\n]+)/i)?.[1]?.trim() ||
-    `Inbound Dock ${dockCode}`;
+    msg.match(/Dock Name:\s*([^\n]+)/i)?.[1]?.trim();
   const dockLocation =
     n?.dock_location ||
     n?.dockLocation ||
-    msg.match(/Location:\s*([^\n]+)/i)?.[1]?.trim() ||
-    "Receiving Bay - A";
+    msg.match(/Location:\s*([^\n]+)/i)?.[1]?.trim();
   const dockType =
-    n?.dock_type || n?.dockType || msg.match(/Dock Type:\s*([^\n]+)/i)?.[1]?.trim() || "Inbound";
-  const warehouseName =
+    n?.dock_type || n?.dockType || msg.match(/Dock Type:\s*([^\n]+)/i)?.[1]?.trim();
+  const parsedWarehouseName =
     n?.warehouse_name ||
     n?.warehouseName ||
-    msg.match(/Warehouse:\s*([^\n]+)/i)?.[1]?.trim() ||
-    "Main Warehouse";
+    msg.match(/(?:Assigned )?Warehouse:\s*([^\n]+)/i)?.[1]?.trim();
+  // Older allocations could attach the singleton Chemical Store to an
+  // unrelated raw-material dock. Do not present that invalid legacy pairing.
+  const warehouseName =
+    /RAW_MATERIAL/i.test(String(dockType || "")) && /chemical store/i.test(String(parsedWarehouseName || ""))
+      ? null
+      : parsedWarehouseName;
 
   const rawTime =
     n?.allocation_time ||
@@ -1288,7 +1290,7 @@ export function DockAllocationNotificationCard({ notification }: { notification:
     ["Dock name", details.dockName],
     ["Location", details.dockLocation],
     ["Dock type", details.dockType],
-    ["Warehouse", details.warehouseName],
+    ["Assigned warehouse", details.warehouseName],
   ].filter(([, value]) => value && value !== "N/A");
   const openAllocation = () => {
     const link = String(notification.link || "");

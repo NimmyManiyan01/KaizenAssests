@@ -551,21 +551,33 @@ async def enrich_putaway_tasks(tasks: list[PutawayTaskModel], session) -> list[d
         results = []
         assignment_totals: dict[uuid.UUID, Decimal] = {}
         assignment_rows_by_task: dict[uuid.UUID, list[PutawayLocationAssignmentModel]] = {}
+        latest_confirmation_by_task: dict[uuid.UUID, datetime.datetime] = {}
         task_ids = [t.id for t in tasks]
         if task_ids:
-            assignment_rows = await session.execute(
+            confirmation_rows = await session.execute(
                 select(
-                    PutawayLocationAssignmentModel.putaway_task_id,
-                    func.coalesce(func.sum(PutawayLocationAssignmentModel.quantity), 0),
-                ).where(PutawayLocationAssignmentModel.putaway_task_id.in_(task_ids))
-                .group_by(PutawayLocationAssignmentModel.putaway_task_id)
+                    PutawayMovementModel.putaway_task_id,
+                    func.max(PutawayMovementModel.confirmed_at),
+                ).where(PutawayMovementModel.putaway_task_id.in_(task_ids))
+                .group_by(PutawayMovementModel.putaway_task_id)
             )
-            assignment_totals = {row[0]: Decimal(str(row[1] or 0)) for row in assignment_rows.all()}
+            latest_confirmation_by_task = {
+                row[0]: row[1] for row in confirmation_rows.all() if row[1] is not None
+            }
             assignment_detail_rows = await session.execute(
                 select(PutawayLocationAssignmentModel).where(PutawayLocationAssignmentModel.putaway_task_id.in_(task_ids))
             )
             for assignment in assignment_detail_rows.scalars().all():
+                latest_confirmation = latest_confirmation_by_task.get(assignment.putaway_task_id)
+                # Before assignment consumption was implemented, confirmed
+                # rows remained in this table and hid the real task remainder.
+                if latest_confirmation and assignment.assigned_at <= latest_confirmation:
+                    continue
                 assignment_rows_by_task.setdefault(assignment.putaway_task_id, []).append(assignment)
+                assignment_totals[assignment.putaway_task_id] = (
+                    assignment_totals.get(assignment.putaway_task_id, Decimal("0"))
+                    + Decimal(str(assignment.quantity or 0))
+                )
         for t in tasks:
             grn = grns.get(t.grn_id)
             hu = hus.get(t.handling_unit_id) if t.handling_unit_id else None
@@ -1354,6 +1366,11 @@ async def assign_storage_location(
             PutawayMovementModel.putaway_task_id == task.id
         )
     ) or Decimal("0")
+    latest_confirmation_at = await uow.session.scalar(
+        select(func.max(PutawayMovementModel.confirmed_at)).where(
+            PutawayMovementModel.putaway_task_id == task.id
+        )
+    )
     if confirmed_total == Decimal("0"):
         # No physical putaways have occurred yet for this task. Re-assignment replaces previous unconfirmed assignments.
         existing_assignments = (await uow.session.scalars(
@@ -1364,11 +1381,17 @@ async def assign_storage_location(
         await uow.session.flush()
         assigned_total = Decimal("0")
     else:
-        assigned_total = await uow.session.scalar(
-            select(func.coalesce(func.sum(PutawayLocationAssignmentModel.quantity), 0)).where(
+        existing_assignments = (await uow.session.scalars(
+            select(PutawayLocationAssignmentModel).where(
                 PutawayLocationAssignmentModel.putaway_task_id == task.id
-            )
-        )
+            ).with_for_update()
+        )).all()
+        assigned_total = Decimal("0")
+        for assignment in existing_assignments:
+            if latest_confirmation_at and assignment.assigned_at <= latest_confirmation_at:
+                await uow.session.delete(assignment)
+                continue
+            assigned_total += Decimal(str(assignment.quantity or 0))
     remaining_quantity = Decimal(str(task.quantity or 0)) - Decimal(str(assigned_total or 0))
     requested_quantity = Decimal(str(request.quantity if request.quantity is not None else remaining_quantity))
     if requested_quantity <= 0:
@@ -3105,6 +3128,20 @@ async def execute_putaway(
     if (target_bin.status or "").upper() not in ("ACTIVE", "AVAILABLE", "OCCUPIED", "PARTIALLY_OCCUPIED"):
         raise HTTPException(status_code=409, detail=f"Target Bin '{target_bin.bin_code}' is {target_bin.status} and cannot receive material")
     await validate_rack_capacity(uow.session, target_bin, request.quantity, uom)
+    active_assignment = await uow.session.scalar(
+        select(PutawayLocationAssignmentModel).where(
+            PutawayLocationAssignmentModel.putaway_task_id == task.id,
+            PutawayLocationAssignmentModel.destination_bin_id == target_bin.id,
+        ).with_for_update()
+    )
+    if active_assignment and request.quantity > active_assignment.quantity:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Putaway quantity ({request.quantity}) exceeds the quantity assigned to "
+                f"Bin '{target_bin.bin_code}' ({active_assignment.quantity} {task.uom})."
+            ),
+        )
     bin_occ = target_bin.occupied_quantity or Decimal("0")
     if bin_occ + request.quantity > target_bin.capacity:
         raise HTTPException(
@@ -3222,6 +3259,19 @@ async def execute_putaway(
     balance.last_putaway_task_id = task.id
     balance.last_grn_number = grn_number or (task.grn_number if task else "N/A")
     balance.updated_at = completed_at
+
+    # Location assignments represent work still awaiting physical putaway.
+    # Consume the confirmed amount so the unassigned remainder can return to
+    # the assignment queue instead of being subtracted a second time.
+    if active_assignment:
+        assignment_remainder = Decimal(str(active_assignment.quantity or 0)) - request.quantity
+        if assignment_remainder <= 0:
+            await uow.session.delete(active_assignment)
+        else:
+            active_assignment.quantity = assignment_remainder
+            # Mark the remainder as outstanding after this confirmation so it
+            # is not mistaken for a legacy pre-confirmation assignment.
+            active_assignment.assigned_at = datetime.datetime.now(datetime.timezone.utc)
 
     # Step 6: Update PutawayTaskModel
     task.destination_warehouse_ref_id = target_bin.warehouse_ref_id

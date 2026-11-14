@@ -84,9 +84,6 @@ REPORTS = [
  Report("receipts","grn","Goods receipt notes","grn","grn_number","created_at",
         "grn_number asn_number gate_entry_number supplier_name supplier_company_name vehicle_number driver_name warehouse_id dock_number receipt_type receipt_date received_by status posted_by posted_at created_at",
         done=("GRN_POSTED","PUT_AWAY","CONFIRMED")),
- Report("quarantine","grn","Quarantine and disposition","quarantine_record","quarantine_number","created_at",
-        "quarantine_number grn_number asn_number item_code material_name damaged_quantity uom batch_number supplier_name warehouse_id reason status disposition reviewed_by reviewed_at created_at",
-        done=("RELEASED","RETURNED","DISPOSED"), progress=("UNDER_REVIEW",)),
  Report("putaways","warehouse","Putaway batches","putaway_task","task_number","created_at",
         "task_number grn_number item_code material_name batch_number quantity uom warehouse_id destination_bin_code destination_rack assigned_to status started_at completed_at completed_by created_at"),
  Report("stock","warehouse","Stock by batch and location","inventory_location_balance","material_code","updated_at",
@@ -107,18 +104,13 @@ REPORTS = [
         "existing_gate_pass_id vendor_reference vehicle_number material_description quantity status assigned_dock_id assigned_warehouse_code assigned_by assigned_at arrived_at released_at created_at",
         done=("RELEASED",)),
  Report("orders","assembly","Production orders","assembly_order","order_number","created_at",
-        "order_number assembly_unit_code product_code product_name bom_number planned_quantity completed_quantity rejected_quantity uom priority required_date assigned_line assigned_operator status material_received_at started_at completed_at created_at"),
+        "order_number assembly_unit_code product_code product_name bom_number planned_quantity completed_quantity uom priority required_date assigned_line assigned_operator status material_received_at started_at completed_at created_at"),
  Report("inspections","assembly","Quality inspections","assembly_quality_inspection","id","inspected_at",
-        "assembly_order_id produced_quantity passed_quantity failed_quantity rework_quantity held_quantity status inspected_by authorized_person_confirmed notes inspected_at",
+        "assembly_order_id produced_quantity passed_quantity status inspected_by authorized_person_confirmed notes inspected_at",
         done=("QC_APPROVED","PASSED"), progress=("PARTIALLY_APPROVED",)),
  Report("finished_goods","assembly","Finished-goods records","assembly_finished_goods","section_main_id","posted_at",
         "section_main_id assembly_order_id product_code product_name batch_number serial_number quantity uom status location_code posted_at",
         done=("DISPATCHED",), progress=("QC_APPROVED","AVAILABLE")),
- Report("rework","assembly","Rework orders","assembly_rework_order","rework_number","created_at",
-        "rework_number assembly_order_id reason_for_failure failed_quantity assigned_team assigned_worker status final_result started_at completed_at created_at"),
- Report("scrap","assembly","Scrap records","assembly_scrap","material_code","recorded_at",
-        "assembly_order_id material_code quantity uom reason employee_team approval_required status recorded_at approved_by approved_at",
-        done=("APPROVED",)),
  Report("dispatches","dispatch","Dispatch orders","dispatch_order","dispatch_number","created_at",
         "dispatch_number order_number assembly_unit_code customer_name warehouse_id dispatch_type status destination scheduled_date expected_delivery_date priority transporter transport_mode gate_exit_completed_at gate_exit_security_officer created_at updated_at",
         progress=("READY_FOR_DISPATCH","OUT_FOR_DELIVERY")),
@@ -127,7 +119,7 @@ REGISTRY = {r.key: r for r in REPORTS}
 # Child tables are only read after their authorized parent has been selected.
 CHILDREN = {
  "asns": ("asn_line", "asn_id", "item_code material_name shipped_quantity uom"),
- "receipts": ("grn_line", "grn_id", "item_code material_name uom received_quantity accepted_quantity quality_approved_quantity damaged_quantity rejected_quantity held_quantity balance_quantity quality_result"),
+ "receipts": ("grn_line", "grn_id", "item_code material_name uom received_quantity accepted_quantity quality_approved_quantity balance_quantity quality_result"),
  "dispatches": ("dispatch_item", "dispatch_order_id", "material_code material_name uom quantity_ordered quantity_available quantity_picked quantity_packed quantity_loaded quantity_pending batch bin status"),
  "requisitions": ("assembly_requisition_item", "requisition_id", "material_code material_name requested_quantity reserved_quantity uom"),
  "finished_goods": ("finished_goods_section", "finished_goods_id", "section_number sub_id status loaded_at dispatched_at loaded_by dispatched_by"),
@@ -344,12 +336,12 @@ async def quantity_totals(report,supplier,warehouse,assembly_unit,session,start,
     parent = select(t.c.id).where(*filters(report,supplier,warehouse,assembly_unit,start,end,search,status,bucket))
     source = t
     condition = t.c.id.in_(parent)
-    fields = [f for f in ("quantity","available_quantity","requested_quantity","picked_quantity","planned_quantity","completed_quantity","rejected_quantity","damaged_quantity","actual_consumed") if f in t.c]
+    fields = [f for f in ("quantity","available_quantity","requested_quantity","picked_quantity","planned_quantity","completed_quantity","actual_consumed") if f in t.c]
     if report.key in {"asns","receipts","dispatches","requisitions"}:
         child_name,fk,_ = CHILDREN[report.key]
         source=table(child_name)
         condition=source.c[fk].in_(parent)
-        fields=[f for f in ("shipped_quantity","received_quantity","quality_approved_quantity","damaged_quantity","rejected_quantity","held_quantity","requested_quantity","quantity_ordered","quantity_picked","quantity_packed","quantity_loaded","quantity_pending") if f in source.c]
+        fields=[f for f in ("shipped_quantity","received_quantity","quality_approved_quantity","requested_quantity","quantity_ordered","quantity_picked","quantity_packed","quantity_loaded","quantity_pending") if f in source.c]
     if "uom" not in source.c or not fields: return []
     unit=func.coalesce(source.c.uom,"UNSPECIFIED")
     query=select(unit.label("uom"),*[func.coalesce(func.sum(source.c[f]),0).label(f) for f in fields]).where(condition).group_by(unit)

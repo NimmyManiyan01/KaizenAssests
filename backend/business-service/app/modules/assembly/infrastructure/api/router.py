@@ -1636,6 +1636,15 @@ async def list_assembly_picking_tasks(
         )).scalars().all()
         output = []
         for task in tasks:
+            request = await uow.session.get(MaterialRequestModel, task.request_id) if task.request_id else None
+            assembly_unit_code = request.assembly_unit_code if request else None
+            if not assembly_unit_code and task.request_id:
+                assembly_unit_code = await uow.session.scalar(
+                    select(AssemblyOrderModel.assembly_unit_code)
+                    .where(AssemblyOrderModel.material_request_id == task.request_id)
+                    .where(AssemblyOrderModel.assembly_unit_code.is_not(None))
+                    .limit(1)
+                )
             task_items = task.items or []
             first_item = task_items[0] if task_items else {}
             enriched_items = []
@@ -1643,6 +1652,22 @@ async def list_assembly_picking_tasks(
                 requested_quantity = Decimal(str(item.get("requested_quantity") or item.get("quantity") or 0))
                 picked_quantity = Decimal(str(item.get("picked_quantity") or item.get("issued_quantity") or 0))
                 item_completed = requested_quantity > 0 and picked_quantity >= requested_quantity
+                pick_movements = (await uow.session.scalars(
+                    select(InventoryMovementHistoryModel)
+                    .where(InventoryMovementHistoryModel.reference_document == task.task_number)
+                    .where(InventoryMovementHistoryModel.movement_type == "TAKEAWAY")
+                    .where(func.lower(InventoryMovementHistoryModel.material_code) == str(item.get("material_code", "")).lower())
+                    .order_by(InventoryMovementHistoryModel.performed_at, InventoryMovementHistoryModel.id)
+                )).all()
+                picked_by_location = {}
+                for movement in pick_movements:
+                    code = str(movement.from_location or "").strip()
+                    if code:
+                        picked_by_location[code] = picked_by_location.get(code, Decimal("0")) + movement.quantity
+                pick_locations = [
+                    {"location_code": code, "picked_quantity": float(quantity)}
+                    for code, quantity in picked_by_location.items()
+                ]
                 location = await uow.session.scalar(
                     select(StorageLocationModel.location_code)
                     .join(InventoryLocationBalanceModel, InventoryLocationBalanceModel.storage_location_id == StorageLocationModel.id)
@@ -1695,6 +1720,7 @@ async def list_assembly_picking_tasks(
                 enriched_items.append({
                     **item,
                     "pick_location": location or item.get("pick_location"),
+                    "pick_locations": pick_locations,
                     "status": "COMPLETED" if item_completed else ("IN_PROGRESS" if picked_quantity > 0 else "PENDING"),
                     "confirmation": {
                         "confirmed": item_completed,
@@ -1711,8 +1737,12 @@ async def list_assembly_picking_tasks(
             ) if task.request_id else None
             output.append({
                 "id": str(task.id), "task_number": task.task_number, "request_number": task.request_number,
+                "assembly_unit_code": assembly_unit_code,
+                "requested_from": assembly_unit_code,
                 "status": task.status if task.completed_at else ("PENDING" if task.status == "COMPLETED" else task.status),
-                "destination": task.destination, "items": enriched_items,
+                "destination": assembly_unit_code or task.destination,
+                "destination_label": f"Assembly Unit {assembly_unit_code}" if assembly_unit_code else task.destination,
+                "items": enriched_items,
                 "warehouse_id": task.warehouse_id, "assigned_to": task.assigned_to,
                 "confirmation": {"confirmed": bool(task.completed_at or issue_record),
                                  "confirmed_by": (issue_record.issued_by if issue_record else task.completed_by),
@@ -3737,37 +3767,39 @@ async def perform_quality_inspection(
             inspection.updated_at = now
 
         fg_created = None
-        new_fg = False
         # Step 8 & 9: Only QC-passed products become Finished Goods with unique QR
         if payload.passed_quantity > Decimal("0") or previous_passed > Decimal("0"):
-            fg_res = await uow.session.execute(
+            if payload.passed_quantity != payload.passed_quantity.to_integral_value():
+                raise HTTPException(422, "Passed finished-goods quantity must be a whole number for unit serialization.")
+            existing_fgs = (await uow.session.execute(
                 select(AssemblyFinishedGoodsModel).where(
                     AssemblyFinishedGoodsModel.assembly_order_id == order.id
                 ).with_for_update()
-            )
-            fg = fg_res.scalars().first()
+            )).scalars().all()
+            if existing_fgs and payload.passed_quantity != previous_passed:
+                raise HTTPException(409, "Serialized finished goods already exist; QC quantity adjustments require unit-level reversal.")
 
-            # Generate unique QR code payload & serial number
-            unique_token = uuid.uuid4().hex[:8].upper()
-            batch_number = f"FG-BAT-{now.strftime('%Y%m%d')}-{unique_token}"
-            qr_payload_str = (
-                f"FG|CODE:{order.product_code}|NAME:{order.product_name}|ORDER:{order.order_number}|BATCH:{batch_number}|QTY:{payload.passed_quantity:g}|QC:QC_APPROVED|LOC:ASSEMBLY-STORAGE-01"
-            )
-            serial_str = f"SN-{order.product_code or 'FG'}-{order.order_number}-{unique_token}"
-
-            if not fg:
-                new_fg = True
+            created_units = []
+            if not existing_fgs:
+              for unit_number in range(1, int(payload.passed_quantity) + 1):
+                unique_token = uuid.uuid4().hex[:8].upper()
+                batch_number = f"FG-UNIT-{now.strftime('%Y%m%d')}-{unique_token}"
+                serial_str = f"SN-{order.product_code or 'FG'}-{order.order_number}-U{unit_number:04d}-{unique_token}"
+                qr_payload_str = (
+                    f"FG|CODE:{order.product_code}|NAME:{order.product_name}|ORDER:{order.order_number}|"
+                    f"BATCH:{batch_number}|SERIAL:{serial_str}|UNIT:{unit_number}|QTY:1|QC:QC_APPROVED|LOC:ASSEMBLY-STORAGE-01"
+                )
                 fg = AssemblyFinishedGoodsModel(
                     assembly_order_id=order.id,
                     product_code=order.product_code or "UNKNOWN",
                     product_name=order.product_name,
-                    quantity=payload.passed_quantity,
+                    quantity=Decimal("1"),
                     uom=order.uom or "PCS",
                     status="QC_APPROVED",
                     warehouse_id="ASSEMBLY",
                     location_code="ASSEMBLY-STORAGE-01",
                     on_hand_before=Decimal("0"),
-                    on_hand_after=payload.passed_quantity,
+                    on_hand_after=Decimal("1"),
                     qr_code=qr_payload_str,
                     serial_number=serial_str,
                     batch_number=batch_number,
@@ -3775,38 +3807,24 @@ async def perform_quality_inspection(
                     updated_at=now,
                 )
                 uow.session.add(fg)
-            else:
-                quantities = await stock_quantities(uow.session, fg)
-                remaining = fg.quantity + payload.passed_quantity - previous_passed
-                if remaining < Decimal(str(quantities["reserved_quantity"])) or remaining < 0:
-                    raise HTTPException(409, "QC adjustment would reduce stock below reserved or dispatched quantities.")
-                fg.quantity = remaining
-                fg.on_hand_after = remaining
-                fg.status = "QC_APPROVED" if remaining > 0 else ("DISPATCHED" if quantities["dispatched_quantity"] > 0 else "QC_REJECTED")
-                fg.updated_at = now
-
-            await uow.session.flush()
-            if new_fg:
+                await uow.session.flush()
                 await assign_section_main_id(uow.session, fg)
-            if qc_status == "QC_APPROVED" and fg.section_main_id:
-                owner_ids = (await uow.session.scalars(select(FinishedGoodsRequestModel.supplier_id).where(
-                    FinishedGoodsRequestModel.work_order_id == order.id,
-                    FinishedGoodsRequestModel.supplier_id.is_not(None)))).all()
-                if len(set(owner_ids)) == 1:
-                    fg.section_supplier_id = owner_ids[0]
                 await generate_sections(uow.session, fg)
+                created_units.append(fg)
+            else:
+                created_units = existing_fgs
+
+            serialized_units = [{
+                    "fg_id": str(fg.id), "unit_number": index, "product_code": fg.product_code,
+                    "product_name": fg.product_name, "quantity": 1.0, "uom": fg.uom,
+                    "status": fg.status, "location_code": fg.location_code, "qr_code": fg.qr_code,
+                    **(await section_summary(uow.session, fg.id)), "serial_number": fg.serial_number,
+                    "batch_number": fg.batch_number,
+                } for index, fg in enumerate(created_units, start=1)]
             fg_created = {
-                "fg_id": str(fg.id),
-                "product_code": fg.product_code,
-                "product_name": fg.product_name,
-                "quantity": float(fg.quantity),
-                "uom": fg.uom,
-                "status": fg.status,
-                "location_code": fg.location_code,
-                "qr_code": fg.qr_code,
-                **(await section_summary(uow.session, fg.id)),
-                "serial_number": fg.serial_number,
-                "batch_number": fg.batch_number,
+                "unit_count": len(serialized_units),
+                "section_count": sum(len(unit["sections"]) for unit in serialized_units),
+                "units": serialized_units,
             }
 
         await uow.commit()
@@ -3911,7 +3929,10 @@ async def list_assembly_finished_goods(
             results.append({
                 **quantities,
                 "qc_approved_quantity": quantities["produced_quantity"],
-                "produced_quantity": float(order.completed_quantity),
+                # Each row is one serialized physical unit. Product grouping
+                # sums these rows, so using the order total here would multiply
+                # the produced count by the number of serialized units.
+                "produced_quantity": float(fg.quantity),
                 "manufacturing_date": (order.completed_at or fg.posted_at).isoformat(),
                 "qc_status": qc.status if qc else fg.status,
                 "inspected_by": qc.inspected_by if qc else None,
@@ -4148,8 +4169,8 @@ async def get_finished_goods_traceability(
             raise HTTPException(status_code=404, detail="Finished-goods record not found")
         fg, order = next(iter(distinct.values()))
 
-        # One persisted FG batch per work order is an existing database invariant.
-        # Confirm it before attributing order-level consumption to this FG identity.
+        # Material consumption is recorded at work-order level and is shared by
+        # every individually serialized finished unit produced by that order.
         fg_count = await uow.session.scalar(select(func.count(AssemblyFinishedGoodsModel.id)).where(
             AssemblyFinishedGoodsModel.assembly_order_id == order.id
         )) or 0
@@ -4257,8 +4278,8 @@ async def get_finished_goods_traceability(
             warnings.append("Assembly order has no material requirement lines available for completeness comparison.")
         elif not expected_codes.issubset(set(verified_by_material)):
             warnings.append("One or more required material codes have no verified consumption event.")
-        if fg_count != 1:
-            warnings.append("Finished-goods allocation to a single work-order output is not uniquely established.")
+        if fg_count < 1:
+            warnings.append("No serialized finished-good unit is linked to this work order.")
         if any(not entry["supplier"].get("supplier_name") for entry in grouped.values()):
             warnings.append("One or more GRNs have no supplier-name snapshot; a supplier record relationship is not stored on GRN.")
         if unlinked_records:
@@ -4268,7 +4289,7 @@ async def get_finished_goods_traceability(
         all_events_linked = len(valid_events) == len(event_rows)
         complete = bool(
             has_any_consumption and event_rows and all_events_linked and not unlinked_records
-            and expected_codes and expected_codes.issubset(verified_codes) and fg_count == 1
+            and expected_codes and expected_codes.issubset(verified_codes) and fg_count >= 1
         )
         if not has_any_consumption:
             traceability_status = "NOT_AVAILABLE"
@@ -4385,6 +4406,8 @@ async def fg_loading(current_user: CurrentUser = Depends(get_current_user), uow:
                 "gate_pass_number": v.gate_pass_number,
                 "vehicle_number": v.vehicle_number,
                 "fg_id": str(r.section_fg_id) if r.section_fg_id else None,
+                "product_code": r.material_code,
+                "product_name": r.material_name,
                 "status": v.status,
                 **summary
             })

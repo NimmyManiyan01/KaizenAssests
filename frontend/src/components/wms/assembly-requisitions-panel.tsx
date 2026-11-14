@@ -1,4 +1,3 @@
-import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -6,7 +5,7 @@ import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { ClipboardList, Loader2, RefreshCw } from "lucide-react";
 
-export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefresh = true, pickupTasks = [], onConfirmPick }: { onUpdated?: () => void | Promise<void>; refreshKey?: number; showRefresh?: boolean; pickupTasks?: any[]; onConfirmPick?: (task: any) => void }) {
+export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefresh = true }: { onUpdated?: () => void | Promise<void>; refreshKey?: number; showRefresh?: boolean }) {
   const [rows, setRows] = useState<any[]>([]);
   const [warehouses, setWarehouses] = useState<any[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -114,10 +113,6 @@ export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefre
               request.reservations?.find((r: any) => r.warehouse_ref_id)?.warehouse_ref_id ||
               warehouses[0]?.id || "";
             const isBusy = busyId === id;
-            const requestNumber = String(request.requisition_number || request.request_number || "").trim().toUpperCase();
-            const relatedPickupTasks = pickupTasks.filter((task) =>
-              String(task.assembly_order_number || task.request_number || "").trim().toUpperCase() === requestNumber,
-            );
             const productionQuantity = Number(
               request.target_quantity || request.planned_quantity || 0,
             );
@@ -192,13 +187,23 @@ export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefre
                         <tr className="border-b bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800/70 dark:text-slate-300">
                           <th className="px-3 py-2">Material</th>
                           <th className="px-3 py-2">Requested</th>
-                          <th className="px-3 py-2">Available<InformationTooltip help="inventory" /></th>
+                          <th className="px-3 py-2">Pick status</th>
                           <th className="px-3 py-2">Unit</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {(request.items || []).map((item: any) => (
-                          <tr
+                        {(request.items || []).map((item: any) => {
+                          const requested = Number(item.requested_quantity ?? item.quantity ?? 0);
+                          const recordedPicked = Number(item.picked_quantity ?? item.issued_quantity ?? item.fulfilled_quantity ?? 0);
+                          const requestIsPicked = ["ISSUED", "ASSEMBLY_RECEIVED", "COMPLETED", "RECEIVED"].includes(status);
+                          const picked = requestIsPicked ? requested : Math.min(recordedPicked, requested);
+                          const pickLabel = picked >= requested && requested > 0 ? "Picked" : picked > 0 ? `Partially picked (${picked}/${requested})` : "Pending";
+                          const pickTone = picked >= requested && requested > 0
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                            : picked > 0
+                              ? "border-amber-200 bg-amber-50 text-amber-800"
+                              : "border-slate-200 bg-slate-50 text-slate-700";
+                          return <tr
                             key={item.id || item.material_code}
                             className="border-b border-slate-100 text-slate-700 transition-colors hover:bg-blue-50/50 last:border-0 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-blue-950/20"
                           >
@@ -207,10 +212,12 @@ export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefre
                               <span className="mt-0.5 block text-sm">{item.material_name}</span>
                             </td>
                             <td className="px-3 py-2.5 tabular-nums">{item.requested_quantity}</td>
-                            <td className="px-3 py-2.5 tabular-nums">{item.available_quantity}</td>
+                            <td className="px-3 py-2.5">
+                              <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${pickTone}`}>{pickLabel}</span>
+                            </td>
                             <td className="px-3 py-2.5 text-slate-500">{item.uom || ""}</td>
-                          </tr>
-                        ))}
+                          </tr>;
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -280,29 +287,6 @@ export function AssemblyRequisitionsPanel({ onUpdated, refreshKey = 0, showRefre
                         </>
                       )}
                   </div>
-                  {relatedPickupTasks.length > 0 && (
-                    <div className="space-y-2 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 dark:border-indigo-900/60 dark:bg-indigo-950/20">
-                      <p className="text-xs font-semibold text-indigo-950 dark:text-indigo-100">Related warehouse pickup</p>
-                      {relatedPickupTasks.map((task) => (
-                        <div key={task.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white px-3 py-2 dark:bg-slate-900">
-                          <div className="min-w-0 text-xs">
-                            <span className="font-semibold">{task.task_number || "Pick task"}</span>
-                            <span className="mx-2 text-muted-foreground">·</span>
-                            <span>{task.material_name || task.material_code}</span>
-                            <span className="mx-2 text-muted-foreground">·</span>
-                            <span>{task.requested_quantity ?? task.quantity ?? "—"} {task.uom || ""}</span>
-                            {Number(task.picked_quantity || 0) > 0 && <span className="ml-2 text-muted-foreground">Picked: {task.picked_quantity} {task.uom || ""}</span>}
-                            <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-700 dark:bg-slate-800 dark:text-slate-200">{task.status || "PENDING"}</span>
-                          </div>
-                          {String(task.status || "").toUpperCase() === "COMPLETED" ? (
-                            <span className="text-xs font-semibold text-emerald-700">Pickup confirmed</span>
-                          ) : (
-                            <Button size="sm" className="h-8" disabled={!onConfirmPick} onClick={() => onConfirmPick?.(task)}>Confirm pickup</Button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </CardContent>
               </Card>
             );

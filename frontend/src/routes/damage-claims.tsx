@@ -23,6 +23,14 @@ import {
 export const Route = createFileRoute("/damage-claims")({ component: Page });
 const actionButtonClass = "h-10 rounded-lg";
 
+const damagePhotoUrl = (photo: any): string => {
+  if (photo?.file_path) return resolveMediaUrl(photo.file_path);
+  if (photo?.image_base64) {
+    return `data:${photo.content_type || "image/jpeg"};base64,${photo.image_base64}`;
+  }
+  return "";
+};
+
 const todayDate = () => {
   const today = new Date();
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
@@ -411,13 +419,13 @@ function Page() {
                             {c.photos.map((photo: any, index: number) => (
                               <button
                                 type="button"
-                                key={`${photo.file_path}-${index}`}
+                                key={`${photo.file_path || photo.filename || "damage-evidence"}-${index}`}
                                 aria-label={`View damage evidence ${index + 1} for ${c.claim_number || "claim"}`}
-                                onClick={() => setPreviewPhoto(resolveMediaUrl(photo.file_path))}
+                                onClick={() => setPreviewPhoto(damagePhotoUrl(photo))}
                                 className="overflow-hidden rounded-lg border border-border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary hover:border-primary"
                               >
                                 <img
-                                  src={resolveMediaUrl(photo.file_path)}
+                                  src={damagePhotoUrl(photo)}
                                   alt={`Damage evidence ${index + 1}`}
                                   className="h-20 w-28 object-cover"
                                 />

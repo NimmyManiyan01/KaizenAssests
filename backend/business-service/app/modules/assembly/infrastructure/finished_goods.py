@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import case, select, update
 
 from app.common.persistence.models import FinishedGoodsRequestModel
-from app.modules.assembly.infrastructure.persistence.models import AssemblyFinishedGoodsModel, AssemblyFinishedGoodsAllocationModel, AssemblyOrderModel
+from app.modules.assembly.infrastructure.persistence.models import AssemblyFinishedGoodsModel, AssemblyFinishedGoodsAllocationModel, AssemblyOrderModel, FinishedGoodsSectionModel
 from app.modules.dispatch.infrastructure.persistence.models import DispatchModel, DispatchItemModel
 
 
@@ -16,7 +16,20 @@ async def stock_quantities(session, fg):
     ))).scalars().all()
     reserved = sum((a.quantity for a in allocations if a.status in ("ALLOCATED", "LOADED")), Decimal("0"))
     dispatched = sum((a.quantity for a in allocations if a.status == "DISPATCHED"), Decimal("0"))
-    return {"produced_quantity": fg.quantity + dispatched, "available_quantity": max(Decimal("0"), fg.quantity - reserved),
+    # Section-based supplier pickup predates allocation-ledger posting. Treat a
+    # complete set of eight dispatched child sections as one dispatched parent
+    # FG unit so inventory summaries reflect the physical gate exit.
+    dispatched_sections = (await session.scalars(select(FinishedGoodsSectionModel.status).where(
+        FinishedGoodsSectionModel.finished_goods_id == fg.id
+    ))).all()
+    section_unit_dispatched = (
+        len(dispatched_sections) == 8
+        and all(section_status == "DISPATCHED" for section_status in dispatched_sections)
+    )
+    unposted_section_dispatch = Decimal("1") if section_unit_dispatched and dispatched == 0 else Decimal("0")
+    dispatched += unposted_section_dispatch
+    on_hand = max(Decimal("0"), fg.quantity - unposted_section_dispatch)
+    return {"produced_quantity": on_hand + dispatched, "available_quantity": max(Decimal("0"), on_hand - reserved),
             "reserved_quantity": reserved, "dispatched_quantity": dispatched}
 
 

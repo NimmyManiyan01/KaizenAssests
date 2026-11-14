@@ -2,7 +2,7 @@ import { InformationTooltip } from "@/components/ui/information-tooltip";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
-import { requireRole } from "@/lib/auth-utils";
+import { getUserInfo, requireRole } from "@/lib/auth-utils";
 import { api, type AssemblyQualityInspectionItem } from "@/lib/api-client";
 import {
   AlertTriangle,
@@ -16,7 +16,6 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
-  User,
   X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -32,7 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { isValidInspectorName, parseNonNegativeNumber } from "@/lib/input-validation";
+import { parseNonNegativeNumber } from "@/lib/input-validation";
 
 export const Route = createFileRoute("/assembly/quality")({
   beforeLoad: () =>
@@ -102,9 +101,6 @@ function AssemblyQualityPage() {
   // Inspection Modal State
   const [inspectItem, setInspectItem] = useState<AssemblyQualityInspectionItem | null>(null);
   const [passedQty, setPassedQty] = useState<number>(0);
-  const [authorizedPersonConfirmed, setAuthorizedPersonConfirmed] = useState(false);
-  const [inspectorName, setInspectorName] = useState("");
-  const [inspectorTouched, setInspectorTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const fetchInspections = async (isManual = false) => {
@@ -127,9 +123,6 @@ function AssemblyQualityPage() {
 
   const handleOpenInspectModal = (item: AssemblyQualityInspectionItem) => {
     setInspectItem(item);
-    setAuthorizedPersonConfirmed(false);
-    setInspectorName("");
-    setInspectorTouched(false);
     setPassedQty(item.produced_quantity);
   };
 
@@ -142,9 +135,6 @@ function AssemblyQualityPage() {
 
   const handleInspectSubmit = async () => {
     if (!inspectItem) return;
-    setInspectorTouched(true);
-    if (!authorizedPersonConfirmed || !isValidInspectorName(inspectorName)) return;
-
     if (!isQuantityValid) {
       toast.error(
         `Total inspected quantity (${totalInspected}) must match produced quantity (${expectedProduced}).`,
@@ -156,8 +146,8 @@ function AssemblyQualityPage() {
       setSubmitting(true);
       const res = await api.performAssemblyQualityInspection({
         order_id: inspectItem.order_id,
-        authorized_person_confirmed: authorizedPersonConfirmed,
-        inspector_name: inspectorName.trim(),
+        authorized_person_confirmed: true,
+        inspector_name: getUserInfo()?.full_name || getUserInfo()?.username || "Authorized QC User",
         passed_quantity: parsedPassedQty,
         failed_quantity: 0,
         rework_quantity: 0,
@@ -188,7 +178,7 @@ function AssemblyQualityPage() {
         (statusFilter === "ALL" ||
           qualityGroup(i) === (statusFilter === "PENDING" ? "PENDING_INSPECTION" : statusFilter)) &&
         (!q ||
-          [i.order_number, i.product_name, i.product_code, i.inspected_by].some((value) =>
+          [i.order_number, i.product_name, i.product_code].some((value) =>
             value?.toLowerCase().includes(q),
           )),
     );
@@ -300,7 +290,7 @@ function AssemblyQualityPage() {
                 <input
                   type="text"
                   aria-label="Search this queue"
-                  placeholder="Search order, product or quality engineer..."
+                  placeholder="Search order or product..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="h-11 w-full rounded-xl border border-border bg-card pl-9 pr-8 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/40"
@@ -366,8 +356,8 @@ function AssemblyQualityPage() {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-border">
-              <table className="quality-inspection-table w-full min-w-[1040px] table-fixed border-collapse text-left text-sm [&_th]:align-middle [&_td]:align-middle">
-                <colgroup><col className="w-[18%]" /><col className="w-[18%]" /><col className="w-[12%]" /><col className="w-[18%]" /><col className="w-[15%]" /><col className="w-[19%]" /></colgroup>
+              <table className="quality-inspection-table w-full min-w-[860px] table-fixed border-collapse text-left text-sm [&_th]:align-middle [&_td]:align-middle">
+                <colgroup><col className="w-[20%]" /><col className="w-[20%]" /><col className="w-[13%]" /><col className="w-[22%]" /><col className="w-[25%]" /></colgroup>
                 <thead>
                   <tr className="border-b border-border/60 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                     <th className="py-3 px-3">Order Number</th>
@@ -375,7 +365,6 @@ function AssemblyQualityPage() {
                     <th className="px-3 py-3 text-center">Produced Qty</th>
                     <th className="px-3 py-3 text-center"><span className="inline-flex items-center justify-center gap-1">QC Breakdown<InformationTooltip help="qc" /></span></th>
                     <th className="px-3 py-3 text-center"><span className="inline-flex items-center justify-center gap-1">QC Status<InformationTooltip help="workflowStatus" /></span></th>
-                    <th className="px-3 py-3 text-center">Quality Engineer &amp; Date</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
@@ -438,26 +427,19 @@ function AssemblyQualityPage() {
 
                       {/* QC Status */}
                       <td className="py-3.5 px-3 whitespace-nowrap">
-                        {getQcStatusBadge(qualityGroup(item))}
-                      </td>
-
-                      {/* Quality Engineer & Date */}
-                      <td className="py-3.5 px-3 whitespace-nowrap">
-                        {item.inspected_by ? (
-                          <div className="flex flex-col text-[11px]">
-                            <span className="font-semibold text-foreground flex items-center gap-1">
-                              <User className="size-3 text-muted-foreground/60" />
-                              {item.inspected_by}
-                            </span>
-                            <span className="text-muted-foreground text-[10px] mt-0.5">
-                              {item.inspected_at
-                                ? new Date(item.inspected_at).toLocaleDateString()
-                                : ""}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
+                        <div className="flex flex-wrap items-center justify-center gap-2">
+                          {getQcStatusBadge(qualityGroup(item))}
+                          {qualityGroup(item) === "PENDING_INSPECTION" && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="h-8 rounded-lg px-3 text-xs font-semibold"
+                              onClick={() => handleOpenInspectModal(item)}
+                            >
+                              Perform QC
+                            </Button>
+                          )}
+                        </div>
                       </td>
 
                     </tr>
@@ -510,52 +492,6 @@ function AssemblyQualityPage() {
                     <span className="font-semibold text-foreground font-mono">
                       {inspectItem.produced_quantity} {inspectItem.uom}
                     </span>
-                  </div>
-                </div>
-
-                <div className="space-y-3 rounded-xl border border-border/60 p-3.5">
-                  <label className="flex items-start gap-2 text-xs font-semibold text-foreground">
-                    <input
-                      type="checkbox"
-                      required
-                      checked={authorizedPersonConfirmed}
-                      onChange={(e) => setAuthorizedPersonConfirmed(e.target.checked)}
-                      className="mt-0.5 size-4 accent-primary"
-                    />
-                    Quality check performed by authorized person
-                  </label>
-                  <div className="space-y-1.5">
-                    <label
-                      htmlFor="qc-quality-engineer-name"
-                      className="text-xs font-semibold text-foreground"
-                    >
-                      Quality Engineer Name *
-                    </label>
-                    <Input
-                      id="qc-quality-engineer-name"
-                      value={inspectorName}
-                      onChange={(e) => setInspectorName(e.target.value)}
-                      onBlur={() => setInspectorTouched(true)}
-                      required
-                      maxLength={128}
-                      aria-invalid={inspectorTouched && !isValidInspectorName(inspectorName)}
-                      aria-describedby="qc-quality-engineer-name-help"
-                      placeholder="Enter quality engineer name"
-                      className="h-9 text-sm rounded-xl"
-                    />
-                    <p
-                      id="qc-quality-engineer-name-help"
-                      className={cn(
-                        "text-xs",
-                        inspectorTouched && !isValidInspectorName(inspectorName)
-                          ? "text-destructive"
-                          : "text-muted-foreground",
-                      )}
-                    >
-                      {inspectorTouched && !isValidInspectorName(inspectorName)
-                        ? "Enter a valid quality engineer name (2-128 characters, at least two letters)."
-                        : "Required. Use letters, spaces, periods, apostrophes or hyphens."}
-                    </p>
                   </div>
                 </div>
 
@@ -613,9 +549,7 @@ function AssemblyQualityPage() {
                 onClick={handleInspectSubmit}
                 disabled={
                   submitting ||
-                  !isQuantityValid ||
-                  !authorizedPersonConfirmed ||
-                  !isValidInspectorName(inspectorName)
+                  !isQuantityValid
                 }
                 className="rounded-xl bg-purple-600 hover:bg-purple-700 text-white gap-1.5 font-semibold shadow-soft"
               >
