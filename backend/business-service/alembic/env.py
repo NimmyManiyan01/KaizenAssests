@@ -25,6 +25,10 @@ from app.modules.gate.infrastructure.persistence import models as gate_models  #
 from app.modules.dock.infrastructure.persistence import models as dock_models  # noqa: F401
 from app.modules.assembly.infrastructure.persistence import models as assembly_models  # noqa: F401
 from app.modules.warehouse.infrastructure.persistence import models as warehouse_models  # noqa: F401
+from app.modules.storage.infrastructure.persistence import models as storage_models  # noqa: F401
+from app.modules.quarantine.infrastructure.persistence import models as quarantine_models  # noqa: F401
+from app.modules.dispatch.infrastructure.persistence import models as dispatch_models  # noqa: F401
+from app.modules.admin.infrastructure.persistence import models as admin_models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

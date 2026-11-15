@@ -101,9 +101,13 @@ def _install_sqlite(c):
 
 def _install_postgres(c):
     try:
-        c.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        c.exec_driver_sql("SELECT gen_random_uuid();")
     except Exception:
-        pass
+        try:
+            with c.begin_nested():
+                c.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        except Exception:
+            pass
     c.exec_driver_sql("""CREATE OR REPLACE FUNCTION maintain_rack_occupancy() RETURNS trigger AS $$
     DECLARE old_rack uuid; new_rack uuid; new_capacity_uom varchar(32); remaining numeric;
     BEGIN
