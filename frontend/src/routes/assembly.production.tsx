@@ -442,17 +442,26 @@ function AssemblyProductionPage() {
               </div>
             </div>
           ) : (
-            <div className="overflow-x-auto -mx-5 px-5">
-              <table className="w-full min-w-[960px] table-fixed text-left text-sm [&_th]:align-middle [&_td]:align-middle">
+            <div className="overflow-x-auto rounded-xl border border-border/70">
+              <table className="assembly-production-table w-full min-w-[1040px] table-fixed text-left text-sm [&_th]:align-middle [&_td]:align-middle">
+                <colgroup>
+                  <col className="w-[15%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[17%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[20%]" />
+                </colgroup>
                 <thead>
                   <tr className="border-b border-border/60 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                     <th className="py-3 px-3">Order Number</th>
                     <th className="py-3 px-3">Assembly Unit</th>
                     <th className="py-3 px-3">Product Details</th>
-                    <th className="py-3 px-3">Target Qty</th>
+                    <th className="py-3 px-3 whitespace-nowrap">Target Qty</th>
                     <th className="py-3 px-3 min-w-[140px]">Progress<InformationTooltip help="production" /></th>
-                    <th className="py-3 px-3">Status</th>
-                    <th className="py-3 px-3 text-center">Production Actions</th>
+                    <th className="py-3 px-3 whitespace-nowrap">Status</th>
+                    <th className="py-3 px-3 text-center whitespace-nowrap">Production Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
@@ -555,7 +564,7 @@ function AssemblyProductionPage() {
                           <div className="flex items-center justify-center gap-2">
                             {order.can_complete && order.traceability_required && (
                               <Button size="sm" variant="outline" onClick={() => void handleOpenConsumption(order)}
-                                className="h-7 px-3 text-xs font-semibold gap-1.5 rounded-lg">
+                                className="h-8 whitespace-nowrap px-3 text-xs font-semibold gap-1.5 rounded-lg">
                                 <Package className="size-3.5" /> Record Material Consumption
                               </Button>
                             )}
@@ -565,7 +574,7 @@ function AssemblyProductionPage() {
                                 size="sm"
                                 onClick={() => handleStartProduction(order)}
                                 disabled={startingOrderId === order.id}
-                                className="h-7 px-3 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 rounded-lg shadow-sm"
+                                className="h-8 whitespace-nowrap px-3.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 rounded-lg shadow-xs"
                               >
                                 <Play className="size-3 fill-current" />
                                 {startingOrderId === order.id ? "Starting..." : "Start Production"}
@@ -577,7 +586,7 @@ function AssemblyProductionPage() {
                               <Button
                                 size="sm"
                                 onClick={() => handleOpenCompleteModal(order)}
-                                className="h-7 px-3 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white gap-1.5 rounded-lg shadow-sm"
+                                className="h-8 whitespace-nowrap px-3.5 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white gap-1.5 rounded-lg shadow-xs transition-colors"
                               >
                                 <CheckCircle2 className="size-3.5" />
                                 Complete Production

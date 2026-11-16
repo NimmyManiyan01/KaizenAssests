@@ -3345,6 +3345,26 @@ body.app-typography :is(main, [role="dialog"], [role="alertdialog"]) table tbody
 .assembly-visual-workspace main .quality-inspection-table tbody tr:last-child {
   border-bottom: 0;
 }
+
+/* Assembly Production: stable column grid and centered actions */
+.assembly-visual-workspace main .assembly-production-table th {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.assembly-visual-workspace main .assembly-production-table :is(th, td) {
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+
+.assembly-visual-workspace main .assembly-production-table :is(th, td):last-child {
+  min-width: 190px;
+  text-align: center;
+}
+
+.assembly-visual-workspace main .assembly-production-table td:last-child > div {
+  justify-content: center;
+}
 /* Keep the Inventory batch-count action legible over its primary-blue pill. */
 body.app-typography main table tbody .inventory-batch-count {
   color: #ffffff !important;
