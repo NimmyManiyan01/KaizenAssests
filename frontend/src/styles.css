@@ -1872,9 +1872,16 @@ body.app-typography .warehouse-module-content[data-warehouse-tab="picking"] .war
   .warehouse-module-content[data-warehouse-tab="picking"] .warehouse-module-hero { padding: 8px 0; min-height: 0; }
   .assembly-requisitions-panel [data-slot="card-content"] { padding: 16px; }
 }
-.warehouse-picking-queue table :is(th, td) { vertical-align: middle; overflow-wrap: anywhere; }
+.warehouse-picking-queue table :is(th, td) { vertical-align: middle; }
+.warehouse-picking-queue table th { white-space: nowrap; }
 .warehouse-picking-queue table :is(th, td):nth-child(5),
-.warehouse-picking-queue table :is(th, td):nth-child(6) { text-align: center; }
+.warehouse-picking-queue table :is(th, td):nth-child(6),
+.warehouse-picking-queue table :is(th, td):nth-child(7),
+.warehouse-picking-queue table :is(th, td):nth-child(8) { text-align: center; }
+.warehouse-picking-queue table :is(th, td):last-child {
+  min-width: 130px;
+  padding-right: 14px;
+}
 .warehouse-picking-queue td:nth-child(4) > span { max-width: 100%; white-space: normal; line-height: 1.5; overflow-wrap: anywhere; }
 
 /* Transparent title card for the Putaway page. */

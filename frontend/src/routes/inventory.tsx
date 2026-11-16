@@ -2514,20 +2514,21 @@ function SimpleWarehouseModule() {
                   showRefresh={false}
                   onUpdated={() => fetchData(true)}
                 />
-                <Card className="warehouse-picking-queue overflow-x-auto border-violet-200 bg-gradient-to-br from-violet-50/80 via-white to-indigo-50/50 p-5 shadow-sm dark:border-violet-900/60 dark:bg-violet-950/20">
+                <Card className="warehouse-picking-queue overflow-hidden border-violet-200 bg-gradient-to-br from-violet-50/80 via-white to-indigo-50/50 p-5 shadow-sm dark:border-violet-900/60 dark:bg-violet-950/20">
                   <h3 className="mb-4 text-sm font-bold uppercase tracking-wider text-slate-900 dark:text-slate-100">
                     Warehouse picking queue <InformationTooltip help="pickRemaining" />
                   </h3>
-                  <table className="w-full min-w-[1040px] table-fixed text-left text-sm">
+                  <div className="overflow-x-auto rounded-lg border border-violet-100 dark:border-violet-900/40">
+                  <table className="w-full min-w-[1080px] table-fixed text-left text-sm">
                     <colgroup>
-                      <col className="w-[13%]" />
-                      <col className="w-[13%]" />
-                      <col className="w-[13%]" />
-                      <col className="w-[14%]" />
-                      <col className="w-[24%]" />
+                      <col className="w-[11%]" />
+                      <col className="w-[11%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[22%]" />
+                      <col className="w-[10%]" />
                       <col className="w-[10%]" />
                       <col className="w-[12%]" />
-                      <col className="w-[10%]" />
                     </colgroup>
                     <thead>
                       <tr className="border-b border-violet-200 bg-violet-100/70 text-violet-950 uppercase dark:border-violet-900 dark:bg-violet-950/50 dark:text-violet-100">
@@ -2536,11 +2537,11 @@ function SimpleWarehouseModule() {
                         <th className="py-2.5 px-3">Destination Unit</th>
                         <th className="py-2.5 px-3">Material</th>
                         <th className="py-2.5 px-3">Pick Location</th>
-                        <th className="py-2.5 px-3">Quantity</th>
-                        <th className="py-2.5 px-3">
+                        <th className="py-2.5 px-3 whitespace-nowrap text-center">Quantity</th>
+                        <th className="py-2.5 px-3 whitespace-nowrap text-center">
                           Status<InformationTooltip help="workflowStatus" />
                         </th>
-                        <th className="py-2.5 px-3 text-right">Action</th>
+                        <th className="py-2.5 px-3 text-center whitespace-nowrap">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -2626,10 +2627,10 @@ function SimpleWarehouseModule() {
                                   )}
                                 </div>
                               </td>
-                              <td className="py-3 px-3 font-bold">
+                              <td className="py-3 px-3 font-bold text-center">
                                 {p.quantity ?? "—"} {p.uom || ""}
                               </td>
-                              <td className="py-3 px-3">
+                              <td className="py-3 px-3 text-center">
                                 <Badge
                                   className={cn(
                                     "text-[10px] font-bold uppercase",
@@ -2641,31 +2642,33 @@ function SimpleWarehouseModule() {
                                   {p.status || "—"}
                                 </Badge>
                               </td>
-                              <td className="py-3 px-3 text-right">
+                              <td className="py-3 px-3 text-center">
                                 {p.status !== "COMPLETED" && (
-                                  <Button
-                                    size="sm"
-                                    onClick={() => {
-                                      setPickupFifoAlert("");
-                                      setPickupQrVerified({ material: false, rack: false });
-                                      setPickupQrError("");
-                                      setPickupConfirmation({
-                                        material_scan: "",
-                                        zone_scan: "",
-                                        quantity: String(
-                                          Math.max(
-                                            0,
-                                            Number(p.requested_quantity || 0) -
-                                              Number(p.picked_quantity || 0),
+                                  <div className="flex items-center justify-center">
+                                    <Button
+                                      size="sm"
+                                      onClick={() => {
+                                        setPickupFifoAlert("");
+                                        setPickupQrVerified({ material: false, rack: false });
+                                        setPickupQrError("");
+                                        setPickupConfirmation({
+                                          material_scan: "",
+                                          zone_scan: "",
+                                          quantity: String(
+                                            Math.max(
+                                              0,
+                                              Number(p.requested_quantity || 0) -
+                                                Number(p.picked_quantity || 0),
+                                            ),
                                           ),
-                                        ),
-                                      });
-                                      setPickupToConfirm(p);
-                                    }}
-                                    className="h-7 text-xs bg-indigo-600 hover:bg-indigo-700 text-white"
-                                  >
-                                    Confirm Pick
-                                  </Button>
+                                        });
+                                        setPickupToConfirm(p);
+                                      }}
+                                      className="h-8 whitespace-nowrap rounded-lg bg-indigo-600 px-3.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-indigo-700"
+                                    >
+                                      Confirm Pick
+                                    </Button>
+                                  </div>
                                 )}
                               </td>
                             </tr>
@@ -2673,6 +2676,7 @@ function SimpleWarehouseModule() {
                       )}
                     </tbody>
                   </table>
+                  </div>
                 </Card>
               </>
             )}
