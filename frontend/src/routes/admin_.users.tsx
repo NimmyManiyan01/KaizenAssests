@@ -20,6 +20,7 @@ import { requireRole } from "@/lib/auth-utils";
 import { ROLE_PAGES, type PageAccess } from "@/lib/page-permissions";
 import { AdminTablePagination } from "@/components/admin/admin-table-pagination";
 import { PasswordInput } from "@/components/admin/password-input";
+import { formatToIST } from "@/lib/utils";
 
 const ADMIN_PAGE_SIZE = 10;
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -741,7 +742,7 @@ function AdminUsersPage() {
                     <td className="px-4 font-mono text-xs">{user.employee_id}</td>
                     <td className="px-4">{roles.find((role) => role.value === user.role)?.label || user.role}</td>
                     <td className="px-4 text-muted-foreground">{user.role === "ASSEMBLY_MANAGER" ? user.assembly_unit_code || "Unassigned" : user.shift_name || "GENERAL"}</td>
-                    <td className="px-4 text-muted-foreground">{user.last_login ? new Date(user.last_login).toLocaleString() : "Never"}</td>
+                    <td className="px-4 text-muted-foreground">{formatToIST(user.last_login)}</td>
                     <td className="px-4"><Badge className={`rounded-full px-2.5 py-1 text-xs font-semibold ${user.status === "ACTIVE" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{user.status === "ACTIVE" ? "Active" : "Inactive"}</Badge></td>
                     <td className="flex justify-end gap-2 px-4 py-3">
                       <Button size="sm" variant="outline" onClick={() => openEdit(user)}><Pencil className="size-4" /> Edit</Button>

@@ -87,6 +87,20 @@ class AssemblyUnitUpdate(BaseModel):
 
 
 def serialize_user(account: UserAccountModel) -> dict:
+    last_login_val = account.last_login
+    if isinstance(last_login_val, datetime):
+        aware = last_login_val.replace(tzinfo=timezone.utc) if last_login_val.tzinfo is None else last_login_val
+        last_login_val = aware.isoformat()
+    elif last_login_val is not None:
+        last_login_val = str(last_login_val)
+
+    created_at_val = account.created_at
+    if isinstance(created_at_val, datetime):
+        aware = created_at_val.replace(tzinfo=timezone.utc) if created_at_val.tzinfo is None else created_at_val
+        created_at_val = aware.isoformat()
+    elif created_at_val is not None:
+        created_at_val = str(created_at_val)
+
     return {
         "id": str(account.id),
         "employee_id": account.employee_id,
@@ -98,8 +112,8 @@ def serialize_user(account: UserAccountModel) -> dict:
         "assembly_unit_code": account.assembly_unit_code,
         "status": account.status,
         "page_permissions": account.page_permissions or {},
-        "last_login": account.last_login,
-        "created_at": account.created_at,
+        "last_login": last_login_val,
+        "created_at": created_at_val,
     }
 
 
