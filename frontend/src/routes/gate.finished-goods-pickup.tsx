@@ -178,9 +178,6 @@ function FinishedGoodsPickupGatePage() {
     setDriverContact(nextTransport?.driver_contact || "");
     setMismatchReason("");
     if (!preserveSuccess) setSuccess(null);
-    if (transportEntries.length && nextIndex < 0) {
-      toast.error("Every assigned vehicle already has a gate pass for this dispatch.");
-    }
   };
   const lookupRequest = (value = query, showNotFound = true) => {
     const requestNumber = value.trim().toLowerCase();
