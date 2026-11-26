@@ -3,7 +3,9 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/wms/app-shell";
 import { getUserInfo, requireRole } from "@/lib/auth-utils";
-import { api, type AssemblyQualityInspectionItem } from "@/lib/api-client";
+import { api, type AssemblyQcChecklist, type AssemblyQualityInspectionItem } from "@/lib/api-client";
+import { DamagePhoto } from "@/components/wms/damage-photo";
+import { Textarea } from "@/components/ui/textarea";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -31,7 +33,6 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { parseNonNegativeNumber } from "@/lib/input-validation";
 
 export const Route = createFileRoute("/assembly/quality")({
   beforeLoad: () =>
@@ -90,6 +91,17 @@ function getQcStatusBadge(status: string) {
   );
 }
 
+type QcFinding = AssemblyQcChecklist["findings"][number] & { file?: File };
+
+function readQcPhoto(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("Could not read the photo. Please retake it."));
+    reader.readAsDataURL(file);
+  });
+}
+
 function AssemblyQualityPage() {
   const navigate = useNavigate();
   const [inspections, setInspections] = useState<AssemblyQualityInspectionItem[]>([]);
@@ -100,7 +112,11 @@ function AssemblyQualityPage() {
 
   // Inspection Modal State
   const [inspectItem, setInspectItem] = useState<AssemblyQualityInspectionItem | null>(null);
-  const [passedQty, setPassedQty] = useState<number>(0);
+  const [checklist, setChecklist] = useState<AssemblyQcChecklist | null>(null);
+  const [findings, setFindings] = useState<QcFinding[]>([]);
+  const [unitInput, setUnitInput] = useState("1");
+  const [viewOnly, setViewOnly] = useState(false);
+  const [checklistError, setChecklistError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const fetchInspections = async (isManual = false) => {
@@ -121,38 +137,65 @@ function AssemblyQualityPage() {
     fetchInspections();
   }, []);
 
-  const handleOpenInspectModal = (item: AssemblyQualityInspectionItem) => {
+  const handleOpenInspectModal = (item: AssemblyQualityInspectionItem, readonly = false) => {
     setInspectItem(item);
-    setPassedQty(item.produced_quantity);
+    setViewOnly(readonly);
+    setUnitInput("1");
+    setChecklist(null);
+    setChecklistError("");
+    setFindings([]);
   };
 
-  const parsedPassedQty = parseNonNegativeNumber(passedQty);
-  const totalInspected = parsedPassedQty ?? Number.NaN;
-  const expectedProduced = inspectItem ? inspectItem.produced_quantity : 0;
-  const isQuantityValid =
-    parsedPassedQty !== null &&
-    totalInspected === expectedProduced;
+  useEffect(() => {
+    if (!inspectItem) return;
+    let cancelled = false;
+    api.getAssemblyQualityChecklist(inspectItem.order_id).then((result) => {
+      if (cancelled) return;
+      setChecklist(result);
+      setFindings(result.findings);
+    }).catch((error) => {
+      if (!cancelled) setChecklistError(error.message || "Unable to load the inspection checklist.");
+    });
+    return () => { cancelled = true; };
+  }, [inspectItem]);
+
+  const expectedProduced = inspectItem?.produced_quantity ?? 0;
+  const unitNumber = Math.min(expectedProduced, Math.max(1, Math.trunc(Number(unitInput) || 1)));
+  const failedUnits = [...new Set(findings.map((entry) => entry.unit_number))].sort((a, b) => a - b);
+  const passedQty = expectedProduced - failedUnits.length;
+  const canSubmit = Boolean(checklist) && Number.isSafeInteger(expectedProduced) && expectedProduced > 0 &&
+    findings.every((entry) => entry.remark.trim() && (entry.file || entry.photo));
+
+  const updateFinding = (componentId: string, update?: Partial<QcFinding>) => {
+    setFindings((previous) => {
+      const matches = (entry: QcFinding) => entry.unit_number === unitNumber && entry.component_id === componentId;
+      if (!update) return previous.filter((entry) => !matches(entry));
+      const existing = previous.find(matches);
+      if (existing) return previous.map((entry) => matches(entry) ? { ...entry, ...update } : entry);
+      return [...previous, { unit_number: unitNumber, component_id: componentId, remark: "", photo: "", ...update }];
+    });
+  };
 
   const handleInspectSubmit = async () => {
-    if (!inspectItem) return;
-    if (!isQuantityValid) {
-      toast.error(
-        `Total inspected quantity (${totalInspected}) must match produced quantity (${expectedProduced}).`,
-      );
-      return;
-    }
+    if (!inspectItem || !canSubmit || submitting || viewOnly) return;
 
     try {
       setSubmitting(true);
+      const evidence = await Promise.all(findings.map(async ({ file, photo, ...entry }) => ({
+        ...entry,
+        remark: entry.remark.trim(),
+        photo: file ? await readQcPhoto(file) : photo,
+      })));
       const res = await api.performAssemblyQualityInspection({
         order_id: inspectItem.order_id,
         authorized_person_confirmed: true,
         inspector_name: getUserInfo()?.full_name || getUserInfo()?.username || "Authorized QC User",
-        passed_quantity: parsedPassedQty,
-        failed_quantity: 0,
+        passed_quantity: passedQty,
+        failed_quantity: failedUnits.length,
         rework_quantity: 0,
         held_quantity: 0,
-      } as any);
+        checklist_findings: evidence,
+      });
 
       toast.success(res.message || `Quality inspection completed for ${inspectItem.order_number}`);
       setInspectItem(null);
@@ -439,6 +482,11 @@ function AssemblyQualityPage() {
                               Perform QC
                             </Button>
                           )}
+                          {item.has_checklist && (
+                            <Button type="button" size="sm" variant="outline" onClick={() => handleOpenInspectModal(item, true)}>
+                              View Checklist
+                            </Button>
+                          )}
                         </div>
                       </td>
 
@@ -461,12 +509,12 @@ function AssemblyQualityPage() {
         {/* ========================================================================= */}
         {/* PERFORM QC INSPECTION MODAL */}
         {/* ========================================================================= */}
-        <Dialog open={!!inspectItem} onOpenChange={(open) => !open && setInspectItem(null)}>
-          <DialogContent className="max-w-lg p-6 rounded-2xl">
+        <Dialog open={!!inspectItem} onOpenChange={(open) => !open && !submitting && setInspectItem(null)}>
+          <DialogContent className="max-h-[90dvh] max-w-xl overflow-y-auto p-6 rounded-2xl">
             <DialogHeader className="border-b border-border/60 pb-3">
               <DialogTitle className="flex items-center gap-2 text-foreground text-lg font-bold">
                 <ShieldCheck className="size-5 text-purple-600" />
-                Perform Quality Inspection
+                {viewOnly ? "Saved Quality Checklist" : "Perform Quality Inspection"}
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground mt-1">
                 Audit manufactured units for order{" "}
@@ -495,42 +543,60 @@ function AssemblyQualityPage() {
                   </div>
                 </div>
 
-                {/* Quantities breakdown */}
-                <div className="space-y-3">
-                  <div className="grid grid-cols-1 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                        <CheckCircle2 className="size-3" /> Passed Qty *
-                      </label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={inspectItem.produced_quantity}
-                        value={passedQty}
-                        onChange={(e) => setPassedQty(Number(e.target.value))}
-                        className="h-9 text-sm font-mono font-bold rounded-xl border-emerald-500/30 focus:border-emerald-500"
+                {!checklist ? (
+                  <p role="status" className="text-sm text-muted-foreground">{checklistError || "Loading checklist…"}</p>
+                ) : (
+                  <fieldset disabled={submitting} className="space-y-3 rounded-xl border p-3">
+                    <legend className="px-1 font-semibold">Sub-material acceptance checklist</legend>
+                    {!viewOnly && <p className="text-sm text-muted-foreground">
+                      Review each unit. Uncheck a component to record a defect and capture its photo.
+                    </p>}
+                    <label className="flex items-center gap-2 text-sm">
+                      Unit
+                      <Input type="number" min={1} max={expectedProduced} value={unitInput} className="max-w-24"
+                        onChange={(event) => setUnitInput(event.target.value)}
+                        onBlur={() => setUnitInput(String(unitNumber))}
                       />
-                    </div>
-
-                  </div>
-
-                  {/* Validation balance warning */}
-                  <div
-                    className={cn(
-                      "p-2.5 rounded-xl text-xs flex items-center justify-between font-medium border",
-                      isQuantityValid
-                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/25"
-                        : "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/25",
-                    )}
-                  >
-                    <span>
-                      Total account: {totalInspected} / {expectedProduced} {inspectItem.uom}
-                    </span>
-                    <span>
-                      {isQuantityValid ? "✓ Quantities balanced" : "⚠ Must equal produced quantity"}
-                    </span>
-                  </div>
-                </div>
+                      <span>of {expectedProduced}</span>
+                    </label>
+                    {failedUnits.length > 0 && <p className="text-sm">Units with defects: {failedUnits.join(", ")}</p>}
+                    {checklist.components.map((component) => {
+                      const finding = findings.find((entry) => entry.unit_number === unitNumber && entry.component_id === component.id);
+                      return (
+                        <div key={component.id} className="space-y-2 rounded-lg border p-3">
+                          <label className="flex items-center justify-between gap-2 text-sm font-medium">
+                            <span>{component.name} {component.code && <span className="text-muted-foreground">({component.code})</span>}
+                              {component.package && <span className="block text-xs text-muted-foreground">{component.package}</span>}
+                            </span>
+                            <input type="checkbox" checked={!finding} disabled={viewOnly} onChange={(event) =>
+                              updateFinding(component.id, event.target.checked ? undefined : {})
+                            } />
+                          </label>
+                          {finding && (viewOnly ? (
+                            <div className="space-y-2 text-sm">
+                              <p className="whitespace-pre-wrap">{finding.remark}</p>
+                              <img src={finding.photo} alt={`QC evidence for ${component.name}`} className="max-h-48 rounded-lg object-contain" />
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <label className="block text-sm">Remark *
+                                <Textarea maxLength={2000} value={finding.remark}
+                                  onChange={(event) => updateFinding(component.id, { remark: event.target.value })}
+                                />
+                              </label>
+                              <p className="text-sm">Photo *</p>
+                              <DamagePhoto key={unitNumber} damagedQuantity={1} initialFile={finding.file}
+                                initialPreviewUrl={finding.photo}
+                                onCapture={(file) => updateFinding(component.id, { file, photo: "" })}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                    <p className="text-sm font-semibold">{passedQty} passed · {failedUnits.length} failed</p>
+                  </fieldset>
+                )}
               </div>
             )}
 
@@ -542,15 +608,12 @@ function AssemblyQualityPage() {
                 onClick={() => setInspectItem(null)}
                 disabled={submitting}
               >
-                Cancel
+                {viewOnly ? "Close" : "Cancel"}
               </Button>
-              <Button
+              {!viewOnly && <Button
                 size="sm"
                 onClick={handleInspectSubmit}
-                disabled={
-                  submitting ||
-                  !isQuantityValid
-                }
+                disabled={submitting || !canSubmit}
                 className="rounded-xl bg-purple-600 hover:bg-purple-700 text-white gap-1.5 font-semibold shadow-soft"
               >
                 {submitting ? (
@@ -559,7 +622,7 @@ function AssemblyQualityPage() {
                   <ShieldCheck className="size-3.5" />
                 )}
                 Submit QC Certification
-              </Button>
+              </Button>}
             </DialogFooter>
           </DialogContent>
         </Dialog>

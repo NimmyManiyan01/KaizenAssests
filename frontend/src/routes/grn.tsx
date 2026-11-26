@@ -59,7 +59,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { api, resolveMediaUrl } from "@/lib/api-client";
+import { api, resolveMediaUrl, type SubMaterial } from "@/lib/api-client";
 import { getUserInfo } from "@/lib/auth-utils";
 import {
   QRScanResultModal,
@@ -241,6 +241,103 @@ function cleanSupplierString(raw?: any): string {
 
 function grnMaterialKey(item: GrnLineItem, index: number): string {
   return [item.grn_line_id, item.item_code, item.variant_code, index].filter(Boolean).join(":");
+}
+
+type PackageRejection = {
+  package_number: number;
+  code: string;
+  name: string;
+  remark: string;
+  evidence_id?: string;
+  photoUrl?: string;
+  file?: File;
+};
+
+function PackageEvidencePreview({ entry }: { entry: PackageRejection }) {
+  const [preview, setPreview] = useState("");
+  useEffect(() => {
+    if (!entry.file) {
+      setPreview("");
+      return;
+    }
+    const url = URL.createObjectURL(entry.file);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [entry.file]);
+  const url = entry.photoUrl || preview;
+  return url ? (
+    <a href={url} target="_blank" rel="noreferrer">
+      <img src={url} alt={`Damage photo for ${entry.name}`} className="h-24 w-32 rounded-lg border object-contain" />
+    </a>
+  ) : <span className="text-sm text-muted-foreground">Photo required</span>;
+}
+
+function PackageDamageChecklist({ count, components, entries, onChange }: {
+  count: number;
+  components: Pick<SubMaterial, "name" | "code">[];
+  entries: PackageRejection[];
+  onChange: (entries: PackageRejection[]) => void;
+}) {
+  const [selected, setSelected] = useState("1");
+  const packageNumber = Math.min(count, Math.max(1, Math.trunc(Number(selected) || 1)));
+  return (
+    <div className="space-y-3">
+      <label className="flex flex-wrap items-center gap-2 text-sm font-medium">
+        Package number
+        <Input type="number" min={1} max={count} value={selected} className="max-w-24"
+          onChange={(event) => setSelected(event.target.value)}
+          onBlur={() => setSelected(String(packageNumber))}
+        />
+        <span className="text-muted-foreground">of {count}</span>
+      </label>
+      {entries.length > 0 && (
+        <p className="text-sm text-muted-foreground">
+          Packages with rejections: {[...new Set(entries.map((entry) => entry.package_number))].sort((a, b) => a - b).join(", ")}
+        </p>
+      )}
+      {components.map((component) => {
+        const matches = (entry: PackageRejection) =>
+          entry.code === component.code && entry.package_number === packageNumber;
+        const rejected = entries.find(matches);
+        const setEntry = (entry?: PackageRejection) =>
+          onChange([...entries.filter((item) => !matches(item)), ...(entry ? [entry] : [])]);
+        return (
+          <div key={component.code} className="space-y-2 rounded-lg border p-3">
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <span>{component.name} <span className="text-muted-foreground">{component.code}</span></span>
+              <input type="checkbox" checked={!rejected} onChange={(event) =>
+                setEntry(!event.target.checked ? {
+                  ...component, package_number: packageNumber, remark: "",
+                } : undefined)
+              } />
+            </label>
+            {rejected && (
+              <div className="space-y-2">
+                <label className="block text-sm">
+                  Remark *
+                  <Textarea value={rejected.remark} maxLength={2000}
+                    onChange={(event) => setEntry({ ...rejected, remark: event.target.value })}
+                  />
+                </label>
+                <div className="space-y-1">
+                  <p className="text-sm">Photo *</p>
+                  <DamagePhoto
+                    key={packageNumber}
+                    damagedQuantity={1}
+                    initialFile={rejected.file}
+                    initialPreviewUrl={rejected.photoUrl}
+                    onCapture={(file) => setEntry({
+                      ...rejected, file, evidence_id: undefined, photoUrl: undefined,
+                    })}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function normalizeGrnRecord(r: any) {
@@ -484,6 +581,12 @@ function GrnPageWorkflow() {
     >
   >({});
   const [qualityApproved, setQualityApproved] = useState<Record<string, number>>({});
+  const [packageRejections, setPackageRejections] = useState<Record<string, PackageRejection[]>>({});
+  const [packageCatalog, setPackageCatalog] = useState<{
+    key: string;
+    materials: Awaited<ReturnType<typeof api.getPackageMaterials>>;
+  }>();
+  const [packageCatalogError, setPackageCatalogError] = useState("");
 
   // Page 4 - Batches State
   const [materialBatches, setMaterialBatches] = useState<Record<string, BatchEntry[]>>({});
@@ -1851,6 +1954,9 @@ function GrnPageWorkflow() {
             rejected_quantity: Number(l.rejected_quantity ?? l.rejectedQuantity ?? 0),
             held_quantity: Number(l.held_quantity ?? l.heldQuantity ?? 0),
             rejected_reason: l.rejected_reason || l.rejectedReason || "",
+            damage_reason: l.damage_reason || l.rejected_sub_materials?.map(
+              (entry: PackageRejection) => `Package ${entry.package_number}, ${entry.name}: ${entry.remark}`,
+            ).join("\n") || "",
             held_reason: l.held_reason || l.heldReason || "",
             balance_quantity: balQty,
             uom: l.uom || "PCS",
@@ -1867,10 +1973,19 @@ function GrnPageWorkflow() {
         const qApp: Record<string, number> = {};
         const bMap: Record<string, BatchEntry[]> = {};
         const pMap: Record<string, any> = {};
+        const checklistMap: Record<string, PackageRejection[]> = {};
 
         persistedLines.forEach((l: any, idx: number) => {
           const itemTarget = rehydratedLines[idx] || (l as GrnLineItem);
           const rowKey = grnMaterialKey(itemTarget, idx);
+          if (Array.isArray(l.rejected_sub_materials)) {
+            checklistMap[rowKey] = l.rejected_sub_materials.map((entry: PackageRejection) => ({
+              ...entry,
+              photoUrl: resolveMediaUrl(l.damage_evidence?.find(
+                (photo: any) => photo.evidence_id === entry.evidence_id,
+              )?.file_path),
+            }));
+          }
           const persistedQualityResult = String(l.quality_result || "PENDING").toUpperCase();
           const hasPersistedInspection =
             l.quality_approved_quantity !== null &&
@@ -1918,6 +2033,7 @@ function GrnPageWorkflow() {
           }
         });
         setQualityApproved(qApp);
+        setPackageRejections(checklistMap);
         setMaterialBatches(bMap);
         if (Object.keys(pMap).length > 0) setDamagePhotos(pMap);
       }
@@ -2191,6 +2307,66 @@ function GrnPageWorkflow() {
   }
 
   // Page 2 Calculations & Totals (Physical Receiving Reconciliation)
+  const packageCatalogKey = JSON.stringify([...new Set(materials.map((item) =>
+    resolveGrnMaterialCode(item).trim().toUpperCase(),
+  ).filter(Boolean))].sort());
+  useEffect(() => {
+    if (![3, 6].includes(currentPage) || activeTab !== "wizard") return;
+    let cancelled = false;
+    setPackageCatalogError("");
+    api.getPackageMaterials(JSON.parse(packageCatalogKey)).then((rows) => {
+      if (!cancelled) setPackageCatalog({ key: packageCatalogKey, materials: rows });
+    }).catch(() => {
+      if (!cancelled) setPackageCatalogError("Could not load package contents. Reload this GRN to retry.");
+    });
+    return () => { cancelled = true; };
+  }, [activeTab, currentPage, packageCatalogKey]);
+  const packageCatalogReady = packageCatalog?.key === packageCatalogKey && !packageCatalogError;
+  const catalogSubMaterials = (code: string) =>
+    packageCatalog?.materials.find((row) => row.code.toUpperCase() === code.trim().toUpperCase())?.sub_materials ?? [];
+  const packageComponents = (item: GrnLineItem, index: number) => {
+    const components = new Map<string, Pick<SubMaterial, "name" | "code">>();
+    for (const entry of packageRejections[grnMaterialKey(item, index)] ?? []) {
+      components.set(entry.code, { code: entry.code, name: entry.name });
+    }
+    for (const component of catalogSubMaterials(resolveGrnMaterialCode(item))) {
+      const name = typeof component === "string" ? component : component.name;
+      const subCode = typeof component === "string" ? name : component.code || name;
+      components.set(subCode, { name, code: subCode });
+    }
+    return [...components.values()];
+  };
+  const hasPackageChecklist = (item: GrnLineItem, index: number) =>
+    packageComponents(item, index).length > 0;
+  const checklistComplete = (item: GrnLineItem, index: number) => {
+    if (!hasPackageChecklist(item, index)) return true;
+    const entries = packageRejections[grnMaterialKey(item, index)] ?? [];
+    const received = Number(item.received_quantity);
+    return Number.isSafeInteger(received) && received > 0 &&
+      new Set(entries.map((entry) => entry.package_number)).size === Number(item.damaged_quantity || 0) &&
+      entries.every((entry) =>
+        entry.package_number <= received && entry.remark.trim() && (entry.file || entry.evidence_id),
+      );
+  };
+  const updatePackageChecklist = (item: GrnLineItem, index: number, entries: PackageRejection[]) => {
+    const key = grnMaterialKey(item, index);
+    const damaged = new Set(entries.map((entry) => entry.package_number)).size;
+    const accepted = Number(item.received_quantity) - damaged;
+    setPackageRejections((previous) => ({ ...previous, [key]: entries }));
+    setQualityApproved((previous) => ({ ...previous, [key]: accepted }));
+    setMaterials((previous) => previous.map((line, i) => i === index ? {
+      ...line,
+      good_quantity: accepted,
+      damaged_quantity: damaged,
+      rejected_quantity: 0,
+      held_quantity: 0,
+      damage_reason: entries.map((entry) =>
+        `Package ${entry.package_number}, ${entry.name} (${entry.code}): ${entry.remark.trim()}`,
+      ).join("\n"),
+      quality_approved_quantity: accepted,
+      quality_result: "INSPECTED",
+    } : line));
+  };
   const totalPoQty = materials.reduce((acc, m) => acc + (m.po_quantity || 0), 0);
   const totalReceivedQty = materials.reduce(
     (acc, m) =>
@@ -2214,6 +2390,9 @@ function GrnPageWorkflow() {
       rowKey: grnMaterialKey(material, materialIndex),
     }))
     .filter(({ material }) => (material.damaged_quantity || 0) > 0);
+  const looseDamageRows = damagedMaterialRows.filter(({ material, materialIndex }) =>
+    !hasPackageChecklist(material, materialIndex),
+  );
   const qcHasRequiredEvidence = materials.every((m, idx) => {
     const received = Number(m.received_quantity || 0);
     const accepted = Number(qualityApproved[grnMaterialKey(m, idx)] ?? 0);
@@ -2223,6 +2402,7 @@ function GrnPageWorkflow() {
       Number(m.damaged_quantity || 0) +
       Number(m.held_quantity || 0);
     if (total !== received) return false;
+    if (hasPackageChecklist(m, idx)) return checklistComplete(m, idx);
     if ((m.rejected_quantity || 0) > 0 && !m.rejected_reason?.trim()) return false;
     if ((m.damaged_quantity || 0) > 0 && !m.damage_reason?.trim()) return false;
     if ((m.held_quantity || 0) > 0 && !m.held_reason?.trim()) return false;
@@ -2467,6 +2647,7 @@ function GrnPageWorkflow() {
   ]);
 
   async function handleProceedFromPage3() {
+    if (!packageCatalogReady || busyAction) return;
     const invalidQcLine = materials.find((m, idx) => {
       const received = Number(m.received_quantity || 0);
       const accepted = Number(qualityApproved[grnMaterialKey(m, idx)] ?? 0);
@@ -2475,6 +2656,7 @@ function GrnPageWorkflow() {
       const held = Number(m.held_quantity || 0);
       return (
         accepted + rejected + damaged + held !== received ||
+        !checklistComplete(m, idx) ||
         (rejected > 0 && !m.rejected_reason?.trim()) ||
         (damaged > 0 && !m.damage_reason?.trim()) ||
         (held > 0 && !m.held_reason?.trim())
@@ -2488,7 +2670,8 @@ function GrnPageWorkflow() {
     }
 
     // Strictly validate that if any material has damaged_quantity > 0, at least 1 photo evidence MUST be taken/attached
-    const missingPhotoLine = damagedMaterialRows.find(({ material, rowKey }) => {
+    const missingPhotoLine = damagedMaterialRows.find(({ material, rowKey, materialIndex }) => {
+      if (hasPackageChecklist(material, materialIndex)) return false;
       const p = damagePhotos[rowKey] || damagePhotos[material.item_code];
       const hasPhotos =
         p &&
@@ -2533,17 +2716,14 @@ function GrnPageWorkflow() {
         };
       });
 
-      const updateLinesRes = await api.updateGrnLines(savedGrnId, payloadLines).catch((e) => {
-        console.warn("Update lines during step 3:", e);
-        return null;
-      });
+      const updateLinesRes = await api.updateGrnLines(savedGrnId, payloadLines);
 
       let currentMaterials = materials;
       if (updateLinesRes && Array.isArray(updateLinesRes.lines)) {
         currentMaterials = materials.map((m, idx) => {
-          const match =
-            updateLinesRes.lines[idx] ||
-            updateLinesRes.lines.find((l: any) => (l.item_code || l.itemCode) === m.item_code);
+          const match = updateLinesRes.lines.find((l: any) =>
+            (l.item_code || l.itemCode) === m.item_code,
+          );
           return match
             ? { ...m, grn_line_id: match.grn_line_id || match.grnLineId || m.grn_line_id }
             : m;
@@ -2551,9 +2731,43 @@ function GrnPageWorkflow() {
         setMaterials(currentMaterials);
       }
 
-      // Upload all pending damage photos to backend
+      const savedChecklists = new Map<number, Omit<PackageRejection, "file" | "photoUrl">[]>();
+      for (const [idx, line] of currentMaterials.entries()) {
+        if (!hasPackageChecklist(line, idx)) continue;
+        const key = grnMaterialKey(materials[idx] ?? line, idx);
+        const entries = packageRejections[key] ?? [];
+        const saved = [];
+        for (const entry of entries) {
+          let evidenceId = entry.evidence_id;
+          if (!evidenceId) {
+            if (!line.grn_line_id || !entry.file) throw new Error("Each rejected sub-material needs a photo.");
+            const data = new FormData();
+            data.append("file", entry.file);
+            data.append("damaged_quantity", "1");
+            data.append("reason", `Package ${entry.package_number}, ${entry.name} (${entry.code})`);
+            data.append("remarks", entry.remark.trim());
+            const uploaded = await api.uploadDamageEvidence(line.grn_line_id, data);
+            evidenceId = uploaded.evidence_id || uploaded.evidenceId;
+            if (!evidenceId) throw new Error(`Photo upload failed for ${entry.name}.`);
+            const updated = { ...entry, file: undefined, evidence_id: evidenceId, photoUrl: resolveMediaUrl(uploaded.file_path) };
+            setPackageRejections((previous) => ({
+              ...previous,
+              [key]: (previous[key] ?? []).map((item) =>
+                item.package_number === entry.package_number && item.code === entry.code ? updated : item,
+              ),
+            }));
+          }
+          saved.push({
+            package_number: entry.package_number, code: entry.code, name: entry.name,
+            remark: entry.remark.trim(), evidence_id: evidenceId,
+          });
+        }
+        savedChecklists.set(idx, saved);
+      }
+
+      // Upload pending photos for materials without a package checklist.
       for (const [idx, m] of currentMaterials.entries()) {
-        if ((m.damaged_quantity || 0) > 0) {
+        if (!savedChecklists.has(idx) && (m.damaged_quantity || 0) > 0) {
           const rowKey = grnMaterialKey(m, idx);
           const p = damagePhotos[rowKey] || damagePhotos[m.item_code];
           const lineIdToUse = m.grn_line_id || m.item_code;
@@ -2598,6 +2812,7 @@ function GrnPageWorkflow() {
             good_quantity: qualityApproved[grnMaterialKey(m, idx)] ?? 0,
             rejected_quantity: m.rejected_quantity || 0,
             damaged_quantity: m.damaged_quantity || 0,
+            rejected_sub_materials: savedChecklists.get(idx),
             held_quantity: m.held_quantity || 0,
             rejected_reason: m.rejected_reason || null,
             damage_reason: m.damage_reason || null,
@@ -2609,8 +2824,7 @@ function GrnPageWorkflow() {
                 ? "PARTIALLY_ACCEPTED"
                 : "ACCEPTED",
           })),
-        )
-        .catch((e) => console.warn("Quality submit:", e));
+        );
 
       const nextStep = 4;
       setMaxCompletedStep((prev) => Math.max(prev, 3));
@@ -3410,7 +3624,16 @@ function GrnPageWorkflow() {
     const batchQty = b.batch_quantity !== undefined ? b.batch_quantity : goodQty;
     const inspectionStatus = dmgQty > 0 || rejQty > 0 ? "PARTIAL" : "COMPLETED";
 
-    return [
+    const contents = catalogSubMaterials(mat ? resolveGrnMaterialCode(mat) : itemCode).map((component) => {
+      if (typeof component === "string") return JSON.stringify({ name: component });
+      return JSON.stringify({
+        name: component.name,
+        code: component.code,
+        quantity_per_package: component.quantity,
+        uom: component.uom,
+      });
+    });
+    const basePayload = [
       `GRN Number: ${header.grn_number || ""}`,
       `Supplier: ${header.supplier_name || header.supplier_company_name || ""}`,
       `Warehouse: ${header.warehouse_name || "Main Warehouse"}`,
@@ -3430,6 +3653,16 @@ function GrnPageWorkflow() {
       `Inspection Status: ${inspectionStatus}`,
       `Batch Quantity: ${batchQty} ${uom}`,
     ].join("\n");
+    if (!contents.length) return basePayload;
+    const fullPayload = `${basePayload}\nSub-materials (per package):\n${contents.join("\n")}`;
+    // Large manifests need a lookup link so every batch still has a scannable QR.
+    if (new TextEncoder().encode(fullPayload).length <= 2200) return fullPayload;
+    if (grnId && typeof window !== "undefined") {
+      const url = new URL("/grn", window.location.origin);
+      url.search = new URLSearchParams({ tab: "wizard", page: "6", grn_id: grnId }).toString();
+      return url.toString();
+    }
+    return `${basePayload}\nSub-materials: see GRN batch label`;
   }
 
   // Page 6 QR Code Generation (Material-Wise) -> Encodes complete self-contained stock details
@@ -4083,6 +4316,7 @@ function GrnPageWorkflow() {
       void (async () => {
         const generated: Record<string, { qr_id: string; data_url: string; payload: string }> = {};
         for (const [idx, m] of materials.entries()) {
+          if (currentPage === 6 && !packageCatalogReady) continue;
           if ((m.good_quantity || 0) <= 0) continue;
           const rowKey = grnMaterialKey(m, idx);
           const code = m.item_code;
@@ -4206,6 +4440,9 @@ function GrnPageWorkflow() {
     materials,
     damagePhotos,
     qualityApproved,
+    packageCatalog,
+    packageCatalogReady,
+    grnId,
   ]);
 
   const selectedReconciliation = useMemo(() => {
@@ -5656,7 +5893,7 @@ function GrnPageWorkflow() {
                 <InformationTooltip help="reconciliation" /></h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Inspect physically received materials into Accepted (Good) and Damaged quantities,
-                  then record photo evidence for damaged goods.
+                  then record photo evidence for damaged goods. For packages, review the sub-material acceptance checklist below.
                 </p>
               </div>
 
@@ -5680,6 +5917,7 @@ function GrnPageWorkflow() {
                     <tbody className="divide-y font-medium">
                       {materials.map((m, idx) => {
                         const rowKey = grnMaterialKey(m, idx);
+                        const checklist = hasPackageChecklist(m, idx);
                         const recQty =
                           m.received_quantity !== undefined
                             ? m.received_quantity
@@ -5713,7 +5951,8 @@ function GrnPageWorkflow() {
                               </div>
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <Input
+                              {checklist ? <span className="font-bold text-emerald-700">{acceptedVal}</span> : <Input
+                                disabled={!packageCatalogReady}
                                 type="number"
                                 min={0}
                                 max={recQty}
@@ -5741,10 +5980,11 @@ function GrnPageWorkflow() {
                                   );
                                 }}
                                 className="w-28 text-right font-bold text-emerald-600 rounded-xl ml-auto"
-                              />
+                              />}
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <Input
+                              {checklist ? <span className="font-bold text-rose-700">{m.damaged_quantity || 0}</span> : <Input
+                                disabled={!packageCatalogReady}
                                 type="number"
                                 min={0}
                                 max={recQty}
@@ -5774,7 +6014,7 @@ function GrnPageWorkflow() {
                                   );
                                 }}
                                 className="w-28 text-right font-bold text-rose-600 rounded-xl ml-auto"
-                              />
+                              />}
                             </td>
                             <td className="px-4 py-3 text-center">
                               <span
@@ -5803,13 +6043,59 @@ function GrnPageWorkflow() {
                 </div>
               </div>
 
+              {!packageCatalogReady && (
+                <p role="status" className="text-sm text-muted-foreground">
+                  {packageCatalogError || "Loading package contents…"}
+                </p>
+              )}
+              {packageCatalogReady && materials.map((material, index) => {
+                const components = packageComponents(material, index);
+                if (!components.length) return null;
+                const key = grnMaterialKey(material, index);
+                const entries = packageRejections[key] ?? [];
+                const count = Number(material.received_quantity);
+                return (
+                  <fieldset key={key} disabled={busyAction} className="space-y-3 rounded-xl border p-4">
+                    <legend className="px-1 font-semibold">{material.material_name} — Sub-material acceptance checklist</legend>
+                    {Number.isSafeInteger(count) && count > 0 ? (
+                      <>
+                        <p className="text-sm text-muted-foreground">
+                          Select a package and leave accepted items checked. Uncheck any rejected item and add a remark and photo. A package with any rejected item counts as one damaged package.
+                        </p>
+                        <PackageDamageChecklist count={count} components={components} entries={entries}
+                          onChange={(updated) => updatePackageChecklist(material, index, updated)}
+                        />
+                        {entries.length === 0 && (
+                          <Button type="button" variant="outline" onClick={() => updatePackageChecklist(material, index, [])}>
+                            Confirm all packages accepted
+                          </Button>
+                        )}
+                      </>
+                    ) : <p className="text-sm text-rose-700">Enter a whole received package count on Step 2.</p>}
+                  </fieldset>
+                );
+              })}
+
               {/* Damaged Goods Photo Evidence Section */}
               <div className="pt-2 space-y-3">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                   <AlertTriangle className="size-4 text-rose-500" /> Damage Evidence & Remarks
                 <InformationTooltip help="damageEvidence" /></h4>
 
-                {damagedMaterialRows.length === 0 ? (
+                {materials.flatMap((material, index) => {
+                  const rowKey = grnMaterialKey(material, index);
+                  return (packageRejections[rowKey] ?? []).map((entry) => (
+                    <div key={`${rowKey}:${entry.package_number}:${entry.code}`} className="flex flex-wrap items-start justify-between gap-3 rounded-xl border p-3">
+                      <div className="space-y-1 text-sm">
+                        <p className="font-semibold">{material.material_name} · Package {entry.package_number}</p>
+                        <p>{entry.name} ({entry.code})</p>
+                        <p className="whitespace-pre-wrap text-muted-foreground">{entry.remark.trim() || "Remark required"}</p>
+                      </div>
+                      <PackageEvidencePreview entry={entry} />
+                    </div>
+                  ));
+                })}
+                {looseDamageRows.length === 0 ? damagedMaterialRows.length === 0 && (
                   <div className="rounded-xl border bg-emerald-50 p-4 text-center text-sm font-medium text-emerald-800 flex items-center justify-center gap-2">
                     <CheckCircle2 className="size-5 text-emerald-600" />
                     {materials.every(
@@ -5834,7 +6120,7 @@ function GrnPageWorkflow() {
                       </thead>
 
                       <tbody className="divide-y">
-                        {damagedMaterialRows.map(({ material: m, materialIndex, rowKey }) => (
+                        {looseDamageRows.map(({ material: m, materialIndex, rowKey }) => (
                           <tr key={rowKey}>
                             <td className="px-4 py-3 font-mono font-bold text-primary">
                               {resolveGrnMaterialCode(m) || "—"}
@@ -5930,10 +6216,11 @@ function GrnPageWorkflow() {
                     </thead>
                     <tbody className="divide-y">
                       {materials.flatMap((m, idx) => {
+                        const packageDamage = hasPackageChecklist(m, idx) && Number(m.damaged_quantity || 0) > 0;
                         const rows = [
                           {
                             kind: "Damaged",
-                            qty: Number(m.damaged_quantity || 0),
+                            qty: hasPackageChecklist(m, idx) ? 0 : Number(m.damaged_quantity || 0),
                             field: "damage_reason" as const,
                           },
                           {
@@ -5947,7 +6234,19 @@ function GrnPageWorkflow() {
                             field: "held_reason" as const,
                           },
                         ].filter((row) => row.qty > 0);
-                        return rows.map((row) => (
+                        const packageRow = packageDamage ? (
+                          <tr key={`${grnMaterialKey(m, idx)}-package-damage`}>
+                            <td className="px-4 py-3 font-semibold">{m.material_name}</td>
+                            <td className="px-4 py-3 font-semibold">Damaged packages</td>
+                            <td className="px-4 py-3 text-right font-bold">{m.damaged_quantity}</td>
+                            <td className="px-4 py-3 whitespace-pre-wrap text-sm">
+                              {(packageRejections[grnMaterialKey(m, idx)] ?? []).map((entry) =>
+                                `Package ${entry.package_number}, ${entry.name}: ${entry.remark.trim() || "Remark required"}`,
+                              ).join("\n") || "Complete the sub-material checklist"}
+                            </td>
+                          </tr>
+                        ) : null;
+                        return [packageRow, ...rows.map((row) => (
                           <tr key={`${grnMaterialKey(m, idx)}-${row.kind}`}>
                             <td className="px-4 py-3 font-semibold">
                               {resolveGrnMaterialCode(m) || "—"} — {m.material_name}
@@ -5971,10 +6270,10 @@ function GrnPageWorkflow() {
                               />
                             </td>
                           </tr>
-                        ));
+                        ))];
                       })}
                       {materials.every(
-                        (m) =>
+                        (m, idx) =>
                           !(
                             Number(m.damaged_quantity || 0) ||
                             Number(m.rejected_quantity || 0) ||
@@ -6000,7 +6299,7 @@ function GrnPageWorkflow() {
                   <ArrowLeft className="mr-2 size-4" /> Back
                 </Button>
                 <Button
-                  disabled={busyAction || !qcHasRequiredEvidence}
+                  disabled={busyAction || !packageCatalogReady || !qcHasRequiredEvidence}
                   onClick={() => void handleProceedFromPage3()}
                   className="rounded-xl font-bold px-6"
                 >
@@ -6671,9 +6970,9 @@ function GrnPageWorkflow() {
                                       </div>
                                     ) : (
                                       <div className="grid size-48 place-items-center bg-gray-100 mx-auto rounded-2xl border border-dashed border-gray-300">
-                                        <Loader2 className="size-8 animate-spin text-primary" />
+                                        {!packageCatalogError && <Loader2 className="size-8 animate-spin text-primary" />}
                                         <span className="text-xs text-gray-500">
-                                          Generating QR...
+                                          {packageCatalogError ? "QR unavailable" : "Generating QR..."}
                                         </span>
                                       </div>
                                     )}
@@ -6686,6 +6985,33 @@ function GrnPageWorkflow() {
                                     <dt className="text-muted-foreground">Batch quantity</dt><dd className="font-semibold tabular-nums">{b.batch_quantity} {mat.uom}</dd>
                                   </dl>
 
+                                  {catalogSubMaterials(resolveGrnMaterialCode(mat)).length > 0 && (
+                                    <div className="space-y-2 border-t pt-3 text-left text-xs">
+                                      <h5 className="font-semibold">Sub-materials per package</h5>
+                                      <ul className="divide-y rounded-lg border">
+                                        {catalogSubMaterials(resolveGrnMaterialCode(mat)).map((component) => {
+                                          const item = typeof component === "string" ? { name: component } : component;
+                                          return (
+                                            <li key={item.name} className="flex flex-wrap justify-between gap-x-2 gap-y-1 px-2 py-2">
+                                              <div className="min-w-0 break-words">
+                                                <p className="font-medium">{item.name}</p>
+                                                {"code" in item && item.code && <p className="font-mono text-muted-foreground">{item.code}</p>}
+                                              </div>
+                                              {"quantity" in item && item.quantity != null && (
+                                                <span className="font-semibold tabular-nums">{item.quantity} {item.uom}</span>
+                                              )}
+                                              {"uom" in item && item.quantity == null && item.uom && <span>{item.uom}</span>}
+                                            </li>
+                                          );
+                                        })}
+                                      </ul>
+                                    </div>
+                                  )}
+                                  {!packageCatalogReady && (
+                                    <p className="text-left text-xs text-muted-foreground">
+                                      {packageCatalogError || "Loading sub-material details…"}
+                                    </p>
+                                  )}
                                   <div className="grid grid-cols-1 gap-2 border-t pt-3">
                                     {qrInfo.data_url ? (
                                       <a
@@ -7983,6 +8309,27 @@ function GrnPageWorkflow() {
                   </tbody>
                 </table>
               </div>
+              {selectedGrnDetail.lines?.map((line: any) => {
+                const entries: PackageRejection[] = line.rejected_sub_materials ?? [];
+                if (!entries.length) return null;
+                return (
+                  <section key={line.grn_line_id || line.item_code} className="space-y-2 rounded-xl border p-4">
+                    <h4 className="font-semibold">{line.material_name || line.item_code} — Rejected sub-materials</h4>
+                    <ul className="divide-y text-sm">
+                      {entries.map((entry) => {
+                        const photo = line.damage_evidence?.find((item: any) => item.evidence_id === entry.evidence_id);
+                        return (
+                          <li key={entry.evidence_id} className="space-y-1 py-2">
+                            <p className="font-medium">Package {entry.package_number} · {entry.name} ({entry.code})</p>
+                            <p className="whitespace-pre-wrap">{entry.remark}</p>
+                            {photo?.file_path && <a className="underline" href={resolveMediaUrl(photo.file_path)} target="_blank" rel="noreferrer">View photo</a>}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                );
+              })}
               {(() => {
                 const allLines = selectedGrnDetail.lines?.length
                   ? selectedGrnDetail.lines

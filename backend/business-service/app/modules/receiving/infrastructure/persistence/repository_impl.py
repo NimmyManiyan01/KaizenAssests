@@ -1581,6 +1581,29 @@ class SqlAlchemyGrnRepository(GrnRepository):
                     raise ValueError(f"Damage reason is required for {line.item_code}")
                 if held_qty > 0 and not str(item.get("held_reason") or "").strip():
                     raise ValueError(f"Held reason is required for {line.item_code}")
+                checklist = item.get("rejected_sub_materials")
+                if checklist is not None:
+                    packages = {entry["package_number"] for entry in checklist}
+                    entries = {(entry["package_number"], entry["code"]) for entry in checklist}
+                    evidence_ids = {uuid.UUID(entry["evidence_id"]) for entry in checklist}
+                    if (
+                        len(packages) != damaged_qty
+                        or any(number > received_qty for number in packages)
+                        or len(entries) != len(checklist)
+                        or len(evidence_ids) != len(checklist)
+                        or any(not entry["remark"].strip() for entry in checklist)
+                    ):
+                        raise ValueError(f"Invalid package damage checklist for {line.item_code}")
+                    if evidence_ids:
+                        linked = await self._session.scalars(
+                            select(GrnDamageEvidenceModel.id).where(
+                                GrnDamageEvidenceModel.grn_line_id == line.id,
+                                GrnDamageEvidenceModel.id.in_(evidence_ids),
+                            )
+                        )
+                        if set(linked) != evidence_ids:
+                            raise ValueError(f"Each rejected sub-material needs its own photo for {line.item_code}")
+                    line.rejected_sub_materials = checklist
                 line.quality_result = item.get("quality_result", "ACCEPTED")
                 line.accepted_quantity = accepted_qty
                 line.rejected_quantity = rejected_qty

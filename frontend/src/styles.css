@@ -1873,7 +1873,6 @@ body.app-typography .warehouse-module-content[data-warehouse-tab="picking"] .war
   .assembly-requisitions-panel [data-slot="card-content"] { padding: 16px; }
 }
 .warehouse-picking-queue table :is(th, td) { vertical-align: middle; overflow-wrap: anywhere; }
-.warehouse-picking-queue table :is(th, td):nth-child(5),
 .warehouse-picking-queue table :is(th, td):nth-child(6) { text-align: center; }
 .warehouse-picking-queue td:nth-child(4) > span { max-width: 100%; white-space: normal; line-height: 1.5; overflow-wrap: anywhere; }
 

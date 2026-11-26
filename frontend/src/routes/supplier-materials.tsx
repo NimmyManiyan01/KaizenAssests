@@ -5,6 +5,7 @@ import {
   Eye,
   Loader2,
   PackagePlus,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
@@ -18,7 +19,7 @@ import { AppShell } from "@/components/wms/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,11 +47,40 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { api } from "@/lib/api-client";
+import { api, type SubMaterial } from "@/lib/api-client";
 
 export const Route = createFileRoute("/supplier-materials")({ component: SupplierMaterials });
 const UOMS = ["PCS", "BUNDLE", "SET", "KG", "LITER", "METER", "BOX"];
-const emptyForm = { code: "", name: "", category: "", description: "", uom: "PCS" };
+type SubMaterialDraft = Omit<SubMaterial, "quantity"> & { quantity: string };
+const emptyForm = { code: "", name: "", category: "", description: "", sub_materials: [] as SubMaterialDraft[] };
+
+function readSubMaterials(items: (string | Partial<SubMaterial>)[] = []): SubMaterialDraft[] {
+  return items.map((item) => {
+    const saved = typeof item === "string" ? { name: item } : item;
+    return {
+      name: saved.name ?? "",
+      code: saved.code ?? "",
+      uom: saved.uom ?? "PCS",
+      quantity: saved.quantity == null ? "" : String(saved.quantity),
+    };
+  });
+}
+
+function assignSubCodes(items: SubMaterialDraft[], parentCode: string, previous: SubMaterialDraft[]) {
+  if (!parentCode.trim()) return items;
+  const used = new Set([...previous, ...items].map(({ code }) => code.toUpperCase()));
+  const prefix = parentCode.trim().toUpperCase().slice(0, 56);
+  let sequence = 1;
+  return items.map((item) => {
+    if (item.code || !item.name.trim()) return item;
+    let code: string;
+    do {
+      code = `${prefix}-${String(sequence++).padStart(3, "0")}`;
+    } while (used.has(code));
+    used.add(code);
+    return { ...item, code };
+  });
+}
 
 
 function SupplierMaterials() {
@@ -64,6 +94,11 @@ function SupplierMaterials() {
   const [details, setDetails] = useState<any | null>(null);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const subMaterialsWithCodes = assignSubCodes(
+    form.sub_materials,
+    form.code,
+    readSubMaterials(editing?.sub_materials ?? []),
+  );
   const [saving, setSaving] = useState(false);
   const [pendingAction, setPendingAction] = useState<{
     type: "status" | "delete";
@@ -138,14 +173,32 @@ function SupplierMaterials() {
       name: m.name || "",
       category: m.category || "",
       description: m.description || "",
-      uom: m.uom || "PCS",
+      sub_materials: readSubMaterials(m.sub_materials ?? []),
     });
     setDialogOpen(true);
   };
   const saveMaterial = async (event: React.FormEvent) => {
     event.preventDefault();
-    const next = { ...form, code: form.code.trim().toUpperCase(), name: form.name.trim() };
-    if (!next.code || !next.name || !next.uom) {
+    const next = {
+      ...form,
+      code: form.code.trim().toUpperCase(),
+      name: form.name.trim(),
+      sub_materials: subMaterialsWithCodes.map((item) => ({
+        ...item,
+        name: item.name.trim(),
+        code: item.code.trim().toUpperCase(),
+        quantity: Number(item.quantity),
+      })),
+    };
+    if (next.sub_materials.some((item) => !item.name)) {
+      toast.error("Enter a name for each sub-material or remove the empty row");
+      return;
+    }
+    if (next.sub_materials.some((item) => !item.code || !(item.quantity > 0 && item.quantity <= 1e15))) {
+      toast.error("Enter a positive quantity for each sub-material");
+      return;
+    }
+    if (!next.code || !next.name) {
       toast.error("Complete all required material fields");
       return;
     }
@@ -163,8 +216,11 @@ function SupplierMaterials() {
     setSaving(true);
     try {
       const saved = editing
-        ? await api.updateGateMaterial(editing.id, { material_name: next.name, base_uom: next.uom })
-        : await api.createMaterialComponent(next.name, next.uom, next.code);
+        ? await api.updateGateMaterial(editing.id, {
+            material_name: next.name,
+            sub_materials: next.sub_materials,
+          })
+        : await api.createMaterialComponent(next.name, undefined, next.code, undefined, undefined, next.sub_materials);
       setMaterials((rows) =>
         editing
           ? rows.map((row) => (row.id === editing.id ? { ...row, ...saved, ...next } : row))
@@ -177,6 +233,12 @@ function SupplierMaterials() {
     } finally {
       setSaving(false);
     }
+  };
+  const updateSubMaterial = (index: number, change: Partial<SubMaterialDraft>) => {
+    setForm((current) => ({
+      ...current,
+      sub_materials: current.sub_materials.map((item, i) => i === index ? { ...item, ...change } : item),
+    }));
   };
   const toggleStatus = async (m: any) => {
     const nextStatus = String(m.status).toUpperCase() === "ACTIVE" ? "Inactive" : "Active";
@@ -525,24 +587,76 @@ function SupplierMaterials() {
                   </p>
                 )}
               </div>
-              <div>
-                <Label htmlFor="supplier-material-uom">Base UOM *</Label>
-                <Select
-                  value={form.uom}
-                  onValueChange={(value) => setForm({ ...form, uom: value })}
+              <fieldset className="space-y-3 rounded-lg border p-3">
+                <legend className="px-1 text-sm font-medium">Sub-materials</legend>
+                {subMaterialsWithCodes.map(({ name, code, uom, quantity }, index) => (
+                  <div key={index} className="space-y-3 rounded-lg border p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label htmlFor={`sub-material-name-${index}`}>Sub-material name</Label>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Remove sub-material ${index + 1}`}
+                        onClick={() => setForm((current) => ({
+                          ...current,
+                          sub_materials: current.sub_materials.filter((_, i) => i !== index),
+                        }))}
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                    <Input
+                      id={`sub-material-name-${index}`}
+                      placeholder="Enter sub-material name"
+                      value={name}
+                      maxLength={256}
+                      required
+                      onChange={(event) => updateSubMaterial(index, { name: event.target.value })}
+                    />
+                    <div className="space-y-1">
+                      <Label htmlFor={`sub-material-code-${index}`}>Sub-code</Label>
+                      <Input id={`sub-material-code-${index}`} value={code} readOnly
+                        placeholder="Generated automatically"
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="min-w-0 space-y-1">
+                        <Label htmlFor={`sub-material-uom-${index}`}>UOM</Label>
+                        <Select value={uom} onValueChange={(value) => updateSubMaterial(index, { uom: value })}>
+                          <SelectTrigger id={`sub-material-uom-${index}`} className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {[...new Set([...uoms, uom])].map((unit) => (
+                              <SelectItem key={unit} value={unit}>{unit}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <Label htmlFor={`sub-material-quantity-${index}`}>Quantity per package</Label>
+                        <Input id={`sub-material-quantity-${index}`} type="number" min="0" max={1e15}
+                          step="any" value={quantity} required
+                          onChange={(event) => updateSubMaterial(index, { quantity: event.target.value })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={saving || form.sub_materials.length >= 100}
+                  onClick={() => setForm((current) => ({
+                    ...current,
+                    sub_materials: [...current.sub_materials, { name: "", code: "", uom: "PCS", quantity: "" }],
+                  }))}
                 >
-                  <SelectTrigger id="supplier-material-uom" className="mt-1.5 h-10 rounded-lg">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {uoms.map((v) => (
-                      <SelectItem key={v} value={v}>
-                        {v}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                  <Plus className="size-4" /> Add sub-material
+                </Button>
+              </fieldset>
               <div className="flex justify-end gap-2">
                 <Button
                   type="button"
@@ -555,7 +669,7 @@ function SupplierMaterials() {
                 <Button
                   type="submit"
                   className="h-10 rounded-lg"
-                  disabled={saving || !form.code.trim() || !form.name.trim() || !form.uom}
+                  disabled={saving || !form.code.trim() || !form.name.trim()}
                 >
                   {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
                   {editing ? "Save Changes" : "Save Material"}
@@ -565,23 +679,59 @@ function SupplierMaterials() {
           </DialogContent>
         </Dialog>
         <Dialog open={Boolean(details)} onOpenChange={(open) => !open && setDetails(null)}>
-          <DialogContent className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-lg overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
+          <DialogContent className="w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-2xl overflow-y-auto rounded-xl p-4 shadow-lg sm:p-6">
             <DialogHeader>
               <DialogTitle>Material Details</DialogTitle>
+              <DialogDescription>Material identity and package contents.</DialogDescription>
             </DialogHeader>
             {details && (
-              <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
-                {[
-                  ["Material Code", details.code],
-                  ["Material Name", details.name],
-                  ["UOM", details.uom],
-                ].map(([label, value]) => (
-                  <div key={String(label)}>
-                    <p className="text-xs text-muted-foreground">{label}</p>
-                    <p className="font-semibold">{String(value)}</p>
+              <>
+                <dl className="grid gap-4 rounded-lg border bg-muted/30 p-4 text-sm sm:grid-cols-2">
+                  <div className="min-w-0">
+                    <dt className="text-xs text-muted-foreground">Material Code</dt>
+                    <dd className="break-words font-mono font-semibold">{details.code}</dd>
                   </div>
-                ))}
-              </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs text-muted-foreground">Material Name</dt>
+                    <dd className="break-words font-semibold">{details.name}</dd>
+                  </div>
+                </dl>
+                <section aria-labelledby="material-details-components" className="space-y-2">
+                  <h3 id="material-details-components" className="text-sm font-semibold">Sub-materials</h3>
+                  {details.sub_materials?.length > 0 ? (
+                    <div className="overflow-x-auto rounded-lg border">
+                      <table aria-labelledby="material-details-components" className="w-full text-left text-sm">
+                        <thead className="bg-muted">
+                          <tr>
+                            <th scope="col" className="px-3 py-2">Name</th>
+                            <th scope="col" className="px-3 py-2">Sub-code</th>
+                            <th scope="col" className="px-3 py-2 text-right">Qty per package</th>
+                            <th scope="col" className="px-3 py-2">UOM</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {readSubMaterials(details.sub_materials).map(({ name, code, uom, quantity }) => (
+                            <tr key={code || name}>
+                              <th scope="row" className="px-3 py-2 font-medium">{name}</th>
+                              <td className="px-3 py-2 font-mono text-xs">{code || "—"}</td>
+                              <td className="px-3 py-2 text-right tabular-nums">{quantity || "—"}</td>
+                              <td className="px-3 py-2">{uom}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : <p className="text-sm text-muted-foreground">No sub-materials added.</p>}
+                </section>
+                <div className="flex justify-end border-t pt-4">
+                  <Button type="button" onClick={() => {
+                    setDetails(null);
+                    openEdit(details);
+                  }}>
+                    <Pencil className="size-4" /> Edit Material
+                  </Button>
+                </div>
+              </>
             )}
           </DialogContent>
         </Dialog>

@@ -7,6 +7,11 @@ from sqlalchemy import func, select, text
 
 from app.modules.gate.infrastructure.persistence.models import GateEntryModel
 
+COMPLETED_RECEIVING_STATUSES = (
+    "RECEIVING_COMPLETED", "RECEIVING_COMPLETE", "COMPLETED", "UNLOADED", "GRN_POSTED",
+    "VEHICLE_EXITED", "GATE_EXIT_COMPLETED", "EXITED", "CHECKED_OUT",
+)
+
 
 def normalize_vehicle(value: str) -> str:
     return re.sub(r"[\s-]+", "", value).upper()
@@ -48,6 +53,16 @@ async def validate_gate_duplicates(session, vehicle: str, asn_id: uuid.UUID | No
         # Obtain SQLite's writer reservation before checking for duplicates.
         await session.execute(text("UPDATE gate_entry SET status = status WHERE 0"))
     normalized_column = func.replace(func.replace(func.upper(GateEntryModel.vehicle_number), "-", ""), " ", "")
+    if asn_id is not None:
+        completed = await session.scalar(
+            select(GateEntryModel.id).where(
+                GateEntryModel.asn_id == asn_id,
+                normalized_column == normalize_vehicle(vehicle),
+                func.upper(GateEntryModel.status).in_(COMPLETED_RECEIVING_STATUSES),
+            ).limit(1)
+        )
+        if completed:
+            raise HTTPException(409, "Receiving is complete for this vehicle on this ASN.")
     duplicate_filters = [
         normalized_column == normalize_vehicle(vehicle),
         GateEntryModel.status.notin_(["REJECTED", "DENIED_ENTRY", "VEHICLE_EXITED", "GATE_EXIT_COMPLETED", "CHECKED_OUT"]),

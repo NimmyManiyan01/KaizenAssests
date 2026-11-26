@@ -16,6 +16,7 @@ type Props = {
   }) => void;
   initialPreviewUrl?: string;
   initialFile?: File;
+  onCapture?: (file: File) => void;
 };
 
 // Do not reset photo state when reason or quantity changes, only when the line changes.
@@ -30,6 +31,7 @@ function PhotoEditor({
   onSuccess,
   initialPreviewUrl,
   initialFile,
+  onCapture,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const mounted = useRef(false);
@@ -93,7 +95,7 @@ function PhotoEditor({
     async function openCamera() {
       try {
         if (!navigator.mediaDevices?.getUserMedia) {
-          throw new Error("Camera requires HTTPS or localhost. Use Upload Photo instead.");
+          throw new Error("Camera requires HTTPS or localhost.");
         }
 
         const opened = await navigator.mediaDevices.getUserMedia({
@@ -130,7 +132,7 @@ function PhotoEditor({
           name === "NotAllowedError"
             ? "Camera permission denied. Allow camera access in your browser."
             : name === "NotFoundError"
-              ? "No camera found. Use Upload Photo instead."
+              ? "No camera found."
               : name === "NotReadableError"
                 ? "Camera is unavailable or used by another application."
                 : cause instanceof Error
@@ -216,6 +218,7 @@ function PhotoEditor({
       const capturedFile = new File([blob], `damage-${Date.now()}.jpg`, { type: "image/jpeg" });
 
       if (choose(capturedFile)) {
+        onCapture?.(capturedFile);
         setCameraOpen(false);
         setReady(false);
       }
@@ -309,7 +312,7 @@ function PhotoEditor({
             setCameraOpen(true);
           }}
         >
-          {file ? "Retake" : "Open Camera"}
+          {preview ? "Retake Photo" : "Open Camera"}
         </Button>
       )}
 
@@ -370,7 +373,7 @@ function PhotoEditor({
         </>
       )}
 
-      {file && (
+      {file && !onCapture && (
         <>
           {!saved && (
             <label className="flex items-start gap-2 text-xs text-muted-foreground">
@@ -404,13 +407,13 @@ function PhotoEditor({
         </>
       )}
 
-      {!validLine && (
+      {!onCapture && !validLine && (
         <p className="text-xs text-red-600">
           Return to Page 2 and click Next to save material details.
         </p>
       )}
 
-      {!validQuantity && (
+      {!onCapture && !validQuantity && (
         <p className="text-xs text-red-600">Damaged quantity must be greater than zero.</p>
       )}
 
@@ -420,7 +423,7 @@ function PhotoEditor({
         </p>
       )}
 
-      {saved && (
+      {saved && !onCapture && (
         <p role="status" className="text-xs text-green-700">
           Photo saved successfully.
         </p>

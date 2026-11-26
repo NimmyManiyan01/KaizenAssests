@@ -127,6 +127,7 @@ class MaterialModel(Base):
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     material_code: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     material_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    sub_materials: Mapped[Optional[List[str | dict[str, str | float]]]] = mapped_column(JSON, nullable=True)
     category: Mapped[str] = mapped_column(String(128), nullable=False, default="General")
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     base_uom: Mapped[str] = mapped_column(String(32), default="PCS", nullable=False)

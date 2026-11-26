@@ -2509,25 +2509,21 @@ function SimpleWarehouseModule() {
               />
             ) : (
               <>
-                <AssemblyRequisitionsPanel
-                  refreshKey={requisitionRefreshKey}
-                  showRefresh={false}
-                  onUpdated={() => fetchData(true)}
-                />
-                <Card className="warehouse-picking-queue overflow-x-auto border-violet-200 bg-gradient-to-br from-violet-50/80 via-white to-indigo-50/50 p-5 shadow-sm dark:border-violet-900/60 dark:bg-violet-950/20">
+                <Card className="warehouse-picking-queue min-w-0 border-violet-200 bg-gradient-to-br from-violet-50/80 via-white to-indigo-50/50 p-5 shadow-sm dark:border-violet-900/60 dark:bg-violet-950/20">
                   <h3 className="mb-4 text-sm font-bold uppercase tracking-wider text-slate-900 dark:text-slate-100">
                     Warehouse picking queue <InformationTooltip help="pickRemaining" />
                   </h3>
-                  <table className="w-full min-w-[1040px] table-fixed text-left text-sm">
+                  <div className="w-full overflow-x-auto rounded-lg border">
+                  <table className="w-full min-w-[1200px] table-fixed text-left text-sm">
                     <colgroup>
                       <col className="w-[13%]" />
-                      <col className="w-[13%]" />
-                      <col className="w-[13%]" />
                       <col className="w-[14%]" />
-                      <col className="w-[24%]" />
-                      <col className="w-[10%]" />
-                      <col className="w-[12%]" />
-                      <col className="w-[10%]" />
+                      <col className="w-[13%]" />
+                      <col className="w-[11%]" />
+                      <col className="w-[19%]" />
+                      <col className="w-[8%]" />
+                      <col className="w-[9%]" />
+                      <col className="w-[13%]" />
                     </colgroup>
                     <thead>
                       <tr className="border-b border-violet-200 bg-violet-100/70 text-violet-950 uppercase dark:border-violet-900 dark:bg-violet-950/50 dark:text-violet-100">
@@ -2536,11 +2532,11 @@ function SimpleWarehouseModule() {
                         <th className="py-2.5 px-3">Destination Unit</th>
                         <th className="py-2.5 px-3">Material</th>
                         <th className="py-2.5 px-3">Pick Location</th>
-                        <th className="py-2.5 px-3">Quantity</th>
+                        <th className="whitespace-nowrap py-2.5 px-3">Qty</th>
                         <th className="py-2.5 px-3">
                           Status<InformationTooltip help="workflowStatus" />
                         </th>
-                        <th className="py-2.5 px-3 text-right">Action</th>
+                        <th className="py-2.5 px-3 text-center">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -2568,7 +2564,7 @@ function SimpleWarehouseModule() {
                               <td className="py-3 px-3 font-semibold text-indigo-600">
                                 <button
                                   type="button"
-                                  className="underline underline-offset-2"
+                                  className="max-w-full text-left underline underline-offset-2"
                                   onClick={() => {
                                     setPickupFifoAlert("");
                                     setPickupQrVerified({ material: false, rack: false });
@@ -2626,7 +2622,7 @@ function SimpleWarehouseModule() {
                                   )}
                                 </div>
                               </td>
-                              <td className="py-3 px-3 font-bold">
+                              <td className="whitespace-nowrap py-3 px-3 font-bold tabular-nums">
                                 {p.quantity ?? "—"} {p.uom || ""}
                               </td>
                               <td className="py-3 px-3">
@@ -2641,7 +2637,7 @@ function SimpleWarehouseModule() {
                                   {p.status || "—"}
                                 </Badge>
                               </td>
-                              <td className="py-3 px-3 text-right">
+                              <td className="py-3 px-3 text-center">
                                 {p.status !== "COMPLETED" && (
                                   <Button
                                     size="sm"
@@ -2662,7 +2658,7 @@ function SimpleWarehouseModule() {
                                       });
                                       setPickupToConfirm(p);
                                     }}
-                                    className="h-7 text-xs bg-indigo-600 hover:bg-indigo-700 text-white"
+                                    className="h-auto min-h-8 max-w-full whitespace-normal px-2 py-1 text-xs leading-tight bg-indigo-600 hover:bg-indigo-700 text-white"
                                   >
                                     Confirm Pick
                                   </Button>
@@ -2673,7 +2669,13 @@ function SimpleWarehouseModule() {
                       )}
                     </tbody>
                   </table>
+                  </div>
                 </Card>
+                <AssemblyRequisitionsPanel
+                  refreshKey={requisitionRefreshKey}
+                  showRefresh={false}
+                  onUpdated={() => fetchData(true)}
+                />
               </>
             )}
           </TabsContent>

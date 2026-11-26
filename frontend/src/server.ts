@@ -24,9 +24,12 @@ function attachSecurityHeaders(response: Response): Response {
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+  const localMediaSources = import.meta.env.DEV
+    ? " http://localhost:8000 http://127.0.0.1:8000 http://localhost:8001 http://127.0.0.1:8001"
+    : "";
   headers.set(
     "Content-Security-Policy",
-    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; worker-src 'self' blob:; child-src 'self' blob:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'self' http://localhost:8000 http://127.0.0.1:8000 https: wss: blob: data:;",
+    `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; worker-src 'self' blob:; child-src 'self' blob:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:${localMediaSources}; font-src 'self' data: https:; connect-src 'self' http://localhost:8000 http://127.0.0.1:8000${import.meta.env.DEV ? " http://localhost:8001 http://127.0.0.1:8001" : ""} https: wss: blob: data:;`,
   );
   return new Response(response.body, {
     status: response.status,
