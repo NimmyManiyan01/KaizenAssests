@@ -15,7 +15,7 @@ import os
 import re
 import uuid
 from app.modules.gate.application.transport_validation import (
-    normalize_vehicle, valid_vehicle, validate_transport, validate_gate_duplicates,
+    COMPLETED_RECEIVING_STATUSES, normalize_vehicle, valid_vehicle, validate_transport, validate_gate_duplicates,
 )
 from decimal import Decimal, InvalidOperation
 from typing import Optional
@@ -599,6 +599,37 @@ DEFAULT_MATERIAL_COMPONENTS = [
 
 _custom_materials_warehouse: list[dict] = []
 
+def _validate_sub_materials(value: object) -> list[dict[str, str | float]]:
+    if not isinstance(value, list) or len(value) > 100:
+        raise HTTPException(status_code=422, detail="Enter up to 100 sub-materials.")
+    items = []
+    names = set()
+    codes = set()
+    for item in value:
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=422, detail="Each sub-material needs a name, sub-code, UOM and quantity.")
+        name, uom = item.get("name"), item.get("uom")
+        code, quantity = item.get("code"), item.get("quantity")
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 256:
+            raise HTTPException(status_code=422, detail="Sub-material names must have 1 to 256 characters.")
+        if not isinstance(uom, str) or not 1 <= len(uom.strip().upper()) <= 32:
+            raise HTTPException(status_code=422, detail="Each sub-material needs a valid UOM.")
+        if not isinstance(code, str) or not 1 <= len(code.strip().upper()) <= 64:
+            raise HTTPException(status_code=422, detail="Sub-codes must have 1 to 64 characters.")
+        if type(quantity) not in (int, float) or not 0 < quantity <= 1e15:
+            raise HTTPException(status_code=422, detail="Quantity per package must be positive and at most 1 quadrillion.")
+        name = name.strip()
+        code = code.strip().upper()
+        if name.casefold() in names:
+            raise HTTPException(status_code=422, detail="Sub-material names must be unique within the package.")
+        names.add(name.casefold())
+        if code in codes:
+            raise HTTPException(status_code=422, detail="Sub-codes must be unique within the package.")
+        codes.add(code)
+        items.append({"name": name, "code": code, "uom": uom.strip().upper(), "quantity": quantity})
+    return items
+
+
 @preview_router.get("/materials")
 async def get_material_components(
     response: Response = None,
@@ -606,6 +637,7 @@ async def get_material_components(
     available_only: bool = Query(default=False),
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    item_codes: list[str] | None = Query(default=None),
     user: CurrentUser = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow)
 ) -> list[dict]:
@@ -614,6 +646,8 @@ async def get_material_components(
         from app.common.persistence.models import MaterialModel, MaterialStockModel
         from app.modules.storage.infrastructure.persistence.models import InventoryLocationBalanceModel
         material_query = select(MaterialModel)
+        if item_codes:
+            material_query = material_query.where(func.upper(MaterialModel.material_code).in_(item_codes))
         if "SUPPLIER" in {role.upper() for role in user.roles}:
             supplier_id = await _authenticated_supplier_id(user, uow)
             material_query = material_query.join(
@@ -646,6 +680,7 @@ async def get_material_components(
                     "id": str(m.id),
                     "code": m.material_code,
                     "name": m.material_name,
+                    "sub_materials": m.sub_materials or [],
                     "category": m.category,
                     "description": m.description,
                     "uom": m.base_uom,
@@ -658,6 +693,8 @@ async def get_material_components(
                 })
     except Exception as exc:
         logger.warning("Failed to query materials master list: %s", exc)
+        if item_codes:
+            raise HTTPException(status_code=503, detail="Could not load material composition.") from exc
 
     filtered = materials if status_filter.upper() == "ALL" else [material for material in materials if str(material.get("status") or "ACTIVE").upper() == status_filter.upper()]
     if available_only:
@@ -691,6 +728,7 @@ async def add_material_component(
         id=uuid.uuid4(),
         material_code=material_code,
         material_name=mat_name,
+        sub_materials=_validate_sub_materials(payload.get("sub_materials", [])),
         category=category,
         description=str(payload.get("description") or "").strip() or None,
         base_uom=uom,
@@ -708,7 +746,7 @@ async def add_material_component(
             )
         )
     await uow.session.commit()
-    return {"id": str(material.id), "code": material.material_code, "name": material.material_name, "category": material.category, "uom": material.base_uom, "status": material.status, "created_at": material.created_at.isoformat() if material.created_at else None, "updated_at": material.updated_at.isoformat() if material.updated_at else None}
+    return {"id": str(material.id), "code": material.material_code, "name": material.material_name, "sub_materials": material.sub_materials or [], "category": material.category, "uom": material.base_uom, "status": material.status, "created_at": material.created_at.isoformat() if material.created_at else None, "updated_at": material.updated_at.isoformat() if material.updated_at else None}
 
 
 @preview_router.put("/materials/{material_id}")
@@ -727,12 +765,14 @@ async def update_material_component(
     if "category" in payload and not str(payload["category"]).strip():
         raise HTTPException(status_code=422, detail="Category is required")
     material.material_name = str(payload.get("material_name", material.material_name)).strip()
+    if "sub_materials" in payload:
+        material.sub_materials = _validate_sub_materials(payload["sub_materials"])
     material.category = str(payload.get("category", material.category)).strip()
     material.description = str(payload.get("description", material.description or "")).strip() or None
     material.base_uom = str(payload.get("base_uom", payload.get("uom", material.base_uom))).upper()
     material.updated_at = datetime.datetime.now()
     await uow.session.commit()
-    return {"id": str(material.id), "code": material.material_code, "name": material.material_name, "category": material.category, "description": material.description, "uom": material.base_uom, "status": material.status, "updated_at": material.updated_at.isoformat()}
+    return {"id": str(material.id), "code": material.material_code, "name": material.material_name, "sub_materials": material.sub_materials or [], "category": material.category, "description": material.description, "uom": material.base_uom, "status": material.status, "updated_at": material.updated_at.isoformat()}
 
 
 @preview_router.patch("/materials/{material_id}/status")
@@ -2794,6 +2834,9 @@ async def create_gate_entry(
                  "driver_contact": contacts[index] if index < len(contacts) else ""}
                 for index, vehicle in enumerate(vehicles)
             ]
+
+    if asn and len(assigned_transports) <= 1 and str(asn.status or "").strip().upper() in COMPLETED_RECEIVING_STATUSES:
+        raise HTTPException(409, "Receiving is complete for this ASN.")
 
     requested_plate = request.vehicle_plate or (assigned_transports[0].get("vehicle_number") if assigned_transports else None) or (asn.vehicle_number if asn else None)
     try:

@@ -303,7 +303,7 @@ async def list_zones(
     return rows
 
 
-def _next_alphabetic_zone_code(codes):
+def _next_numeric_zone_code(codes):
     sequence = 0
     for code in codes:
         suffix = str(code).upper().removeprefix("ZONE-")
@@ -316,12 +316,7 @@ def _next_alphabetic_zone_code(codes):
             match = re.search(r"(?:ZONE-|-Z)(\d+)$", str(code).upper())
             if match:
                 sequence = max(sequence, int(match.group(1)))
-    number = sequence + 1
-    suffix = ""
-    while number:
-        number, remainder = divmod(number - 1, 26)
-        suffix = chr(ord("A") + remainder) + suffix
-    return f"ZONE-{suffix}"
+    return f"ZONE-{sequence + 1:03d}"
 
 
 @warehouse_router.get("/{id_or_code}/zones/next-code")
@@ -334,7 +329,7 @@ async def next_zone_code(
     result = await uow.session.execute(
         select(WarehouseZoneModel.zone_code).where(WarehouseZoneModel.warehouse_ref_id == warehouse.id)
     )
-    return {"suggested_zone_code": _next_alphabetic_zone_code(result.scalars().all())}
+    return {"suggested_zone_code": _next_numeric_zone_code(result.scalars().all())}
 
 
 @zone_router.get("/next-code")
@@ -344,11 +339,11 @@ async def next_unscoped_zone_code(
 ) -> dict:
     warehouse = await _get_primary_warehouse(uow, required=False)
     if warehouse is None:
-        return {"suggested_zone_code": "ZONE-A"}
+        return {"suggested_zone_code": "ZONE-001"}
     result = await uow.session.execute(
         select(WarehouseZoneModel.zone_code).where(WarehouseZoneModel.warehouse_ref_id == warehouse.id)
     )
-    return {"suggested_zone_code": _next_alphabetic_zone_code(result.scalars().all())}
+    return {"suggested_zone_code": _next_numeric_zone_code(result.scalars().all())}
 
 
 @zone_router.post("", status_code=status.HTTP_201_CREATED)
@@ -386,8 +381,8 @@ async def create_warehouse_zone(
     code = payload.zone_code
     if not code:
         code = (await next_zone_code(id_or_code, user, uow))["suggested_zone_code"]
-    if not re.fullmatch(r"ZONE-[A-Z]+", code):
-        raise HTTPException(status_code=422, detail="Zone codes must use the ZONE-A, ZONE-B format")
+    if not re.fullmatch(r"ZONE-(?:00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,})", code):
+        raise HTTPException(status_code=422, detail="Zone codes must use the ZONE-001, ZONE-002 format")
     duplicate_code = await uow.session.scalar(
         select(WarehouseZoneModel.id).where(
             WarehouseZoneModel.warehouse_ref_id == warehouse.id,

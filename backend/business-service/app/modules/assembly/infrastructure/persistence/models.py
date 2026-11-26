@@ -207,6 +207,7 @@ class AssemblyQualityInspectionModel(Base):
     inspected_by_user_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     authorized_person_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    checklist: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     inspected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)

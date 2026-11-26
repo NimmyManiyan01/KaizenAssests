@@ -32,6 +32,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    JSON,
     Numeric,
     String,
     Text,
@@ -462,6 +463,7 @@ class GrnLineModel(Base):
     held_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0"), server_default="0")
     rejected_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     damage_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rejected_sub_materials: Mapped[Optional[list[dict]]] = mapped_column(JSON, nullable=True)
     held_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # --------------------------------------------------------

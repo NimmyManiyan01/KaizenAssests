@@ -1991,6 +1991,7 @@ async def get_grn_detail(
                     )
                     for dl in getattr(line, "damage_lots", [])
                 ],
+                rejected_sub_materials=line.rejected_sub_materials,
                 damage_evidence=[
                     DamageEvidenceResponse(
                         evidence_id=str(ev.id),

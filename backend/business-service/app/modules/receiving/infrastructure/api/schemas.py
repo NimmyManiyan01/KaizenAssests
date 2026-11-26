@@ -377,6 +377,14 @@ class DamageEvidenceResponse(ApiModel):
     uploaded_at: datetime
 
 
+class RejectedSubMaterial(ApiModel):
+    package_number: int = Field(ge=1)
+    code: str = Field(min_length=1, max_length=256)
+    name: str = Field(min_length=1, max_length=256)
+    remark: str = Field(min_length=1, max_length=2000)
+    evidence_id: str = Field(min_length=1, max_length=36)
+
+
 class GrnLineResponse(ApiModel):
     grn_line_id: str | None = None
     item_code: str
@@ -405,6 +413,7 @@ class GrnLineResponse(ApiModel):
     batches: list["GrnBatchResponse"] = Field(default_factory=list)
     damage_lots: list[GrnDamageLotResponse] = Field(default_factory=list)
     damage_evidence: list[DamageEvidenceResponse] = Field(default_factory=list)
+    rejected_sub_materials: list[RejectedSubMaterial] | None = None
 
     @field_validator(
         "received_quantity",
@@ -475,6 +484,7 @@ class QualityInspectionLineRequest(ApiModel):
     quality_approved_quantity: NonNegativeQuantity = Decimal("0")
     good_quantity: NonNegativeQuantity | None = None
     damaged_quantity: NonNegativeQuantity | None = None
+    rejected_sub_materials: list[RejectedSubMaterial] | None = None
 
     @field_validator("quality_result")
     @classmethod

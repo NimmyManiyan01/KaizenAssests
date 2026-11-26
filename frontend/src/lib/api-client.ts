@@ -289,7 +289,20 @@ async function requestWithTimeout<T>(
   }
 }
 
+export type SubMaterial = { name: string; code: string; uom: string; quantity: number };
+
 export const api = {
+  async getPackageMaterials(itemCodes: string[]): Promise<{ code: string; sub_materials: (SubMaterial | string)[] }[]> {
+    const pages = await Promise.all(Array.from({ length: Math.ceil(itemCodes.length / 100) }, (_, index) => {
+      const query = new URLSearchParams({ status: "ALL", limit: "100" });
+      for (const code of itemCodes.slice(index * 100, (index + 1) * 100)) query.append("item_codes", code);
+      return request<{ code: string; sub_materials: (SubMaterial | string)[] }[]>(
+        `${BUSINESS_API_URL}/api/gate/materials?${query}`,
+        { cache: "no-store" },
+      );
+    }));
+    return pages.flat();
+  },
   async getOperationalReport(resource: "catalog" | "summary" | "records" | "detail" | "journeys", params: Record<string, string>): Promise<any> {
     const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== ""));
     query.set("nocache", "1");
@@ -1710,11 +1723,11 @@ export const api = {
     ]; */
   },
 
-  async createMaterialComponent(name: string, uom: string = "PCS", materialCode?: string, category = "General", description = ""): Promise<any> {
+  async createMaterialComponent(name: string, uom: string = "PCS", materialCode?: string, category = "General", description = "", subMaterials?: SubMaterial[]): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/gate/materials`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, uom, material_code: materialCode, category, description }),
+      body: JSON.stringify({ name, uom, material_code: materialCode, category, description, sub_materials: subMaterials }),
     });
   },
 
@@ -3602,6 +3615,13 @@ export const api = {
       },
     );
   },
+  async getAssemblyQualityChecklist(orderId: string): Promise<AssemblyQcChecklist> {
+    return request<AssemblyQcChecklist>(
+      `${BUSINESS_API_URL}/api/v1/assembly/quality/inspections/${encodeURIComponent(orderId)}/checklist`,
+      { cache: "no-store" },
+    );
+  },
+
   async performAssemblyQualityInspection(payload: {
     order_id: string;
     inspector_name: string;
@@ -3611,6 +3631,7 @@ export const api = {
     rework_quantity?: number;
     held_quantity?: number;
     notes?: string;
+    checklist_findings?: AssemblyQcFinding[];
   }): Promise<any> {
     return request<any>(`${BUSINESS_API_URL}/api/v1/assembly/quality/inspect`, {
       method: "POST",
@@ -3926,7 +3947,14 @@ export interface AssistantChatResponse {
 }
 
 
+export type AssemblyQcFinding = { unit_number: number; component_id: string; remark: string; photo: string };
+export type AssemblyQcChecklist = {
+  components: { id: string; name: string; code?: string; package?: string }[];
+  findings: AssemblyQcFinding[];
+};
+
 export interface AssemblyQualityInspectionItem {
+  has_checklist?: boolean;
   order_id: string;
   order_number: string;
   product_code: string;

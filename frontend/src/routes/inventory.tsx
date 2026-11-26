@@ -2569,7 +2569,7 @@ function SimpleWarehouseModule() {
                               <td className="py-3 px-3 font-semibold text-indigo-600">
                                 <button
                                   type="button"
-                                  className="underline underline-offset-2"
+                                  className="max-w-full text-left underline underline-offset-2"
                                   onClick={() => {
                                     setPickupFifoAlert("");
                                     setPickupQrVerified({ material: false, rack: false });
@@ -2627,7 +2627,7 @@ function SimpleWarehouseModule() {
                                   )}
                                 </div>
                               </td>
-                              <td className="py-3 px-3 font-bold text-center">
+                              <td className="whitespace-nowrap py-3 px-3 font-bold tabular-nums text-center">
                                 {p.quantity ?? "—"} {p.uom || ""}
                               </td>
                               <td className="py-3 px-3 text-center">

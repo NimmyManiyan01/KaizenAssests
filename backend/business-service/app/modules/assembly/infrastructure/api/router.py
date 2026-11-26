@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 import logging
@@ -13,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy.orm import defer
 
 from app.database.session import UnitOfWork, get_uow
 from app.modules.assembly.infrastructure.finished_goods import allocate_fifo, stock_quantities, dispatch_priorities, enforce_dispatch_priority
@@ -3512,6 +3515,65 @@ async def require_quality_inspector(user: CurrentUser = Depends(get_current_user
     return user
 
 
+class AssemblyQcFinding(BaseModel):
+    unit_number: int = Field(ge=1)
+    component_id: str = Field(min_length=1, max_length=600)
+    remark: str = Field(min_length=1, max_length=2000)
+    photo: str = Field(max_length=2_000_000)
+
+    @field_validator("remark")
+    @classmethod
+    def validate_remark(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Enter a remark for each unchecked item.")
+        return value.strip()
+
+    @field_validator("photo")
+    @classmethod
+    def validate_photo(cls, value: str) -> str:
+        prefix = "data:image/jpeg;base64,"
+        if value.startswith(prefix):
+            try:
+                data = base64.b64decode(value[len(prefix):], validate=True)
+                if data.startswith(b"\xff\xd8\xff") and data.endswith(b"\xff\xd9"):
+                    return value
+            except binascii.Error:
+                pass
+        raise ValueError("Capture a JPEG photo for each unchecked item.")
+
+
+async def _assembly_qc_components(session, order: AssemblyOrderModel) -> list[dict]:
+    items = order.items or []
+    if not items and order.bom_id:
+        bom = await session.scalars(
+            select(BillOfMaterialsItemModel).where(BillOfMaterialsItemModel.bom_id == order.bom_id)
+        )
+        items = [
+            {"material_code": row.material_code, "material_name": row.material_name}
+            for row in bom
+        ]
+    codes = {str(item.get("material_code") or item.get("item_code") or "").strip().upper() for item in items} - {""}
+    materials = {}
+    if codes:
+        rows = await session.scalars(select(MaterialModel).where(func.upper(MaterialModel.material_code).in_(codes)))
+        materials = {material.material_code.upper(): material for material in rows}
+    components = {}
+    for item in items:
+        code = str(item.get("material_code") or item.get("item_code") or "").strip().upper()
+        if not code:
+            continue
+        material = materials.get(code)
+        if material and material.sub_materials:
+            for sub in material.sub_materials:
+                name = sub if isinstance(sub, str) else sub["name"]
+                sub_code = name if isinstance(sub, str) else sub.get("code") or name
+                key = f"{code}/{sub_code}"
+                components[key] = {"id": key, "code": sub_code, "name": name, "package": material.material_name}
+        else:
+            components[code] = {"id": code, "code": code, "name": item.get("material_name") or code}
+    return list(components.values()) or [{"id": "finished-product", "code": order.product_code, "name": order.product_name}]
+
+
 class QualityInspectionPayload(BaseModel):
     authorized_person_confirmed: bool = Field(..., strict=True)
     inspector_name: str = Field(..., max_length=128)
@@ -3538,6 +3600,24 @@ class QualityInspectionPayload(BaseModel):
     rework_quantity: Decimal = Field(default=Decimal("0"), ge=0, description="Quantity that needs rework")
     held_quantity: Decimal = Field(default=Decimal("0"), ge=0, description="Quantity held pending disposition")
     notes: Optional[str] = None
+    checklist_findings: list[AssemblyQcFinding] | None = None
+
+
+@router.get("/quality/inspections/{order_id}/checklist")
+async def get_quality_checklist(
+    order_id: uuid.UUID,
+    uow: UnitOfWork = Depends(get_uow),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    order = await uow.session.scalar(_scope_assembly_orders(
+        select(AssemblyOrderModel).where(AssemblyOrderModel.id == order_id), current_user,
+    ))
+    if not order:
+        raise HTTPException(404, "Assembly order not found")
+    saved = await uow.session.scalar(
+        select(AssemblyQualityInspectionModel.checklist).where(AssemblyQualityInspectionModel.assembly_order_id == order.id)
+    )
+    return saved if saved is not None else {"components": await _assembly_qc_components(uow.session, order), "findings": []}
 
 
 @router.get("/quality/inspections")
@@ -3561,7 +3641,8 @@ async def list_quality_inspections(
     async with uow:
         # Fetch orders in QC_PENDING or that have an inspection
         orders_q = (
-            select(AssemblyOrderModel, AssemblyQualityInspectionModel)
+            select(AssemblyOrderModel, AssemblyQualityInspectionModel, AssemblyQualityInspectionModel.checklist.is_not(None))
+            .options(defer(AssemblyQualityInspectionModel.checklist))
             .outerjoin(
                 AssemblyQualityInspectionModel,
                 AssemblyQualityInspectionModel.assembly_order_id == AssemblyOrderModel.id,
@@ -3580,7 +3661,7 @@ async def list_quality_inspections(
         rows = res.all()
 
         results = []
-        for order, inspection in rows:
+        for order, inspection, has_checklist in rows:
             # Determine effective QC status
             if inspection:
                 qc_st = inspection.status
@@ -3639,6 +3720,7 @@ async def list_quality_inspections(
                 "inspected_by": inspected_by,
                 "inspected_at": inspected_at,
                 "notes": qc_notes,
+                "has_checklist": has_checklist,
                 "can_inspect": order.status in ("QC_PENDING", "REWORK_REQUIRED") or (inspection is None and order.status == "QC_PENDING"),
                 "completed_at": order.completed_at.isoformat() if order.completed_at else None,
             })
@@ -3712,6 +3794,26 @@ async def perform_quality_inspection(
                 ),
             )
 
+        checklist = None
+        failed_units = set()
+        if payload.checklist_findings is not None:
+            if order.completed_quantity != order.completed_quantity.to_integral_value():
+                raise HTTPException(422, "A unit checklist requires a whole produced quantity.")
+            components = await _assembly_qc_components(uow.session, order)
+            component_ids = {item["id"] for item in components}
+            entries = payload.checklist_findings
+            if sum(len(entry.photo) for entry in entries) > 12_000_000:
+                raise HTTPException(422, "Checklist photos exceed the 12 MB submission limit.")
+            keys = {(entry.unit_number, entry.component_id) for entry in entries}
+            if len(keys) != len(entries) or any(
+                number > order.completed_quantity or component not in component_ids for number, component in keys
+            ):
+                raise HTTPException(422, "Checklist contains duplicate or unknown unit components.")
+            failed_units = {number for number, _ in keys}
+            if len(failed_units) != payload.failed_quantity or payload.rework_quantity or payload.held_quantity:
+                raise HTTPException(422, "Failed quantity must match the units with unchecked items.")
+            checklist = {"components": components, "findings": [entry.model_dump() for entry in entries]}
+
         inspector_name = payload.inspector_name
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -3747,6 +3849,7 @@ async def perform_quality_inspection(
                 inspected_by_user_id=current_user.subject,
                 authorized_person_confirmed=payload.authorized_person_confirmed,
                 notes=payload.notes,
+                checklist=checklist,
                 inspected_at=now,
                 created_at=now,
                 updated_at=now,
@@ -3763,6 +3866,7 @@ async def perform_quality_inspection(
             inspection.inspected_by_user_id = current_user.subject
             inspection.authorized_person_confirmed = payload.authorized_person_confirmed
             inspection.notes = payload.notes
+            inspection.checklist = checklist
             inspection.inspected_at = now
             inspection.updated_at = now
 
@@ -3781,7 +3885,11 @@ async def perform_quality_inspection(
 
             created_units = []
             if not existing_fgs:
-              for unit_number in range(1, int(payload.passed_quantity) + 1):
+              unit_numbers = (
+                  (number for number in range(1, int(order.completed_quantity) + 1) if number not in failed_units)
+                  if checklist is not None else range(1, int(payload.passed_quantity) + 1)
+              )
+              for unit_number in unit_numbers:
                 unique_token = uuid.uuid4().hex[:8].upper()
                 batch_number = f"FG-UNIT-{now.strftime('%Y%m%d')}-{unique_token}"
                 serial_str = f"SN-{order.product_code or 'FG'}-{order.order_number}-U{unit_number:04d}-{unique_token}"

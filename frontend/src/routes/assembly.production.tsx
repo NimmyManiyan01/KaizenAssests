@@ -43,6 +43,21 @@ export const Route = createFileRoute("/assembly/production")({
   component: AssemblyProductionPage,
 });
 
+const productionDateFormatter = new Intl.DateTimeFormat("en-IN", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+function ProductionDate({ value }: { value?: string | null }) {
+  if (!value) return <span className="text-muted-foreground">—</span>;
+  const date = value.slice(0, 10);
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (!Number.isFinite(parsed.getTime())) return <span className="text-muted-foreground">—</span>;
+  return <time dateTime={date}>{productionDateFormatter.format(parsed)}</time>;
+}
+
 function getStatusBadge(status: string) {
   const s = (status || "").toUpperCase();
   if (s === "IN_PRODUCTION" || s === "IN-PROGRESS" || s === "RUNNING") {
@@ -443,15 +458,16 @@ function AssemblyProductionPage() {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-border/70">
-              <table className="assembly-production-table w-full min-w-[1040px] table-fixed text-left text-sm [&_th]:align-middle [&_td]:align-middle">
+              <table className="assembly-production-table w-full min-w-[1140px] table-fixed text-left text-sm [&_th]:align-middle [&_td]:align-middle">
                 <colgroup>
-                  <col className="w-[15%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[14%]" />
                   <col className="w-[10%]" />
-                  <col className="w-[17%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[16%]" />
-                  <col className="w-[12%]" />
-                  <col className="w-[20%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[19%]" />
                 </colgroup>
                 <thead>
                   <tr className="border-b border-border/60 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
@@ -461,6 +477,7 @@ function AssemblyProductionPage() {
                     <th className="py-3 px-3 whitespace-nowrap">Target Qty</th>
                     <th className="py-3 px-3 min-w-[140px]">Progress<InformationTooltip help="production" /></th>
                     <th className="py-3 px-3 whitespace-nowrap">Status</th>
+                    <th className="py-3 px-3 whitespace-nowrap">Production Dates</th>
                     <th className="py-3 px-3 text-center whitespace-nowrap">Production Actions</th>
                   </tr>
                 </thead>
@@ -486,9 +503,9 @@ function AssemblyProductionPage() {
                             {order.material_request_number ? (
                               <Link
                                 to="/assembly/material-requests"
-                                className="hover:underline hover:text-primary font-mono inline-flex items-center gap-1"
+                                className="hover:underline hover:text-primary font-mono"
                               >
-                                Req: {order.material_request_number}
+                                Req: <span className="whitespace-nowrap">{order.material_request_number}</span>
                               </Link>
                             ) : (
                               "Direct Work Run"
@@ -555,17 +572,26 @@ function AssemblyProductionPage() {
                         </td>
 
                         {/* Status */}
-                        <td className="py-3.5 px-3 whitespace-nowrap">
+                        <td className="py-3.5 px-3">
                           {getStatusBadge(order.status)}
                         </td>
 
+                        <td className="py-3.5 px-3 text-xs">
+                          <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 whitespace-nowrap">
+                            <dt className="text-muted-foreground">Start</dt>
+                            <dd><ProductionDate value={order.started_at} /></dd>
+                            <dt className="text-muted-foreground">End</dt>
+                            <dd><ProductionDate value={order.completed_at} /></dd>
+                          </dl>
+                        </td>
+
                         {/* Production Actions */}
-                        <td className="py-3.5 px-3 text-center whitespace-nowrap align-middle">
-                          <div className="flex items-center justify-center gap-2">
+                        <td className="py-3.5 px-3 text-center align-middle">
+                          <div className="flex flex-col items-center justify-center gap-2 [&_button]:h-auto [&_button]:min-h-7 [&_button]:max-w-full [&_button]:whitespace-normal [&_button]:py-1">
                             {order.can_complete && order.traceability_required && (
                               <Button size="sm" variant="outline" onClick={() => void handleOpenConsumption(order)}
                                 className="h-8 whitespace-nowrap px-3 text-xs font-semibold gap-1.5 rounded-lg">
-                                <Package className="size-3.5" /> Record Material Consumption
+                                <Package className="size-3.5 shrink-0" /> Record Material Consumption
                               </Button>
                             )}
                             {/* Action: Start Production */}
@@ -576,7 +602,7 @@ function AssemblyProductionPage() {
                                 disabled={startingOrderId === order.id}
                                 className="h-8 whitespace-nowrap px-3.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 rounded-lg shadow-xs"
                               >
-                                <Play className="size-3 fill-current" />
+                                <Play className="size-3 shrink-0 fill-current" />
                                 {startingOrderId === order.id ? "Starting..." : "Start Production"}
                               </Button>
                             )}
@@ -588,7 +614,7 @@ function AssemblyProductionPage() {
                                 onClick={() => handleOpenCompleteModal(order)}
                                 className="h-8 whitespace-nowrap px-3.5 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white gap-1.5 rounded-lg shadow-xs transition-colors"
                               >
-                                <CheckCircle2 className="size-3.5" />
+                                <CheckCircle2 className="size-3.5 shrink-0" />
                                 Complete Production
                               </Button>
                             )}

@@ -90,7 +90,13 @@ type AsnTransportEntry = {
   driver_name: string;
   driver_contact: string;
   has_active_gate_pass: boolean;
+  receiving_completed: boolean;
 };
+
+const COMPLETED_ASN_STATUSES = new Set([
+  "RECEIVING_COMPLETED", "RECEIVING_COMPLETE", "COMPLETED", "UNLOADED", "GRN_POSTED",
+  "VEHICLE_EXITED", "GATE_EXIT_COMPLETED", "EXITED", "CHECKED_OUT",
+]);
 
 const normalizePlate = (value: unknown) =>
   String(value || "")
@@ -107,7 +113,7 @@ const formatApiDateTime = (value?: string | null) => {
 const displaySupplierName = (value?: string | null) =>
   String(value || "").replace(/\s*\(EMP-[^)]+\)/gi, "").trim();
 
-function getAsnTransportEntries(asn: any): Omit<AsnTransportEntry, "has_active_gate_pass">[] {
+function getAsnTransportEntries(asn: any): Omit<AsnTransportEntry, "has_active_gate_pass" | "receiving_completed">[] {
   const assignment = Array.isArray(asn?.logistics)
     ? asn.logistics.find((item: any) => item?.type === "transport_assignment")
     : null;
@@ -136,6 +142,23 @@ function getAsnTransportEntries(asn: any): Omit<AsnTransportEntry, "has_active_g
     driver_name: drivers[index] || "",
     driver_contact: contacts[index] || "",
   }));
+}
+
+function isCompletedAsnVehicle(asn: any, arrivals: Arrival[], plate?: string) {
+  return arrivals.some((arrival) =>
+    (String(arrival.asn_number || "").toUpperCase() === String(asn.asn_number || "").toUpperCase() ||
+      Boolean(asn.id || asn.asn_id) && String(arrival.asn_id) === String(asn.id || asn.asn_id)) &&
+    (!plate || normalizePlate(arrival.vehicle_number) === normalizePlate(plate)) &&
+    COMPLETED_ASN_STATUSES.has(String(arrival.status || "").trim().toUpperCase()),
+  );
+}
+
+function isCompletedAsn(asn: any, arrivals: Arrival[]) {
+  const vehicles = getAsnTransportEntries(asn);
+  return vehicles.length > 1
+    ? vehicles.every(({ vehicle_number }) => isCompletedAsnVehicle(asn, arrivals, vehicle_number))
+    : COMPLETED_ASN_STATUSES.has(String(asn.status || "").trim().toUpperCase()) ||
+      isCompletedAsnVehicle(asn, arrivals);
 }
 
 function InboundArrivals() {
@@ -168,6 +191,8 @@ function InboundArrivals() {
   // FR-02 Section A: Supplier and Shipment Details
   const [selectedSupplier, setSelectedSupplier] = useState("");
   const [selectedAsn, setSelectedAsn] = useState("");
+  const [resolvedAsn, setResolvedAsn] = useState<any>(null);
+  const selectedAsnCompleted = Boolean(resolvedAsn && isCompletedAsn(resolvedAsn, arrivals));
   const [asnRecords, setAsnRecords] = useState<any[]>([]);
   const [asnTransportEntries, setAsnTransportEntries] = useState<AsnTransportEntry[]>([]);
   const [selectedTransportIndex, setSelectedTransportIndex] = useState(-1);
@@ -279,6 +304,7 @@ function InboundArrivals() {
   }, []);
 
   const applyAsnDetails = useCallback((asn: any) => {
+    setResolvedAsn(asn?.asn_number ? asn : null);
     if (!asn) {
       setSelectedSupplier("");
       setAutoExpectedDate("");
@@ -300,6 +326,7 @@ function InboundArrivals() {
 
     const transports = getAsnTransportEntries(asn).map((transport) => ({
       ...transport,
+      receiving_completed: isCompletedAsnVehicle(asn, arrivalsRef.current, transport.vehicle_number),
       has_active_gate_pass: arrivalsRef.current.some(
         (arrival) =>
           String(arrival.asn_id || "") === String(asn.id || asn.asn_id || "") &&
@@ -311,7 +338,7 @@ function InboundArrivals() {
     }));
     setAsnTransportEntries(transports);
 
-    const nextIndex = transports.findIndex((transport) => !transport.has_active_gate_pass);
+    const nextIndex = transports.findIndex((transport) => !transport.has_active_gate_pass && !transport.receiving_completed);
     setSelectedTransportIndex(nextIndex);
     const selectedTransport = nextIndex >= 0 ? transports[nextIndex] : null;
     setVehicleNumberInput(selectedTransport?.vehicle_number || "");
@@ -396,6 +423,7 @@ function InboundArrivals() {
 
     setSelectedSupplier("");
     setSelectedAsn("");
+    setResolvedAsn(null);
     setAsnTransportEntries([]);
     setSelectedTransportIndex(-1);
     setAutoExpectedDate("");
@@ -889,7 +917,10 @@ function InboundArrivals() {
 
       {/* FR-02 New Gate Entry Registration Modal */}
       <Dialog open={isNewRegistrationModalOpen} onOpenChange={handleGateEntryModalOpenChange}>
-        <DialogContent className="max-w-2xl rounded-2xl bg-card p-6 shadow-2xl">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-3xl overflow-y-auto rounded-2xl bg-card p-4 shadow-2xl sm:p-6">
+          <DialogHeader className="border-b pb-3 pr-8">
+            <DialogTitle>New Gate Entry</DialogTitle>
+          </DialogHeader>
           <form
             noValidate
             onSubmit={(e) => {
@@ -898,6 +929,10 @@ function InboundArrivals() {
                 toast.error("ASN Number is required", {
                   description: "Please enter or select an ASN number before generating the gate pass.",
                 });
+                return;
+              }
+              if (selectedAsnCompleted) {
+                toast.error("Receiving is complete for this ASN.");
                 return;
               }
               if (!vehicleNumberInput.trim()) {
@@ -999,8 +1034,9 @@ function InboundArrivals() {
             className="space-y-4 text-xs"
           >
             {/* SECTION A: SUPPLIER AND SHIPMENT DETAILS */}
-            <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
-              <div className="grid gap-3 sm:grid-cols-2">
+            <section aria-labelledby="gate-entry-shipment" className="space-y-3 rounded-xl border bg-muted/30 p-4">
+              <h3 id="gate-entry-shipment" className="border-b pb-2 text-sm font-semibold">Shipment details</h3>
+              <div className="grid items-start gap-x-4 gap-y-3 sm:grid-cols-2 [&>div]:min-w-0">
                 {/* Supplier Searchable Dropdown */}
                 <div>
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
@@ -1038,11 +1074,12 @@ function InboundArrivals() {
                   />
                   <datalist id="asn-numbers-list">
                     {asnRecords.map((asn) => (
-                      <option key={asn.id || asn.asn_number} value={asn.asn_number}>
+                      <option key={asn.id || asn.asn_number} value={asn.asn_number} disabled={isCompletedAsn(asn, arrivals)}>
                         {asn.asn_number} {asn.supplier_name ? `— ${asn.supplier_name}` : ""} {asn.vehicle_number ? `(${asn.vehicle_number})` : ""}
                       </option>
                     ))}
                   </datalist>
+                  {selectedAsnCompleted && <p role="alert" className="mt-1 text-xs text-destructive">Receiving is complete for this ASN.</p>}
                 </div>
 
                 {/* Expected Delivery Date Auto-Filled */}
@@ -1062,21 +1099,22 @@ function InboundArrivals() {
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
                     ASN Document Photo *
                   </label>
-                  <div className="flex gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-9 flex-1 rounded-xl text-xs"
+                      className="h-9 min-w-0 justify-center gap-1.5 rounded-xl px-2 text-xs"
                       onClick={() => void openAsnCamera()}
                     >
-                      <Camera className="mr-2 size-4" /> Open Camera
+                      <Camera className="size-4 shrink-0" /> Camera
                     </Button>
-                    <label className="flex h-9 flex-1 cursor-pointer items-center justify-center rounded-xl border border-input bg-background px-3 text-xs font-medium hover:bg-accent hover:text-accent-foreground">
-                      <Upload className="mr-2 size-4" /> Upload Photo
+                    <label className="flex h-9 min-w-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-input bg-background px-2 text-xs font-medium hover:bg-accent hover:text-accent-foreground focus-within:ring-2 focus-within:ring-ring">
+                      <Upload className="size-4 shrink-0" /> Upload
                       <input
                         type="file"
                         accept="image/*,.pdf"
-                        className="hidden"
+                        aria-label="Upload ASN document photo"
+                        className="sr-only"
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) {
@@ -1160,10 +1198,11 @@ function InboundArrivals() {
                   className="w-full rounded-xl border bg-background p-2.5 text-xs font-medium focus:ring-1 focus:ring-primary"
                 />
               </div>
-            </div>
+            </section>
 
             {/* SECTION B: VEHICLE AND DRIVER DETAILS */}
-            <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
+            <section aria-labelledby="gate-entry-vehicle" className="space-y-3 rounded-xl border bg-muted/30 p-4">
+              <h3 id="gate-entry-vehicle" className="border-b pb-2 text-sm font-semibold">Vehicle and driver</h3>
               {asnTransportEntries.length > 1 && (
                 <div>
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
@@ -1174,7 +1213,7 @@ function InboundArrivals() {
                     onChange={(event) => {
                       const index = Number(event.target.value);
                       const entry = asnTransportEntries[index];
-                      if (!entry || entry.has_active_gate_pass) return;
+                      if (!entry || entry.has_active_gate_pass || entry.receiving_completed) return;
                       setSelectedTransportIndex(index);
                       setVehicleNumberInput(entry.vehicle_number);
                       setDriverNameInput(entry.driver_name);
@@ -1192,11 +1231,11 @@ function InboundArrivals() {
                       <option
                         key={`${entry.vehicle_number}-${index}`}
                         value={index}
-                        disabled={entry.has_active_gate_pass}
+                        disabled={entry.has_active_gate_pass || entry.receiving_completed}
                       >
                         Vehicle & Driver #{index + 1}: {entry.vehicle_number} ·{" "}
                         {entry.driver_name || "Driver"}
-                        {entry.has_active_gate_pass ? " · Active gate pass" : " · Available"}
+                        {entry.receiving_completed ? " · Receiving complete" : entry.has_active_gate_pass ? " · Active gate pass" : " · Available"}
                       </option>
                     ))}
                   </select>
@@ -1206,16 +1245,16 @@ function InboundArrivals() {
                 </div>
               )}
               {asnTransportEntries.length > 0 &&
-                asnTransportEntries.every((entry) => entry.has_active_gate_pass) && (
+                !selectedAsnCompleted &&
+                asnTransportEntries.every((entry) => entry.has_active_gate_pass || entry.receiving_completed) && (
                   <p
                     className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900"
                     role="alert"
                   >
-                    All supplier-assigned vehicles already have active gate passes for this ASN.
-                    Create another pass after a vehicle exits.
+                    No supplier-assigned vehicle is available for a new gate pass.
                   </p>
                 )}
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid items-start gap-x-4 gap-y-3 sm:grid-cols-2 [&>div]:min-w-0">
                 <div>
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
                     Vehicle Registration Number *
@@ -1274,21 +1313,22 @@ function InboundArrivals() {
                   <label className="text-[10px] font-bold uppercase text-muted-foreground block mb-1">
                     Vehicle Photo *
                   </label>
-                  <div className="flex gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-9 flex-1 rounded-xl text-xs"
+                      className="h-9 min-w-0 justify-center gap-1.5 rounded-xl px-2 text-xs"
                       onClick={() => void openVehicleCamera()}
                     >
-                      <Camera className="mr-2 size-4" /> Open Camera
+                      <Camera className="size-4 shrink-0" /> Camera
                     </Button>
-                    <label className="flex h-9 flex-1 cursor-pointer items-center justify-center rounded-xl border border-input bg-background px-3 text-xs font-medium hover:bg-accent hover:text-accent-foreground">
-                      <Upload className="mr-2 size-4" /> Upload Photo
+                    <label className="flex h-9 min-w-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-input bg-background px-2 text-xs font-medium hover:bg-accent hover:text-accent-foreground focus-within:ring-2 focus-within:ring-ring">
+                      <Upload className="size-4 shrink-0" /> Upload
                       <input
                         type="file"
                         accept="image/*"
-                        className="hidden"
+                        aria-label="Upload vehicle photo"
+                        className="sr-only"
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) {
@@ -1403,7 +1443,7 @@ function InboundArrivals() {
                   </select>
                 </div>
               </div>
-            </div>
+            </section>
 
             {/* SECTION C: INVOICE AND SUPPORTING DOCUMENTS */}
             <div className="hidden rounded-xl border bg-muted/30 p-4 space-y-3">
@@ -1557,7 +1597,7 @@ function InboundArrivals() {
             </div>
 
             {/* Actions */}
-            <div className="flex gap-2 justify-end">
+            <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
               <Button
                 type="button"
                 variant="outline"
@@ -1568,7 +1608,7 @@ function InboundArrivals() {
               </Button>
               <Button
                 type="submit"
-                disabled={submittingWebEntry}
+                disabled={submittingWebEntry || selectedAsnCompleted}
                 className="rounded-xl font-bold shadow-sm"
               >
                 {submittingWebEntry ? (
